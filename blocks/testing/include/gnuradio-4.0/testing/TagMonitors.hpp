@@ -145,7 +145,7 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
         return mark_tag ? (tagGenerated ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
     }
 
-    work::Status processBulk(PublishablePortSpan auto& outSpan) noexcept
+    work::Status processBulk(OutputSpanLike auto& outSpan) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
         const auto [tagGenerated, tagRepeatStarted] = generateTag(                                           //

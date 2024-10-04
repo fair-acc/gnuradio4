@@ -35,7 +35,11 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
     double                                    sampling_rate = 1.0;
     constexpr static gr::TagPropagationPolicy tag_policy    = gr::TagPropagationPolicy::TPP_DONT;
 
-    gr::work::Status processBulk(const gr::InputSpan auto inSamples, gr::PublishablePortSpan auto& outSamples) {
+    // TODO: References are required here because InputSpan and OutputSpan have internal states
+    // (e.g., tagsPublished) that are unique to each instance. Copying these objects without proper
+    // state management can lead to incorrect behavior when the publishTag() method is called.
+    // This issue must be resolved in future updates, see https://github.com/fair-acc/gnuradio4/issues/439
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSamples, gr::OutputSpanLike auto& outSamples) {
         std::copy(inSamples.begin(), inSamples.end(), outSamples.begin());
         std::size_t tagsForwarded = 0;
         for (gr::Tag tag : inSamples.rawTags) {
@@ -163,10 +167,10 @@ const boost::ut::suite TagPropagation = [] {
         };
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
 
-        auto& monitorBulk    = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
-        auto& monitorOne     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
-        auto& sinkBulk       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
-        auto& sinkOne        = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
+        auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
+        auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+        auto& sinkBulk    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
+        auto& sinkOne     = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", true && verbose}});
 
         // src ─> monitorBulk ─> monitorOne ┬─> sinkBulk
         //                                  └─> sinkOne

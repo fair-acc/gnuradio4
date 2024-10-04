@@ -263,33 +263,49 @@ namespace gr {
 struct Async {};
 
 /**
- * @brief API for access to the input samples and tags from the process_bulk function.
+ * @brief Provides an interface for accessing input samples and their associated tags within the `processBulk` function.
  *
- * This concept is used for the input parameters of the process_bulk function to allow:
- * - access to the samples (via conversion to std::span)
- * - consumption of samples. By default all available samples get consumed.
- * - access to tags
- *   - via a range::view returned by `tag()` which returns the index relative to first sample in this span. The index can be negative for tags that were not consumed before.
- *   - via rawTags, which gives access to the bare ConsumableSpan<Tag>
- * - consumption of tags. By default the tags belonging to up to and including the first sample get consumed. This can be manually changed by calling consumeTags with the index of a stream sample.
- * - get a merged tag which contains the data of all tags belonging to up to and including the first sample. Optionally this can be changed to merge all tags until a supplied local stream index.
+ * The `InputSpanLike` concept is used as the type for input parameters in the `processBulk` function:`work::Status processBulk(InputSpanLike auto& in, OutputSpan auto& out);`
+ * **Features:**
+ * - Access to Samples: Allows direct access to samples via array indexing (via conversion to `std::span`): `auto value = in[0];  // Access the first sample`
+ * - Consuming Samples: Provides a `consume(nSamplesToConsume)` method to indicate how many samples to consume.
+ *   - Default Behavior:
+ *     - For `Synch` ports, all samples are published by default.
+ *     - For `Async` ports, no samples are published by default.
+ * - Access to Tags:
+ *   - Using `tags()`: Returns a `range::view` of input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
+ *   - Using `rawTags`: Provides direct access to the underlying `ReaderSpan<Tag>` for advanced manipulation.
+ * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
+ * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` and including first sample.
  */
 template<typename T>
-concept InputSpan = requires(T span, gr::Tag::signed_index_type n) {
-    { span } -> std::ranges::contiguous_range;
+concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, gr::Tag::signed_index_type n) {
     { span.consume(0) };
     { span.rawTags };
-    requires ConsumableSpan<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
+    requires ReaderSpanLike<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
     { span.tags() } -> std::ranges::range;
     { span.consumeTags(n) };
     { span.getMergedTag(n) } -> std::same_as<gr::Tag>;
 };
 
+/**
+ * @brief Provides an interface for writing output samples and publishing tags within the `processBulk` function.
+ *
+ * The `OutputSpan` concept is used as the type for output parameters in the `processBulk` function: `work::Status processBulk(InputSpanLike auto& in, OutputSpan auto& out);`
+ * **Features:**
+ * - Writing Output Samples: Allows writing to output samples via array indexing (via conversion to `std::span`): `out[0] = 4.2;  // Write a value to the first output sample`
+ * - Publishing Samples: Provides a `publish(nSamplesToPublish)` method to indicate how many samples are to be published.
+ *   - Default Behavior:
+ *     - For `Synch` ports, all samples are published by default.
+ *     - For `Async` ports, no samples are published by default.
+ * - Publishing Tags: Use `publishTag(tagData, tagOffset)` to publish tags. `tagOffset` is relative to the first sample.
+ */
 template<typename T>
-concept PublishablePortSpan = PublishableSpan<T> && requires(T span, property_map& tagData, Tag::signed_index_type index) {
-    requires PublishableSpan<std::remove_cvref_t<decltype(span.tags)>>;
+concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& span, property_map& tagData, Tag::signed_index_type tagOffset) {
+    span.publish(0UZ);
+    requires WriterSpanLike<std::remove_cvref_t<decltype(span.tags)>>;
     { *span.tags.begin() } -> std::same_as<gr::Tag&>;
-    { span.publishTag(tagData, index) } -> std::same_as<void>;
+    { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
 };
 
 /**
@@ -368,13 +384,18 @@ struct Port {
     using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
 
     template<SpanReleasePolicy spanReleasePolicy>
-    struct PortInputSpan : public ReaderSpanType<spanReleasePolicy> {
+    struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
         TagReaderSpanType      rawTags;
         Tag::signed_index_type streamIndex;
 
-        PortInputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
+        InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
 
-        ~PortInputSpan() override {
+        InputSpan(const InputSpan&)            = default;
+        InputSpan& operator=(const InputSpan&) = default;
+        // InputSpan(InputSpan&&) noexcept            = delete;
+        // InputSpan& operator=(InputSpan&&) noexcept = delete;
+
+        ~InputSpan() override {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
                 if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
@@ -424,28 +445,33 @@ struct Port {
             }
             return reader.get(nTagsProcessed);
         }
-    }; // end of ConsumablePortInputRange
-    static_assert(ConsumableSpan<PortInputSpan<gr::SpanReleasePolicy::ProcessAll>>);
-    static_assert(InputSpan<PortInputSpan<gr::SpanReleasePolicy::ProcessAll>>);
+    }; // end of InputSpan
+    static_assert(ReaderSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
+    static_assert(InputSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
 
     template<SpanReleasePolicy spanReleasePolicy>
     using WriterSpanType = decltype(std::declval<WriterType>().template reserve<spanReleasePolicy>(1UZ));
 
-    template<SpanReleasePolicy spanReleasePolicy, PublishableSpanReservePolicy spanReservePolicy>
-    struct PublishablePortOutputRange : public WriterSpanType<spanReleasePolicy> {
+    template<SpanReleasePolicy spanReleasePolicy, WriterSpanReservePolicy spanReservePolicy>
+    struct OutputSpan : public WriterSpanType<spanReleasePolicy> {
         TagWriterSpanType      tags;
         Tag::signed_index_type streamIndex;
         std::size_t            tagsPublished{0UZ};
 
-        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
-        requires(spanReservePolicy == PublishableSpanReservePolicy::Reserve)
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
 
-        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
-        requires(spanReservePolicy == PublishableSpanReservePolicy::TryReserve)
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
 
-        ~PublishablePortOutputRange() {
+        OutputSpan(const OutputSpan&)            = default;
+        OutputSpan& operator=(const OutputSpan&) = default;
+        // OutputSpan(OutputSpan&&) noexcept            = delete;
+        // OutputSpan& operator=(OutputSpan&&) noexcept = delete;
+
+        ~OutputSpan() {
             if (WriterSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
                 tags.publish(tagsPublished);
             }
@@ -480,9 +506,9 @@ struct Port {
                 tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
             }
         }
-    }; // end of PublishablePortOutputRange
-
-    static_assert(PublishablePortSpan<PublishablePortOutputRange<gr::SpanReleasePolicy::ProcessAll, PublishableSpanReservePolicy::Reserve>>);
+    }; // end of PortOutputSpan
+    static_assert(WriterSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
+    static_assert(OutputSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
 
 private:
     IoType    _ioHandler    = newIoHandler();
@@ -709,24 +735,24 @@ public:
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
-    PortInputSpan<spanReleasePolicy> get(std::size_t nSamples)
+    InputSpan<spanReleasePolicy> get(std::size_t nSamples)
     requires(kIsInput)
     {
-        return PortInputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader());
+        return InputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
@@ -748,7 +774,7 @@ public:
             return false;
         }
         {
-            PublishableSpan auto outTags = tagWriter().tryReserve(1UZ);
+            WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
             if (!outTags.empty()) {
                 outTags[0].index = _cachedTag.index;
                 outTags[0].map   = _cachedTag.map;
@@ -963,9 +989,9 @@ private:
 
         [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
 
-        [[nodiscard]] std::size_t nReaders() const { return _value.nReaders(); }
-        [[nodiscard]] std::size_t nWriters() const { return _value.nWriters(); }
-        [[nodiscard]] std::size_t bufferSize() const { return _value.bufferSize(); }
+        [[nodiscard]] std::size_t nReaders() const override { return _value.nReaders(); }
+        [[nodiscard]] std::size_t nWriters() const override { return _value.nWriters(); }
+        [[nodiscard]] std::size_t bufferSize() const override { return _value.bufferSize(); }
 
         [[nodiscard]] bool isConnected() const noexcept override { return _value.isConnected(); }
 
@@ -1058,8 +1084,8 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, Tag
 };
 } // namespace detail
 
-inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(const PortLike auto& port, detail::TagPredicate auto& predicate, Tag::signed_index_type readOffset) {
-    const gr::ConsumableSpan auto tagData = port.tagReader().get();
+inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, Tag::signed_index_type readOffset) {
+    ReaderSpanLike auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
@@ -1075,9 +1101,9 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(const P
     }
 }
 
-inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(const PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
-inline constexpr std::optional<std::size_t> samples_to_eos_tag(const PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
 
 } // namespace gr
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes), (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo)

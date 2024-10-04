@@ -128,7 +128,7 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(buffers.streamBuffer.n_readers(), 1UZ));
 
-        PublishableSpan auto pSpan = writer.reserve<SpanReleasePolicy::ProcessAll>(32UZ);
+        WriterSpanLike auto pSpan = writer.reserve<SpanReleasePolicy::ProcessAll>(32UZ);
         std::iota(pSpan.begin(), pSpan.end(), 1);
         fmt::print("typed-port connected output vector: {}\n", pSpan);
     };

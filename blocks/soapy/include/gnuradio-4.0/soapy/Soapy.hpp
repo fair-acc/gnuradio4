@@ -88,7 +88,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     void resume() { _rxStream.activate(); }
     void stop() { _device.reset(); }
 
-    constexpr work::Status processBulk(PublishableSpan auto& output)
+    constexpr work::Status processBulk(OutputSpanLike auto& output)
     requires(nPorts == 1U)
     {
         // special case single ouput -> simplifies connect API because this doesn't require sub-indices
@@ -113,7 +113,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         return status;
     }
 
-    template<PublishableSpan TOutputBuffer>
+    template<OutputSpanLike TOutputBuffer>
     constexpr work::Status processBulk(std::span<TOutputBuffer>& outputs)
     requires(nPorts > 1U)
     {

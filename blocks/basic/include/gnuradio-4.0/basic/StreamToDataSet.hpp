@@ -137,7 +137,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
         }
     }
 
-    gr::work::Status processBulk(ConsumableSpan auto& inSamples /* equivalent to std::span<const T> */, PublishableSpan auto& outSamples /* equivalent to std::span<T> */) {
+    gr::work::Status processBulk(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
         if constexpr (streamOut) {
             return processBulkStream(inSamples, outSamples);
         } else {
@@ -145,7 +145,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
         }
     }
 
-    gr::work::Status processBulkStream(ConsumableSpan auto& inSamples, PublishableSpan auto& outSamples) {
+    gr::work::Status processBulkStream(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
         const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(_filterState);
         _accState.update(startTrigger, endTrigger, isSingleTrigger, n_pre, n_post);
 
@@ -194,7 +194,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
         return work::Status::OK;
     }
 
-    gr::work::Status processBulkDataSet(ConsumableSpan auto& inSamples, PublishableSpan auto& outSamples) {
+    gr::work::Status processBulkDataSet(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
         //    This is a workaround to support cases of overlapping datasets, for example, Start1-Start2-Stop1-Stop2 case.
         //    always add new DataSet when Start trigger is present
         property_map tmpFilterState;
@@ -253,7 +253,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 if (!accState.isPostActive) { // normal data accumulation
                     const std::size_t nSamplesToCopy = std::min(n_max.value - ds.signal_values.size(), inSamples.size());
                     if (nSamplesToCopy > 0) {
-                        ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.begin() + nSamplesToCopy);
+                        ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.begin() + static_cast<std::ptrdiff_t>(nSamplesToCopy));
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nSamplesToCopy);
                         accState.nSamples += nSamplesToCopy;
                     }
@@ -316,7 +316,7 @@ private:
         return result;
     }
 
-    void copyInputSamplesToHistory(ConsumableSpan auto& inSamples, std::size_t maxSamplesToCopy) {
+    void copyInputSamplesToHistory(InputSpanLike auto& inSamples, std::size_t maxSamplesToCopy) {
         if (n_pre > 0) {
             const auto samplesToCopy          = std::min(maxSamplesToCopy, inSamples.size());
             const auto end                    = std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy));

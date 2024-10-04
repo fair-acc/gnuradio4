@@ -98,7 +98,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     void stop() { closeFile(); }
 
-    [[nodiscard]] constexpr work::Status processBulk(ConsumableSpan auto& dataIn) {
+    [[nodiscard]] constexpr work::Status processBulk(InputSpanLike auto& dataIn) {
         if (max_bytes_per_file.value != 0U && _totalBytesWrittenFile >= max_bytes_per_file.value) {
             closeFile();
             openNextFile();
@@ -223,7 +223,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     void stop() { closeFile(); }
 
-    [[nodiscard]] constexpr work::Status processBulk(PublishablePortSpan auto& dataOut) noexcept {
+    [[nodiscard]] constexpr work::Status processBulk(OutputSpanLike auto& dataOut) noexcept {
         if (!_file.is_open()) {
             return work::Status::DONE;
         }

@@ -350,9 +350,9 @@ public:
                 return false;
             }
 
-            const auto readData = reader.get(nProcess);
+            auto readData = reader.get(nProcess);
             if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
-                const auto tags         = tag_reader.get();
+                auto       tags         = tag_reader.get();
                 const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + nProcess)](const auto& tag) { return tag.index < until; });
                 auto       relevantTags = std::vector<Tag>(tags.begin(), it);
                 for (auto& t : relevantTags) {
@@ -361,8 +361,8 @@ public:
                 fnc(readData, std::span<const Tag>(relevantTags));
                 std::ignore = tags.consume(relevantTags.size());
             } else {
-                const auto tags = tag_reader.get();
-                std::ignore     = tags.consume(tags.size());
+                auto tags   = tag_reader.get();
+                std::ignore = tags.consume(tags.size());
                 fnc(readData);
             }
 
@@ -386,7 +386,7 @@ public:
                 return false;
             }
 
-            const auto readData = reader.get(nProcess);
+            auto readData = reader.get(nProcess);
             fnc(readData);
             std::ignore = readData.consume(nProcess);
             return true;
@@ -480,7 +480,7 @@ public:
         _listeners_finished = true;
     }
 
-    [[nodiscard]] work::Status processBulk(std::span<const T> inData) noexcept {
+    [[nodiscard]] work::Status processBulk(std::span<const T>& inData) noexcept {
         std::optional<property_map> tagData;
         if (this->inputTagsPresent()) {
             assert(this->mergedInputTag().index == 0);

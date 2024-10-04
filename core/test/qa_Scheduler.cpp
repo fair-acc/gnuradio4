@@ -71,7 +71,7 @@ struct ExpectSink : public gr::Block<ExpectSink<T>> {
         }
     }
 
-    [[nodiscard]] gr::work::Status processBulk(std::span<const T> input) noexcept {
+    [[nodiscard]] gr::work::Status processBulk(std::span<const T>& input) noexcept {
         tracer->trace(this->name);
         for (auto data : input) {
             count++;
@@ -292,7 +292,7 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
     gr::Sequence   _produceCount{0};
     gr::Sequence   _invokeCount{0};
 
-    [[nodiscard]] constexpr gr::work::Status processBulk(gr::ConsumableSpan auto& input, gr::PublishableSpan auto& output) noexcept {
+    [[nodiscard]] constexpr gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) noexcept {
         auto produceCount = _produceCount.value();
         _invokeCount.incrementAndGet();
 
