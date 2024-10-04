@@ -10070,7 +10070,7 @@ struct fmt::formatter<gr::Sequence> {
     }
 
     template<typename FormatContext>
-    auto format(gr::Sequence const& value, FormatContext& ctx) {
+    auto format(gr::Sequence const& value, FormatContext& ctx) const {
         return fmt::format_to(ctx.out(), "{}", value.value());
     }
 };
@@ -13513,7 +13513,7 @@ struct fmt::formatter<std::complex<T>> {
 // simplified formatter for UncertainValue
 template<gr::arithmetic_or_complex_like T>
 struct fmt::formatter<gr::UncertainValue<T>> {
-    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
     template<typename FormatContext>
     constexpr auto format(const gr::UncertainValue<T>& value, FormatContext& ctx) const noexcept {
@@ -13557,7 +13557,7 @@ constexpr std::string join(const Container& container, const Separator& separato
 
 template<>
 struct fmt::formatter<pmtv::map_t::value_type> {
-    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
     template<typename FormatContext>
     auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const noexcept {
@@ -13567,7 +13567,7 @@ struct fmt::formatter<pmtv::map_t::value_type> {
 
 template<pmtv::IsPmt T>
 struct fmt::formatter<T> { // alternate pmtv formatter optimised for compile-time not runtime
-    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
     template<typename FormatContext>
     auto format(const T& value, FormatContext& ctx) const noexcept {
@@ -13611,7 +13611,7 @@ private:
 
 template<>
 struct fmt::formatter<pmtv::map_t> {
-    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
     template<typename FormatContext>
     constexpr auto format(const pmtv::map_t& value, FormatContext& ctx) const noexcept {
@@ -13625,7 +13625,7 @@ template<>
 struct fmt::formatter<std::vector<bool>> {
     char presentation = 'c';
 
-    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    constexpr auto parse(fmt::format_parse_context& ctx) -> decltype(ctx.begin()) {
         auto it = ctx.begin(), end = ctx.end();
         if (it != end && (*it == 's' || *it == 'c')) {
             presentation = *it++;
@@ -14679,7 +14679,7 @@ struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
     }
 
     template<typename FormatContext>
-    constexpr auto format(const gr::Annotated<T, description, Arguments...>& annotated, FormatContext& ctx) {
+    constexpr auto format(const gr::Annotated<T, description, Arguments...>& annotated, FormatContext& ctx) const {
         // TODO: add switch for printing only brief and/or meta-information
         return value_formatter.format(annotated.value, ctx);
     }
@@ -19151,7 +19151,7 @@ struct fmt::formatter<gr::Sequence> {
     }
 
     template<typename FormatContext>
-    auto format(gr::Sequence const& value, FormatContext& ctx) {
+    auto format(gr::Sequence const& value, FormatContext& ctx) const {
         return fmt::format_to(ctx.out(), "{}", value.value());
     }
 };
@@ -19784,7 +19784,7 @@ struct fmt::formatter<gr::thread_pool::thread::Policy> {
     }
 
     template<typename FormatContext>
-    auto format(Policy policy, FormatContext& ctx) {
+    auto format(Policy policy, FormatContext& ctx) const {
         std::string policy_name;
         switch (policy) {
         case Policy::UNKNOWN: policy_name = "UNKNOWN"; break;
@@ -24686,7 +24686,7 @@ struct fmt::formatter<gr::Edge> {
     }
 
     template<typename FormatContext>
-    auto format(const gr::Edge& e, FormatContext& ctx) {
+    auto format(const gr::Edge& e, FormatContext& ctx) const {
         const auto& name = [this](const gr::BlockModel* block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
 
         const auto portIndex = [](const gr::PortDefinition& port) {
