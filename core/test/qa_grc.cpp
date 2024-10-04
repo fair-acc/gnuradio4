@@ -17,8 +17,8 @@ struct ArraySource : public gr::Block<ArraySource<T>> {
     std::array<gr::PortOut<T>, 2> outA{};
     std::array<gr::PortOut<T>, 2> outB{};
 
-    template<typename PublishableSpan1, typename PublishableSpan2>
-    gr::work::Status processBulk(PublishableSpan1&, PublishableSpan2&) { // TODO: needs proper explicit signature
+    template<gr::OutputSpanLike TOutputSpan1, gr::OutputSpanLike TOutputSpan2>
+    gr::work::Status processBulk(std::span<TOutputSpan1>&, std::span<TOutputSpan2>&) {
         return gr::work::Status::OK;
     }
 };
@@ -38,8 +38,8 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
     gr::Annotated<std::vector<int16_t>, "int16_t vector setting">                   int16_vector;
     gr::Annotated<std::vector<std::complex<double>>, "std::complex vector setting"> complex_vector;
 
-    template<typename ConsumableSpan1, typename ConsumableSpan2>
-    gr::work::Status processBulk(ConsumableSpan1&, ConsumableSpan2&) { // TODO: needs proper explicit signature
+    template<gr::InputSpanLike TInputSpan1, gr::InputSpanLike TInputSpan2>
+    gr::work::Status processBulk(std::span<TInputSpan1>&, std::span<TInputSpan2>&) {
         return gr::work::Status::OK;
     }
 };

@@ -63,20 +63,20 @@ struct ProcessMessageStdSpanBlock : gr::Block<ProcessMessageStdSpanBlock<T>> {
     void processMessages(gr::MsgPortInNamed<"__Builtin">&, std::span<const gr::Message>) {}
 };
 
-static_assert(!gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(gr::traits::block::can_processMessagesForPortReaderSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 static_assert(gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageStdSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 
 template<typename T>
-struct ProcessMessageConsumableSpanBlock : gr::Block<ProcessMessageConsumableSpanBlock<T>> {
+struct ProcessMessageReaderSpanBlock : gr::Block<ProcessMessageReaderSpanBlock<T>> {
     gr::PortIn<T> in;
 
     T processOne(T) { return {}; }
 
-    void processMessages(gr::MsgPortInNamed<"__Builtin">&, gr::ConsumableSpan auto) {}
+    void processMessages(gr::MsgPortInNamed<"__Builtin">&, gr::ReaderSpanLike auto) {}
 };
 
-static_assert(gr::traits::block::can_processMessagesForPortConsumableSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
-static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageConsumableSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(gr::traits::block::can_processMessagesForPortReaderSpan<ProcessMessageReaderSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
+static_assert(!gr::traits::block::can_processMessagesForPortStdSpan<ProcessMessageReaderSpanBlock<int>, gr::MsgPortInNamed<"__Builtin">>);
 
 using namespace boost::ut;
 using namespace gr;
@@ -87,7 +87,7 @@ const boost::ut::suite MessagesTests = [] {
     using namespace gr;
 
     static auto returnReplyMsg = [](gr::MsgPortIn& port) {
-        ConsumableSpan auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
+        ReaderSpanLike auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
         Message             msg  = span[0];
         expect(span.consume(span.size()));
         return msg;

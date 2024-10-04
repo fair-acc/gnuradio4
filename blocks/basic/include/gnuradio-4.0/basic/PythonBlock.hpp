@@ -3,20 +3,19 @@
 
 #include "PythonInterpreter.hpp"
 
-#include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/annotated.hpp>
 
 // Forward declaration of PythonBlock method definition, needed for CPython's C-API wrapping
 template<typename T>
-inline PyModuleDef *
-myBlockPythonDefinitions(void);
+inline PyModuleDef* myBlockPythonDefinitions(void);
 
 namespace gr::basic {
 
 using namespace gr;
 
 template<typename T>
-    requires std::is_arithmetic_v<T> /* || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>> */
+requires std::is_arithmetic_v<T> /* || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>> */
 struct PythonBlock : public Block<PythonBlock<T>> {
     using Description = Doc<R""(@brief PythonBlock enabling Python scripts to be executed in GR flow-graphs.
 
@@ -88,8 +87,8 @@ myBlock.processBulk(ins, outs);
     A<gr::Size_t, "n_outputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>> n_outputs    = 0U;
     std::string                                                                   pythonScript = "";
 
-    PyModuleDef        *_moduleDefinitions = myBlockPythonDefinitions<T>();
-    python::Interpreter _interpreter{ this, _moduleDefinitions };
+    PyModuleDef*        _moduleDefinitions = myBlockPythonDefinitions<T>();
+    python::Interpreter _interpreter{this, _moduleDefinitions};
     std::string         _prePythonDefinition = fmt::format(R"p(import {0}
 import warnings
 
@@ -119,22 +118,19 @@ class PythonBlockWrapper: ## helper class to make the C++ class appear as a Pyth
         {0}.setSettings(self.capsule, settings)
 
 this_block = PythonBlockWrapper(capsule))p",
-                                                           _moduleDefinitions->m_name);
-    poc_property_map    _settingsMap{ { "key1", "value1" }, { "key2", "value2" } };
+                _moduleDefinitions->m_name);
+    poc_property_map    _settingsMap{{"key1", "value1"}, {"key2", "value2"}};
     bool                _tagAvailable = false;
     tag_type            _tag          = "Simulated Tag";
 
-    void
-    settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
+    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
 
-            fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"),
-                       new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"),
-                       new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
-            if (std::any_of(inputs.begin(), inputs.end(), [](const auto &port) { return port.isConnected(); })) {
+            fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
+            if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 throw gr::exception("Number of input ports cannot be changed after Graph initialization.");
             }
-            if (std::any_of(outputs.begin(), outputs.end(), [](const auto &port) { return port.isConnected(); })) {
+            if (std::any_of(outputs.begin(), outputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 throw gr::exception("Number of output ports cannot be changed after Graph initialization.");
             }
             inputs.resize(n_inputs);
@@ -143,80 +139,66 @@ this_block = PythonBlockWrapper(capsule))p",
 
         if (new_settings.contains("pythonScript")) {
             _interpreter.invoke(
-                    [this] {
-                        if (python::PyObjectGuard testImport(PyRun_StringFlags(_prePythonDefinition.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr));
-                            !testImport) {
-                            python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - testImport", this->unique_name, this->name), std::source_location::current(),
-                                                            _prePythonDefinition);
-                        }
+                [this] {
+                    if (python::PyObjectGuard testImport(PyRun_StringFlags(_prePythonDefinition.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !testImport) {
+                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - testImport", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                    }
 
-                        // Retrieve the PythonBlockWrapper class object
-                        PyObject *pPythonBlockWrapperClass = PyDict_GetItemString(_interpreter.getDictionary(), "PythonBlockWrapper"); // borrowed reference
-                        if (!pPythonBlockWrapperClass) {
-                            python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - failed to retrieve PythonBlockWrapper class", this->unique_name, this->name),
-                                                            std::source_location::current(), _prePythonDefinition);
-                        }
+                    // Retrieve the PythonBlockWrapper class object
+                    PyObject* pPythonBlockWrapperClass = PyDict_GetItemString(_interpreter.getDictionary(), "PythonBlockWrapper"); // borrowed reference
+                    if (!pPythonBlockWrapperClass) {
+                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - failed to retrieve PythonBlockWrapper class", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                    }
 
-                        // Retrieve the this_block
-                        PyObject *pInstance = PyDict_GetItemString(_interpreter.getDictionary(), "this_block"); // borrowed reference
-                        if (!pInstance) {
-                            python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - failed to retrieve 'this_block'", this->unique_name, this->name),
-                                                            std::source_location::current(), _prePythonDefinition);
-                        }
+                    // Retrieve the this_block
+                    PyObject* pInstance = PyDict_GetItemString(_interpreter.getDictionary(), "this_block"); // borrowed reference
+                    if (!pInstance) {
+                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - failed to retrieve 'this_block'", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                    }
 
-                        // Check if pInstance is an instance of PythonBlockWrapper
-                        if (PyObject_IsInstance(pInstance, pPythonBlockWrapperClass) != 1) {
-                            python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - 'this_block' is not an instance of PythonBlockWrapper", this->unique_name, this->name),
-                                                            std::source_location::current(), _prePythonDefinition);
-                        }
+                    // Check if pInstance is an instance of PythonBlockWrapper
+                    if (PyObject_IsInstance(pInstance, pPythonBlockWrapperClass) != 1) {
+                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - 'this_block' is not an instance of PythonBlockWrapper", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                    }
 
-                        if (const python::PyObjectGuard result(PyRun_StringFlags(pythonScript.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !result) {
-                            python::throwCurrentPythonError(fmt::format("{}(aka. '{}')::settingsChanged(...) - script parsing error", this->unique_name, this->name), std::source_location::current(),
-                                                            pythonScript);
-                        }
+                    if (const python::PyObjectGuard result(PyRun_StringFlags(pythonScript.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !result) {
+                        python::throwCurrentPythonError(fmt::format("{}(aka. '{}')::settingsChanged(...) - script parsing error", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                    }
 
-                        python::PyObjectGuard pyFunc(PyObject_GetAttrString(_interpreter.getModule(), "process_bulk"));
-                        if (!pyFunc.get() || !PyCallable_Check(pyFunc.get())) {
-                            python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) Python function process_bulk not found or is not callable", this->unique_name, this->name),
-                                                            std::source_location::current(), pythonScript);
-                        }
-                    },
-                    pythonScript);
+                    python::PyObjectGuard pyFunc(PyObject_GetAttrString(_interpreter.getModule(), "process_bulk"));
+                    if (!pyFunc.get() || !PyCallable_Check(pyFunc.get())) {
+                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) Python function process_bulk not found or is not callable", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                    }
+                },
+                pythonScript);
         }
     }
 
-    const poc_property_map &
-    getSettings() const {
+    const poc_property_map& getSettings() const {
         // TODO: replace with this->settings().get() once the property_map is Python wrapped
         return _settingsMap;
     }
 
-    bool
-    setSettings(const poc_property_map &newSettings) {
+    bool setSettings(const poc_property_map& newSettings) {
         // TODO: replace with this->settings().set(newSettings) once the property_map is Python wrapped
         if (newSettings.empty()) {
             return false;
         }
-        for (const auto &[key, value] : newSettings) {
+        for (const auto& [key, value] : newSettings) {
             _settingsMap.insert_or_assign(key, value);
         }
         return true;
     }
 
-    bool
-    tagAvailable() {
+    bool tagAvailable() {
         _tagAvailable = !_tagAvailable;
         return _tagAvailable;
     }
 
-    tag_type
-    getTag() {
-        return _tag;
-    }
+    tag_type getTag() { return _tag; }
 
-    template<typename TConsumableInputSpan, typename TProducibleOutSpan>
-    work::Status
-    processBulk(std::span<TConsumableInputSpan> ins, std::span<TProducibleOutSpan> outs) {
+    template<typename TInputSpan, typename TOutputSpan>
+    work::Status processBulk(std::span<TInputSpan> ins, std::span<TOutputSpan> outs) {
         _interpreter.invoke([this, ins, outs] { callPythonFunction(ins, outs); }, pythonScript);
         return work::Status::OK;
     }
@@ -231,17 +213,16 @@ this_block = PythonBlockWrapper(capsule))p",
     // clang-format on
 
 private:
-    template<typename TConsumableInputSpan, typename TProducibleOutSpan>
-    void
-    callPythonFunction(std::span<TConsumableInputSpan> ins, std::span<TProducibleOutSpan> outs) {
-        PyObject *pIns = PyList_New(static_cast<Py_ssize_t>(ins.size()));
+    template<typename TInputSpan, typename TOutputSpan>
+    void callPythonFunction(std::span<TInputSpan> ins, std::span<TOutputSpan> outs) {
+        PyObject* pIns = PyList_New(static_cast<Py_ssize_t>(ins.size()));
         for (size_t i = 0; i < ins.size(); ++i) {
-            PyList_SetItem(pIns, Py_ssize_t(i), python::toPyArray(ins[i].data(), { ins[i].size() }));
+            PyList_SetItem(pIns, Py_ssize_t(i), python::toPyArray(ins[i].data(), {ins[i].size()}));
         }
 
-        PyObject *pOuts = PyList_New(static_cast<Py_ssize_t>(outs.size()));
+        PyObject* pOuts = PyList_New(static_cast<Py_ssize_t>(outs.size()));
         for (size_t i = 0; i < outs.size(); ++i) {
-            PyList_SetItem(pOuts, Py_ssize_t(i), python::toPyArray(outs[i].data(), { outs[i].size() }));
+            PyList_SetItem(pOuts, Py_ssize_t(i), python::toPyArray(outs[i].data(), {outs[i].size()}));
         }
 
         python::PyObjectGuard pyArgs(PyTuple_New(2));
@@ -249,8 +230,7 @@ private:
         PyTuple_SetItem(pyArgs, 1, pOuts);
 
         if (python::PyObjectGuard pyValue = _interpreter.invokeFunction("process_bulk", pyArgs); !pyValue) {
-            python::throwCurrentPythonError(fmt::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(),
-                                            pythonScript);
+            python::throwCurrentPythonError(fmt::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), pythonScript);
         }
     }
 };
@@ -259,58 +239,54 @@ private:
 ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::PythonBlock, inputs, outputs, n_inputs, n_outputs, pythonScript)
 
 template<typename T>
-gr::basic::PythonBlock<T> *
-getPythonBlockFromCapsule(PyObject *capsule) {
+gr::basic::PythonBlock<T>* getPythonBlockFromCapsule(PyObject* capsule) {
     static std::string pyBlockName = gr::python::sanitizedPythonBlockName<gr::basic::PythonBlock<T>>();
-    if (void *objPointer = PyCapsule_GetPointer(capsule, pyBlockName.c_str()); objPointer != nullptr) {
-        return static_cast<gr::basic::PythonBlock<T> *>(objPointer);
+    if (void* objPointer = PyCapsule_GetPointer(capsule, pyBlockName.c_str()); objPointer != nullptr) {
+        return static_cast<gr::basic::PythonBlock<T>*>(objPointer);
     }
     gr::python::throwCurrentPythonError("could not retrieve obj pointer from capsule");
     return nullptr;
 }
 
 template<typename T>
-PyObject *
-PythonBlock_TagAvailable_Template(PyObject * /*self*/, PyObject *args) {
-    PyObject *capsule;
+PyObject* PythonBlock_TagAvailable_Template(PyObject* /*self*/, PyObject* args) {
+    PyObject* capsule;
     if (!PyArg_ParseTuple(args, "O", &capsule)) {
         return nullptr;
     }
-    gr::basic::PythonBlock<T> *myBlock = getPythonBlockFromCapsule<T>(capsule);
+    gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
     return myBlock->tagAvailable() ? gr::python::TrueObj : gr::python::FalseObj;
 }
 
 template<typename T>
-PyObject *
-PythonBlock_GetTag_Template(PyObject * /*self*/, PyObject *args) {
-    PyObject *capsule;
+PyObject* PythonBlock_GetTag_Template(PyObject* /*self*/, PyObject* args) {
+    PyObject* capsule;
     if (!PyArg_ParseTuple(args, "O", &capsule)) {
         return nullptr;
     }
-    gr::basic::PythonBlock<T> *myBlock = getPythonBlockFromCapsule<T>(capsule);
+    gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
     return PyUnicode_FromString(myBlock->getTag().c_str());
 }
 
 template<typename T>
-PyObject *
-PythonBlock_GetSettings_Template(PyObject * /*self*/, PyObject *args) {
-    PyObject *capsule;
+PyObject* PythonBlock_GetSettings_Template(PyObject* /*self*/, PyObject* args) {
+    PyObject* capsule;
     if (!PyArg_ParseTuple(args, "O", &capsule)) {
         return nullptr;
     }
-    const gr::basic::PythonBlock<T> *myBlock = getPythonBlockFromCapsule<T>(capsule);
+    const gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
     if (myBlock == nullptr) {
         gr::python::throwCurrentPythonError(fmt::format("could not retrieve myBLock<{}> {}", gr::meta::type_name<T>(), gr::python::toString(capsule)));
         return nullptr;
     }
-    const auto &settings = myBlock->getSettings();
+    const auto& settings = myBlock->getSettings();
 
-    PyObject *dict = PyDict_New(); // returns owning reference
+    PyObject* dict = PyDict_New(); // returns owning reference
     if (!dict) {
         return PyErr_NoMemory();
     }
     try {
-        for (const auto &[key, value] : settings) {
+        for (const auto& [key, value] : settings) {
             gr::python::PyObjectGuard py_value(PyUnicode_FromString(value.c_str()));
             if (!py_value) { // Failed to convert string to Python Unicode
                 gr::python::PyDecRef(dict);
@@ -322,7 +298,7 @@ PythonBlock_GetSettings_Template(PyObject * /*self*/, PyObject *args) {
                 return nullptr;
             }
         }
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError, e.what());
         gr::python::PyDecRef(dict);
         return nullptr;
@@ -331,25 +307,24 @@ PythonBlock_GetSettings_Template(PyObject * /*self*/, PyObject *args) {
 }
 
 template<typename T>
-PyObject *
-PythonBlock_SetSettings_Template(PyObject * /*self*/, PyObject *args) {
-    PyObject *capsule;
-    PyObject *settingsDict;
+PyObject* PythonBlock_SetSettings_Template(PyObject* /*self*/, PyObject* args) {
+    PyObject* capsule;
+    PyObject* settingsDict;
     if (!PyArg_ParseTuple(args, "OO", &capsule, &settingsDict)) {
         return nullptr;
     }
-    gr::basic::PythonBlock<T> *myBlock = getPythonBlockFromCapsule<T>(capsule);
+    gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
     if (!gr::python::isPyDict(settingsDict)) {
         PyErr_SetString(PyExc_TypeError, "Settings must be a dictionary");
         return nullptr;
     }
 
     typename gr::basic::PythonBlock<T>::poc_property_map newSettings;
-    PyObject                                            *key, *value;
+    PyObject *                                           key, *value;
     Py_ssize_t                                           pos = 0;
     while (PyDict_Next(settingsDict, &pos, &key, &value)) {
-        const char *keyStr   = PyUnicode_AsUTF8(key);
-        const char *valueStr = PyUnicode_AsUTF8(value);
+        const char* keyStr   = PyUnicode_AsUTF8(key);
+        const char* valueStr = PyUnicode_AsUTF8(value);
         newSettings[keyStr]  = valueStr;
     }
 
@@ -358,37 +333,28 @@ PythonBlock_SetSettings_Template(PyObject * /*self*/, PyObject *args) {
 }
 
 template<typename T>
-PyMethodDef *
-blockMethods() {
+PyMethodDef* blockMethods() {
     static PyMethodDef methods[] = {
-        { "tagAvailable", reinterpret_cast<PyCFunction>(PythonBlock_TagAvailable_Template<T>), METH_VARARGS, "Check if a tag is available" },
-        { "getTag", reinterpret_cast<PyCFunction>(PythonBlock_GetTag_Template<T>), METH_VARARGS, "Get the current tag" },
-        { "getSettings", reinterpret_cast<PyCFunction>(PythonBlock_GetSettings_Template<T>), METH_VARARGS, "Get the settings" },
-        { "setSettings", reinterpret_cast<PyCFunction>(PythonBlock_SetSettings_Template<T>), METH_VARARGS, "Set the settings" },
-        { nullptr, nullptr, 0, nullptr } // Sentinel
+        {"tagAvailable", reinterpret_cast<PyCFunction>(PythonBlock_TagAvailable_Template<T>), METH_VARARGS, "Check if a tag is available"}, {"getTag", reinterpret_cast<PyCFunction>(PythonBlock_GetTag_Template<T>), METH_VARARGS, "Get the current tag"}, {"getSettings", reinterpret_cast<PyCFunction>(PythonBlock_GetSettings_Template<T>), METH_VARARGS, "Get the settings"}, {"setSettings", reinterpret_cast<PyCFunction>(PythonBlock_SetSettings_Template<T>), METH_VARARGS, "Set the settings"}, {nullptr, nullptr, 0, nullptr} // Sentinel
     };
     static_assert(gr::meta::always_false<T>, "type not defined");
     return methods;
 }
 
-#define DEFINE_PYTHON_WRAPPER(T, NAME) \
-    extern "C" inline PyObject *NAME##_##T(PyObject *self, PyObject *args) { return NAME##_Template<T>(self, args); }
+#define DEFINE_PYTHON_WRAPPER(T, NAME)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
+    extern "C" inline PyObject* NAME##_##T(PyObject* self, PyObject* args) { return NAME##_Template<T>(self, args); }
 
-#define DEFINE_PYTHON_TYPE_FUNCTIONS_AND_METHODS(type) \
-    DEFINE_PYTHON_WRAPPER(type, PythonBlock_TagAvailable) \
-    DEFINE_PYTHON_WRAPPER(type, PythonBlock_GetTag) \
-    DEFINE_PYTHON_WRAPPER(type, PythonBlock_GetSettings) \
-    DEFINE_PYTHON_WRAPPER(type, PythonBlock_SetSettings) \
-    template<> \
-    PyMethodDef *blockMethods<type>() { \
-        static PyMethodDef methods[] = { \
-            { "tagAvailable", reinterpret_cast<PyCFunction>(PythonBlock_TagAvailable_##type), METH_VARARGS, "Check if a tag is available" }, \
-            { "getTag", reinterpret_cast<PyCFunction>(PythonBlock_GetTag_##type), METH_VARARGS, "Get the current tag" }, \
-            { "getSettings", reinterpret_cast<PyCFunction>(PythonBlock_GetSettings_##type), METH_VARARGS, "Get the settings" }, \
-            { "setSettings", reinterpret_cast<PyCFunction>(PythonBlock_SetSettings_##type), METH_VARARGS, "Set the settings" }, \
-            { nullptr, nullptr, 0, nullptr } /* Sentinel */ \
-        }; \
-        return methods; \
+#define DEFINE_PYTHON_TYPE_FUNCTIONS_AND_METHODS(type)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
+    DEFINE_PYTHON_WRAPPER(type, PythonBlock_TagAvailable)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+    DEFINE_PYTHON_WRAPPER(type, PythonBlock_GetTag)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+    DEFINE_PYTHON_WRAPPER(type, PythonBlock_GetSettings)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
+    DEFINE_PYTHON_WRAPPER(type, PythonBlock_SetSettings)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
+    template<>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
+    PyMethodDef* blockMethods<type>() {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
+        static PyMethodDef methods[] = {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
+            {"tagAvailable", reinterpret_cast<PyCFunction>(PythonBlock_TagAvailable_##type), METH_VARARGS, "Check if a tag is available"}, {"getTag", reinterpret_cast<PyCFunction>(PythonBlock_GetTag_##type), METH_VARARGS, "Get the current tag"}, {"getSettings", reinterpret_cast<PyCFunction>(PythonBlock_GetSettings_##type), METH_VARARGS, "Get the settings"}, {"setSettings", reinterpret_cast<PyCFunction>(PythonBlock_SetSettings_##type), METH_VARARGS, "Set the settings"}, {nullptr, nullptr, 0, nullptr} /* Sentinel */                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
+        };                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
+        return methods;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
     }
 
 DEFINE_PYTHON_TYPE_FUNCTIONS_AND_METHODS(int32_t)
@@ -397,21 +363,12 @@ DEFINE_PYTHON_TYPE_FUNCTIONS_AND_METHODS(float)
 // add more types as needed
 
 template<typename T>
-inline PyModuleDef *
-myBlockPythonDefinitions(void) {
+inline PyModuleDef* myBlockPythonDefinitions(void) {
     static std::string  pyBlockName    = gr::python::sanitizedPythonBlockName<gr::basic::PythonBlock<T>>();
-    static PyMethodDef *pyBlockMethods = blockMethods<T>();
+    static PyMethodDef* pyBlockMethods = blockMethods<T>();
 
     constexpr auto            blockDescription = static_cast<std::string_view>(gr::basic::PythonBlock<T>::Description::value);
-    static struct PyModuleDef myBlockModule    = { .m_base     = PyModuleDef_HEAD_INIT,
-                                                   .m_name     = pyBlockName.c_str(),
-                                                   .m_doc      = blockDescription.data(),
-                                                   .m_size     = -1,
-                                                   .m_methods  = pyBlockMethods,
-                                                   .m_slots    = nullptr,
-                                                   .m_traverse = nullptr,
-                                                   .m_clear    = nullptr,
-                                                   .m_free     = nullptr };
+    static struct PyModuleDef myBlockModule    = {.m_base = PyModuleDef_HEAD_INIT, .m_name = pyBlockName.c_str(), .m_doc = blockDescription.data(), .m_size = -1, .m_methods = pyBlockMethods, .m_slots = nullptr, .m_traverse = nullptr, .m_clear = nullptr, .m_free = nullptr};
     return &myBlockModule;
 }
 

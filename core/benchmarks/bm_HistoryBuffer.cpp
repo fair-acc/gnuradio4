@@ -25,12 +25,12 @@ inline const boost::ut::suite _buffer_tests = [] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 {
-                    PublishableSpan auto pSpan = writer.tryReserve(1);
+                    WriterSpanLike auto pSpan = writer.tryReserve(1);
                     boost::ut::expect(!pSpan.empty());
                     pSpan[0] = counter;
                     pSpan.publish(1);
                 }
-                ConsumableSpan auto data = reader.get(1);
+                ReaderSpanLike auto data = reader.get(1);
                 if (data[0] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -48,12 +48,12 @@ inline const boost::ut::suite _buffer_tests = [] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 {
-                    PublishableSpan auto pSpan = writer.tryReserve(1);
+                    WriterSpanLike auto pSpan = writer.tryReserve(1);
                     boost::ut::expect(!pSpan.empty());
                     pSpan[0] = counter;
                     pSpan.publish(1);
                 }
-                ConsumableSpan auto data = reader.get(1);
+                ReaderSpanLike auto data = reader.get(1);
                 if (data[0] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -71,12 +71,12 @@ inline const boost::ut::suite _buffer_tests = [] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 {
-                    PublishableSpan auto pSpan = writer.tryReserve(1LU);
+                    WriterSpanLike auto pSpan = writer.tryReserve(1LU);
                     boost::ut::expect(!pSpan.empty());
                     pSpan[0] = counter;
                     pSpan.publish(1);
                 }
-                ConsumableSpan auto data = reader.get(1);
+                ReaderSpanLike auto data = reader.get(1);
                 if (data[0] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
                 }
@@ -126,11 +126,11 @@ inline const boost::ut::suite _buffer_tests = [] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 {
-                    PublishableSpan auto pSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(1LU);
+                    WriterSpanLike auto pSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(1LU);
                     boost::ut::expect(!pSpan.empty());
                     pSpan[0] = counter;
                 }
-                gr::ConsumableSpan auto     range = reader.get(1);
+                ReaderSpanLike auto         range = reader.get(1);
                 [[maybe_unused]] const auto data  = range[0];
                 [[maybe_unused]] const auto ret   = range.consume(1);
                 counter++;

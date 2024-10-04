@@ -57,7 +57,7 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
 
 auto returnReplyMsg(gr::MsgPortIn& port) {
     expect(eq(port.streamReader().available(), 1UZ)) << "didn't receive a reply message";
-    ConsumableSpan auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
+    ReaderSpanLike auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
     Message             msg  = span[0];
     expect(span.consume(span.size()));
     fmt::print("Test got a reply: {}\n", msg);
@@ -351,10 +351,10 @@ const boost::ut::suite RunningGraphTests = [] {
 
         const auto& data     = reply.data.value();
         const auto& children = std::get<property_map>(data.at("children"s));
-        expect(eq(children.size(), 4));
+        expect(eq(children.size(), 4UZ));
 
         const auto& edges = std::get<property_map>(data.at("edges"s));
-        expect(eq(edges.size(), 4));
+        expect(eq(edges.size(), 4UZ));
     }
     scheduler.processScheduledMessages();
 

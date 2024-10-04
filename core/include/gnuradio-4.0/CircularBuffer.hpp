@@ -190,7 +190,7 @@ enum class SpanReleasePolicy {
 /*
  * The enum specifies whether to use the blocking reserve() method or the non-blocking tryReserve() method
  */
-enum class PublishableSpanReservePolicy {
+enum class WriterSpanReservePolicy {
     Reserve,    // use blocking reserve() method
     TryReserve, // use non-blocking tryReserve() method
 };
@@ -284,7 +284,7 @@ class CircularBuffer {
     class Writer;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-    class PublishableOutputRange {
+    class WriterSpan {
         Writer<U>* _parent = nullptr;
 
     public:
@@ -294,16 +294,15 @@ class CircularBuffer {
         using reverse_iterator = typename std::span<T>::reverse_iterator;
         using pointer          = typename std::span<T>::reverse_iterator;
 
-        PublishableOutputRange() = delete;
-        explicit PublishableOutputRange(Writer<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; };
-        explicit constexpr PublishableOutputRange(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
+        explicit WriterSpan(Writer<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; };
+        explicit constexpr WriterSpan(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
             _parent->_index        = index;
             _parent->_offset       = sequence - static_cast<signed_index_type>(nSlotsToClaim);
             _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
             _parent->_instanceCount++;
         }
-        PublishableOutputRange(const PublishableOutputRange& other) : _parent(other._parent) { _parent->_instanceCount++; }
-        PublishableOutputRange& operator=(const PublishableOutputRange& other) {
+        WriterSpan(const WriterSpan& other) : _parent(other._parent) { _parent->_instanceCount++; }
+        WriterSpan& operator=(const WriterSpan& other) {
             if (this != &other) {
                 _parent = other._parent;
                 _parent->_instanceCount++;
@@ -311,12 +310,12 @@ class CircularBuffer {
             return *this;
         }
 
-        ~PublishableOutputRange() {
+        ~WriterSpan() {
             _parent->_instanceCount--;
             if (_parent->_instanceCount == 0) {
                 if (!_parent->isPublishRequested()) {
                     if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
-                        assert(false && "CircularBuffer::PublishableOutputRange() - omitted publish() call for SpanReleasePolicy::Terminate");
+                        assert(false && "CircularBuffer::WriterSpan() - omitted publish() call for SpanReleasePolicy::Terminate");
                         std::abort();
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
                         publish(_parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
@@ -340,13 +339,13 @@ class CircularBuffer {
 #ifndef NDEBUG
                 if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
-                        fmt::print(stderr, "CircularBuffer::MultiWriter::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
+                        fmt::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
                         std::abort();
                     }
 
                 } else {
                     if (!_parent->_internalSpan.empty() && !isPublishRequested()) {
-                        fmt::print(stderr, "CircularBuffer::SingleWriter::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
+                        fmt::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
                     }
                 }
@@ -383,28 +382,28 @@ class CircularBuffer {
             _parent->_nRequestedSamplesToPublish += nSamplesToPublish;
             _parent->_isPublishRequested = true;
         }
-    }; // class PublishableOutputRange
+    }; // class WriterSpan
 
-    static_assert(PublishableSpan<PublishableOutputRange<T>>);
+    static_assert(WriterSpanLike<WriterSpan<T>>);
 
     template<typename U>
     class Writer {
-        friend class PublishableOutputRange<U, SpanReleasePolicy::Terminate>;
-        friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessAll>;
-        friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessNone>;
+        friend class WriterSpan<U, SpanReleasePolicy::Terminate>;
+        friend class WriterSpan<U, SpanReleasePolicy::ProcessAll>;
+        friend class WriterSpan<U, SpanReleasePolicy::ProcessNone>;
 
         using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         BufferTypeLocal _buffer; // controls buffer life-cycle, the rest are cache optimisations
 
         // doesn't have to be atomic because this writer is accessed (by design) always by the same thread.
-        // These are the parameters for PublishableOutputRange, only one PublishableOutputRange can be reserved per writer
+        // These are the parameters for WriterSpan, only one WriterSpan can be reserved per writer
         std::size_t       _nRequestedSamplesToPublish{0UZ}; // controls how many samples were already requested for publishing, multiple publish() calls are allowed
         bool              _isPublishRequested{true};        // controls if publish() was invoked
         std::size_t       _index{0UZ};
         signed_index_type _offset{0};
-        std::span<T>      _internalSpan{};     // internal span is managed by Writer and is shared across all PublishableSpans reserved by this Writer
-        std::size_t       _instanceCount{0UZ}; // number of PublishableOutputRange instances
+        std::span<T>      _internalSpan{};     // internal span is managed by Writer and is shared across all WriterSpans reserved by this Writer
+        std::size_t       _instanceCount{0UZ}; // number of WriterSpan instances
 
     public:
         Writer() = delete;
@@ -416,7 +415,7 @@ class CircularBuffer {
               _isPublishRequested(std::exchange(other._isPublishRequested, true)),                //
               _index(std::exchange(other._index, 0UZ)),                                           //
               _offset(std::exchange(other._offset, 0)),                                           //
-              _internalSpan(std::exchange(other._internalSpan, std::span<T>{})){};
+              _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {};
 
         Writer& operator=(Writer tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
@@ -438,37 +437,37 @@ class CircularBuffer {
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
+        [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _isPublishRequested         = false;
             _nRequestedSamplesToPublish = 0UZ;
 
             if (nSamples == 0) {
-                return PublishableOutputRange<U, policy>(this);
+                return WriterSpan<U, policy>(this);
             }
 
             const std::optional<signed_index_type> sequence = _buffer->_claimStrategy.tryNext(nSamples);
             if (sequence.has_value()) {
                 const std::size_t index = (static_cast<std::size_t>(sequence.value()) + _buffer->_size - nSamples) % _buffer->_size;
-                return PublishableOutputRange<U, policy>(this, index, sequence.value(), nSamples);
+                return WriterSpan<U, policy>(this, index, sequence.value(), nSamples);
             } else {
-                return PublishableOutputRange<U, policy>(this);
+                return WriterSpan<U, policy>(this);
             }
         }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
+        [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _isPublishRequested         = false;
             _nRequestedSamplesToPublish = 0UZ;
 
             if (nSamples == 0) {
-                return PublishableOutputRange<U, policy>(this);
+                return WriterSpan<U, policy>(this);
             }
 
             const auto        sequence = _buffer->_claimStrategy.next(nSamples);
             const std::size_t index    = (static_cast<std::size_t>(sequence) + _buffer->_size - nSamples) % _buffer->_size;
-            return PublishableOutputRange<U, policy>(this, index, sequence, nSamples);
+            return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
@@ -482,7 +481,7 @@ class CircularBuffer {
                 if (_internalSpan.size() - _nRequestedSamplesToPublish != 0) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
-                        "a previous PublishableOutputRange was not fully published, {} samples remain unpublished.",
+                        "a previous WriterSpan was not fully published, {} samples remain unpublished.",
                         _internalSpan.size() - _nRequestedSamplesToPublish);
                     std::abort();
                 }
@@ -491,7 +490,7 @@ class CircularBuffer {
                 if (!_internalSpan.empty() && !_isPublishRequested) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::SingleWriter::reserve() was invoked for the second time in succession "
-                        "without calling publish() for a previous PublishableOutputRange, {} samples was reserved.",
+                        "without calling publish() for a previous WriterSpan, {} samples was reserved.",
                         _internalSpan.size());
                     std::abort();
                 }
@@ -504,8 +503,8 @@ class CircularBuffer {
     class Reader;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-    class ConsumableInputRange {
-        const Reader<U>*   _parent = nullptr;
+    class ReaderSpan {
+        Reader<U>*         _parent = nullptr;
         std::span<const T> _internalSpan{};
 
     public:
@@ -515,13 +514,13 @@ class CircularBuffer {
         using reverse_iterator = typename std::span<const T>::reverse_iterator;
         using pointer          = typename std::span<const T>::reverse_iterator;
 
-        explicit ConsumableInputRange(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; }
+        explicit ReaderSpan(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; }
 
-        explicit constexpr ConsumableInputRange(const Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_instanceCount++; }
+        explicit constexpr ReaderSpan(Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_instanceCount++; }
 
-        ConsumableInputRange(const ConsumableInputRange& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_instanceCount++; }
+        ReaderSpan(const ReaderSpan& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_instanceCount++; }
 
-        ConsumableInputRange& operator=(const ConsumableInputRange& other) {
+        ReaderSpan& operator=(const ReaderSpan& other) {
             if (this != &other) {
                 _parent       = other._parent;
                 _internalSpan = other._internalSpan;
@@ -530,7 +529,7 @@ class CircularBuffer {
             return *this;
         }
 
-        virtual ~ConsumableInputRange() {
+        virtual ~ReaderSpan() {
             _parent->_instanceCount--;
 
             if (_parent->_instanceCount == 0) {
@@ -538,7 +537,7 @@ class CircularBuffer {
                     std::ignore = performConsume(_parent->_nRequestedSamplesToConsume);
                 } else {
                     if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
-                        assert(false && "CircularBuffer::ConsumableInputRange() - omitted consume() call for SpanReleasePolicy::Terminate");
+                        assert(false && "CircularBuffer::ReaderSpan() - omitted consume() call for SpanReleasePolicy::Terminate");
                         std::abort();
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
                         std::ignore = performConsume(_parent->_nSamplesFirstGet);
@@ -572,18 +571,18 @@ class CircularBuffer {
         const T&                                 operator[](std::size_t i) noexcept { return _internalSpan[i]; }
         explicit(false) operator const std::span<const T>&() const noexcept { return _internalSpan; }
         explicit(false) operator std::span<const T>&() noexcept { return _internalSpan; }
-        operator std::span<const T>&&() = delete;
+        // operator std::span<const T>&&() = delete;
 
         template<bool strict_check = true>
-        [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
+        [[nodiscard]] bool consume(std::size_t nSamples) noexcept {
             if (isConsumeRequested()) {
-                assert(false && "An error occurred: The method CircularBuffer::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
+                assert(false && "An error occurred: The method CircularBuffer::ReaderSpan::consume() was invoked for the second time in succession, a corresponding ReaderSpan was already consumed.");
             }
             return tryConsume<strict_check>(nSamples);
         }
 
         template<bool strict_check = true>
-        [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
+        [[nodiscard]] bool tryConsume(std::size_t nSamples) noexcept {
             if (isConsumeRequested()) {
                 return false;
             }
@@ -598,7 +597,7 @@ class CircularBuffer {
 
     private:
         template<bool strict_check = true>
-        [[nodiscard]] bool performConsume(std::size_t nSamples) const noexcept {
+        [[nodiscard]] bool performConsume(std::size_t nSamples) noexcept {
             _parent->_nSamplesFirstGet           = std::numeric_limits<std::size_t>::max();
             _parent->_nRequestedSamplesToConsume = std::numeric_limits<std::size_t>::max();
             if constexpr (strict_check) {
@@ -615,27 +614,27 @@ class CircularBuffer {
             return true;
         }
 
-    }; // class ConsumableInputRange
-    static_assert(ConsumableSpan<ConsumableInputRange<T>>);
+    }; // class ReaderSpan
+    static_assert(ReaderSpanLike<ReaderSpan<T>>);
 
     template<typename U>
     class Reader {
-        friend class ConsumableInputRange<U, SpanReleasePolicy::Terminate>;
-        friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessAll>;
-        friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessNone>;
+        friend class ReaderSpan<U, SpanReleasePolicy::Terminate>;
+        friend class ReaderSpan<U, SpanReleasePolicy::ProcessAll>;
+        friend class ReaderSpan<U, SpanReleasePolicy::ProcessNone>;
 
         using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
-        mutable signed_index_type _readIndexCached;
+        signed_index_type         _readIndexCached;
         BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
-        mutable std::size_t       _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
-        mutable std::size_t       _instanceCount{0UZ};                                        // number of ConsumableInputRange instances
+        std::size_t               _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
+        std::size_t               _instanceCount{0UZ};                                        // number of ReaderSpan instances
 
         // Samples are now consumed in a delayed manner. When the consume() method is called, the actual consumption does not happen immediately.
-        // Instead, the real consume() operation is invoked in the destructor, when the last ConsumableInputRange is destroyed.
-        mutable std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
-        mutable std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
+        // Instead, the real consume() operation is invoked in the destructor, when the last ReaderSpan is destroyed.
+        std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
+        std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
 
         std::size_t bufferIndex() const noexcept {
             const auto bitmask = _buffer->_size - 1;
@@ -680,7 +679,7 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t nRequestedSamplesToConsume() const noexcept { return _nRequestedSamplesToConsume; }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
+        [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) noexcept -> ReaderSpan<U, policy> {
             if (isConsumeRequested()) {
                 assert(false && "An error occurred: The method CircularBuffer::Reader::get() was invoked after consume() methods was explicitly invoked.");
             }
@@ -697,7 +696,7 @@ class CircularBuffer {
             } else {
                 nSamples = std::min(nSamples, _nSamplesFirstGet);
             }
-            return ConsumableInputRange<U, policy>(this, bufferIndex(), nSamples);
+            return ReaderSpan<U, policy>(this, bufferIndex(), nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }

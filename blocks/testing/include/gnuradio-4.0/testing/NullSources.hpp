@@ -56,7 +56,7 @@ struct SlowSource : public gr::Block<SlowSource<T>> {
 
     std::optional<std::chrono::time_point<std::chrono::system_clock>> lastEventAt;
 
-    [[nodiscard]] gr::work::Status processBulk(PublishableSpan auto& output) {
+    [[nodiscard]] gr::work::Status processBulk(OutputSpanLike auto& output) {
         if (!lastEventAt || std::chrono::system_clock::now() - *lastEventAt > std::chrono::milliseconds(n_delay)) {
             lastEventAt = std::chrono::system_clock::now();
 

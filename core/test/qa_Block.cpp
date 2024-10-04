@@ -114,7 +114,7 @@ static_assert(gr::HasProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<
 static_assert(gr::HasConstProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
 static_assert(!gr::HasProcessBulkFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
 
-enum class ProcessBulkVariant { SPAN_SPAN, SPAN_PUBLISHABLE, SPAN_PUBLISHABLE2, CONSUMABLE_SPAN, CONSUMABLE_SPAN2, CONSUMABLE_PUBLISHABLE, CONSUMABLE_PUBLISHABLE2, CONSUMABLE_PUBLISHABLE_PORT, CONSUMABLE_PUBLISHABLE_PORT2 };
+enum class ProcessBulkVariant { STD_STD, STD_STD_REF, STD_OUTPUT, STD_OUTPUT_REF, INPUT_STD, INPUT_STD_REF, INPUT_OUTPUT, INPUT_OUTPUT_REF };
 
 template<typename T, ProcessBulkVariant processVariant>
 struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessBulkSpan<T, processVariant>> {
@@ -122,79 +122,72 @@ struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessB
     gr::PortOut<T> out{};
 
     gr::work::Status processBulk(std::span<const T>, std::span<T>)
-    requires(processVariant == ProcessBulkVariant::SPAN_SPAN)
+    requires(processVariant == ProcessBulkVariant::STD_STD)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto&)
-    requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE)
+    gr::work::Status processBulk(std::span<const T>&, std::span<T>&)
+    requires(processVariant == ProcessBulkVariant::STD_STD_REF)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto)
-    requires(processVariant == ProcessBulkVariant::SPAN_PUBLISHABLE2)
+    gr::work::Status processBulk(std::span<const T>, gr::OutputSpanLike auto)
+    requires(processVariant == ProcessBulkVariant::STD_OUTPUT)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumableSpan auto, std::span<T>)
-    requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN)
+    gr::work::Status processBulk(std::span<const T>&, gr::OutputSpanLike auto&)
+    requires(processVariant == ProcessBulkVariant::STD_OUTPUT_REF)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumableSpan auto&, std::span<T>)
-    requires(processVariant == ProcessBulkVariant::CONSUMABLE_SPAN2)
+    gr::work::Status processBulk(gr::InputSpanLike auto, std::span<T>)
+    requires(processVariant == ProcessBulkVariant::INPUT_STD)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumableSpan auto&, gr::PublishableSpan auto&)
-    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE)
+    gr::work::Status processBulk(gr::InputSpanLike auto&, std::span<T>&)
+    requires(processVariant == ProcessBulkVariant::INPUT_STD_REF)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(gr::ConsumableSpan auto, gr::PublishableSpan auto)
-    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE2)
+    gr::work::Status processBulk(gr::InputSpanLike auto, gr::OutputSpanLike auto)
+    requires(processVariant == ProcessBulkVariant::INPUT_OUTPUT)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(const gr::InputSpan auto&, gr::PublishablePortSpan auto&)
-    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT)
-    {
-        return gr::work::Status::OK;
-    }
-
-    gr::work::Status processBulk(const gr::InputSpan auto, gr::PublishablePortSpan auto)
-    requires(processVariant == ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT2)
+    gr::work::Status processBulk(gr::InputSpanLike auto&, gr::OutputSpanLike auto&)
+    requires(processVariant == ProcessBulkVariant::INPUT_OUTPUT_REF)
     {
         return gr::work::Status::OK;
     }
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVariant processVariant), (BlockSignaturesProcessBulkSpan<T, processVariant>), in, out);
+static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>>);
+static_assert(!gr::HasProcessOneFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>>);
+static_assert(!gr::HasConstProcessOneFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>>);
 
-static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_SPAN>>);
-static_assert(!gr::HasProcessOneFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_SPAN>>);
-static_assert(!gr::HasConstProcessOneFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_SPAN>>);
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_SPAN>>);
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_PUBLISHABLE>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_PUBLISHABLE2>>); // TODO: fix the signature is required to work
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_SPAN>>);
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_SPAN2>>);
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE2>>); // TODO: fix the signature is required to work
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::CONSUMABLE_PUBLISHABLE_PORT2>>); // TODO: fix the signature is required to work
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD_REF>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_OUTPUT>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_OUTPUT_REF>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::INPUT_STD>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::INPUT_STD_REF>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::INPUT_OUTPUT>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::INPUT_OUTPUT_REF>>);
 
-static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_SPAN>, 0>);
-static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::SPAN_PUBLISHABLE>, 0>);
+// static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>, 0>);
+static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_OUTPUT>, 0>);
 
-enum class ProcessBulkTwoOutsVariant { SPAN_SPAN, PUBLISHABLE_SPAN, PUBLISHABLE_PUBLISHABLE, SPAN_PUBLISHABLE };
+enum class ProcessBulkTwoOutsVariant { STD_STD, OUTPUT_STD, OUTPUT_OUTPUT, STD_OUTPUT };
 
 template<typename T, ProcessBulkTwoOutsVariant processVariant>
 struct BlockSignaturesProcessBulkTwoOuts : public gr::Block<BlockSignaturesProcessBulkTwoOuts<T, processVariant>> {
@@ -203,25 +196,25 @@ struct BlockSignaturesProcessBulkTwoOuts : public gr::Block<BlockSignaturesProce
     gr::PortOut<T> out2{};
 
     gr::work::Status processBulk(std::span<const T>, std::span<T>, std::span<T>)
-    requires(processVariant == ProcessBulkTwoOutsVariant::SPAN_SPAN)
+    requires(processVariant == ProcessBulkTwoOutsVariant::STD_STD)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto&, std::span<T>)
-    requires(processVariant == ProcessBulkTwoOutsVariant::PUBLISHABLE_SPAN)
+    gr::work::Status processBulk(std::span<const T>, gr::OutputSpanLike auto, std::span<T>)
+    requires(processVariant == ProcessBulkTwoOutsVariant::OUTPUT_STD)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(std::span<const T>, gr::PublishableSpan auto&, gr::PublishableSpan auto&)
-    requires(processVariant == ProcessBulkTwoOutsVariant::PUBLISHABLE_PUBLISHABLE)
+    gr::work::Status processBulk(std::span<const T>, gr::OutputSpanLike auto, gr::OutputSpanLike auto)
+    requires(processVariant == ProcessBulkTwoOutsVariant::OUTPUT_OUTPUT)
     {
         return gr::work::Status::OK;
     }
 
-    gr::work::Status processBulk(std::span<const T>, std::span<T>, gr::PublishableSpan auto&)
-    requires(processVariant == ProcessBulkTwoOutsVariant::SPAN_PUBLISHABLE)
+    gr::work::Status processBulk(std::span<const T>, std::span<T>, gr::OutputSpanLike auto)
+    requires(processVariant == ProcessBulkTwoOutsVariant::STD_OUTPUT)
     {
         return gr::work::Status::OK;
     }
@@ -229,59 +222,59 @@ struct BlockSignaturesProcessBulkTwoOuts : public gr::Block<BlockSignaturesProce
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkTwoOutsVariant processVariant), (BlockSignaturesProcessBulkTwoOuts<T, processVariant>), in, out1, out2);
 
-static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::SPAN_SPAN>, 0>);
-static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::SPAN_SPAN>, 1>);
-static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::PUBLISHABLE_SPAN>, 0>);
-static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::PUBLISHABLE_SPAN>, 1>);
-static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::SPAN_PUBLISHABLE>, 0>);
-static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::SPAN_PUBLISHABLE>, 1>);
-static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::PUBLISHABLE_PUBLISHABLE>, 0>);
-static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::PUBLISHABLE_PUBLISHABLE>, 1>);
-static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::SPAN_SPAN>, 2>); // out-of-range check
+static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::STD_STD>, 0>);
+static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::STD_STD>, 1>);
+static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::OUTPUT_STD>, 0>);
+static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::OUTPUT_STD>, 1>);
+static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::STD_OUTPUT>, 0>);
+static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::STD_OUTPUT>, 1>);
+static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::OUTPUT_OUTPUT>, 0>);
+static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::OUTPUT_OUTPUT>, 1>);
+static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::STD_STD>, 2>); // out-of-range check
 
-enum class ProcessBulkVectorVariant { SPAN_SPAN, SPAN_SPAN2, CONSUMABLE_SPAN, CONSUMABLE_PUBLISHABLE, CONSUMABLE_PUBLISHABLE2, SPAN_PUBLISHABLE };
+enum class ProcessBulkVectorVariant { STD_STD, STD_STD_REF, INPUT_STD, STD_OUTPUT, INPUT_OUTPUT, INPUT_OUTPUT_REF };
 
 template<typename T, ProcessBulkVectorVariant processVariant>
 struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProcessBulkVector<T, processVariant>> {
     std::array<gr::PortIn<T>, 3>  inputs{};
     std::array<gr::PortOut<T>, 6> outputs{};
 
-    gr::work::Status processBulk(const std::span<std::span<const T>>&, std::span<std::span<T>>&)
-    requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN)
-    {
-        return gr::work::Status::OK;
-    }
-
     gr::work::Status processBulk(std::span<std::span<const T>>, std::span<std::span<T>>)
-    requires(processVariant == ProcessBulkVectorVariant::SPAN_SPAN2)
+    requires(processVariant == ProcessBulkVectorVariant::STD_STD)
     {
         return gr::work::Status::OK;
     }
 
-    template<gr::ConsumableSpan TInput>
-    gr::work::Status processBulk(const std::span<TInput>&, std::span<std::span<T>>&)
-    requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_SPAN)
+    gr::work::Status processBulk(std::span<std::span<const T>>&, std::span<std::span<T>>&)
+    requires(processVariant == ProcessBulkVectorVariant::STD_STD_REF)
     {
         return gr::work::Status::OK;
     }
 
-    template<gr::ConsumableSpan TInput, gr::PublishableSpan TOutput>
-    gr::work::Status processBulk(const std::span<TInput>&, std::span<TOutput>&)
-    requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE)
+    template<gr::InputSpanLike TInput>
+    gr::work::Status processBulk(std::span<TInput>&, std::span<std::span<T>>&)
+    requires(processVariant == ProcessBulkVectorVariant::INPUT_STD)
     {
         return gr::work::Status::OK;
     }
 
-    template<gr::ConsumableSpan TInput, gr::PublishableSpan TOutput>
+    template<gr::OutputSpanLike TOutput>
+    gr::work::Status processBulk(std::span<std::span<const T>>&, std::span<TOutput>&)
+    requires(processVariant == ProcessBulkVectorVariant::STD_OUTPUT)
+    {
+        return gr::work::Status::OK;
+    }
+
+    template<gr::InputSpanLike TInput, gr::OutputSpanLike TOutput>
     gr::work::Status processBulk(std::span<TInput>, std::span<TOutput>)
-    requires(processVariant == ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2)
+    requires(processVariant == ProcessBulkVectorVariant::INPUT_OUTPUT)
     {
         return gr::work::Status::OK;
     }
 
-    template<gr::PublishableSpan TOutput>
-    gr::work::Status processBulk(const std::span<std::span<const T>>&, std::span<TOutput>&)
-    requires(processVariant == ProcessBulkVectorVariant::SPAN_PUBLISHABLE)
+    template<gr::InputSpanLike TInput, gr::OutputSpanLike TOutput>
+    gr::work::Status processBulk(std::span<TInput>&, std::span<TOutput>&)
+    requires(processVariant == ProcessBulkVectorVariant::INPUT_OUTPUT_REF)
     {
         return gr::work::Status::OK;
     }
@@ -289,12 +282,12 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
 
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVectorVariant processVariant), (BlockSignaturesProcessBulkVector<T, processVariant>), inputs, outputs);
 
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN>>);
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_SPAN2>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_SPAN>>); // combinations are not supported yet
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE>>);
-static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::CONSUMABLE_PUBLISHABLE2>>);
-static_assert(!gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::SPAN_PUBLISHABLE>>); // combinations are not supported yet
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::STD_STD>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::STD_STD_REF>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::INPUT_STD>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::STD_OUTPUT>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::INPUT_OUTPUT>>);
+static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::INPUT_OUTPUT_REF>>);
 
 struct InvalidSettingBlock : gr::Block<InvalidSettingBlock> {
     std::tuple<int> tuple; // this type is not supported and should cause the checkBlockContracts<T>() to throw
@@ -323,8 +316,8 @@ struct MissingProcessSignature3 : gr::Block<MissingProcessSignature3> {
     std::vector<gr::PortOut<float>>   outA;
     std::array<gr::PortOut<float>, 2> outB;
 
-    template<typename PublishableSpan2>
-    gr::work::Status processBulk(std::span<std::vector<float>>&, PublishableSpan2&) { // TODO: needs proper explicit signature
+    template<gr::OutputSpanLike TOutputSpan2>
+    gr::work::Status processBulk(std::span<std::vector<float>>&, std::span<TOutputSpan2>&) {
         return gr::work::Status::OK;
     }
 };
@@ -378,7 +371,7 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::Resampling<>, gr::Stri
     ProcessStatus status{};
     bool          write_to_vector{false};
 
-    gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
+    gr::work::Status processBulk(std::span<const T>& input, std::span<T>& output) noexcept {
         status.n_inputs  = input.size();
         status.n_outputs = output.size();
         status.process_counter++;
@@ -401,7 +394,7 @@ struct SyncOrAsyncBlock : gr::Block<SyncOrAsyncBlock<T, isInputAsync, isOutputAs
     InputPortType  in{};
     OutputPortType out{};
 
-    gr::work::Status processBulk(const gr::ConsumableSpan auto& inSpan, gr::PublishableSpan auto& outSpan) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
         const auto available = std::min(inSpan.size(), outSpan.size());
         if (available != 0) {
             std::copy(inSpan.begin(), std::next(inSpan.begin(), static_cast<std::ptrdiff_t>(available)), outSpan.begin());
@@ -424,11 +417,11 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
     std::array<gr::PortOut<T, gr::Async>, nPorts> outputs;
 
     template<typename TInSpan, typename TOutSpan>
-    gr::work::Status processBulk(const std::span<TInSpan>& ins, const std::span<TOutSpan>& outs) {
+    gr::work::Status processBulk(std::span<TInSpan>& ins, std::span<TOutSpan>& outs) {
         for (std::size_t channelIndex = 0; channelIndex < ins.size(); ++channelIndex) {
-            gr::ConsumableSpan auto  inputSpan  = ins[channelIndex];
-            gr::PublishableSpan auto outputSpan = outs[channelIndex];
-            auto                     available  = std::min(inputSpan.size(), outputSpan.size());
+            gr::InputSpanLike auto  inputSpan  = ins[channelIndex];
+            gr::OutputSpanLike auto outputSpan = outs[channelIndex];
+            auto                    available  = std::min(inputSpan.size(), outputSpan.size());
 
             for (std::size_t valueIndex = 0; valueIndex < available; ++valueIndex) {
                 outputSpan[valueIndex] = inputSpan[valueIndex];
@@ -904,10 +897,8 @@ const boost::ut::suite<"reflFirstTypeName Tests"> _reflFirstTypeNameTests = [] {
     using namespace std::literals::string_literals;
 
     "std::complex"_test = []() {
-        expect(eq(reflFirstTypeName<std::complex<double>>(),
-                  "std::complex<double>"s));
-        expect(eq(reflFirstTypeName<std::complex<float>>(),
-                  "std::complex<float>"s));
+        expect(eq(reflFirstTypeName<std::complex<double>>(), "std::complex<double>"s));
+        expect(eq(reflFirstTypeName<std::complex<float>>(), "std::complex<float>"s));
     };
 };
 

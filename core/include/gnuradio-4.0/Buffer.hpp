@@ -64,55 +64,52 @@ template<typename T>
 concept ConstSpanLvalueLike = convertible_from_lvalue_only<T, std::span<const std::remove_cvref_t<typename T::value_type>>>;
 
 template<typename T>
-concept ConsumableSpan = std::ranges::contiguous_range<T> && ConstSpanLvalueLike<T> && requires(T& s) { s.consume(0); };
+concept ReaderSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& s) { s.consume(0); };
 
 template<typename T>
-concept PublishableSpan = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& s) { s.publish(0UZ); };
+concept WriterSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& s) { s.publish(0UZ); };
 
-// clang-format off
-// disable formatting until clang-format (v16) supporting concepts
 template<class T>
 concept BufferReaderLike = requires(T /*const*/ t, const std::size_t nItems) {
-    { t.get(nItems) } ; // TODO: get() returns CircularBuffer::Reader::ConsumableInputRange
-    { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.available() }      -> std::same_as<std::size_t>;
+    { t.get(nItems) }; // TODO: get() returns CircularBuffer::ReaderSpan
+    { t.position() } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.available() } -> std::same_as<std::size_t>;
     { t.buffer() };
-    { t.nSamplesConsumed()}   -> std::same_as<std::size_t>;
-    { t.isConsumeRequested()} -> std::same_as<bool>;
+    { t.nSamplesConsumed() } -> std::same_as<std::size_t>;
+    { t.isConsumeRequested() } -> std::same_as<bool>;
 };
 
-template<class T, typename ...Args>
+template<class T, typename... Args>
 concept BufferWriterLike = requires(T t, const std::size_t nItems) {
-    { t.tryReserve(nItems) };// TODO: tryReserve() returns CircularBuffer::Writer::PublishableOutputRange
-    { t.reserve(nItems) };// TODO: reserve() returns CircularBuffer::Writer::PublishableOutputRange
-    { t.available() }         -> std::same_as<std::size_t>;
+    { t.tryReserve(nItems) }; // TODO: tryReserve() returns CircularBuffer::WriterSpan
+    { t.reserve(nItems) };    // TODO: reserve() returns CircularBuffer::WriterSpan
+    { t.available() } -> std::same_as<std::size_t>;
     { t.buffer() };
-    { t.nRequestedSamplesToPublish()} -> std::same_as<std::size_t>;
+    { t.nRequestedSamplesToPublish() } -> std::same_as<std::size_t>;
 };
 
-template<class T, typename ...Args>
-concept BufferLike = requires(T t, const std::size_t min_size, Args ...args) {
+template<class T, typename... Args>
+concept BufferLike = requires(T t, const std::size_t min_size, Args... args) {
     { T(min_size, args...) };
-    { t.size() }       -> std::same_as<std::size_t>;
+    { t.size() } -> std::same_as<std::size_t>;
     { t.new_reader() } -> BufferReaderLike;
     { t.new_writer() } -> BufferWriterLike;
 };
 
 // compile-time unit-tests
 namespace test {
-template <typename T>
-struct non_compliant_class {
-};
-template <typename T, typename... Args>
+template<typename T>
+struct non_compliant_class {};
+template<typename T, typename... Args>
 using WithSequenceParameter = decltype([](std::span<T>&, std::make_signed_t<std::size_t>, Args...) { /* */ });
-template <typename T, typename... Args>
+template<typename T, typename... Args>
 using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
 } // namespace test
 
 static_assert(!BufferLike<test::non_compliant_class<int>>);
 static_assert(!BufferReaderLike<test::non_compliant_class<int>>);
 static_assert(!BufferWriterLike<test::non_compliant_class<int>>);
-// clang-format on
+
 } // namespace gr
 
 #endif // GNURADIO_BUFFER2_H

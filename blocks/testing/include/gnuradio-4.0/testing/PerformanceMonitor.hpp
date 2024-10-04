@@ -98,7 +98,7 @@ Additionally, the block provides three optional output ports for real-time strea
 
     void stop() { closeFile(); }
 
-    gr::work::Status processBulk(gr::ConsumableSpan auto& inSpan, gr::PublishableSpan auto& outResSpan, gr::PublishableSpan auto& outRateSpan) {
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outResSpan, gr::OutputSpanLike auto& outRateSpan) {
         const std::size_t nSamples = std::min(inSpan.size(), static_cast<std::size_t>(evaluate_perf_rate - _nSamplesCounter));
         std::ignore                = inSpan.consume(nSamples);
         _nSamplesCounter += static_cast<gr::Size_t>(nSamples);
@@ -134,7 +134,7 @@ private:
         }
     }
 
-    void addNewMetrics(gr::PublishableSpan auto& outResSpan, gr::PublishableSpan auto& outRateSpan) {
+    void addNewMetrics(gr::OutputSpanLike auto& outResSpan, gr::OutputSpanLike auto& outRateSpan) {
         const std::chrono::time_point<ClockSourceType> timeNow = ClockSourceType::now();
         const auto                                     dTime   = std::chrono::duration_cast<std::chrono::microseconds>(timeNow - _lastTimePoint).count();
         const double                                   rate    = (dTime == 0) ? 0. : static_cast<double>(_nSamplesCounter) * 1.e6 / static_cast<double>(dTime);

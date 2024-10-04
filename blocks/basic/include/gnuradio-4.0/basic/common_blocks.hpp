@@ -31,10 +31,7 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr auto
-    processOne(T a) const noexcept {
-        return a * factor;
-    }
+    [[nodiscard]] constexpr auto processOne(T a) const noexcept { return a * factor; }
 };
 
 ENABLE_REFLECTION_FOR_TEMPLATE(builtin_multiply, in, out, factor);
@@ -47,8 +44,7 @@ public:
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    [[nodiscard]] constexpr auto
-    processOne(T a) const noexcept {
+    [[nodiscard]] constexpr auto processOne(T a) const noexcept {
         s_event_count++;
         return a;
     }
@@ -63,13 +59,12 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
     std::vector<gr::PortIn<T>> inputs;
     gr::PortOut<T>             out;
 
-    gr::Annotated<gr::Size_t, "n_inputs", gr::Visible, gr::Doc<"variable number of inputs">, gr::Limits<1U, 32U>> n_inputs{ 0U };
+    gr::Annotated<gr::Size_t, "n_inputs", gr::Visible, gr::Doc<"variable number of inputs">, gr::Limits<1U, 32U>> n_inputs{0U};
 
-    void
-    settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
+    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
             // if one of the port is already connected and  n_inputs was changed then throw
-            if (std::any_of(inputs.begin(), inputs.end(), [](const auto &port) { return port.isConnected(); })) {
+            if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 this->emitErrorMessage("settingsChanged(..)", gr::Error("Number of input ports cannot be changed after Graph initialization."));
             }
             fmt::print("{}: configuration changed: n_inputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.at("n_inputs"));
@@ -77,10 +72,9 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
         }
     }
 
-    template<gr::ConsumableSpan TInput>
-    gr::work::Status
-    processBulk(const std::span<TInput> &inSpans, gr::PublishableSpan auto &outSpan) {
-        std::size_t minSizeIn = std::ranges::min_element(inSpans, [](const auto &lhs, const auto &rhs) { return lhs.size() < rhs.size(); })->size();
+    template<gr::InputSpanLike TInput>
+    gr::work::Status processBulk(std::span<TInput>& inSpans, gr::OutputSpanLike auto& outSpan) {
+        std::size_t minSizeIn = std::ranges::min_element(inSpans, [](const auto& lhs, const auto& rhs) { return lhs.size() < rhs.size(); })->size();
         std::size_t available = std::min(outSpan.size(), minSizeIn);
 
         if (available == 0) {
@@ -91,7 +85,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
             outSpan[i] = std::accumulate(inSpans.begin(), inSpans.end(), 0, [i](T sum, auto span) { return sum + span[i]; });
         }
         outSpan.publish(available);
-        for (auto &inSpan : inSpans) {
+        for (auto& inSpan : inSpans) {
             [[maybe_unused]] bool success = inSpan.consume(available);
             assert(success && "Check that consume was successful");
         }

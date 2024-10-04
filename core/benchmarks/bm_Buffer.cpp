@@ -65,7 +65,7 @@ void runTest(BufferLike auto& buffer, const std::size_t vectorLength, const std:
                 std::size_t           nSamplesProduced = 0;
                 barrier.arrive_and_wait();
                 while (nSamplesProduced <= (minSamples + nProducer - 1) / nProducer) {
-                    PublishableSpan auto data = writer.reserve(vectorLength);
+                    WriterSpanLike auto data = writer.reserve(vectorLength);
                     if (!data.empty()) {
                         data.publish(vectorLength);
                         nSamplesProduced += vectorLength;
@@ -93,7 +93,7 @@ void runTest(BufferLike auto& buffer, const std::size_t vectorLength, const std:
                     if (reader.available() < vectorLength) {
                         continue;
                     }
-                    const ConsumableSpan auto& input = reader.get(vectorLength);
+                    ReaderSpanLike auto input = reader.get(vectorLength);
                     nSamplesConsumed += input.size();
 
                     if (!input.consume(input.size())) {

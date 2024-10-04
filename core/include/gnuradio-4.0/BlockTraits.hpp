@@ -261,153 +261,139 @@ template<typename TBlock>
 concept can_processOne_const = can_processOne_scalar_const<TBlock> or can_processOne_simd_const<TBlock>;
 
 template<typename TBlock, typename TPort>
-concept can_processMessagesForPortConsumableSpan = requires(TBlock& block, TPort& inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
+concept can_processMessagesForPortReaderSpan = requires(TBlock& block, TPort& inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
 
 template<typename TBlock, typename TPort>
 concept can_processMessagesForPortStdSpan = requires(TBlock& block, TPort& inPort, std::span<const Message> msgSpan) { block.processMessages(inPort, msgSpan); };
 
-// clang-format off
 namespace detail {
 
 template<typename T>
-struct DummyConsumableSpan {
+struct DummyReaderSpan {
     using value_type = typename std::remove_cv_t<T>;
-    using iterator = typename std::span<const T>::iterator;
+    using iterator   = typename std::span<const T>::iterator;
 
 private:
     std::span<const T> internalSpan; // Internal span, used for fake implementation
 
 public:
-    DummyConsumableSpan() = default;
-    DummyConsumableSpan(const DummyConsumableSpan& other) = default;
-    DummyConsumableSpan& operator=(const DummyConsumableSpan& other) = default;
-    DummyConsumableSpan(DummyConsumableSpan&& other) noexcept = default;
-    DummyConsumableSpan& operator=(DummyConsumableSpan&& other) noexcept = default;
-    ~DummyConsumableSpan() = default;
+    DummyReaderSpan()                                            = default;
+    DummyReaderSpan(const DummyReaderSpan& other)                = default;
+    DummyReaderSpan& operator=(const DummyReaderSpan& other)     = default;
+    DummyReaderSpan(DummyReaderSpan&& other) noexcept            = default;
+    DummyReaderSpan& operator=(DummyReaderSpan&& other) noexcept = default;
+    ~DummyReaderSpan()                                           = default;
 
-    [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
-    [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    [[nodiscard]] constexpr iterator    begin() const noexcept { return internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator    end() const noexcept { return internalSpan.end(); }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
     operator const std::span<const T>&() const noexcept { return internalSpan; }
-    operator std::span<const T>&() noexcept  { return internalSpan; }
-    operator std::span<const T>&&() = delete;
+    operator std::span<const T>&() noexcept { return internalSpan; }
+    // operator std::span<const T>&&() = delete;
 
-    [[nodiscard]] bool consume(std::size_t /* nSamples */) const noexcept { return true; }
+    [[nodiscard]] bool consume(std::size_t /* nSamples */) noexcept { return true; }
 };
-static_assert(ConsumableSpan<DummyConsumableSpan<int>>);
+static_assert(ReaderSpanLike<DummyReaderSpan<int>>);
 
 template<typename T>
-struct DummyInputSpan: public DummyConsumableSpan<T> {
-    DummyConsumableSpan<gr::Tag> rawTags{};
-    auto tags() { return std::views::empty<std::pair<Tag::signed_index_type, const property_map&>>; }
+struct DummyInputSpan : public DummyReaderSpan<T> {
+    DummyReaderSpan<gr::Tag> rawTags{};
+    auto                     tags() { return std::views::empty<std::pair<Tag::signed_index_type, const property_map&>>; }
     [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type /*untilLocalIndex*/) const { return {}; }
-    void consumeTags(gr::Tag::signed_index_type /*untilLocalIndex*/) { }
+    void                     consumeTags(gr::Tag::signed_index_type /*untilLocalIndex*/) {}
 };
-static_assert(ConsumableSpan<DummyInputSpan<int>>);
-static_assert(InputSpan<DummyInputSpan<int>>);
+static_assert(ReaderSpanLike<DummyInputSpan<int>>);
+static_assert(InputSpanLike<DummyInputSpan<int>>);
 
 template<typename T>
-struct DummyPublishableSpan {
+struct DummyWriterSpan {
     using value_type = typename std::remove_cv_t<T>;
-    using iterator = typename std::span<T>::iterator;
+    using iterator   = typename std::span<T>::iterator;
 
 private:
     std::span<T> internalSpan; // Internal span, used for fake implementation
 
 public:
-    DummyPublishableSpan() = default;
-    DummyPublishableSpan(const DummyPublishableSpan& other) = delete;
-    DummyPublishableSpan& operator=(const DummyPublishableSpan& other) = delete;
-    DummyPublishableSpan(DummyPublishableSpan&& other) noexcept = default;
-    DummyPublishableSpan& operator=(DummyPublishableSpan&& other) noexcept = default;
-    ~DummyPublishableSpan() = default;
+    DummyWriterSpan()                                            = default;
+    DummyWriterSpan(const DummyWriterSpan& other)                = default;
+    DummyWriterSpan& operator=(const DummyWriterSpan& other)     = default;
+    DummyWriterSpan(DummyWriterSpan&& other) noexcept            = default;
+    DummyWriterSpan& operator=(DummyWriterSpan&& other) noexcept = default;
+    ~DummyWriterSpan()                                           = default;
 
-    [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
-    [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    [[nodiscard]] constexpr iterator    begin() const noexcept { return internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator    end() const noexcept { return internalSpan.end(); }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
     operator const std::span<T>&() const noexcept { return internalSpan; }
-    operator std::span<T>&() noexcept  { return internalSpan; }
+    operator std::span<T>&() noexcept { return internalSpan; }
 
     constexpr void publish(std::size_t) noexcept {}
 };
-static_assert(PublishableSpan<DummyPublishableSpan<int>>);
+static_assert(WriterSpanLike<DummyWriterSpan<int>>);
 
 template<typename T>
-struct DummyPublishablePortSpan: public DummyPublishableSpan<T> {
-    DummyPublishableSpan<gr::Tag> tags{};
+struct DummyOutputSpan : public DummyWriterSpan<T> {
+    DummyWriterSpan<gr::Tag> tags{};
 
     void publishTag(property_map&, gr::Tag::signed_index_type) {}
 };
-static_assert(PublishablePortSpan<DummyPublishablePortSpan<int>>);
+static_assert(OutputSpanLike<DummyOutputSpan<int>>);
 
-// clang-format on
-
-struct to_any_vector {
-    template<typename Any>
-    operator std::vector<Any>() const {
-        return {};
-    } // NOSONAR
-
-    template<typename Any>
-    operator std::vector<Any>&() const {
-        return {};
-    } // NOSONAR
-};
-
-struct to_any_pointer {
-    template<typename Any>
-    operator Any*() const {
-        return {};
-    } // NOSONAR
-};
-
-template<typename T>
-struct dummy_reader {
-    using type = to_any_pointer;
-};
-
-template<typename T>
-struct dummy_writer {
-    using type = to_any_pointer;
-};
-
-template<typename Port, bool isVectorOfSpansReturned>
+template<typename Port, bool isInputStdSpan, bool isOutputStdSpan>
 constexpr auto* port_to_processBulk_argument_helper() {
     if constexpr (requires(Port p) { // array of ports
                       typename Port::value_type;
                       p.cbegin() != p.cend();
                   }) {
         if constexpr (Port::value_type::kIsInput) {
-            if constexpr (isVectorOfSpansReturned) {
+            if constexpr (isInputStdSpan) {
                 return static_cast<std::span<std::span<const typename Port::value_type::value_type>>*>(nullptr);
             } else {
                 return static_cast<std::span<DummyInputSpan<const typename Port::value_type::value_type>>*>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
-            if constexpr (isVectorOfSpansReturned) {
+            if constexpr (isOutputStdSpan) {
                 return static_cast<std::span<std::span<typename Port::value_type::value_type>>*>(nullptr);
             } else {
-                return static_cast<std::span<DummyPublishablePortSpan<typename Port::value_type::value_type>>*>(nullptr);
+                return static_cast<std::span<DummyOutputSpan<typename Port::value_type::value_type>>*>(nullptr);
             }
         }
 
     } else { // single port
         if constexpr (Port::kIsInput) {
-            return static_cast<DummyInputSpan<const typename Port::value_type>*>(nullptr);
+            if constexpr (isInputStdSpan) {
+                return static_cast<std::span<const typename Port::value_type>*>(nullptr);
+            } else {
+                return static_cast<DummyInputSpan<const typename Port::value_type>*>(nullptr);
+            }
         } else if constexpr (Port::kIsOutput) {
-            return static_cast<DummyPublishablePortSpan<typename Port::value_type>*>(nullptr);
+            if constexpr (isOutputStdSpan) {
+                return static_cast<std::span<typename Port::value_type>*>(nullptr);
+            } else {
+                return static_cast<DummyOutputSpan<typename Port::value_type>*>(nullptr);
+            }
         }
     }
 }
 
 template<typename Port>
-struct port_to_processBulk_argument_consumable_publishable {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false>())>;
+struct port_to_processBulk_argument_std_std {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, true>())>;
 };
 
 template<typename Port>
-struct port_to_processBulk_argument_std_span {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true>())>;
+struct port_to_processBulk_argument_std_notstd {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, false>())>;
+};
+
+template<typename Port>
+struct port_to_processBulk_argument_notstd_std {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, true>())>;
+};
+
+template<typename Port>
+struct port_to_processBulk_argument_notstd_notstd {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, false>())>;
 };
 
 template<typename>
@@ -418,7 +404,7 @@ template<typename T>
 using dynamic_span = std::span<T>;
 
 template<std::size_t... InIdx, std::size_t... OutIdx>
-auto can_processBulk_invoke_test(auto& block, const auto& inputs, auto& outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
+auto can_processBulk_invoke_test(auto& block, auto& inputs, auto& outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
 
 template<typename TBlock, template<typename> typename TArguments>
@@ -427,15 +413,16 @@ concept can_processBulk_helper = requires(TBlock& n, typename meta::transform_ty
 };
 
 template<typename TBlock>
-concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_consumable_publishable> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_span>;
+concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_notstd> || //
+                          can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_notstd>;
 
 /**
  * Satisfied if `TDerived` has a member function `processBulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
- * std::span<const T> or any type satisfying ConsumableSpan<T>. Output arguments must accept either a std::span<T> or any type satisfying PublishableSpan<T>, except for the I-th output argument, which
- * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
+ * std::span<const T> or any type satisfying InputSpanLike<T>. Output arguments must accept either a std::span<T> or any type satisfying OutputSpanLike<T>, except for the I-th output argument, which
+ * must be std::span<T> and *not* a type satisfying OutputSpanLike<T>.
  */
 template<typename TDerived, std::size_t I>
-concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyInputSpan, traits::block::stream_input_port_types < TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types < TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types < TDerived>>::template apply<std::tuple> bad_outputs) {
+concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyInputSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyOutputSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyOutputSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> bad_outputs) {
     { detail::can_processBulk_invoke_test(d, inputs, outputs, std::make_index_sequence<stream_input_port_types<TDerived>::size>(), std::make_index_sequence<stream_output_port_types<TDerived>::size>()) } -> std::same_as<work::Status>;
     // TODO: Is this check redundant?
     not requires { []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) { return {}; }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>()); };
