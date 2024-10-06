@@ -173,7 +173,7 @@ private:
         } else if constexpr (std::same_as<std::monostate, U>) {
             return fmt::format_to(ctx.out(), "null");
         } else {
-            return fmt::format_to(ctx.out(), "unknown type {}", typeid(U).name());
+            return fmt::format_to(ctx.out(), "unknown type {}", gr::meta::type_name<U>());
         }
     }
 };

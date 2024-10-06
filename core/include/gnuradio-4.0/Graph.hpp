@@ -347,9 +347,7 @@ public:
             throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
-        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort,
-            // TODO:
-            65536UZ, 0, "unnamed edge");
+        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, minBufferSize, weight, edgeName);
 
         message.endpoint = graph::property::kEdgeEmplaced;
         return message;
@@ -414,6 +412,13 @@ public:
 
             result["weight"s]        = edge.weight();
             result["minBufferSize"s] = edge.minBufferSize();
+            result["edgeName"s]      = std::string(edge.name());
+
+            result["bufferSize"s] = edge.bufferSize();
+            result["edgeState"s]  = std::string(magic_enum::enum_name(edge.state()));
+            result["nReaders"s]   = edge.nReaders();
+            result["nWriters"s]   = edge.nWriters();
+            result["type"s]       = std::string(magic_enum::enum_name(edge.edgeType()));
 
             return result;
         };
@@ -477,6 +482,7 @@ public:
                 serializedEdges[std::to_string(index)] = serializeEdge(edge);
                 index++;
             }
+            result["edges"] = std::move(serializedEdges);
             return result;
         }();
 
@@ -553,8 +559,12 @@ public:
             if (sourcePort.defaultValue().type().name() != destinationPort.defaultValue().type().name()) {
                 edge._state = Edge::EdgeState::IncompatiblePorts;
             } else {
-                auto connectionResult = sourcePort.connect(destinationPort) == ConnectionResult::SUCCESS;
-                edge._state           = connectionResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
+                auto connectionResult  = sourcePort.connect(destinationPort) == ConnectionResult::SUCCESS;
+                edge._state            = connectionResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
+                edge._actualBufferSize = sourcePort.bufferSize();
+                edge._edgeType         = sourcePort.type();
+                edge._sourcePort       = std::addressof(sourcePort);
+                edge._destinationPort  = std::addressof(destinationPort);
             }
         } catch (...) {
             edge._state = Edge::EdgeState::PortNotFound;

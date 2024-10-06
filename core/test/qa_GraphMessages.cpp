@@ -338,6 +338,27 @@ const boost::ut::suite RunningGraphTests = [] {
     expect(emplaceTestEdge(multiply2, "out", sink.unique_name, "in")) << "emplace edge multiply2 -> sink failed and returned an error";
     scheduler.processScheduledMessages();
 
+    // Get the whole graph
+    {
+        sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */);
+        if (!waitForAReply()) {
+            fmt::println("didn't receive a reply message for kGraphInspect");
+            expect(false);
+        }
+
+        const Message reply = returnReplyMsg(fromGraph);
+        expect(reply.data.has_value());
+
+        const auto& data     = reply.data.value();
+        const auto& children = std::get<property_map>(data.at("children"s));
+        expect(eq(children.size(), 4));
+
+        const auto& edges = std::get<property_map>(data.at("edges"s));
+        expect(eq(edges.size(), 4));
+    }
+    scheduler.processScheduledMessages();
+
+    // Stopping scheduler
     scheduler.requestStop();
     schedulerThread1.join();
     if (!schedulerRet.has_value()) {
