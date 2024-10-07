@@ -55,7 +55,7 @@ class BufferSkeleton {
             return true;
         }
 
-        [[nodiscard]] constexpr std::make_signed_t<std::size_t> position() const noexcept { return -1; }
+        [[nodiscard]] constexpr std::size_t position() const noexcept { return 0; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept { return 0; }
     };

@@ -74,7 +74,7 @@ concept PublishableSpan = std::ranges::contiguous_range<T> && std::ranges::outpu
 template<class T>
 concept BufferReaderLike = requires(T /*const*/ t, const std::size_t nItems) {
     { t.get(nItems) } ; // TODO: get() returns CircularBuffer::Reader::ConsumableInputRange
-    { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.position() }       -> std::same_as<std::size_t>;
     { t.available() }      -> std::same_as<std::size_t>;
     { t.buffer() };
     { t.nSamplesConsumed()}   -> std::same_as<std::size_t>;
