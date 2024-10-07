@@ -13604,7 +13604,7 @@ private:
         } else if constexpr (std::same_as<std::monostate, U>) {
             return fmt::format_to(ctx.out(), "null");
         } else {
-            return fmt::format_to(ctx.out(), "unknown type {}", typeid(U).name());
+            return fmt::format_to(ctx.out(), "unknown type {}", gr::meta::type_name<U>());
         }
     }
 };
@@ -15057,7 +15057,7 @@ struct Port {
 
         ~PortInputSpan() override {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
-                if (rawTags.isConsumeRequested()) {                             // the user has already manually consumed tags
+                if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
                 }
                 if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
@@ -15068,14 +15068,12 @@ struct Port {
         }
 
         [[nodiscard]] auto tags() {
-            return std::views::transform(rawTags, [this](auto &tag) { return std::make_pair(std::max(tag.index, 0l) - streamIndex, std::ref(tag.map)); });
+            return std::views::transform(rawTags, [this](auto& tag) { return std::make_pair(std::max(tag.index, 0l) - streamIndex, std::ref(tag.map)); });
         }
 
         void consumeTags(gr::Tag::signed_index_type untilLocalIndex) {
-            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(
-                    rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }),
-                    [](auto /*v*/) {return true;} ));
-            std::ignore = rawTags.tryConsume(tagsToConsume);
+            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
+            std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
         [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type untilLocalIndex = 0) const {
@@ -15085,9 +15083,8 @@ struct Port {
                     destinationMap.insert_or_assign(key, value);
                 }
             };
-            Tag  result{-1, {}};
-            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }),
-                                  [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
+            Tag result{-1, {}};
+            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
             return result;
         }
 
@@ -15248,6 +15245,24 @@ public:
     [[nodiscard]] constexpr static bool isSynchronous() noexcept { return kIsSynch; }
 
     [[nodiscard]] constexpr static bool isOptional() noexcept { return kIsOptional; }
+
+    [[nodiscard]] constexpr std::size_t nReaders() const noexcept {
+        if constexpr (kIsInput) {
+            return -1UZ;
+        } else {
+            return _ioHandler.buffer().n_readers();
+        }
+    }
+
+    [[nodiscard]] constexpr std::size_t nWriters() const noexcept {
+        if constexpr (kIsInput) {
+            return _ioHandler.buffer().n_writers();
+        } else {
+            return -1UZ;
+        }
+    }
+
+    [[nodiscard]] constexpr std::size_t bufferSize() const noexcept { return _ioHandler.buffer().size(); }
 
     [[nodiscard]] constexpr static decltype(portName) static_name() noexcept
     requires(!portName.empty())
@@ -15562,6 +15577,10 @@ private:
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept = 0;
+
+        [[nodiscard]] virtual std::size_t nReaders() const   = 0;
+        [[nodiscard]] virtual std::size_t nWriters() const   = 0;
+        [[nodiscard]] virtual std::size_t bufferSize() const = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -15625,6 +15644,10 @@ private:
 
         [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
 
+        [[nodiscard]] std::size_t nReaders() const { return _value.nReaders(); }
+        [[nodiscard]] std::size_t nWriters() const { return _value.nWriters(); }
+        [[nodiscard]] std::size_t bufferSize() const { return _value.bufferSize(); }
+
         [[nodiscard]] bool isConnected() const noexcept override { return _value.isConnected(); }
 
         [[nodiscard]] ConnectionResult disconnect() noexcept override { return _value.disconnect(); }
@@ -15687,6 +15710,10 @@ public:
     }
 
     [[nodiscard]] bool isConnected() const noexcept { return _accessor->isConnected(); }
+
+    [[nodiscard]] std::size_t nReaders() const { return _accessor->nReaders(); }
+    [[nodiscard]] std::size_t nWriters() const { return _accessor->nWriters(); }
+    [[nodiscard]] std::size_t bufferSize() const { return _accessor->bufferSize(); }
 
     [[nodiscard]] ConnectionResult disconnect() noexcept { return _accessor->disconnect(); }
 
@@ -24205,14 +24232,21 @@ struct PortDefinition {
 struct Edge {
     enum class EdgeState { WaitingToBeConnected, Connected, Overriden, ErrorConnecting, PortNotFound, IncompatiblePorts };
 
-    BlockModel*    _sourceBlock;      /// non-owning reference
-    BlockModel*    _destinationBlock; /// non-owning reference
+    // Member variables that are controlled by the graph and scheduler
+    BlockModel*    _sourceBlock      = nullptr; /// non-owning reference
+    BlockModel*    _destinationBlock = nullptr; /// non-owning reference
     PortDefinition _sourcePortDefinition;
     PortDefinition _destinationPortDefinition;
-    std::size_t    _minBufferSize;
-    std::int32_t   _weight = 0;
-    std::string    _name   = "unnamed edge"; // custom edge name
-    EdgeState      _state  = EdgeState::WaitingToBeConnected;
+    EdgeState      _state            = EdgeState::WaitingToBeConnected;
+    std::size_t    _actualBufferSize = -1UZ;
+    PortType       _edgeType         = PortType::ANY;
+    DynamicPort*   _sourcePort       = nullptr; /// non-owning reference
+    DynamicPort*   _destinationPort  = nullptr; /// non-owning reference
+
+    // User-controlled member variables
+    std::size_t  _minBufferSize;
+    std::int32_t _weight = 0;
+    std::string  _name   = "unnamed edge"; // custom edge name
 
 public:
     Edge() = delete;
@@ -24231,10 +24265,20 @@ public:
     [[nodiscard]] constexpr const BlockModel& destinationBlock() const noexcept { return *_destinationBlock; }
     [[nodiscard]] PortDefinition              sourcePortDefinition() const noexcept { return _sourcePortDefinition; }
     [[nodiscard]] PortDefinition              destinationPortDefinition() const noexcept { return _destinationPortDefinition; }
-    [[nodiscard]] constexpr std::string_view  name() const noexcept { return _name; }
-    [[nodiscard]] constexpr std::size_t       minBufferSize() const noexcept { return _minBufferSize; }
-    [[nodiscard]] constexpr std::int32_t      weight() const noexcept { return _weight; }
     [[nodiscard]] constexpr EdgeState         state() const noexcept { return _state; }
+
+    [[nodiscard]] constexpr std::size_t      minBufferSize() const noexcept { return _minBufferSize; }
+    [[nodiscard]] constexpr std::int32_t     weight() const noexcept { return _weight; }
+    [[nodiscard]] constexpr std::string_view name() const noexcept { return _name; }
+
+    constexpr void setMinBufferSize(std::size_t minBufferSize) { _minBufferSize = minBufferSize; }
+    constexpr void setWeight(std::int32_t weight) { _weight = weight; }
+    constexpr void setName(std::string name) { _name = std::move(name); }
+
+    constexpr std::size_t bufferSize() const { return _actualBufferSize; }
+    constexpr std::size_t nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
+    constexpr std::size_t nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
+    constexpr PortType    edgeType() const { return _edgeType; }
 };
 
 class BlockModel {
@@ -25533,9 +25577,7 @@ public:
             throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
-        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort,
-            // TODO:
-            65536UZ, 0, "unnamed edge");
+        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, minBufferSize, weight, edgeName);
 
         message.endpoint = graph::property::kEdgeEmplaced;
         return message;
@@ -25600,6 +25642,13 @@ public:
 
             result["weight"s]        = edge.weight();
             result["minBufferSize"s] = edge.minBufferSize();
+            result["edgeName"s]      = std::string(edge.name());
+
+            result["bufferSize"s] = edge.bufferSize();
+            result["edgeState"s]  = std::string(magic_enum::enum_name(edge.state()));
+            result["nReaders"s]   = edge.nReaders();
+            result["nWriters"s]   = edge.nWriters();
+            result["type"s]       = std::string(magic_enum::enum_name(edge.edgeType()));
 
             return result;
         };
@@ -25663,6 +25712,7 @@ public:
                 serializedEdges[std::to_string(index)] = serializeEdge(edge);
                 index++;
             }
+            result["edges"] = std::move(serializedEdges);
             return result;
         }();
 
@@ -25739,8 +25789,12 @@ public:
             if (sourcePort.defaultValue().type().name() != destinationPort.defaultValue().type().name()) {
                 edge._state = Edge::EdgeState::IncompatiblePorts;
             } else {
-                auto connectionResult = sourcePort.connect(destinationPort) == ConnectionResult::SUCCESS;
-                edge._state           = connectionResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
+                auto connectionResult  = sourcePort.connect(destinationPort) == ConnectionResult::SUCCESS;
+                edge._state            = connectionResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
+                edge._actualBufferSize = sourcePort.bufferSize();
+                edge._edgeType         = sourcePort.type();
+                edge._sourcePort       = std::addressof(sourcePort);
+                edge._destinationPort  = std::addressof(destinationPort);
             }
         } catch (...) {
             edge._state = Edge::EdgeState::PortNotFound;

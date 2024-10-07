@@ -32,14 +32,21 @@ struct PortDefinition {
 struct Edge {
     enum class EdgeState { WaitingToBeConnected, Connected, Overriden, ErrorConnecting, PortNotFound, IncompatiblePorts };
 
-    BlockModel*    _sourceBlock;      /// non-owning reference
-    BlockModel*    _destinationBlock; /// non-owning reference
+    // Member variables that are controlled by the graph and scheduler
+    BlockModel*    _sourceBlock      = nullptr; /// non-owning reference
+    BlockModel*    _destinationBlock = nullptr; /// non-owning reference
     PortDefinition _sourcePortDefinition;
     PortDefinition _destinationPortDefinition;
-    std::size_t    _minBufferSize;
-    std::int32_t   _weight = 0;
-    std::string    _name   = "unnamed edge"; // custom edge name
-    EdgeState      _state  = EdgeState::WaitingToBeConnected;
+    EdgeState      _state            = EdgeState::WaitingToBeConnected;
+    std::size_t    _actualBufferSize = -1UZ;
+    PortType       _edgeType         = PortType::ANY;
+    DynamicPort*   _sourcePort       = nullptr; /// non-owning reference
+    DynamicPort*   _destinationPort  = nullptr; /// non-owning reference
+
+    // User-controlled member variables
+    std::size_t  _minBufferSize;
+    std::int32_t _weight = 0;
+    std::string  _name   = "unnamed edge"; // custom edge name
 
 public:
     Edge() = delete;
@@ -58,10 +65,20 @@ public:
     [[nodiscard]] constexpr const BlockModel& destinationBlock() const noexcept { return *_destinationBlock; }
     [[nodiscard]] PortDefinition              sourcePortDefinition() const noexcept { return _sourcePortDefinition; }
     [[nodiscard]] PortDefinition              destinationPortDefinition() const noexcept { return _destinationPortDefinition; }
-    [[nodiscard]] constexpr std::string_view  name() const noexcept { return _name; }
-    [[nodiscard]] constexpr std::size_t       minBufferSize() const noexcept { return _minBufferSize; }
-    [[nodiscard]] constexpr std::int32_t      weight() const noexcept { return _weight; }
     [[nodiscard]] constexpr EdgeState         state() const noexcept { return _state; }
+
+    [[nodiscard]] constexpr std::size_t      minBufferSize() const noexcept { return _minBufferSize; }
+    [[nodiscard]] constexpr std::int32_t     weight() const noexcept { return _weight; }
+    [[nodiscard]] constexpr std::string_view name() const noexcept { return _name; }
+
+    constexpr void setMinBufferSize(std::size_t minBufferSize) { _minBufferSize = minBufferSize; }
+    constexpr void setWeight(std::int32_t weight) { _weight = weight; }
+    constexpr void setName(std::string name) { _name = std::move(name); }
+
+    constexpr std::size_t bufferSize() const { return _actualBufferSize; }
+    constexpr std::size_t nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
+    constexpr std::size_t nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
+    constexpr PortType    edgeType() const { return _edgeType; }
 };
 
 class BlockModel {

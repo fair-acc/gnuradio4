@@ -376,7 +376,7 @@ struct Port {
 
         ~PortInputSpan() override {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
-                if (rawTags.isConsumeRequested()) {                             // the user has already manually consumed tags
+                if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
                 }
                 if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
@@ -387,14 +387,12 @@ struct Port {
         }
 
         [[nodiscard]] auto tags() {
-            return std::views::transform(rawTags, [this](auto &tag) { return std::make_pair(std::max(tag.index, 0l) - streamIndex, std::ref(tag.map)); });
+            return std::views::transform(rawTags, [this](auto& tag) { return std::make_pair(std::max(tag.index, 0l) - streamIndex, std::ref(tag.map)); });
         }
 
         void consumeTags(gr::Tag::signed_index_type untilLocalIndex) {
-            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(
-                    rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }),
-                    [](auto /*v*/) {return true;} ));
-            std::ignore = rawTags.tryConsume(tagsToConsume);
+            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
+            std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
         [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type untilLocalIndex = 0) const {
@@ -404,9 +402,8 @@ struct Port {
                     destinationMap.insert_or_assign(key, value);
                 }
             };
-            Tag  result{-1, {}};
-            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }),
-                                  [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
+            Tag result{-1, {}};
+            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
             return result;
         }
 
@@ -567,6 +564,24 @@ public:
     [[nodiscard]] constexpr static bool isSynchronous() noexcept { return kIsSynch; }
 
     [[nodiscard]] constexpr static bool isOptional() noexcept { return kIsOptional; }
+
+    [[nodiscard]] constexpr std::size_t nReaders() const noexcept {
+        if constexpr (kIsInput) {
+            return -1UZ;
+        } else {
+            return _ioHandler.buffer().n_readers();
+        }
+    }
+
+    [[nodiscard]] constexpr std::size_t nWriters() const noexcept {
+        if constexpr (kIsInput) {
+            return _ioHandler.buffer().n_writers();
+        } else {
+            return -1UZ;
+        }
+    }
+
+    [[nodiscard]] constexpr std::size_t bufferSize() const noexcept { return _ioHandler.buffer().size(); }
 
     [[nodiscard]] constexpr static decltype(portName) static_name() noexcept
     requires(!portName.empty())
@@ -881,6 +896,10 @@ private:
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept = 0;
+
+        [[nodiscard]] virtual std::size_t nReaders() const   = 0;
+        [[nodiscard]] virtual std::size_t nWriters() const   = 0;
+        [[nodiscard]] virtual std::size_t bufferSize() const = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -944,6 +963,10 @@ private:
 
         [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
 
+        [[nodiscard]] std::size_t nReaders() const { return _value.nReaders(); }
+        [[nodiscard]] std::size_t nWriters() const { return _value.nWriters(); }
+        [[nodiscard]] std::size_t bufferSize() const { return _value.bufferSize(); }
+
         [[nodiscard]] bool isConnected() const noexcept override { return _value.isConnected(); }
 
         [[nodiscard]] ConnectionResult disconnect() noexcept override { return _value.disconnect(); }
@@ -1006,6 +1029,10 @@ public:
     }
 
     [[nodiscard]] bool isConnected() const noexcept { return _accessor->isConnected(); }
+
+    [[nodiscard]] std::size_t nReaders() const { return _accessor->nReaders(); }
+    [[nodiscard]] std::size_t nWriters() const { return _accessor->nWriters(); }
+    [[nodiscard]] std::size_t bufferSize() const { return _accessor->bufferSize(); }
 
     [[nodiscard]] ConnectionResult disconnect() noexcept { return _accessor->disconnect(); }
 
