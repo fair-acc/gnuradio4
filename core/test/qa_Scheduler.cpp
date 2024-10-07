@@ -311,7 +311,7 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
 
         fmt::println("##BusyLoopBlock produces data _invokeCount: {}", _invokeCount.value());
         std::ranges::copy(input.begin(), input.end(), output.begin());
-        produceCount = _produceCount.addAndGet(-1L);
+        produceCount = _produceCount.subAndGet(1L);
         return OK;
     }
 };

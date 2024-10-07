@@ -26,7 +26,7 @@ using std::hardware_destructive_interference_size;
 inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
+static constexpr const std::size_t kInitialCursorValue = 0L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
@@ -36,36 +36,37 @@ static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
  */
 class Sequence {
 public:
-    using signed_index_type = std::make_signed_t<std::size_t>;
+    using index_type = std::size_t;
 
 private:
-    alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
+    alignas(hardware_destructive_interference_size) std::atomic<index_type> _fieldsValue{};
 
 public:
     Sequence(const Sequence&)       = delete;
     Sequence(const Sequence&&)      = delete;
     void operator=(const Sequence&) = delete;
 
-    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+    explicit Sequence(index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
 
-    [[nodiscard]] forceinline signed_index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
-    forceinline void                            setValue(const signed_index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
+    [[nodiscard]] forceinline index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
+    forceinline void                     setValue(const index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
 
-    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
+    [[nodiscard]] forceinline bool compareAndSet(index_type expectedSequence, index_type nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
         return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[maybe_unused]] forceinline signed_index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
-    [[nodiscard]] forceinline signed_index_type    addAndGet(signed_index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-    void                                           wait(signed_index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
-    void                                           notify_all() noexcept { _fieldsValue.notify_all(); }
+    [[maybe_unused]] forceinline index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
+    [[nodiscard]] forceinline index_type    addAndGet(index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
+    [[nodiscard]] forceinline index_type    subAndGet(index_type value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
+    void                                    wait(index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
+    void                                    notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {
 
-using signed_index_type = Sequence::signed_index_type;
+using index_type = Sequence::index_type;
 
 /**
  * Get the minimum sequence from an array of Sequences.
@@ -74,11 +75,11 @@ using signed_index_type = Sequence::signed_index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
+inline index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, index_type minimum = std::numeric_limits<index_type>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
     for (const auto& s : sequences) {
-        const signed_index_type v = s->value();
+        const index_type v = s->value();
         if (v < minimum) {
             minimum = v;
         }
@@ -97,7 +98,7 @@ inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Se
 #endif
 
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
-    signed_index_type                                       cursorSequence;
+    index_type                                              cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 

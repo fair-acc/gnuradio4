@@ -27,8 +27,8 @@ namespace gr {
  * \returns the sequence that is available which may be greater than the requested sequence.
  */
 template<typename T>
-inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
+inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const Sequence::index_type sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<Sequence::index_type>;
 };
 static_assert(!isWaitStrategy<int>);
 
@@ -55,7 +55,7 @@ class BlockingWaitStrategy {
     std::condition_variable_any _conditionVariable;
 
 public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    Sequence::index_type waitFor(const Sequence::index_type sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
         if (cursor.value() < sequence) {
             std::unique_lock uniqueLock(_gate);
 
@@ -65,7 +65,7 @@ public:
             }
         }
 
-        std::int64_t availableSequence;
+        Sequence::index_type availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -86,8 +86,8 @@ static_assert(WaitStrategyLike<BlockingWaitStrategy>);
  * It is best used when threads can be bound to specific CPU cores.
  */
 struct BusySpinWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        std::int64_t availableSequence;
+    Sequence::index_type waitFor(const Sequence::index_type sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        Sequence::index_type availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -111,7 +111,7 @@ public:
         : _retries(retries) {
     }
 
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+    Sequence::index_type waitFor(const Sequence::index_type sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _retries;
         const auto waitMethod = [&counter]() {
             // optional: barrier check alert
@@ -126,7 +126,7 @@ public:
             }
         };
 
-        std::int64_t availableSequence;
+        Sequence::index_type availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             waitMethod();
         }
@@ -151,7 +151,7 @@ public:
     explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
         : _timeout(timeout) {}
 
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    Sequence::index_type waitFor(const Sequence::index_type sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
         auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
 
         if (cursor.value() < sequence) {
@@ -166,7 +166,7 @@ public:
             }
         }
 
-        std::int64_t availableSequence;
+        Sequence::index_type availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -190,7 +190,7 @@ class YieldingWaitStrategy {
     const std::size_t _spinTries = 100;
 
 public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+    Sequence::index_type waitFor(const Sequence::index_type sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _spinTries;
         const auto waitMethod = [&counter]() {
             // optional: barrier check alert
@@ -202,7 +202,7 @@ public:
             }
         };
 
-        std::int64_t availableSequence;
+        Sequence::index_type availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             waitMethod();
         }
@@ -214,7 +214,7 @@ static_assert(WaitStrategyLike<YieldingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
 
 struct NoWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
+    Sequence::index_type waitFor(const Sequence::index_type sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
         // wait for nothing
         return sequence;
     }
@@ -327,8 +327,8 @@ public:
  * Latency spikes can occur after quiet periods.
  */
 struct SpinWaitWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
-        std::int64_t availableSequence;
+    Sequence::index_type waitFor(const Sequence::index_type sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
+        Sequence::index_type availableSequence;
 
         SpinWait     spinWait;
         while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
