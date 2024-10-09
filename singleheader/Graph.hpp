@@ -9688,55 +9688,52 @@ template<typename T>
 concept ConstSpanLvalueLike = convertible_from_lvalue_only<T, std::span<const std::remove_cvref_t<typename T::value_type>>>;
 
 template<typename T>
-concept ConsumableSpan = std::ranges::contiguous_range<T> && ConstSpanLvalueLike<T> && requires(T& s) { s.consume(0); };
+concept ReaderSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& s) { s.consume(0); };
 
 template<typename T>
-concept PublishableSpan = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& s) { s.publish(0UZ); };
+concept WriterSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& s) { s.publish(0UZ); };
 
-// clang-format off
-// disable formatting until clang-format (v16) supporting concepts
 template<class T>
 concept BufferReaderLike = requires(T /*const*/ t, const std::size_t nItems) {
-    { t.get(nItems) } ; // TODO: get() returns CircularBuffer::Reader::ConsumableInputRange
-    { t.position() }       -> std::same_as<std::make_signed_t<std::size_t>>;
-    { t.available() }      -> std::same_as<std::size_t>;
+    { t.get(nItems) }; // TODO: get() returns CircularBuffer::ReaderSpan
+    { t.position() } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.available() } -> std::same_as<std::size_t>;
     { t.buffer() };
-    { t.nSamplesConsumed()}   -> std::same_as<std::size_t>;
-    { t.isConsumeRequested()} -> std::same_as<bool>;
+    { t.nSamplesConsumed() } -> std::same_as<std::size_t>;
+    { t.isConsumeRequested() } -> std::same_as<bool>;
 };
 
-template<class T, typename ...Args>
+template<class T, typename... Args>
 concept BufferWriterLike = requires(T t, const std::size_t nItems) {
-    { t.tryReserve(nItems) };// TODO: tryReserve() returns CircularBuffer::Writer::PublishableOutputRange
-    { t.reserve(nItems) };// TODO: reserve() returns CircularBuffer::Writer::PublishableOutputRange
-    { t.available() }         -> std::same_as<std::size_t>;
+    { t.tryReserve(nItems) }; // TODO: tryReserve() returns CircularBuffer::WriterSpan
+    { t.reserve(nItems) };    // TODO: reserve() returns CircularBuffer::WriterSpan
+    { t.available() } -> std::same_as<std::size_t>;
     { t.buffer() };
-    { t.nRequestedSamplesToPublish()} -> std::same_as<std::size_t>;
+    { t.nRequestedSamplesToPublish() } -> std::same_as<std::size_t>;
 };
 
-template<class T, typename ...Args>
-concept BufferLike = requires(T t, const std::size_t min_size, Args ...args) {
+template<class T, typename... Args>
+concept BufferLike = requires(T t, const std::size_t min_size, Args... args) {
     { T(min_size, args...) };
-    { t.size() }       -> std::same_as<std::size_t>;
+    { t.size() } -> std::same_as<std::size_t>;
     { t.new_reader() } -> BufferReaderLike;
     { t.new_writer() } -> BufferWriterLike;
 };
 
 // compile-time unit-tests
 namespace test {
-template <typename T>
-struct non_compliant_class {
-};
-template <typename T, typename... Args>
+template<typename T>
+struct non_compliant_class {};
+template<typename T, typename... Args>
 using WithSequenceParameter = decltype([](std::span<T>&, std::make_signed_t<std::size_t>, Args...) { /* */ });
-template <typename T, typename... Args>
+template<typename T, typename... Args>
 using NoSequenceParameter = decltype([](std::span<T>&, Args...) { /* */ });
 } // namespace test
 
 static_assert(!BufferLike<test::non_compliant_class<int>>);
 static_assert(!BufferReaderLike<test::non_compliant_class<int>>);
 static_assert(!BufferWriterLike<test::non_compliant_class<int>>);
-// clang-format on
+
 } // namespace gr
 
 #endif // GNURADIO_BUFFER2_H
@@ -10839,7 +10836,7 @@ enum class SpanReleasePolicy {
 /*
  * The enum specifies whether to use the blocking reserve() method or the non-blocking tryReserve() method
  */
-enum class PublishableSpanReservePolicy {
+enum class WriterSpanReservePolicy {
     Reserve,    // use blocking reserve() method
     TryReserve, // use non-blocking tryReserve() method
 };
@@ -10933,7 +10930,7 @@ class CircularBuffer {
     class Writer;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-    class PublishableOutputRange {
+    class WriterSpan {
         Writer<U>* _parent = nullptr;
 
     public:
@@ -10943,16 +10940,15 @@ class CircularBuffer {
         using reverse_iterator = typename std::span<T>::reverse_iterator;
         using pointer          = typename std::span<T>::reverse_iterator;
 
-        PublishableOutputRange() = delete;
-        explicit PublishableOutputRange(Writer<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; };
-        explicit constexpr PublishableOutputRange(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
+        explicit WriterSpan(Writer<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; };
+        explicit constexpr WriterSpan(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
             _parent->_index        = index;
             _parent->_offset       = sequence - static_cast<signed_index_type>(nSlotsToClaim);
             _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
             _parent->_instanceCount++;
         }
-        PublishableOutputRange(const PublishableOutputRange& other) : _parent(other._parent) { _parent->_instanceCount++; }
-        PublishableOutputRange& operator=(const PublishableOutputRange& other) {
+        WriterSpan(const WriterSpan& other) : _parent(other._parent) { _parent->_instanceCount++; }
+        WriterSpan& operator=(const WriterSpan& other) {
             if (this != &other) {
                 _parent = other._parent;
                 _parent->_instanceCount++;
@@ -10960,12 +10956,12 @@ class CircularBuffer {
             return *this;
         }
 
-        ~PublishableOutputRange() {
+        ~WriterSpan() {
             _parent->_instanceCount--;
             if (_parent->_instanceCount == 0) {
                 if (!_parent->isPublishRequested()) {
                     if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
-                        assert(false && "CircularBuffer::PublishableOutputRange() - omitted publish() call for SpanReleasePolicy::Terminate");
+                        assert(false && "CircularBuffer::WriterSpan() - omitted publish() call for SpanReleasePolicy::Terminate");
                         std::abort();
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
                         publish(_parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
@@ -10989,13 +10985,13 @@ class CircularBuffer {
 #ifndef NDEBUG
                 if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
-                        fmt::print(stderr, "CircularBuffer::MultiWriter::PublishableOutputRange() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
+                        fmt::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
                         std::abort();
                     }
 
                 } else {
                     if (!_parent->_internalSpan.empty() && !isPublishRequested()) {
-                        fmt::print(stderr, "CircularBuffer::SingleWriter::PublishableOutputRange() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
+                        fmt::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
                     }
                 }
@@ -11032,28 +11028,28 @@ class CircularBuffer {
             _parent->_nRequestedSamplesToPublish += nSamplesToPublish;
             _parent->_isPublishRequested = true;
         }
-    }; // class PublishableOutputRange
+    }; // class WriterSpan
 
-    static_assert(PublishableSpan<PublishableOutputRange<T>>);
+    static_assert(WriterSpanLike<WriterSpan<T>>);
 
     template<typename U>
     class Writer {
-        friend class PublishableOutputRange<U, SpanReleasePolicy::Terminate>;
-        friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessAll>;
-        friend class PublishableOutputRange<U, SpanReleasePolicy::ProcessNone>;
+        friend class WriterSpan<U, SpanReleasePolicy::Terminate>;
+        friend class WriterSpan<U, SpanReleasePolicy::ProcessAll>;
+        friend class WriterSpan<U, SpanReleasePolicy::ProcessNone>;
 
         using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         BufferTypeLocal _buffer; // controls buffer life-cycle, the rest are cache optimisations
 
         // doesn't have to be atomic because this writer is accessed (by design) always by the same thread.
-        // These are the parameters for PublishableOutputRange, only one PublishableOutputRange can be reserved per writer
+        // These are the parameters for WriterSpan, only one WriterSpan can be reserved per writer
         std::size_t       _nRequestedSamplesToPublish{0UZ}; // controls how many samples were already requested for publishing, multiple publish() calls are allowed
         bool              _isPublishRequested{true};        // controls if publish() was invoked
         std::size_t       _index{0UZ};
         signed_index_type _offset{0};
-        std::span<T>      _internalSpan{};     // internal span is managed by Writer and is shared across all PublishableSpans reserved by this Writer
-        std::size_t       _instanceCount{0UZ}; // number of PublishableOutputRange instances
+        std::span<T>      _internalSpan{};     // internal span is managed by Writer and is shared across all WriterSpans reserved by this Writer
+        std::size_t       _instanceCount{0UZ}; // number of WriterSpan instances
 
     public:
         Writer() = delete;
@@ -11065,7 +11061,7 @@ class CircularBuffer {
               _isPublishRequested(std::exchange(other._isPublishRequested, true)),                //
               _index(std::exchange(other._index, 0UZ)),                                           //
               _offset(std::exchange(other._offset, 0)),                                           //
-              _internalSpan(std::exchange(other._internalSpan, std::span<T>{})){};
+              _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {};
 
         Writer& operator=(Writer tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
@@ -11087,37 +11083,37 @@ class CircularBuffer {
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
+        [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _isPublishRequested         = false;
             _nRequestedSamplesToPublish = 0UZ;
 
             if (nSamples == 0) {
-                return PublishableOutputRange<U, policy>(this);
+                return WriterSpan<U, policy>(this);
             }
 
             const std::optional<signed_index_type> sequence = _buffer->_claimStrategy.tryNext(nSamples);
             if (sequence.has_value()) {
                 const std::size_t index = (static_cast<std::size_t>(sequence.value()) + _buffer->_size - nSamples) % _buffer->_size;
-                return PublishableOutputRange<U, policy>(this, index, sequence.value(), nSamples);
+                return WriterSpan<U, policy>(this, index, sequence.value(), nSamples);
             } else {
-                return PublishableOutputRange<U, policy>(this);
+                return WriterSpan<U, policy>(this);
             }
         }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> PublishableOutputRange<U, policy> {
+        [[nodiscard]] constexpr auto reserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
             _isPublishRequested         = false;
             _nRequestedSamplesToPublish = 0UZ;
 
             if (nSamples == 0) {
-                return PublishableOutputRange<U, policy>(this);
+                return WriterSpan<U, policy>(this);
             }
 
             const auto        sequence = _buffer->_claimStrategy.next(nSamples);
             const std::size_t index    = (static_cast<std::size_t>(sequence) + _buffer->_size - nSamples) % _buffer->_size;
-            return PublishableOutputRange<U, policy>(this, index, sequence, nSamples);
+            return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
@@ -11131,7 +11127,7 @@ class CircularBuffer {
                 if (_internalSpan.size() - _nRequestedSamplesToPublish != 0) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
-                        "a previous PublishableOutputRange was not fully published, {} samples remain unpublished.",
+                        "a previous WriterSpan was not fully published, {} samples remain unpublished.",
                         _internalSpan.size() - _nRequestedSamplesToPublish);
                     std::abort();
                 }
@@ -11140,7 +11136,7 @@ class CircularBuffer {
                 if (!_internalSpan.empty() && !_isPublishRequested) {
                     fmt::print(stderr,
                         "An error occurred: The method CircularBuffer::SingleWriter::reserve() was invoked for the second time in succession "
-                        "without calling publish() for a previous PublishableOutputRange, {} samples was reserved.",
+                        "without calling publish() for a previous WriterSpan, {} samples was reserved.",
                         _internalSpan.size());
                     std::abort();
                 }
@@ -11153,8 +11149,8 @@ class CircularBuffer {
     class Reader;
 
     template<typename U = T, SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-    class ConsumableInputRange {
-        const Reader<U>*   _parent = nullptr;
+    class ReaderSpan {
+        Reader<U>*         _parent = nullptr;
         std::span<const T> _internalSpan{};
 
     public:
@@ -11164,13 +11160,13 @@ class CircularBuffer {
         using reverse_iterator = typename std::span<const T>::reverse_iterator;
         using pointer          = typename std::span<const T>::reverse_iterator;
 
-        explicit ConsumableInputRange(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; }
+        explicit ReaderSpan(const Reader<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; }
 
-        explicit constexpr ConsumableInputRange(const Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_instanceCount++; }
+        explicit constexpr ReaderSpan(Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->_instanceCount++; }
 
-        ConsumableInputRange(const ConsumableInputRange& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_instanceCount++; }
+        ReaderSpan(const ReaderSpan& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->_instanceCount++; }
 
-        ConsumableInputRange& operator=(const ConsumableInputRange& other) {
+        ReaderSpan& operator=(const ReaderSpan& other) {
             if (this != &other) {
                 _parent       = other._parent;
                 _internalSpan = other._internalSpan;
@@ -11179,7 +11175,7 @@ class CircularBuffer {
             return *this;
         }
 
-        virtual ~ConsumableInputRange() {
+        virtual ~ReaderSpan() {
             _parent->_instanceCount--;
 
             if (_parent->_instanceCount == 0) {
@@ -11187,7 +11183,7 @@ class CircularBuffer {
                     std::ignore = performConsume(_parent->_nRequestedSamplesToConsume);
                 } else {
                     if constexpr (spanReleasePolicy() == SpanReleasePolicy::Terminate) {
-                        assert(false && "CircularBuffer::ConsumableInputRange() - omitted consume() call for SpanReleasePolicy::Terminate");
+                        assert(false && "CircularBuffer::ReaderSpan() - omitted consume() call for SpanReleasePolicy::Terminate");
                         std::abort();
                     } else if constexpr (spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
                         std::ignore = performConsume(_parent->_nSamplesFirstGet);
@@ -11221,18 +11217,18 @@ class CircularBuffer {
         const T&                                 operator[](std::size_t i) noexcept { return _internalSpan[i]; }
         explicit(false) operator const std::span<const T>&() const noexcept { return _internalSpan; }
         explicit(false) operator std::span<const T>&() noexcept { return _internalSpan; }
-        operator std::span<const T>&&() = delete;
+        // operator std::span<const T>&&() = delete;
 
         template<bool strict_check = true>
-        [[nodiscard]] bool consume(std::size_t nSamples) const noexcept {
+        [[nodiscard]] bool consume(std::size_t nSamples) noexcept {
             if (isConsumeRequested()) {
-                assert(false && "An error occurred: The method CircularBuffer::ConsumableInputRange::consume() was invoked for the second time in succession, a corresponding ConsumableInputRange was already consumed.");
+                assert(false && "An error occurred: The method CircularBuffer::ReaderSpan::consume() was invoked for the second time in succession, a corresponding ReaderSpan was already consumed.");
             }
             return tryConsume<strict_check>(nSamples);
         }
 
         template<bool strict_check = true>
-        [[nodiscard]] bool tryConsume(std::size_t nSamples) const noexcept {
+        [[nodiscard]] bool tryConsume(std::size_t nSamples) noexcept {
             if (isConsumeRequested()) {
                 return false;
             }
@@ -11247,7 +11243,7 @@ class CircularBuffer {
 
     private:
         template<bool strict_check = true>
-        [[nodiscard]] bool performConsume(std::size_t nSamples) const noexcept {
+        [[nodiscard]] bool performConsume(std::size_t nSamples) noexcept {
             _parent->_nSamplesFirstGet           = std::numeric_limits<std::size_t>::max();
             _parent->_nRequestedSamplesToConsume = std::numeric_limits<std::size_t>::max();
             if constexpr (strict_check) {
@@ -11264,27 +11260,27 @@ class CircularBuffer {
             return true;
         }
 
-    }; // class ConsumableInputRange
-    static_assert(ConsumableSpan<ConsumableInputRange<T>>);
+    }; // class ReaderSpan
+    static_assert(ReaderSpanLike<ReaderSpan<T>>);
 
     template<typename U>
     class Reader {
-        friend class ConsumableInputRange<U, SpanReleasePolicy::Terminate>;
-        friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessAll>;
-        friend class ConsumableInputRange<U, SpanReleasePolicy::ProcessNone>;
+        friend class ReaderSpan<U, SpanReleasePolicy::Terminate>;
+        friend class ReaderSpan<U, SpanReleasePolicy::ProcessAll>;
+        friend class ReaderSpan<U, SpanReleasePolicy::ProcessNone>;
 
         using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
-        mutable signed_index_type _readIndexCached;
+        signed_index_type         _readIndexCached;
         BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
-        mutable std::size_t       _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
-        mutable std::size_t       _instanceCount{0UZ};                                        // number of ConsumableInputRange instances
+        std::size_t               _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
+        std::size_t               _instanceCount{0UZ};                                        // number of ReaderSpan instances
 
         // Samples are now consumed in a delayed manner. When the consume() method is called, the actual consumption does not happen immediately.
-        // Instead, the real consume() operation is invoked in the destructor, when the last ConsumableInputRange is destroyed.
-        mutable std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
-        mutable std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
+        // Instead, the real consume() operation is invoked in the destructor, when the last ReaderSpan is destroyed.
+        std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
+        std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
 
         std::size_t bufferIndex() const noexcept {
             const auto bitmask = _buffer->_size - 1;
@@ -11329,7 +11325,7 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t nRequestedSamplesToConsume() const noexcept { return _nRequestedSamplesToConsume; }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
-        [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) const noexcept -> ConsumableInputRange<U, policy> {
+        [[nodiscard]] constexpr auto get(const std::size_t nRequested = std::numeric_limits<std::size_t>::max()) noexcept -> ReaderSpan<U, policy> {
             if (isConsumeRequested()) {
                 assert(false && "An error occurred: The method CircularBuffer::Reader::get() was invoked after consume() methods was explicitly invoked.");
             }
@@ -11346,7 +11342,7 @@ class CircularBuffer {
             } else {
                 nSamples = std::min(nSamples, _nSamplesFirstGet);
             }
-            return ConsumableInputRange<U, policy>(this, bufferIndex(), nSamples);
+            return ReaderSpan<U, policy>(this, bufferIndex(), nSamples);
         }
 
         [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
@@ -14171,8 +14167,8 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     } else {
         message.data = std::unexpected(userMessage);
     }
-    PublishableSpan auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-    msgSpan[0]                   = std::move(message);
+    WriterSpanLike auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+    msgSpan[0]                  = std::move(message);
 }
 } // namespace detail
 
@@ -14944,33 +14940,49 @@ namespace gr {
 struct Async {};
 
 /**
- * @brief API for access to the input samples and tags from the process_bulk function.
+ * @brief Provides an interface for accessing input samples and their associated tags within the `processBulk` function.
  *
- * This concept is used for the input parameters of the process_bulk function to allow:
- * - access to the samples (via conversion to std::span)
- * - consumption of samples. By default all available samples get consumed.
- * - access to tags
- *   - via a range::view returned by `tag()` which returns the index relative to first sample in this span. The index can be negative for tags that were not consumed before.
- *   - via rawTags, which gives access to the bare ConsumableSpan<Tag>
- * - consumption of tags. By default the tags belonging to up to and including the first sample get consumed. This can be manually changed by calling consumeTags with the index of a stream sample.
- * - get a merged tag which contains the data of all tags belonging to up to and including the first sample. Optionally this can be changed to merge all tags until a supplied local stream index.
+ * The `InputSpanLike` concept is used as the type for input parameters in the `processBulk` function:`work::Status processBulk(InputSpanLike auto& in, OutputSpan auto& out);`
+ * **Features:**
+ * - Access to Samples: Allows direct access to samples via array indexing (via conversion to `std::span`): `auto value = in[0];  // Access the first sample`
+ * - Consuming Samples: Provides a `consume(nSamplesToConsume)` method to indicate how many samples to consume.
+ *   - Default Behavior:
+ *     - For `Synch` ports, all samples are published by default.
+ *     - For `Async` ports, no samples are published by default.
+ * - Access to Tags:
+ *   - Using `tags()`: Returns a `range::view` of input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
+ *   - Using `rawTags`: Provides direct access to the underlying `ReaderSpan<Tag>` for advanced manipulation.
+ * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
+ * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` and including first sample.
  */
 template<typename T>
-concept InputSpan = requires(T span, gr::Tag::signed_index_type n) {
-    { span } -> std::ranges::contiguous_range;
+concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, gr::Tag::signed_index_type n) {
     { span.consume(0) };
     { span.rawTags };
-    requires ConsumableSpan<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
+    requires ReaderSpanLike<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
     { span.tags() } -> std::ranges::range;
     { span.consumeTags(n) };
     { span.getMergedTag(n) } -> std::same_as<gr::Tag>;
 };
 
+/**
+ * @brief Provides an interface for writing output samples and publishing tags within the `processBulk` function.
+ *
+ * The `OutputSpan` concept is used as the type for output parameters in the `processBulk` function: `work::Status processBulk(InputSpanLike auto& in, OutputSpan auto& out);`
+ * **Features:**
+ * - Writing Output Samples: Allows writing to output samples via array indexing (via conversion to `std::span`): `out[0] = 4.2;  // Write a value to the first output sample`
+ * - Publishing Samples: Provides a `publish(nSamplesToPublish)` method to indicate how many samples are to be published.
+ *   - Default Behavior:
+ *     - For `Synch` ports, all samples are published by default.
+ *     - For `Async` ports, no samples are published by default.
+ * - Publishing Tags: Use `publishTag(tagData, tagOffset)` to publish tags. `tagOffset` is relative to the first sample.
+ */
 template<typename T>
-concept PublishablePortSpan = PublishableSpan<T> && requires(T span, property_map& tagData, Tag::signed_index_type index) {
-    requires PublishableSpan<std::remove_cvref_t<decltype(span.tags)>>;
+concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& span, property_map& tagData, Tag::signed_index_type tagOffset) {
+    span.publish(0UZ);
+    requires WriterSpanLike<std::remove_cvref_t<decltype(span.tags)>>;
     { *span.tags.begin() } -> std::same_as<gr::Tag&>;
-    { span.publishTag(tagData, index) } -> std::same_as<void>;
+    { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
 };
 
 /**
@@ -15049,13 +15061,18 @@ struct Port {
     using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
 
     template<SpanReleasePolicy spanReleasePolicy>
-    struct PortInputSpan : public ReaderSpanType<spanReleasePolicy> {
+    struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
         TagReaderSpanType      rawTags;
         Tag::signed_index_type streamIndex;
 
-        PortInputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
+        InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
 
-        ~PortInputSpan() override {
+        InputSpan(const InputSpan&)            = default;
+        InputSpan& operator=(const InputSpan&) = default;
+        // InputSpan(InputSpan&&) noexcept            = delete;
+        // InputSpan& operator=(InputSpan&&) noexcept = delete;
+
+        ~InputSpan() override {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
                 if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
@@ -15105,28 +15122,33 @@ struct Port {
             }
             return reader.get(nTagsProcessed);
         }
-    }; // end of ConsumablePortInputRange
-    static_assert(ConsumableSpan<PortInputSpan<gr::SpanReleasePolicy::ProcessAll>>);
-    static_assert(InputSpan<PortInputSpan<gr::SpanReleasePolicy::ProcessAll>>);
+    }; // end of InputSpan
+    static_assert(ReaderSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
+    static_assert(InputSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
 
     template<SpanReleasePolicy spanReleasePolicy>
     using WriterSpanType = decltype(std::declval<WriterType>().template reserve<spanReleasePolicy>(1UZ));
 
-    template<SpanReleasePolicy spanReleasePolicy, PublishableSpanReservePolicy spanReservePolicy>
-    struct PublishablePortOutputRange : public WriterSpanType<spanReleasePolicy> {
+    template<SpanReleasePolicy spanReleasePolicy, WriterSpanReservePolicy spanReservePolicy>
+    struct OutputSpan : public WriterSpanType<spanReleasePolicy> {
         TagWriterSpanType      tags;
         Tag::signed_index_type streamIndex;
         std::size_t            tagsPublished{0UZ};
 
-        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
-        requires(spanReservePolicy == PublishableSpanReservePolicy::Reserve)
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
 
-        constexpr PublishablePortOutputRange(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
-        requires(spanReservePolicy == PublishableSpanReservePolicy::TryReserve)
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
 
-        ~PublishablePortOutputRange() {
+        OutputSpan(const OutputSpan&)            = default;
+        OutputSpan& operator=(const OutputSpan&) = default;
+        // OutputSpan(OutputSpan&&) noexcept            = delete;
+        // OutputSpan& operator=(OutputSpan&&) noexcept = delete;
+
+        ~OutputSpan() {
             if (WriterSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
                 tags.publish(tagsPublished);
             }
@@ -15161,9 +15183,9 @@ struct Port {
                 tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
             }
         }
-    }; // end of PublishablePortOutputRange
-
-    static_assert(PublishablePortSpan<PublishablePortOutputRange<gr::SpanReleasePolicy::ProcessAll, PublishableSpanReservePolicy::Reserve>>);
+    }; // end of PortOutputSpan
+    static_assert(WriterSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
+    static_assert(OutputSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
 
 private:
     IoType    _ioHandler    = newIoHandler();
@@ -15390,24 +15412,24 @@ public:
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
-    PortInputSpan<spanReleasePolicy> get(std::size_t nSamples)
+    InputSpan<spanReleasePolicy> get(std::size_t nSamples)
     requires(kIsInput)
     {
-        return PortInputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader());
+        return InputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return PublishablePortOutputRange<spanReleasePolicy, PublishableSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
@@ -15429,7 +15451,7 @@ public:
             return false;
         }
         {
-            PublishableSpan auto outTags = tagWriter().tryReserve(1UZ);
+            WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
             if (!outTags.empty()) {
                 outTags[0].index = _cachedTag.index;
                 outTags[0].map   = _cachedTag.map;
@@ -15644,9 +15666,9 @@ private:
 
         [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
 
-        [[nodiscard]] std::size_t nReaders() const { return _value.nReaders(); }
-        [[nodiscard]] std::size_t nWriters() const { return _value.nWriters(); }
-        [[nodiscard]] std::size_t bufferSize() const { return _value.bufferSize(); }
+        [[nodiscard]] std::size_t nReaders() const override { return _value.nReaders(); }
+        [[nodiscard]] std::size_t nWriters() const override { return _value.nWriters(); }
+        [[nodiscard]] std::size_t bufferSize() const override { return _value.bufferSize(); }
 
         [[nodiscard]] bool isConnected() const noexcept override { return _value.isConnected(); }
 
@@ -15739,8 +15761,8 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, Tag
 };
 } // namespace detail
 
-inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(const PortLike auto& port, detail::TagPredicate auto& predicate, Tag::signed_index_type readOffset) {
-    const gr::ConsumableSpan auto tagData = port.tagReader().get();
+inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, Tag::signed_index_type readOffset) {
+    ReaderSpanLike auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
@@ -15756,9 +15778,9 @@ inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(const P
     }
 }
 
-inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(const PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
-inline constexpr std::optional<std::size_t> samples_to_eos_tag(const PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
 
 } // namespace gr
 ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::fixed_string portName, gr::PortType portType, gr::PortDirection portDirection, typename... Attributes), (gr::Port<T, portName, portType, portDirection, Attributes...>), kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo)
@@ -18771,153 +18793,139 @@ template<typename TBlock>
 concept can_processOne_const = can_processOne_scalar_const<TBlock> or can_processOne_simd_const<TBlock>;
 
 template<typename TBlock, typename TPort>
-concept can_processMessagesForPortConsumableSpan = requires(TBlock& block, TPort& inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
+concept can_processMessagesForPortReaderSpan = requires(TBlock& block, TPort& inPort) { block.processMessages(inPort, inPort.streamReader().get(1UZ)); };
 
 template<typename TBlock, typename TPort>
 concept can_processMessagesForPortStdSpan = requires(TBlock& block, TPort& inPort, std::span<const Message> msgSpan) { block.processMessages(inPort, msgSpan); };
 
-// clang-format off
 namespace detail {
 
 template<typename T>
-struct DummyConsumableSpan {
+struct DummyReaderSpan {
     using value_type = typename std::remove_cv_t<T>;
-    using iterator = typename std::span<const T>::iterator;
+    using iterator   = typename std::span<const T>::iterator;
 
 private:
     std::span<const T> internalSpan; // Internal span, used for fake implementation
 
 public:
-    DummyConsumableSpan() = default;
-    DummyConsumableSpan(const DummyConsumableSpan& other) = default;
-    DummyConsumableSpan& operator=(const DummyConsumableSpan& other) = default;
-    DummyConsumableSpan(DummyConsumableSpan&& other) noexcept = default;
-    DummyConsumableSpan& operator=(DummyConsumableSpan&& other) noexcept = default;
-    ~DummyConsumableSpan() = default;
+    DummyReaderSpan()                                            = default;
+    DummyReaderSpan(const DummyReaderSpan& other)                = default;
+    DummyReaderSpan& operator=(const DummyReaderSpan& other)     = default;
+    DummyReaderSpan(DummyReaderSpan&& other) noexcept            = default;
+    DummyReaderSpan& operator=(DummyReaderSpan&& other) noexcept = default;
+    ~DummyReaderSpan()                                           = default;
 
-    [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
-    [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    [[nodiscard]] constexpr iterator    begin() const noexcept { return internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator    end() const noexcept { return internalSpan.end(); }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
     operator const std::span<const T>&() const noexcept { return internalSpan; }
-    operator std::span<const T>&() noexcept  { return internalSpan; }
-    operator std::span<const T>&&() = delete;
+    operator std::span<const T>&() noexcept { return internalSpan; }
+    // operator std::span<const T>&&() = delete;
 
-    [[nodiscard]] bool consume(std::size_t /* nSamples */) const noexcept { return true; }
+    [[nodiscard]] bool consume(std::size_t /* nSamples */) noexcept { return true; }
 };
-static_assert(ConsumableSpan<DummyConsumableSpan<int>>);
+static_assert(ReaderSpanLike<DummyReaderSpan<int>>);
 
 template<typename T>
-struct DummyInputSpan: public DummyConsumableSpan<T> {
-    DummyConsumableSpan<gr::Tag> rawTags{};
-    auto tags() { return std::views::empty<std::pair<Tag::signed_index_type, const property_map&>>; }
+struct DummyInputSpan : public DummyReaderSpan<T> {
+    DummyReaderSpan<gr::Tag> rawTags{};
+    auto                     tags() { return std::views::empty<std::pair<Tag::signed_index_type, const property_map&>>; }
     [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type /*untilLocalIndex*/) const { return {}; }
-    void consumeTags(gr::Tag::signed_index_type /*untilLocalIndex*/) { }
+    void                     consumeTags(gr::Tag::signed_index_type /*untilLocalIndex*/) {}
 };
-static_assert(ConsumableSpan<DummyInputSpan<int>>);
-static_assert(InputSpan<DummyInputSpan<int>>);
+static_assert(ReaderSpanLike<DummyInputSpan<int>>);
+static_assert(InputSpanLike<DummyInputSpan<int>>);
 
 template<typename T>
-struct DummyPublishableSpan {
+struct DummyWriterSpan {
     using value_type = typename std::remove_cv_t<T>;
-    using iterator = typename std::span<T>::iterator;
+    using iterator   = typename std::span<T>::iterator;
 
 private:
     std::span<T> internalSpan; // Internal span, used for fake implementation
 
 public:
-    DummyPublishableSpan() = default;
-    DummyPublishableSpan(const DummyPublishableSpan& other) = delete;
-    DummyPublishableSpan& operator=(const DummyPublishableSpan& other) = delete;
-    DummyPublishableSpan(DummyPublishableSpan&& other) noexcept = default;
-    DummyPublishableSpan& operator=(DummyPublishableSpan&& other) noexcept = default;
-    ~DummyPublishableSpan() = default;
+    DummyWriterSpan()                                            = default;
+    DummyWriterSpan(const DummyWriterSpan& other)                = default;
+    DummyWriterSpan& operator=(const DummyWriterSpan& other)     = default;
+    DummyWriterSpan(DummyWriterSpan&& other) noexcept            = default;
+    DummyWriterSpan& operator=(DummyWriterSpan&& other) noexcept = default;
+    ~DummyWriterSpan()                                           = default;
 
-    [[nodiscard]] constexpr iterator begin() const noexcept { return internalSpan.begin(); }
-    [[nodiscard]] constexpr iterator end() const noexcept { return internalSpan.end(); }
+    [[nodiscard]] constexpr iterator    begin() const noexcept { return internalSpan.begin(); }
+    [[nodiscard]] constexpr iterator    end() const noexcept { return internalSpan.end(); }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
     operator const std::span<T>&() const noexcept { return internalSpan; }
-    operator std::span<T>&() noexcept  { return internalSpan; }
+    operator std::span<T>&() noexcept { return internalSpan; }
 
     constexpr void publish(std::size_t) noexcept {}
 };
-static_assert(PublishableSpan<DummyPublishableSpan<int>>);
+static_assert(WriterSpanLike<DummyWriterSpan<int>>);
 
 template<typename T>
-struct DummyPublishablePortSpan: public DummyPublishableSpan<T> {
-    DummyPublishableSpan<gr::Tag> tags{};
+struct DummyOutputSpan : public DummyWriterSpan<T> {
+    DummyWriterSpan<gr::Tag> tags{};
 
     void publishTag(property_map&, gr::Tag::signed_index_type) {}
 };
-static_assert(PublishablePortSpan<DummyPublishablePortSpan<int>>);
+static_assert(OutputSpanLike<DummyOutputSpan<int>>);
 
-// clang-format on
-
-struct to_any_vector {
-    template<typename Any>
-    operator std::vector<Any>() const {
-        return {};
-    } // NOSONAR
-
-    template<typename Any>
-    operator std::vector<Any>&() const {
-        return {};
-    } // NOSONAR
-};
-
-struct to_any_pointer {
-    template<typename Any>
-    operator Any*() const {
-        return {};
-    } // NOSONAR
-};
-
-template<typename T>
-struct dummy_reader {
-    using type = to_any_pointer;
-};
-
-template<typename T>
-struct dummy_writer {
-    using type = to_any_pointer;
-};
-
-template<typename Port, bool isVectorOfSpansReturned>
+template<typename Port, bool isInputStdSpan, bool isOutputStdSpan>
 constexpr auto* port_to_processBulk_argument_helper() {
     if constexpr (requires(Port p) { // array of ports
                       typename Port::value_type;
                       p.cbegin() != p.cend();
                   }) {
         if constexpr (Port::value_type::kIsInput) {
-            if constexpr (isVectorOfSpansReturned) {
+            if constexpr (isInputStdSpan) {
                 return static_cast<std::span<std::span<const typename Port::value_type::value_type>>*>(nullptr);
             } else {
                 return static_cast<std::span<DummyInputSpan<const typename Port::value_type::value_type>>*>(nullptr);
             }
         } else if constexpr (Port::value_type::kIsOutput) {
-            if constexpr (isVectorOfSpansReturned) {
+            if constexpr (isOutputStdSpan) {
                 return static_cast<std::span<std::span<typename Port::value_type::value_type>>*>(nullptr);
             } else {
-                return static_cast<std::span<DummyPublishablePortSpan<typename Port::value_type::value_type>>*>(nullptr);
+                return static_cast<std::span<DummyOutputSpan<typename Port::value_type::value_type>>*>(nullptr);
             }
         }
 
     } else { // single port
         if constexpr (Port::kIsInput) {
-            return static_cast<DummyInputSpan<const typename Port::value_type>*>(nullptr);
+            if constexpr (isInputStdSpan) {
+                return static_cast<std::span<const typename Port::value_type>*>(nullptr);
+            } else {
+                return static_cast<DummyInputSpan<const typename Port::value_type>*>(nullptr);
+            }
         } else if constexpr (Port::kIsOutput) {
-            return static_cast<DummyPublishablePortSpan<typename Port::value_type>*>(nullptr);
+            if constexpr (isOutputStdSpan) {
+                return static_cast<std::span<typename Port::value_type>*>(nullptr);
+            } else {
+                return static_cast<DummyOutputSpan<typename Port::value_type>*>(nullptr);
+            }
         }
     }
 }
 
 template<typename Port>
-struct port_to_processBulk_argument_consumable_publishable {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false>())>;
+struct port_to_processBulk_argument_std_std {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, true>())>;
 };
 
 template<typename Port>
-struct port_to_processBulk_argument_std_span {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true>())>;
+struct port_to_processBulk_argument_std_notstd {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, false>())>;
+};
+
+template<typename Port>
+struct port_to_processBulk_argument_notstd_std {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, true>())>;
+};
+
+template<typename Port>
+struct port_to_processBulk_argument_notstd_notstd {
+    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, false>())>;
 };
 
 template<typename>
@@ -18928,7 +18936,7 @@ template<typename T>
 using dynamic_span = std::span<T>;
 
 template<std::size_t... InIdx, std::size_t... OutIdx>
-auto can_processBulk_invoke_test(auto& block, const auto& inputs, auto& outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
+auto can_processBulk_invoke_test(auto& block, auto& inputs, auto& outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
 
 template<typename TBlock, template<typename> typename TArguments>
@@ -18937,15 +18945,16 @@ concept can_processBulk_helper = requires(TBlock& n, typename meta::transform_ty
 };
 
 template<typename TBlock>
-concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_consumable_publishable> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_span>;
+concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_notstd> || //
+                          can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_notstd>;
 
 /**
  * Satisfied if `TDerived` has a member function `processBulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
- * std::span<const T> or any type satisfying ConsumableSpan<T>. Output arguments must accept either a std::span<T> or any type satisfying PublishableSpan<T>, except for the I-th output argument, which
- * must be std::span<T> and *not* a type satisfying PublishableSpan<T>.
+ * std::span<const T> or any type satisfying InputSpanLike<T>. Output arguments must accept either a std::span<T> or any type satisfying OutputSpanLike<T>, except for the I-th output argument, which
+ * must be std::span<T> and *not* a type satisfying OutputSpanLike<T>.
  */
 template<typename TDerived, std::size_t I>
-concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyInputSpan, traits::block::stream_input_port_types < TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types < TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyPublishablePortSpan, traits::block::stream_output_port_types < TDerived>>::template apply<std::tuple> bad_outputs) {
+concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (I < traits::block::stream_output_port_types<TDerived>::size) && (I >= 0) && requires(TDerived& d, typename meta::transform_types<detail::DummyInputSpan, traits::block::stream_input_port_types<TDerived>>::template apply<std::tuple> inputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::dynamic_span, detail::DummyOutputSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> outputs, typename meta::transform_conditional<decltype([](auto j) { return j == I; }), detail::nothing_you_ever_wanted, detail::DummyOutputSpan, traits::block::stream_output_port_types<TDerived>>::template apply<std::tuple> bad_outputs) {
     { detail::can_processBulk_invoke_test(d, inputs, outputs, std::make_index_sequence<stream_input_port_types<TDerived>::size>(), std::make_index_sequence<stream_output_port_types<TDerived>::size>()) } -> std::same_as<work::Status>;
     // TODO: Is this check redundant?
     not requires { []<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(d.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(bad_outputs)...)) { return {}; }(std::make_index_sequence<traits::block::stream_input_port_types<TDerived>::size>(), std::make_index_sequence<traits::block::stream_output_port_types<TDerived>::size>()); };
@@ -22603,9 +22612,9 @@ public:
         }
     }
 
-    void publishSamples(std::size_t nSamples, auto& publishableSpanTuple) noexcept {
+    void publishSamples(std::size_t nSamples, auto& outputSpanTuple) noexcept {
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
-            for_each_publishable_span(
+            for_each_writer_span(
                 [nSamples]<typename Out>(Out& out) {
                     if constexpr (Out::isMultiProducerStrategy()) {
                         if (!out.isFullyPublished()) {
@@ -22623,14 +22632,14 @@ public:
                         }
                     }
                 },
-                publishableSpanTuple);
+                outputSpanTuple);
         }
     }
 
     bool consumeReaders(std::size_t nSamples, auto& consumableSpanTuple) {
         bool success = true;
         if constexpr (traits::block::stream_input_ports<Derived>::size > 0) {
-            for_each_consumable_span(
+            for_each_reader_span(
                 [nSamples, &success]<typename In>(In& in) {
                     if (!in.isConsumeRequested()) {
                         using enum gr::SpanReleasePolicy;
@@ -22676,21 +22685,21 @@ public:
         }
     }
 
-    constexpr void forwardTags(auto& publishableSpanTuple) noexcept {
+    constexpr void forwardTags(auto& outputSpanTuple) noexcept {
         if (inputTagsPresent()) {
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
                 // publishTag(mergedInputTag().map, 0);
-                for_each_publishable_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, publishableSpanTuple);
+                for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, outputSpanTuple);
             }
         }
     }
 
-    constexpr void copyCachedOutputTags(auto& publishableSpanTuple) noexcept {
+    constexpr void copyCachedOutputTags(auto& outputSpanTuple) noexcept {
         if (_outputTags.empty()) {
             return;
         }
         for (const auto& tag : _outputTags) {
-            for_each_publishable_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, tag.index); }, publishableSpanTuple);
+            for_each_writer_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, tag.index); }, outputSpanTuple);
         }
         _outputTags.clear();
     }
@@ -22710,7 +22719,7 @@ public:
                         destinationMap.insert_or_assign(key, value);
                     }
                 };
-                if constexpr (InputSpan<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
+                if constexpr (InputSpanLike<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
                     mergeSrcMapInto(inputSpanOrVector.getMergedTag(0).map, _mergedInputTag.map);
                 } else {
                     std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(0).map, _mergedInputTag.map); });
@@ -22783,7 +22792,7 @@ public:
 
     constexpr static bool containsEmptyOutputSpans(auto& outputTuple) noexcept {
         bool result = false;
-        for_each_publishable_span(
+        for_each_writer_span(
             [&result](auto& out) {
                 if (out.empty()) {
                     result = true;
@@ -22824,9 +22833,9 @@ public:
         for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
-    inline constexpr void publishEoS(auto& publishableSpanTuple) noexcept {
+    inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
         const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
-        for_each_publishable_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::signed_index_type>(outSpan.nRequestedSamplesToPublish())); }, publishableSpanTuple);
+        for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::signed_index_type>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
@@ -22841,8 +22850,8 @@ public:
             if (available == 0UZ) {
                 return;
             }
-            ConsumableSpan auto inSpan = inPort.streamReader().get(available);
-            if constexpr (traits::block::can_processMessagesForPortConsumableSpan<Derived, TPort>) {
+            ReaderSpanLike auto inSpan = inPort.streamReader().get(available);
+            if constexpr (traits::block::can_processMessagesForPortReaderSpan<Derived, TPort>) {
                 self().processMessages(inPort, inSpan);
                 // User could have consumed the span in the custom processMessages handler
                 std::ignore = inSpan.tryConsume(inSpan.size());
@@ -23099,10 +23108,10 @@ protected:
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
                     // nextTag limits the size of the chunk except if this would violate port constraints
-                    result.nextTag                        = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
-                    result.nextEosTag                     = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
-                    const gr::ConsumableSpan auto tagData = port.tagReader().get();
-                    result.hasTag                         = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
+                    result.nextTag                    = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
+                    result.nextEosTag                 = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
+                    const ReaderSpanLike auto tagData = port.tagReader().get();
+                    result.hasTag                     = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
                     if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
                         result.asyncEoS = true;
@@ -23432,9 +23441,9 @@ protected:
         const auto nextEosTagSkipBefore                                       = nextEosTag - inputSkipBefore;
         const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
-        if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
-            const auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ConsumableSpan now
-            updateInputAndOutputTags(inputSpans, inputSkipBefore);                                          // apply all tags in the skipped data range
+        if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
+            auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
+            updateInputAndOutputTags(inputSpans, inputSkipBefore);                                    // apply all tags in the skipped data range
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
@@ -23457,8 +23466,8 @@ protected:
         std::size_t  processedIn      = limitByFirstTag ? 1UZ : resampledIn;
         std::size_t  processedOut     = limitByFirstTag ? 1UZ : resampledOut;
 
-        const auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
-        auto       outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
+        auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
+        auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
         if (containsEmptyOutputSpans(outputSpans)) {
             return {requestedWork, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
@@ -23472,7 +23481,7 @@ protected:
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
-            for_each_consumable_span(
+            for_each_reader_span(
                 [&processedIn](auto& in) {
                     if (in.isConsumeRequested()) {
                         processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
@@ -23480,7 +23489,7 @@ protected:
                 },
                 inputSpans);
 
-            for_each_publishable_span(
+            for_each_writer_span(
                 [&processedOut](auto& out) {
                     if (out.isPublishRequested()) {
                         processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
@@ -23543,7 +23552,7 @@ protected:
             _mergedInputTag.map.clear(); // clear temporary cached input tags after processing - won't be needed after this
         } else {
             // if no data is published or consumed => do not publish any tags
-            for_each_publishable_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);
+            for_each_writer_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);
         }
 
         if (lifecycle::isShuttingDown(this->state())) {
@@ -23727,9 +23736,9 @@ public:
                 continue; // function does not produce any return message
             }
 
-            retMessage->cmd              = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
-            retMessage->serviceName      = unique_name;
-            PublishableSpan auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            retMessage->cmd             = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
+            retMessage->serviceName     = unique_name;
+            WriterSpanLike auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
                 throw gr::exception(fmt::format("{}::processMessages() can not reserve span for message\n", name));
             } else {
@@ -23859,7 +23868,7 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
 }})", //
     detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("PublishableSpan auto out{}", shortTypeName.template operator()<T>(), index); })));
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("OutputSpanLike auto out{}", shortTypeName.template operator()<T>(), index); })));
         // clang-format on
 
         bool has_port_collection = false;
@@ -24135,17 +24144,17 @@ inline constexpr auto for_each_port(Function&& function, Tuple&& tuple, Tuples&&
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto for_each_consumable_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+inline constexpr auto for_each_reader_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
     return gr::meta::tuple_for_each(
         [&function](auto&&... args) {
             (..., ([&function](auto&& arg) {
                 using ArgType = std::decay_t<decltype(arg)>;
 
-                if constexpr (ConsumableSpan<typename ArgType::value_type>) {
+                if constexpr (ReaderSpanLike<typename ArgType::value_type>) {
                     for (auto& param : arg) {
                         function(param);
                     }
-                } else if (ConsumableSpan<ArgType>) {
+                } else if (ReaderSpanLike<ArgType>) {
                     function(arg);
                 }
             }(args)));
@@ -24154,17 +24163,17 @@ inline constexpr auto for_each_consumable_span(Function&& function, Tuple&& tupl
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto for_each_publishable_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+inline constexpr auto for_each_writer_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
     return gr::meta::tuple_for_each(
         [&function](auto&&... args) {
             (..., ([&function](auto&& arg) {
                 using ArgType = std::decay_t<decltype(arg)>;
 
-                if constexpr (PublishableSpan<typename ArgType::value_type>) {
+                if constexpr (WriterSpanLike<typename ArgType::value_type>) {
                     for (auto& param : arg) {
                         function(param);
                     }
-                } else if (PublishableSpan<ArgType>) {
+                } else if (WriterSpanLike<ArgType>) {
                     function(arg);
                 }
             }(args)));

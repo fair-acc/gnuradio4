@@ -637,9 +637,9 @@ public:
         }
     }
 
-    void publishSamples(std::size_t nSamples, auto& publishableSpanTuple) noexcept {
+    void publishSamples(std::size_t nSamples, auto& outputSpanTuple) noexcept {
         if constexpr (traits::block::stream_output_ports<Derived>::size > 0) {
-            for_each_publishable_span(
+            for_each_writer_span(
                 [nSamples]<typename Out>(Out& out) {
                     if constexpr (Out::isMultiProducerStrategy()) {
                         if (!out.isFullyPublished()) {
@@ -657,14 +657,14 @@ public:
                         }
                     }
                 },
-                publishableSpanTuple);
+                outputSpanTuple);
         }
     }
 
     bool consumeReaders(std::size_t nSamples, auto& consumableSpanTuple) {
         bool success = true;
         if constexpr (traits::block::stream_input_ports<Derived>::size > 0) {
-            for_each_consumable_span(
+            for_each_reader_span(
                 [nSamples, &success]<typename In>(In& in) {
                     if (!in.isConsumeRequested()) {
                         using enum gr::SpanReleasePolicy;
@@ -710,21 +710,21 @@ public:
         }
     }
 
-    constexpr void forwardTags(auto& publishableSpanTuple) noexcept {
+    constexpr void forwardTags(auto& outputSpanTuple) noexcept {
         if (inputTagsPresent()) {
             if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
                 // publishTag(mergedInputTag().map, 0);
-                for_each_publishable_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, publishableSpanTuple);
+                for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, outputSpanTuple);
             }
         }
     }
 
-    constexpr void copyCachedOutputTags(auto& publishableSpanTuple) noexcept {
+    constexpr void copyCachedOutputTags(auto& outputSpanTuple) noexcept {
         if (_outputTags.empty()) {
             return;
         }
         for (const auto& tag : _outputTags) {
-            for_each_publishable_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, tag.index); }, publishableSpanTuple);
+            for_each_writer_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, tag.index); }, outputSpanTuple);
         }
         _outputTags.clear();
     }
@@ -744,7 +744,7 @@ public:
                         destinationMap.insert_or_assign(key, value);
                     }
                 };
-                if constexpr (InputSpan<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
+                if constexpr (InputSpanLike<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
                     mergeSrcMapInto(inputSpanOrVector.getMergedTag(0).map, _mergedInputTag.map);
                 } else {
                     std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(0).map, _mergedInputTag.map); });
@@ -817,7 +817,7 @@ public:
 
     constexpr static bool containsEmptyOutputSpans(auto& outputTuple) noexcept {
         bool result = false;
-        for_each_publishable_span(
+        for_each_writer_span(
             [&result](auto& out) {
                 if (out.empty()) {
                     result = true;
@@ -858,9 +858,9 @@ public:
         for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
-    inline constexpr void publishEoS(auto& publishableSpanTuple) noexcept {
+    inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
         const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
-        for_each_publishable_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::signed_index_type>(outSpan.nRequestedSamplesToPublish())); }, publishableSpanTuple);
+        for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::signed_index_type>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
@@ -875,8 +875,8 @@ public:
             if (available == 0UZ) {
                 return;
             }
-            ConsumableSpan auto inSpan = inPort.streamReader().get(available);
-            if constexpr (traits::block::can_processMessagesForPortConsumableSpan<Derived, TPort>) {
+            ReaderSpanLike auto inSpan = inPort.streamReader().get(available);
+            if constexpr (traits::block::can_processMessagesForPortReaderSpan<Derived, TPort>) {
                 self().processMessages(inPort, inSpan);
                 // User could have consumed the span in the custom processMessages handler
                 std::ignore = inSpan.tryConsume(inSpan.size());
@@ -1133,10 +1133,10 @@ protected:
                 if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                     // get the tag after the one at position 0 that will be evaluated for this chunk.
                     // nextTag limits the size of the chunk except if this would violate port constraints
-                    result.nextTag                        = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
-                    result.nextEosTag                     = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
-                    const gr::ConsumableSpan auto tagData = port.tagReader().get();
-                    result.hasTag                         = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
+                    result.nextTag                    = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
+                    result.nextEosTag                 = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
+                    const ReaderSpanLike auto tagData = port.tagReader().get();
+                    result.hasTag                     = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
                     if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
                         result.asyncEoS = true;
@@ -1466,9 +1466,9 @@ protected:
         const auto nextEosTagSkipBefore                                       = nextEosTag - inputSkipBefore;
         const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
-        if (inputSkipBefore > 0) {                                                                          // consume samples on sync ports that need to be consumed due to the stride
-            const auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ConsumableSpan now
-            updateInputAndOutputTags(inputSpans, inputSkipBefore);                                          // apply all tags in the skipped data range
+        if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
+            auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
+            updateInputAndOutputTags(inputSpans, inputSkipBefore);                                    // apply all tags in the skipped data range
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
@@ -1491,8 +1491,8 @@ protected:
         std::size_t  processedIn      = limitByFirstTag ? 1UZ : resampledIn;
         std::size_t  processedOut     = limitByFirstTag ? 1UZ : resampledOut;
 
-        const auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
-        auto       outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
+        auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
+        auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
         if (containsEmptyOutputSpans(outputSpans)) {
             return {requestedWork, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
@@ -1506,7 +1506,7 @@ protected:
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
-            for_each_consumable_span(
+            for_each_reader_span(
                 [&processedIn](auto& in) {
                     if (in.isConsumeRequested()) {
                         processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
@@ -1514,7 +1514,7 @@ protected:
                 },
                 inputSpans);
 
-            for_each_publishable_span(
+            for_each_writer_span(
                 [&processedOut](auto& out) {
                     if (out.isPublishRequested()) {
                         processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
@@ -1577,7 +1577,7 @@ protected:
             _mergedInputTag.map.clear(); // clear temporary cached input tags after processing - won't be needed after this
         } else {
             // if no data is published or consumed => do not publish any tags
-            for_each_publishable_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);
+            for_each_writer_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);
         }
 
         if (lifecycle::isShuttingDown(this->state())) {
@@ -1761,9 +1761,9 @@ public:
                 continue; // function does not produce any return message
             }
 
-            retMessage->cmd              = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
-            retMessage->serviceName      = unique_name;
-            PublishableSpan auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            retMessage->cmd             = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
+            retMessage->serviceName     = unique_name;
+            WriterSpanLike auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
                 throw gr::exception(fmt::format("{}::processMessages() can not reserve span for message\n", name));
             } else {
@@ -1893,7 +1893,7 @@ fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
 }})", //
     detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", shortTypeName.template operator()<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("PublishableSpan auto out{}", shortTypeName.template operator()<T>(), index); })));
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("OutputSpanLike auto out{}", shortTypeName.template operator()<T>(), index); })));
         // clang-format on
 
         bool has_port_collection = false;
@@ -2169,17 +2169,17 @@ inline constexpr auto for_each_port(Function&& function, Tuple&& tuple, Tuples&&
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto for_each_consumable_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+inline constexpr auto for_each_reader_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
     return gr::meta::tuple_for_each(
         [&function](auto&&... args) {
             (..., ([&function](auto&& arg) {
                 using ArgType = std::decay_t<decltype(arg)>;
 
-                if constexpr (ConsumableSpan<typename ArgType::value_type>) {
+                if constexpr (ReaderSpanLike<typename ArgType::value_type>) {
                     for (auto& param : arg) {
                         function(param);
                     }
-                } else if (ConsumableSpan<ArgType>) {
+                } else if (ReaderSpanLike<ArgType>) {
                     function(arg);
                 }
             }(args)));
@@ -2188,17 +2188,17 @@ inline constexpr auto for_each_consumable_span(Function&& function, Tuple&& tupl
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto for_each_publishable_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+inline constexpr auto for_each_writer_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
     return gr::meta::tuple_for_each(
         [&function](auto&&... args) {
             (..., ([&function](auto&& arg) {
                 using ArgType = std::decay_t<decltype(arg)>;
 
-                if constexpr (PublishableSpan<typename ArgType::value_type>) {
+                if constexpr (WriterSpanLike<typename ArgType::value_type>) {
                     for (auto& param : arg) {
                         function(param);
                     }
-                } else if (PublishableSpan<ArgType>) {
+                } else if (WriterSpanLike<ArgType>) {
                     function(arg);
                 }
             }(args)));

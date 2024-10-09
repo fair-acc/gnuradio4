@@ -150,10 +150,10 @@ struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>, gr::Port
             return {requested_work, 0UL, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS};
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
-        const auto        input        = reader.get();
+        auto              input        = reader.get();
 
         {
-            gr::PublishableSpan auto pSpan = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(n_to_publish);
+            gr::WriterSpanLike auto pSpan = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(n_to_publish);
             using namespace vir::stdx;
             using V            = native_simd<T>;
             std::size_t i      = 0;
@@ -237,13 +237,13 @@ public:
             return {requested_work, 0UL, gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS};
         }
         const std::size_t n_to_publish = std::min(n_readable, n_writable);
-        const auto        input        = reader.get();
+        auto              input        = reader.get();
 
         if constexpr (use_memcopy) {
-            gr::PublishableSpan auto pSpan = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(n_to_publish);
+            gr::WriterSpanLike auto pSpan = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(n_to_publish);
             std::memcpy(pSpan.data(), reader.get().data(), n_to_publish * sizeof(T));
         } else {
-            gr::PublishableSpan auto pSpan = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(n_to_publish);
+            gr::WriterSpanLike auto pSpan = writer.template reserve<gr::SpanReleasePolicy::ProcessAll>(n_to_publish);
             for (std::size_t i = 0; i < n_to_publish; i++) {
                 pSpan[i] = input[i];
             }

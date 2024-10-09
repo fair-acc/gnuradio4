@@ -392,7 +392,7 @@ with properties:
 sendMessage<Set>(toBlock /* MsgOut port */, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, { { "factor", 42 } } /* data  */);
 // and to read one message:
 auto returnReplyMsg = [](gr::MsgPortIn &fromBlock) {
-    ConsumableSpan auto span = fromBlock.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
+    ReaderSpanLike auto span = fromBlock.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
     Message             msg  = span[0];
     expect(span.consume(span.size()));
     return msg;

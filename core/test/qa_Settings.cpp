@@ -162,7 +162,7 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
         }
     }
 
-    constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
+    constexpr work::Status processBulk(std::span<const T>& input, std::span<T>& output) noexcept {
         assert(this->output_chunk_size == gr::Size_t(1) && "block implements only basic decimation");
         assert(this->input_chunk_size != gr::Size_t(0) && "input_chunk_size must be non-zero");
 

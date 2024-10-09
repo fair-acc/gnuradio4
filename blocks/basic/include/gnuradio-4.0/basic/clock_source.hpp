@@ -93,7 +93,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
         }
     }
 
-    work::Status processBulk(PublishablePortSpan auto& outSpan) noexcept {
+    work::Status processBulk(OutputSpanLike auto& outSpan) noexcept {
         if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
             outSpan.publish(0UZ);
             return work::Status::DONE;

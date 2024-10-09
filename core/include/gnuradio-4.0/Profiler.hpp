@@ -314,8 +314,8 @@ public:
             while (!seen_finished) {
                 seen_finished = finished;
                 while (reader.available() > 0) {
-                    gr::ConsumableSpan auto event = reader.get(1);
-                    auto                    it    = mapped_threads.find(event[0].thread_id);
+                    ReaderSpanLike auto event = reader.get(1);
+                    auto                it    = mapped_threads.find(event[0].thread_id);
                     if (it == mapped_threads.end()) {
                         it = mapped_threads.emplace(event[0].thread_id, static_cast<int>(mapped_threads.size())).first;
                     }

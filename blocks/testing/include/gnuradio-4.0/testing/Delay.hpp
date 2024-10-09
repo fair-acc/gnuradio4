@@ -19,8 +19,7 @@ struct Delay : public gr::Block<Delay<T>> {
     bool              _waiting = true;
     clock::time_point _start_time;
 
-    gr::work::Status
-    processBulk(ConsumableSpan auto &input, PublishableSpan auto &output) {
+    gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
         if (_waiting) {
             if (clock::now() - _start_time < std::chrono::milliseconds(delay_ms)) {
                 std::ignore = input.consume(0);
@@ -37,8 +36,7 @@ struct Delay : public gr::Block<Delay<T>> {
         return work::Status::OK;
     }
 
-    void
-    start() noexcept {
+    void start() noexcept {
         _waiting    = true;
         _start_time = clock::now();
     }

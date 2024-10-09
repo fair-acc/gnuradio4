@@ -81,16 +81,13 @@ you can set the `backPressure` property to false.
     std::map<gr::Size_t, std::vector<gr::Size_t>> _internalMapping{};
     gr::Size_t                                    _selectedSrc = -1U;
 
-    void
-    settingsChanged(const gr::property_map &old_settings, const gr::property_map &new_settings) {
-        if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
-            fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"),
-                       new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"),
-                       new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
+    void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
+        if (newSettings.contains("n_inputs") || newSettings.contains("n_outputs")) {
+            fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.at("n_inputs"), newSettings.contains("n_inputs") ? newSettings.at("n_inputs") : "same", oldSettings.at("n_outputs"), newSettings.contains("n_outputs") ? newSettings.at("n_outputs") : "same");
             inputs.resize(n_inputs);
             outputs.resize(n_outputs);
         }
-        if (new_settings.contains("map_in") || new_settings.contains("map_out")) {
+        if (newSettings.contains("map_in") || newSettings.contains("map_out")) {
             assert(map_in.value.size() == map_out.value.size() && "map_in and map_out must have the same length");
             _internalMapping.clear();
 
@@ -104,15 +101,14 @@ you can set the `backPressure` property to false.
         }
     }
 
-    template<gr::ConsumableSpan TInSpan, gr::PublishableSpan TOutSpan>
-    gr::work::Status
-    processBulk(const ConsumableSpan auto &selectSpan, const std::span<TInSpan> &ins, PublishableSpan auto &monOut, std::span<TOutSpan> &outs) {
+    template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
+    gr::work::Status processBulk(InputSpanLike auto& selectSpan, std::span<TInSpan>& ins, OutputSpanLike auto& monOut, std::span<TOutSpan>& outs) {
         if (_internalMapping.empty()) {
             if (back_pressure) {
-                std::for_each(ins.begin(), ins.end(), [](auto &input) { std::ignore = input.consume(0UZ); });
+                std::for_each(ins.begin(), ins.end(), [](auto& input) { std::ignore = input.consume(0UZ); });
             } else {
                 // make the implicit consume all available behaviour explicit
-                std::for_each(ins.begin(), ins.end(), [](auto &input) { std::ignore = input.consume(input.size()); });
+                std::for_each(ins.begin(), ins.end(), [](auto& input) { std::ignore = input.consume(input.size()); });
             }
             return work::Status::OK;
         }
@@ -126,7 +122,7 @@ you can set the `backPressure` property to false.
 
         std::vector<int> outOffsets(outs.size(), 0U);
 
-        auto copyToOutput = [&outOffsets](auto inputAvailable, auto &inputSpan, auto &outputSpan, int outIndex) {
+        auto copyToOutput = [&outOffsets](auto inputAvailable, auto& inputSpan, auto& outputSpan, int outIndex) {
             const auto offset = (outIndex < 0) ? 0 : outOffsets[static_cast<std::size_t>(outIndex)];
             std::copy_n(inputSpan.begin(), inputAvailable, std::next(outputSpan.begin(), offset));
             if (outIndex >= 0) {
@@ -136,9 +132,9 @@ you can set the `backPressure` property to false.
         };
 
         bool monitorOutProcessed = false;
-        for (const auto &[inIndex, outIndices] : _internalMapping) {
-            ConsumableSpan auto inputSpan = ins[inIndex];
-            auto                available = inputSpan.size();
+        for (const auto& [inIndex, outIndices] : _internalMapping) {
+            InputSpanLike auto inputSpan = ins[inIndex];
+            auto               available = inputSpan.size();
 
             for (const auto outIndex : outIndices) {
                 const auto remainingSize = outs[static_cast<std::size_t>(outIndex)].size() - static_cast<std::size_t>(outOffsets[static_cast<std::size_t>(outIndex)]);
@@ -171,14 +167,16 @@ you can set the `backPressure` property to false.
         }
 
         if (!monitorOutProcessed && _selectedSrc < ins.size()) {
-            ConsumableSpan auto inputSpan = ins[_selectedSrc];
-            auto                available = std::min(inputSpan.size(), monOut.size());
+            InputSpanLike auto inputSpan = ins[_selectedSrc];
+            auto               available = std::min(inputSpan.size(), monOut.size());
             copyToOutput(available, inputSpan, monOut, -1);
             std::ignore = inputSpan.consume(available);
         }
 
         for (auto iPort = 0U; iPort < ins.size(); ++iPort) {
-            if (usedInputs.contains(iPort)) continue;
+            if (usedInputs.contains(iPort)) {
+                continue;
+            }
 
             if (back_pressure) {
                 std::ignore = ins[iPort].consume(0UZ);
