@@ -69,10 +69,10 @@ template<PortReflectable TBlock>
 using all_port_descriptors = typename detail::all_port_descriptors_impl<TBlock>::type;
 
 template<PortReflectable TBlock, PortType portType>
-using input_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_input_port, port::is_port_flavor<portType>::template eval>;
+using input_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_input_port, port::is_port_type<portType>::template eval>;
 
 template<PortReflectable TBlock, PortType portType>
-using output_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_output_port, port::is_port_flavor<portType>::template eval>;
+using output_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_output_port, port::is_port_type<portType>::template eval>;
 
 template<PortReflectable TBlock>
 using all_input_ports = typename all_port_descriptors<TBlock>::template filter<port::is_input_port>;

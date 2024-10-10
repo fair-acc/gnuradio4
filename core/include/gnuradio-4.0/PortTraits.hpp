@@ -63,10 +63,10 @@ using is_output_port = std::bool_constant<T::kIsOutput>;
 template<gr::detail::PortDescription T>
 using is_dynamic_port_collection = std::bool_constant<T::kIsDynamicCollection>;
 
-template<PortType portFlavor>
-struct is_port_flavor {
+template<PortType portType>
+struct is_port_type {
     template<gr::detail::PortDescription T>
-    using eval = std::bool_constant<portFlavor == PortType::ANY or portFlavor == T::kPortType>;
+    using eval = std::bool_constant<portType == PortType::ANY or portType == T::kPortType>;
 };
 
 template<gr::detail::PortDescription PortOrCollection>

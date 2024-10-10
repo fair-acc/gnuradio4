@@ -165,19 +165,19 @@ struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>> {
             std::size_t i      = 0;
             const auto  _value = value;
             for (; i + V::size() <= n_to_publish; i += V::size()) {
-                V x(&input[i], element_aligned);
+                V y(&input[i], element_aligned);
                 if constexpr (op == '*') {
-                    x *= _value;
+                    y *= _value;
                 } else if constexpr (op == '/') {
-                    x /= _value;
+                    y /= _value;
                 } else if constexpr (op == '+') {
-                    x += _value;
+                    y += _value;
                 } else if constexpr (op == '-') {
-                    x -= _value;
+                    y -= _value;
                 } else {
                     static_assert(gr::meta::always_false<T>, "operation not implemented");
                 }
-                x.copy_to(&pSpan[i], element_aligned);
+                y.copy_to(&pSpan[i], element_aligned);
             }
 
             // #### N.B. later high-level user-function finishes here
