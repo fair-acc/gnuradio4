@@ -60,7 +60,7 @@ template<std::size_t Index, PortType portFlavor, PortReflectable Self>
 
 template<fixed_string Name, PortReflectable Self>
 [[nodiscard]] constexpr auto& inputPort(Self* self) noexcept {
-    constexpr int Index = meta::indexForName<Name, traits::block::all_input_ports<Self>>();
+    constexpr int Index = traits::block::indexForName<Name, traits::block::all_input_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
         return self->msgIn;
     }
@@ -69,7 +69,7 @@ template<fixed_string Name, PortReflectable Self>
 
 template<fixed_string Name, PortReflectable Self>
 [[nodiscard]] constexpr auto& outputPort(Self* self) noexcept {
-    constexpr int Index = meta::indexForName<Name, traits::block::all_output_ports<Self>>();
+    constexpr int Index = traits::block::indexForName<Name, traits::block::all_output_ports<Self>>();
     if constexpr (Index == meta::default_message_port_index) {
         return self->msgOut;
     }

@@ -134,7 +134,7 @@ private:
     public:
         // connect using the port index
 
-        template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
+        template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex = meta::invalid_index, typename Destination>
         [[nodiscard]] auto to_internal(Destination& destination) {
             auto& destinationPort = inputPort<destinationPortIndex, PortType::ANY>(&destination);
             return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
@@ -159,17 +159,32 @@ private:
 
         template<fixed_string destinationPortName, std::size_t destinationPortSubIndex, typename Destination>
         [[nodiscard]] constexpr auto to(Destination& destination) {
-            using destination_input_ports              = typename traits::block::all_input_ports<Destination>;
-            constexpr std::size_t destinationPortIndex = meta::indexForName<destinationPortName, destination_input_ports>();
-            if constexpr (destinationPortIndex == meta::invalid_index) {
-                meta::print_types<meta::message_type<"There is no input port with the specified name in this destination block">, Destination, meta::message_type<destinationPortName>, meta::message_type<"These are the known names:">, traits::block::all_input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports> port_not_found_error{};
+            static_assert(destinationPortSubIndex != meta::invalid_index);
+            using PortNames                            = typename traits::block::all_input_port_names<Destination>;
+            constexpr std::size_t destinationPortIndex = traits::block::try_index_for_name<destinationPortName, PortNames>::value;
+            if constexpr (destinationPortIndex != meta::invalid_index) {
+                return to_internal<destinationPortIndex, destinationPortSubIndex>(destination);
+            } else {
+                constexpr auto        nameWithSubIndex1 = destinationPortName + '#' + meta::fixed_string_from_number<destinationPortSubIndex>;
+                constexpr std::size_t altPortIndex1     = traits::block::try_index_for_name<nameWithSubIndex1, PortNames>::value;
+                if constexpr (altPortIndex1 != meta::invalid_index) {
+                    return to_internal<altPortIndex1>(destination);
+                } else {
+                    constexpr auto        nameWithSubIndex2 = destinationPortName + meta::fixed_string_from_number<destinationPortSubIndex>;
+                    constexpr std::size_t altPortIndex2     = traits::block::try_index_for_name<nameWithSubIndex2, PortNames>::value;
+                    if constexpr (altPortIndex2 != meta::invalid_index) {
+                        return to_internal<altPortIndex2>(destination);
+                    } else {
+                        static_assert(traits::block::NameLookupSucceeds<PortNames, destinationPortName>, //
+                            "The requested input port does not exist. Inspect the detailed error message for the 'NameList' argument to the 'NameLookupSucceeds' concept to see all valid input port names.");
+                    }
+                }
             }
-            return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
         }
 
         template<fixed_string destinationPortName, typename Destination>
         [[nodiscard]] constexpr auto to(Destination& destination) {
-            return to<destinationPortName, meta::invalid_index, Destination>(destination);
+            return to_internal<traits::block::indexForName<destinationPortName, traits::block::all_input_ports<Destination>>()>(destination);
         }
     };
 
@@ -493,7 +508,7 @@ public:
     }
 
     // connect using the port index
-    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
+    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex = meta::invalid_index, typename Source>
     [[nodiscard]] auto connectInternal(Source& source) {
         auto& port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
         return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection);
@@ -517,17 +532,32 @@ public:
 
     template<fixed_string sourcePortName, std::size_t sourcePortSubIndex, typename Source>
     [[nodiscard]] auto connect(Source& source) {
-        using source_output_ports             = typename traits::block::all_output_ports<Source>;
-        constexpr std::size_t sourcePortIndex = meta::indexForName<sourcePortName, source_output_ports>();
-        if constexpr (sourcePortIndex == meta::invalid_index) {
-            meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>, meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports> port_not_found_error{};
+        static_assert(sourcePortSubIndex != meta::invalid_index);
+        using PortNames                       = typename traits::block::all_output_port_names<Source>;
+        constexpr std::size_t sourcePortIndex = traits::block::try_index_for_name<sourcePortName, PortNames>::value;
+        if constexpr (sourcePortIndex != meta::invalid_index) {
+            return connectInternal<sourcePortIndex, sourcePortSubIndex>(source);
+        } else {
+            constexpr auto        nameWithSubIndex1 = sourcePortName + '#' + meta::fixed_string_from_number<sourcePortSubIndex>;
+            constexpr std::size_t altPortIndex1     = traits::block::try_index_for_name<nameWithSubIndex1, PortNames>::value;
+            if constexpr (altPortIndex1 != meta::invalid_index) {
+                return connectInternal<altPortIndex1>(source);
+            } else {
+                constexpr auto        nameWithSubIndex2 = sourcePortName + meta::fixed_string_from_number<sourcePortSubIndex>;
+                constexpr std::size_t altPortIndex2     = traits::block::try_index_for_name<nameWithSubIndex2, PortNames>::value;
+                if constexpr (altPortIndex2 != meta::invalid_index) {
+                    return connectInternal<altPortIndex2>(source);
+                } else {
+                    static_assert(traits::block::NameLookupSucceeds<PortNames, sourcePortName>, //
+                        "The requested output port does not exist. Inspect the detailed error message for the 'NameList' argument to the 'NameLookupSucceeds' concept to see all valid output port names.");
+                }
+            }
         }
-        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source);
     }
 
     template<fixed_string sourcePortName, typename Source>
     [[nodiscard]] auto connect(Source& source) {
-        return connect<sourcePortName, meta::invalid_index, Source>(source);
+        return connectInternal<traits::block::indexForName<sourcePortName, traits::block::all_output_ports<Source>>()>(source);
     }
 
     // dynamic/runtime connections
@@ -642,12 +672,14 @@ static_assert(BlockLike<Graph>);
 /*******************************************************************************************************/
 
 template<typename TBlock>
-concept SourceBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_output_port_types<TBlock>::size > 0;
+concept SourceBlockLike = traits::block::can_processOne<std::remove_cvref_t<TBlock>> and //
+                          traits::block::template stream_output_port_types<std::remove_cvref_t<TBlock>>::size > 0;
 
 static_assert(not SourceBlockLike<int>);
 
 template<typename TBlock>
-concept SinkBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_input_port_types<TBlock>::size > 0;
+concept SinkBlockLike = traits::block::can_processOne<std::remove_cvref_t<TBlock>> and //
+                        traits::block::template stream_input_port_types<std::remove_cvref_t<TBlock>>::size > 0;
 
 static_assert(not SinkBlockLike<int>);
 
@@ -707,7 +739,6 @@ struct to_right_descriptor : TDesc {
 
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
 class MergedGraph<Left, Right, OutId, InId> : public Block<MergedGraph<Left, Right, OutId, InId>> {
-    // FIXME: How do we refuse connection to a vector<Port>?
     static std::atomic_size_t _unique_id_counter;
 
     template<typename TDesc>
@@ -717,6 +748,8 @@ class MergedGraph<Left, Right, OutId, InId> : public Block<MergedGraph<Left, Rig
     friend struct to_left_descriptor;
 
 public:
+    // Warning: If the order of ports in the following list is changed, then existing merge-by-index calls change their
+    // meaning. Also the order of input arguments and tuple members for processOne changes.
     using AllPorts = meta::concat<
         // Left:
         typename meta::concat<typename traits::block::all_port_descriptors<Left>::template filter<traits::port::is_message_port>, traits::block::stream_input_ports<Left>, meta::remove_at<OutId, traits::block::stream_output_ports<Left>>>::template transform<to_left_descriptor>,
@@ -919,14 +952,15 @@ constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>,
  */
 template<meta::fixed_string OutName, meta::fixed_string InName, SourceBlockLike A, SinkBlockLike B>
 constexpr auto merge(A&& a, B&& b) {
-    constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::block::stream_output_ports<A>>();
-    constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::block::stream_input_ports<B>>();
-    static_assert(OutIdUnchecked != -1);
-    static_assert(InIdUnchecked != -1);
-    constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
-    constexpr auto InId  = static_cast<std::size_t>(InIdUnchecked);
-    static_assert(std::same_as<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>, "Port types do not match");
-    return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{std::forward<A>(a), std::forward<B>(b)};
+    static_assert(std::is_same_v<std::remove_cvref_t<A>, A>, "You need to std::move the first block, or directly call the block's constructor.");
+    static_assert(std::is_same_v<std::remove_cvref_t<B>, B>, "You need to std::move the second block, or directly call the block's constructor.");
+    constexpr auto OutId = traits::block::indexForName<OutName, typename traits::block::stream_output_ports<A>>();
+    constexpr auto InId  = traits::block::indexForName<InName, typename traits::block::stream_input_ports<B>>();
+    using PortADesc = typename traits::block::stream_output_ports<A>::template at<OutId>;
+    using PortBDesc = typename traits::block::stream_input_ports<B>::template at<InId>;
+    static_assert(not PortADesc::kIsDynamicCollection, "Merging dynamically sized ports (std::vector of Ports) is not possible.");
+    static_assert(std::same_as<typename PortADesc::value_type, typename PortBDesc::value_type>, "Port types do not match");
+    return MergedGraph<A, B, OutId, InId>{std::forward<A>(a), std::forward<B>(b)};
 }
 
 /*******************************************************************************************************/

@@ -750,10 +750,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input0">(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input1">(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input2">(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input3">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input", 0UZ>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input", 1UZ>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input", 2UZ>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input", 3UZ>(testNode)));
 
         // test also different connect API
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output0"s, *sinks[0], "in"s)));
