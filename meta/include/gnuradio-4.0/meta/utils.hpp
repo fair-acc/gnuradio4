@@ -471,29 +471,6 @@ concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
 template<typename T>
 concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;
 
-template<fixed_string Name, typename PortList>
-consteval std::size_t indexForName() {
-    auto helper = []<std::size_t... Ids>(std::index_sequence<Ids...>) {
-        auto static_name_for_index = [](auto id) {
-            using Port = typename PortList::template at<id>;
-            if constexpr (requires { Port::Name; }) {
-                return Port::Name;
-            } else {
-                // should never see a tuple here => needs to be flattened into given PortList earlier
-                return Port::value_type::Name;
-            }
-        };
-
-        constexpr int n_matches = ((static_name_for_index(std::integral_constant<size_t, Ids>()) == Name) + ...);
-        static_assert(n_matches <= 1, "Multiple ports with that name were found. The name must be unique. You can "
-                                      "still use a port index instead.");
-        static_assert(n_matches == 1, "No port with the given name exists.");
-        constexpr std::size_t result = (((static_name_for_index(std::integral_constant<size_t, Ids>()) == Name) * Ids) + ...);
-        return result;
-    };
-    return helper(std::make_index_sequence<PortList::size>());
-}
-
 // template<template<typename...> typename Type, typename... Items>
 // using find_type = decltype(std::tuple_cat(std::declval<std::conditional_t<is_instantiation_of<Items, Type>, std::tuple<Items>, std::tuple<>>>()...));
 
