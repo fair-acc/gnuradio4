@@ -286,6 +286,54 @@ connections:
             expect(false);
         }
     };
+
+    "Context settings"_test = [] {
+        try {
+            using namespace gr;
+
+            const auto context = getContext();
+            gr::Graph  graph1;
+            auto&      block = graph1.emplaceBlock<ArraySink<double>>({{"name", "ArraySink0"}});
+            const auto now   = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+            expect(block.settings().set({{"name", "ArraySink1"}}, SettingsCtx{now, "1"}).empty());
+            expect(block.settings().set({{"name", "ArraySink1+10"}}, SettingsCtx{now + 10'000'000'000ULL, "1"}).empty());
+            expect(block.settings().set({{"name", "ArraySink1+20"}}, SettingsCtx{now + 20'000'000'000ULL, "1"}).empty());
+            expect(block.settings().set({{"name", "ArraySink2"}}, SettingsCtx{now, "2"}).empty());
+            expect(block.settings().set({{"name", "ArraySink3"}}, SettingsCtx{now, 3}).empty()); // int as context name
+
+            const auto graph1Saved = gr::saveGrc(graph1);
+            const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+
+            graph2.forEachBlock([&](const auto& node) {
+                const auto& stored = node.settings().getStoredAll();
+                expect(eq(node.settings().getNStoredParameters(), 6UZ));
+                for (const auto& [ctx, ctxParameters] : stored) {
+                    for (const auto& [ctxTime, settingsMap] : ctxParameters) {
+                        std::string expectedName = "ArraySink0";
+                        if (ctxTime.context == "1" && ctxTime.time == now) {
+                            expectedName = "ArraySink1";
+                        } else if (ctxTime.context == "1" && ctxTime.time == now + 10'000'000'000ULL) {
+                            expectedName = "ArraySink1+10";
+                        } else if (ctxTime.context == "1" && ctxTime.time == now + 20'000'000'000ULL) {
+                            expectedName = "ArraySink1+20";
+                        } else if (ctxTime.context == "2" && ctxTime.time == now) {
+                            expectedName = "ArraySink2";
+                        } else if (ctxTime.context == "3" && ctxTime.time == now) {
+                            expectedName = "ArraySink3";
+                        }
+
+                        expect(eq(std::get<std::string>(settingsMap.at("name")), expectedName));
+                    }
+                }
+            });
+
+            expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
+            expect(eq(collectEdges(graph1), collectEdges(graph2)));
+        } catch (const std::string& e) {
+            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            expect(false);
+        }
+    };
 };
 
 } // namespace gr::qa_grc_test
