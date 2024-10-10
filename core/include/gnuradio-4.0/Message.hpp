@@ -5,7 +5,7 @@
 #include <gnuradio-4.0/CircularBuffer.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <pmtv/pmt.hpp>
 

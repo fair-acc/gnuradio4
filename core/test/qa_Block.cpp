@@ -16,6 +16,8 @@ struct copy : public Block<copy> {
     PortIn<float>  in;
     PortOut<float> out;
 
+    GR_MAKE_REFLECTABLE(copy, in, out);
+
 public:
     template<meta::t_or_simd<float> V>
     [[nodiscard]] constexpr V processOne(const V& a) const noexcept {
@@ -23,8 +25,6 @@ public:
     }
 };
 } // namespace gr::test
-
-ENABLE_REFLECTION(gr::test::copy, in, out);
 
 namespace gr::test {
 static_assert(traits::block::stream_input_port_types<copy>::size() == 1);
@@ -44,29 +44,29 @@ template<typename T>
 struct BlockSignaturesNone : public gr::Block<BlockSignaturesNone<T>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
-};
 
-ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesNone, in, out);
+    GR_MAKE_REFLECTABLE(BlockSignaturesNone, in, out);
+};
 static_assert(!gr::HasRequiredProcessFunction<BlockSignaturesNone<float>>);
 
 template<typename T>
 struct BlockSignaturesVoid : public gr::Block<BlockSignaturesVoid<T>> {
     T value;
 
+    GR_MAKE_REFLECTABLE(BlockSignaturesVoid, value);
+
     void processOne() {}
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesVoid, value);
 static_assert(gr::HasRequiredProcessFunction<BlockSignaturesVoid<float>>);
 
 template<typename T>
 struct BlockSignaturesVoid2 : public gr::Block<BlockSignaturesVoid2<T>> {
     T value;
 
+    GR_MAKE_REFLECTABLE(BlockSignaturesVoid2, value);
+
     gr::work::Status processBulk() { return gr::work::Status::OK; }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesVoid2, value);
 static_assert(gr::HasRequiredProcessFunction<BlockSignaturesVoid2<float>>);
 
 template<typename T>
@@ -74,10 +74,10 @@ struct BlockSignaturesProcessOne : public gr::Block<BlockSignaturesProcessOne<T>
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
+    GR_MAKE_REFLECTABLE(BlockSignaturesProcessOne, in, out);
+
     T processOne(T) { return T(); }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesProcessOne, in, out);
 static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessOne<float>>);
 static_assert(gr::HasProcessOneFunction<BlockSignaturesProcessOne<float>>);
 static_assert(!gr::HasConstProcessOneFunction<BlockSignaturesProcessOne<float>>);
@@ -88,10 +88,10 @@ struct BlockSignaturesProcessOneConst : public gr::Block<BlockSignaturesProcessO
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
+    GR_MAKE_REFLECTABLE(BlockSignaturesProcessOneConst, in, out);
+
     T processOne(T) const { return T(); }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesProcessOneConst, in, out);
 static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessOneConst<float>>);
 static_assert(gr::HasProcessOneFunction<BlockSignaturesProcessOneConst<float>>);
 static_assert(gr::HasConstProcessOneFunction<BlockSignaturesProcessOneConst<float>>);
@@ -102,13 +102,13 @@ struct BlockSignaturesTemplatedProcessOneConst : public gr::Block<BlockSignature
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
+    GR_MAKE_REFLECTABLE(BlockSignaturesTemplatedProcessOneConst, in, out);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& /*input*/) const noexcept {
         return V();
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(BlockSignaturesTemplatedProcessOneConst, in, out);
 static_assert(gr::HasRequiredProcessFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
 static_assert(gr::HasProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
 static_assert(gr::HasConstProcessOneFunction<BlockSignaturesTemplatedProcessOneConst<float>>);
@@ -120,6 +120,8 @@ template<typename T, ProcessBulkVariant processVariant>
 struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessBulkSpan<T, processVariant>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
+
+    GR_MAKE_REFLECTABLE(BlockSignaturesProcessBulkSpan, in, out);
 
     gr::work::Status processBulk(std::span<const T>, std::span<T>)
     requires(processVariant == ProcessBulkVariant::STD_STD)
@@ -170,7 +172,6 @@ struct BlockSignaturesProcessBulkSpan : public gr::Block<BlockSignaturesProcessB
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVariant processVariant), (BlockSignaturesProcessBulkSpan<T, processVariant>), in, out);
 static_assert(gr::HasRequiredProcessFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>>);
 static_assert(!gr::HasProcessOneFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>>);
 static_assert(!gr::HasConstProcessOneFunction<BlockSignaturesProcessBulkSpan<float, ProcessBulkVariant::STD_STD>>);
@@ -194,6 +195,8 @@ struct BlockSignaturesProcessBulkTwoOuts : public gr::Block<BlockSignaturesProce
     gr::PortIn<T>  in{};
     gr::PortOut<T> out1{};
     gr::PortOut<T> out2{};
+
+    GR_MAKE_REFLECTABLE(BlockSignaturesProcessBulkTwoOuts, in, out1, out2);
 
     gr::work::Status processBulk(std::span<const T>, std::span<T>, std::span<T>)
     requires(processVariant == ProcessBulkTwoOutsVariant::STD_STD)
@@ -220,8 +223,6 @@ struct BlockSignaturesProcessBulkTwoOuts : public gr::Block<BlockSignaturesProce
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkTwoOutsVariant processVariant), (BlockSignaturesProcessBulkTwoOuts<T, processVariant>), in, out1, out2);
-
 static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::STD_STD>, 0>);
 static_assert(gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::STD_STD>, 1>);
 static_assert(!gr::traits::block::processBulk_requires_ith_output_as_span<BlockSignaturesProcessBulkTwoOuts<float, ProcessBulkTwoOutsVariant::OUTPUT_STD>, 0>);
@@ -236,8 +237,10 @@ enum class ProcessBulkVectorVariant { STD_STD, STD_STD_REF, INPUT_STD, STD_OUTPU
 
 template<typename T, ProcessBulkVectorVariant processVariant>
 struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProcessBulkVector<T, processVariant>> {
-    std::array<gr::PortIn<T>, 3>  inputs{};
-    std::array<gr::PortOut<T>, 6> outputs{};
+    std::vector<gr::PortIn<T>>  inputs{};
+    std::vector<gr::PortOut<T>> outputs{};
+
+    GR_MAKE_REFLECTABLE(BlockSignaturesProcessBulkVector, inputs, outputs);
 
     gr::work::Status processBulk(std::span<std::span<const T>>, std::span<std::span<T>>)
     requires(processVariant == ProcessBulkVectorVariant::STD_STD)
@@ -280,8 +283,6 @@ struct BlockSignaturesProcessBulkVector : public gr::Block<BlockSignaturesProces
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, ProcessBulkVectorVariant processVariant), (BlockSignaturesProcessBulkVector<T, processVariant>), inputs, outputs);
-
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::STD_STD>>);
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::STD_STD_REF>>);
 static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float, ProcessBulkVectorVariant::INPUT_STD>>);
@@ -291,26 +292,26 @@ static_assert(gr::HasProcessBulkFunction<BlockSignaturesProcessBulkVector<float,
 
 struct InvalidSettingBlock : gr::Block<InvalidSettingBlock> {
     std::tuple<int> tuple; // this type is not supported and should cause the checkBlockContracts<T>() to throw
+                           //
+    GR_MAKE_REFLECTABLE(InvalidSettingBlock, tuple);
 };
-
-ENABLE_REFLECTION(InvalidSettingBlock, tuple);
 
 struct MissingProcessSignature1 : gr::Block<MissingProcessSignature1> {
     gr::PortIn<int>    in;
     gr::PortOut<int>   out0;
     gr::PortOut<float> out1;
-};
 
-ENABLE_REFLECTION(MissingProcessSignature1, in, out0, out1);
+    GR_MAKE_REFLECTABLE(MissingProcessSignature1, in, out0, out1);
+};
 
 struct MissingProcessSignature2 : gr::Block<MissingProcessSignature2> {
     gr::PortIn<int>    in0;
     gr::PortIn<float>  in1;
     gr::PortOut<int>   out0;
     gr::PortOut<float> out1;
-};
 
-ENABLE_REFLECTION(MissingProcessSignature2, in0, in1, out0, out1);
+    GR_MAKE_REFLECTABLE(MissingProcessSignature2, in0, in1, out0, out1);
+};
 
 struct MissingProcessSignature3 : gr::Block<MissingProcessSignature3> {
     std::vector<gr::PortOut<float>>   outA;
@@ -320,9 +321,9 @@ struct MissingProcessSignature3 : gr::Block<MissingProcessSignature3> {
     gr::work::Status processBulk(std::span<std::vector<float>>&, std::span<TOutputSpan2>&) {
         return gr::work::Status::OK;
     }
-};
 
-ENABLE_REFLECTION(MissingProcessSignature3, outA, outB);
+    GR_MAKE_REFLECTABLE(MissingProcessSignature3, outA, outB);
+};
 
 struct ProcessStatus {
     std::size_t      n_inputs{0};
@@ -368,6 +369,8 @@ struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::Resampling<>, gr::Stri
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
+    GR_MAKE_REFLECTABLE(IntDecBlock, in, out);
+
     ProcessStatus status{};
     bool          write_to_vector{false};
 
@@ -394,6 +397,8 @@ struct SyncOrAsyncBlock : gr::Block<SyncOrAsyncBlock<T, isInputAsync, isOutputAs
     InputPortType  in{};
     OutputPortType out{};
 
+    GR_MAKE_REFLECTABLE(SyncOrAsyncBlock, in, out);
+
     gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
         const auto available = std::min(inSpan.size(), outSpan.size());
         if (available != 0) {
@@ -404,37 +409,42 @@ struct SyncOrAsyncBlock : gr::Block<SyncOrAsyncBlock<T, isInputAsync, isOutputAs
         return gr::work::Status::OK;
     }
 };
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, bool isInputAsync, bool isOututAsync), (SyncOrAsyncBlock<T, isInputAsync, isOututAsync>), in, out);
 static_assert(gr::HasProcessBulkFunction<SyncOrAsyncBlock<float, true, true>>);
-
-ENABLE_REFLECTION_FOR_TEMPLATE(IntDecBlock, in, out);
 
 template<typename T>
 struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
     static constexpr std::size_t nPorts = 4;
 
-    std::array<gr::PortIn<T, gr::Async>, nPorts>  inputs;
-    std::array<gr::PortOut<T, gr::Async>, nPorts> outputs;
+    std::array<gr::PortIn<T, gr::Async>, nPorts>  input;
+    std::array<gr::PortOut<T, gr::Async>, nPorts> output;
 
-    template<typename TInSpan, typename TOutSpan>
-    gr::work::Status processBulk(std::span<TInSpan>& ins, std::span<TOutSpan>& outs) {
-        for (std::size_t channelIndex = 0; channelIndex < ins.size(); ++channelIndex) {
-            gr::InputSpanLike auto  inputSpan  = ins[channelIndex];
-            gr::OutputSpanLike auto outputSpan = outs[channelIndex];
-            auto                    available  = std::min(inputSpan.size(), outputSpan.size());
+    GR_MAKE_REFLECTABLE(ArrayPortsNode, input, output);
 
-            for (std::size_t valueIndex = 0; valueIndex < available; ++valueIndex) {
-                outputSpan[valueIndex] = inputSpan[valueIndex];
-            }
+    template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
+    gr::work::Status processBulk(TInSpan& in0, TInSpan& in1, TInSpan& in2, TInSpan& in3, TOutSpan& out0, TOutSpan& out1, TOutSpan& out2, TOutSpan& out3) {
+        auto available = std::min(in0.size(), out0.size());
+        std::copy_n(in0.begin(), available, out0.begin());
+        std::ignore = in0.consume(available);
+        out0.publish(available);
 
-            std::ignore = inputSpan.consume(available);
-            outputSpan.publish(available);
-        }
+        available = std::min(in1.size(), out1.size());
+        std::copy_n(in1.begin(), available, out1.begin());
+        std::ignore = in1.consume(available);
+        out1.publish(available);
+
+        available = std::min(in2.size(), out2.size());
+        std::copy_n(in2.begin(), available, out2.begin());
+        std::ignore = in2.consume(available);
+        out2.publish(available);
+
+        available = std::min(in3.size(), out3.size());
+        std::copy_n(in3.begin(), available, out3.begin());
+        std::ignore = in3.consume(available);
+        out3.publish(available);
+
         return gr::work::Status::OK;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(ArrayPortsNode, inputs, outputs);
 static_assert(gr::HasProcessBulkFunction<ArrayPortsNode<int>>);
 const boost::ut::suite<"Block signatures"> _block_signature = [] {
     using namespace boost::ut;
@@ -728,7 +738,7 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         std::array<TagSource<double>*, 4>                                 sources;
         std::array<TagSink<double, ProcessFunction::USE_PROCESS_ONE>*, 4> sinks;
 
-        auto* testNode = std::addressof(graph.emplaceBlock<TestNode>());
+        auto& testNode = graph.emplaceBlock<TestNode>();
 
         sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
         sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
@@ -740,16 +750,16 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"inputs", 0UZ>(*testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"inputs", 1UZ>(*testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"inputs", 2UZ>(*testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"inputs", 3UZ>(*testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input0">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input1">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input2">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input3">(testNode)));
 
         // test also different connect API
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#0"s, *sinks[0], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#1"s, *sinks[1], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#2"s, *sinks[2], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*testNode, "outputs#3"s, *sinks[3], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output0"s, *sinks[0], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output1"s, *sinks[1], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output2"s, *sinks[2], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output3"s, *sinks[3], "in"s)));
 
         gr::scheduler::Simple sched{std::move(graph)};
         expect(sched.runAndWait().has_value());
@@ -894,11 +904,11 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
 const boost::ut::suite<"reflFirstTypeName Tests"> _reflFirstTypeNameTests = [] {
     using namespace boost::ut;
     using namespace gr::detail;
-    using namespace std::literals::string_literals;
+    using namespace std::literals::string_view_literals;
 
     "std::complex"_test = []() {
-        expect(eq(reflFirstTypeName<std::complex<double>>(), "std::complex<double>"s));
-        expect(eq(reflFirstTypeName<std::complex<float>>(), "std::complex<float>"s));
+        expect(eq(gr::refl::type_name<std::complex<double>>.view(), "std::complex<double>"sv));
+        expect(eq(gr::refl::type_name<std::complex<float>>.view(), "std::complex<float>"sv));
     };
 };
 

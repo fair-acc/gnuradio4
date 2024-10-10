@@ -55,12 +55,18 @@ public:
     PluginHandler() = default;
 
     explicit PluginHandler(const std::string& plugin_file) {
-        _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY);
+        // TODO: Document why RTLD_LOCAL and not RTLD_GLOBAL is used here. (RTLD_LOCAL breaks RTTI/dynamic_cast across
+        // plugin boundaries. Note that RTTI can be very helpful in the debugger.)
+        _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY | RTLD_LOCAL);
         if (!_dl_handle) {
             _status = "Failed to load the plugin file";
             return;
         }
 
+        // FIXME: Casting a void* to function-pointer is UB in C++. Yes "… 'dlsym' is not C++ and therefore we can do
+        // whateever …". But we don't need to. Simply have a single 'extern "C"' symbol in the plugin which is an object
+        // storing two function pointers. Then we need a single cast from the 'dlsym' result to an aggregate type and
+        // can then extract the two function pointers from it. That's simpler and more likely to be conforming C++.
         _create_fn = reinterpret_cast<plugin_create_function_t>(dlsym(_dl_handle, "gr_plugin_make"));
         if (!_create_fn) {
             _status = "Failed to load symbol gr_plugin_make";
@@ -148,7 +154,7 @@ public:
                     _loadedPluginFiles.insert(fileString);
 
                     if (PluginHandler handler(file.path().string()); handler) {
-                        for (const auto& block_name : handler->providedBlocks()) {
+                        for (std::string_view block_name : handler->providedBlocks()) {
                             _handlerForName.emplace(std::string(block_name), handler.operator->());
                             _knownBlocks.emplace_back(block_name);
                         }
@@ -176,7 +182,7 @@ public:
         return result;
     }
 
-    std::vector<std::string> knownBlockParameterizations(std::string_view block) const {
+    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
         if (_registry->isBlockKnown(block)) {
             return _registry->knownBlockParameterizations(block);
         }
@@ -217,7 +223,7 @@ public:
 
     auto knownBlocks() const { return _registry->knownBlocks(); }
 
-    std::vector<std::string> knownBlockParameterizations(std::string_view block) const {
+    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
         if (_registry->isBlockKnown(block)) {
             return _registry->knownBlockParameterizations(block);
         }

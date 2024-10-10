@@ -9,7 +9,7 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <algorithm>
@@ -174,6 +174,8 @@ private:
     };
 
 public:
+    GR_MAKE_REFLECTABLE(Graph);
+
     constexpr static block::Category blockCategory = block::Category::TransparentBlockGroup;
 
     Graph(property_map settings = {}) : gr::Block<Graph>(std::move(settings)) {
@@ -379,15 +381,15 @@ public:
             return std::visit(meta::overloaded{
                     [](const gr::DynamicPort& port) {
                         return property_map{
-                            {"name", port.name},
-                            {"type", port.defaultValue().type().name()}
+                            {"name"s, std::string(port.name)},
+                            {"type"s, port.defaultValue().type().name()}
                         };
                     },
                     [](const BlockModel::NamedPortCollection& namedCollection) {
                         return property_map{
-                            {"name", namedCollection.name},
-                            {"size", namedCollection.ports.size()},
-                            {"type", namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].defaultValue().type().name()) }
+                            {"name"s, std::string(namedCollection.name)},
+                            {"size"s, namedCollection.ports.size()},
+                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].defaultValue().type().name()) }
                         };
                     }},
                 portOrCollection);
@@ -435,13 +437,13 @@ public:
 
             property_map inputPorts;
             for (auto& portOrCollection : block->dynamicInputPorts()) {
-                inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+                inputPorts[std::string(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
             }
             result["inputPorts"] = std::move(inputPorts);
 
             property_map outputPorts;
             for (auto& portOrCollection : block->dynamicOutputPorts()) {
-                outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+                outputPorts[std::string(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
             }
             result["outputPorts"] = std::move(outputPorts);
 
@@ -547,7 +549,7 @@ public:
     using Block<Graph>::processMessages;
 
     template<typename Anything>
-    void processMessages(MsgPortInNamed<"__FromChildren">& /*port*/, std::span<const Anything> /*input*/) {
+    void processMessages(MsgPortInFromChildren& /*port*/, std::span<const Anything> /*input*/) {
         static_assert(meta::always_false<Anything>, "This is not called, children are processed in processScheduledMessages");
     }
 
@@ -639,6 +641,32 @@ static_assert(BlockLike<Graph>);
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/
 /*******************************************************************************************************/
 
+template<typename TBlock>
+concept SourceBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_output_port_types<TBlock>::size > 0;
+
+static_assert(not SourceBlockLike<int>);
+
+template<typename TBlock>
+concept SinkBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_input_port_types<TBlock>::size > 0;
+
+static_assert(not SinkBlockLike<int>);
+
+template<typename TDesc>
+struct to_left_descriptor : TDesc {
+    template<typename TBlock>
+    static constexpr decltype(auto) getPortObject(TBlock&& obj) {
+        return TDesc::getPortObject(obj.left);
+    }
+};
+
+template<typename TDesc>
+struct to_right_descriptor : TDesc {
+    template<typename TBlock>
+    static constexpr decltype(auto) getPortObject(TBlock&& obj) {
+        return TDesc::getPortObject(obj.right);
+    }
+};
+
 /**
  * Concepts and class for Merging Blocks to Sub-Graph Functionality
  *
@@ -677,27 +705,39 @@ static_assert(BlockLike<Graph>);
  *  - Currently, SIMD support for multiple output ports is not implemented.
  */
 
-template<typename TBlock>
-concept SourceBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_output_port_types<TBlock>::size > 0;
-
-static_assert(not SourceBlockLike<int>);
-
-template<typename TBlock>
-concept SinkBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_input_port_types<TBlock>::size > 0;
-
-static_assert(not SinkBlockLike<int>);
-
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-class MergedGraph : public Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>, meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>> {
+class MergedGraph<Left, Right, OutId, InId> : public Block<MergedGraph<Left, Right, OutId, InId>> {
+    // FIXME: How do we refuse connection to a vector<Port>?
     static std::atomic_size_t _unique_id_counter;
 
+    template<typename TDesc>
+    friend struct to_right_descriptor;
+
+    template<typename TDesc>
+    friend struct to_left_descriptor;
+
 public:
+    using AllPorts = meta::concat<
+        // Left:
+        typename meta::concat<typename traits::block::all_port_descriptors<Left>::template filter<traits::port::is_message_port>, traits::block::stream_input_ports<Left>, meta::remove_at<OutId, traits::block::stream_output_ports<Left>>>::template transform<to_left_descriptor>,
+        // Right:
+        typename meta::concat<typename traits::block::all_port_descriptors<Right>::template filter<traits::port::is_message_port>, meta::remove_at<InId, traits::block::stream_input_ports<Right>>, traits::block::stream_output_ports<Right>>::template transform<to_right_descriptor>>;
+
+    using InputPortTypes = typename AllPorts::template filter<traits::port::is_input_port, traits::port::is_stream_port>::template transform<traits::port::type>;
+
+    using ReturnType = typename AllPorts::template filter<traits::port::is_output_port, traits::port::is_stream_port>::template transform<traits::port::type>::tuple_or_type;
+
+    GR_MAKE_REFLECTABLE(MergedGraph);
+
+    // TODO: Add a comment why a unique ID is necessary for merged blocks but not for all other blocks. (I.e. unique_id
+    // already is a member of the Block base class, this is shadowing that member with a different value. No other block
+    // does this.)
     const std::size_t unique_id   = _unique_id_counter++;
     const std::string unique_name = fmt::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
 
 private:
     // copy-paste from above, keep in sync
-    using base = Block<MergedGraph<Left, Right, OutId, InId>, meta::concat<typename traits::block::stream_input_ports<Left>, meta::remove_at<InId, typename traits::block::stream_input_ports<Right>>>, meta::concat<meta::remove_at<OutId, typename traits::block::stream_output_ports<Left>>, typename traits::block::stream_output_ports<Right>>>;
+    using base = Block<MergedGraph<Left, Right, OutId, InId>>;
 
     Left  left;
     Right right;
@@ -705,7 +745,7 @@ private:
     // merged_work_chunk_size, that's what friends are for
     friend base;
 
-    template<SourceBlockLike, SinkBlockLike, std::size_t, std::size_t>
+    template<typename, typename, std::size_t, std::size_t>
     friend class MergedGraph;
 
     // returns the minimum of all internal max_samples port template parameters
@@ -747,10 +787,6 @@ private:
     }
 
 public:
-    using TInputPortTypes  = typename traits::block::stream_input_port_types<base>;
-    using TOutputPortTypes = typename traits::block::stream_output_port_types<base>;
-    using TReturnType      = typename traits::block::stream_return_type<base>;
-
     constexpr MergedGraph(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
 
     // if the left block (source) implements available_samples (a customization point), then pass the call through
@@ -764,7 +800,7 @@ public:
 
     template<meta::any_simd... Ts>
     requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
-    constexpr vir::simdize<TReturnType, (0, ..., Ts::size())> processOne(const Ts&... inputs) {
+    constexpr vir::simdize<ReturnType, (0, ..., Ts::size())> processOne(const Ts&... inputs) {
         static_assert(traits::block::stream_output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
         return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(std::tie(inputs...)));
     }
@@ -789,8 +825,8 @@ public:
 
     template<typename... Ts>
     // Nicer error messages for the following would be good, but not at the expense of breaking can_processOne_simd.
-    requires(TInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr TReturnType processOne(Ts&&... inputs) {
+    requires(InputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
+    constexpr ReturnType processOne(Ts&&... inputs) {
         // if (sizeof...(Ts) == 0) we could call `return processOne_simd(integral_constant<size_t, width>)`. But if
         // the caller expects to process *one* sample (no inputs for the caller to explicitly
         // request simd), and we process more, we risk inconsistencies.
@@ -881,7 +917,7 @@ constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>,
  * }
  * @endcode
  */
-template<fixed_string OutName, fixed_string InName, SourceBlockLike A, SinkBlockLike B>
+template<meta::fixed_string OutName, meta::fixed_string InName, SourceBlockLike A, SinkBlockLike B>
 constexpr auto merge(A&& a, B&& b) {
     constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::block::stream_output_ports<A>>();
     constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::block::stream_input_ports<B>>();
@@ -910,9 +946,5 @@ inline std::ostream& operator<<(std::ostream& os, const T& value) {
 }
 
 } // namespace gr
-
-// minimal reflection declaration
-REFL_TYPE(gr::Graph)
-REFL_END
 
 #endif // include guard

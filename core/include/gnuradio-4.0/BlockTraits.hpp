@@ -2,10 +2,10 @@
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
 #include <gnuradio-4.0/meta/utils.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include "Port.hpp"
 #include "PortTraits.hpp"
-#include "reflection.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
@@ -18,192 +18,100 @@ namespace gr::work {
 enum class Status;
 }
 
+namespace gr {
+template<typename Left, typename Right, std::size_t OutId, std::size_t InId>
+class MergedGraph;
+
+template<typename T>
+concept PortReflectable = refl::reflectable<T> and std::same_as<std::remove_const_t<T>, typename T::derived_t>;
+}
+
 namespace gr::traits::block {
 
 namespace detail {
 
-template<typename FieldDescriptor>
-using member_type = typename FieldDescriptor::value_type;
+template<typename TPortDescr>
+using port_name = typename TPortDescr::NameT;
 
-template<typename Port>
-constexpr bool is_port_descriptor_v = port::is_port_v<member_type<Port>>;
-
-template<typename Collection>
-constexpr bool is_port_collection_descriptor_v = port::is_port_collection_v<member_type<Collection>>;
-
-template<typename Descriptor>
-using is_port_or_collection_descriptor = std::integral_constant<bool, is_port_descriptor_v<Descriptor> || is_port_collection_descriptor_v<Descriptor>>;
-
-template<typename Descriptor>
-constexpr auto member_to_named_port_helper() {
-    // Collections of ports don't get names inside the type as
-    // the ports inside are dynamically created
-    if constexpr (is_port_descriptor_v<Descriptor>) {
-        return static_cast<typename Descriptor::value_type::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>*>(nullptr);
-    } else if constexpr (is_port_collection_descriptor_v<Descriptor>) {
-        if constexpr (gr::meta::is_std_array_type<typename Descriptor::value_type>()) {
-            auto value_type_updater = []<template<typename, auto> typename Template, typename Arg, auto Size>(Template<Arg, Size>*) {
-                return static_cast< //
-                    Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>, Size>*>(nullptr);
-            };
-            return value_type_updater(static_cast<typename Descriptor::value_type*>(nullptr));
-        } else {
-            auto value_type_updater = []<template<typename...> typename Template, typename Arg, typename... Args>(Template<Arg, Args...>*) {
-                // This type is not going to be used for a variable, it is just meant to be
-                // a compile-time hint of what the port collection looks like.
-                // We're ignoring the Args... because they might depend on the
-                // main type (for example, allocator in a vector)
-                return static_cast<Template<typename Arg::template with_name_and_descriptor<fixed_string(refl::descriptor::get_name(Descriptor()).data), Descriptor>>*>(nullptr);
-            };
-            return value_type_updater(static_cast<typename Descriptor::value_type*>(nullptr));
-        }
-    } else {
-        return static_cast<void*>(nullptr);
-    }
-}
-
-template<typename Descriptor>
-using member_to_named_port = std::remove_pointer_t<decltype(member_to_named_port_helper<Descriptor>())>;
-
-template<typename TBlock>
-struct member_ports_detector {
-    static constexpr bool value = false;
+// see also MergedGraph partial specialization below
+template<PortReflectable TBlock>
+struct all_port_descriptors_impl {
+    using type = refl::make_typelist_from_index_sequence<std::make_index_sequence<refl::data_member_count<TBlock>>, //
+        [](auto Idx) consteval {
+            using T                           = refl::data_member_type<TBlock, Idx>;
+            constexpr meta::fixed_string name = refl::data_member_name<TBlock, Idx>;
+            if constexpr (port::is_port<T>::value) {
+                // Port -> PortDescriptor
+                return meta::typelist<typename T::template make_port_descriptor<name, Idx, gr::detail::SinglePort>>{};
+            } else if constexpr (port::is_port_tuple<T>::value) {
+                // tuple<Ports...> -> typelist<PortDescriptor...>
+                // array<Port, N> -> typelist<PortDescriptor, PortDescriptor, ...>
+                return [=]<size_t... Is>(std::index_sequence<Is...>) { return meta::typelist<typename std::tuple_element_t<Is, T>::template make_port_descriptor<name + meta::fixed_string_from_number<Is>, Idx, Is>...>{}; }(std::make_index_sequence<std::tuple_size_v<T>>());
+            } else if constexpr (port::is_port_collection<T>::value) {
+                // vector<Port> -> PortDescriptor|PortCollection
+                return meta::typelist<typename T::value_type::template make_port_descriptor<name, Idx, gr::detail::PortCollection>>{};
+            } else {
+                // not a Port, nothing to add to the resulting typelist
+                return meta::typelist<>{};
+            }
+        }>;
 };
 
-template<class T, typename ValueType = std::remove_cvref_t<T>>
-concept Reflectable = refl::is_reflectable<ValueType>();
-
-template<Reflectable TBlock>
-struct member_ports_detector<TBlock> {
-    using member_ports = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<is_port_or_collection_descriptor>::template transform<member_to_named_port>;
-
-    static constexpr bool value = member_ports::size != 0;
+// This partial specialization could be generalized into a customization point. But we probably want to think of a
+// better name than 'AllPorts' for triggering that customization.
+template<refl::reflectable Left, refl::reflectable Right, size_t OutId, size_t InId>
+struct all_port_descriptors_impl<gr::MergedGraph<Left, Right, OutId, InId>> {
+    using type = gr::MergedGraph<Left, Right, OutId, InId>::AllPorts;
 };
-
-template<typename TBlock>
-using port_name = typename TBlock::static_name();
-
-template<typename RequestedType>
-struct member_descriptor_has_type {
-    template<typename Descriptor>
-    using matches = std::is_same<RequestedType, member_to_named_port<Descriptor>>;
-};
-
 } // namespace detail
 
-template<typename...>
-struct fixedBlock_ports_data_helper;
+template<PortReflectable TBlock>
+using all_port_descriptors = typename detail::all_port_descriptors_impl<TBlock>::type;
 
-// This specialization defines block attributes when the block is created
-// with two type lists - one list for input and one for output ports
-template<typename TBlock, meta::is_typelist_v InputPorts, meta::is_typelist_v OutputPorts>
-requires(InputPorts::template all_of<port::has_fixed_info> && OutputPorts::template all_of<port::has_fixed_info>)
-struct fixedBlock_ports_data_helper<TBlock, InputPorts, OutputPorts> {
-    using member_ports_detector = std::false_type;
+template<PortReflectable TBlock, PortType portType>
+using input_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_input_port, port::is_port_flavor<portType>::template eval>;
 
-    using defined_input_ports  = InputPorts;
-    using defined_output_ports = OutputPorts;
+template<PortReflectable TBlock, PortType portType>
+using output_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_output_port, port::is_port_flavor<portType>::template eval>;
 
-    template<gr::PortType portType>
-    struct for_type {
-        using input_ports  = typename defined_input_ports ::template filter<traits::port::kind::tester_for<portType>::template is_input_port_or_collection>;
-        using output_ports = typename defined_output_ports ::template filter<traits::port::kind::tester_for<portType>::template is_output_port_or_collection>;
-        using all_ports    = meta::concat<input_ports, output_ports>;
+template<PortReflectable TBlock>
+using all_input_ports = typename all_port_descriptors<TBlock>::template filter<port::is_input_port>;
 
-        using input_port_types  = typename input_ports ::template transform<port::type>;
-        using output_port_types = typename output_ports ::template transform<port::type>;
-    };
+template<PortReflectable TBlock>
+using all_output_ports = typename all_port_descriptors<TBlock>::template filter<port::is_output_port>;
 
-    using all     = for_type<PortType::ANY>;
-    using stream  = for_type<PortType::STREAM>;
-    using message = for_type<PortType::MESSAGE>;
-};
+template<PortReflectable TBlock>
+using all_input_port_types = typename all_input_ports<TBlock>::template transform<port::type>;
 
-// This specialization defines block attributes when the block is created
-// with a list of ports as template arguments
-template<typename TBlock, port::HasFixedInfo... Ports>
-struct fixedBlock_ports_data_helper<TBlock, Ports...> {
-    using member_ports_detector = detail::member_ports_detector<TBlock>;
+template<PortReflectable TBlock>
+using all_output_port_types = typename all_output_ports<TBlock>::template transform<port::type>;
 
-    using all_ports = std::remove_pointer_t<decltype([] {
-        if constexpr (member_ports_detector::value) {
-            return static_cast<typename member_ports_detector::member_ports*>(nullptr);
-        } else {
-            return static_cast<typename meta::concat<std::conditional_t<gr::meta::is_typelist_v<Ports>, Ports, meta::typelist<Ports>>...>*>(nullptr);
-        }
-    }())>;
-
-    template<PortType portType>
-    struct for_type {
-        using input_ports  = typename all_ports ::template filter<traits::port::kind::tester_for<portType>::template is_input_port_or_collection>;
-        using output_ports = typename all_ports ::template filter<traits::port::kind::tester_for<portType>::template is_output_port_or_collection>;
-
-        using input_port_types  = typename input_ports ::template transform<port::type>;
-        using output_port_types = typename output_ports ::template transform<port::type>;
-    };
-
-    using all     = for_type<PortType::ANY>;
-    using stream  = for_type<PortType::STREAM>;
-    using message = for_type<PortType::MESSAGE>;
-};
-
-// clang-format off
-template<typename TBlock,
-         typename TDerived = typename TBlock::derived_t,
-         typename ArgumentList = typename TBlock::block_template_parameters>
-using fixedBlock_ports_data =
-    typename ArgumentList::template filter<port::has_fixed_info_or_is_typelist>
-                         ::template prepend<TBlock>
-                         ::template apply<fixedBlock_ports_data_helper>;
-// clang-format on
-
-template<typename TBlock>
-using ports_data = fixedBlock_ports_data<TBlock>;
-
-template<typename TBlock>
-using all_input_ports = typename fixedBlock_ports_data<TBlock>::all::input_ports;
-
-template<typename TBlock>
-using all_output_ports = typename fixedBlock_ports_data<TBlock>::all::output_ports;
-
-template<typename TBlock>
-using all_input_port_types = typename fixedBlock_ports_data<TBlock>::all::input_port_types;
-
-template<typename TBlock>
-using all_output_port_types = typename fixedBlock_ports_data<TBlock>::all::output_port_types;
-
-template<typename TBlock>
+template<PortReflectable TBlock>
 using all_input_port_types_tuple = typename all_input_port_types<TBlock>::tuple_type;
 
-template<typename TBlock>
-using stream_input_ports = typename fixedBlock_ports_data<TBlock>::stream::input_ports;
+template<PortReflectable TBlock>
+using stream_input_ports = input_port_descriptors<TBlock, PortType::STREAM>;
 
-template<typename TBlock>
-using stream_output_ports = typename fixedBlock_ports_data<TBlock>::stream::output_ports;
+template<PortReflectable TBlock>
+using stream_output_ports = output_port_descriptors<TBlock, PortType::STREAM>;
 
-template<typename TBlock>
-using stream_input_port_types = typename fixedBlock_ports_data<TBlock>::stream::input_port_types;
+template<PortReflectable TBlock>
+using stream_input_port_types = typename stream_input_ports<TBlock>::template transform<port::type>;
 
-template<typename TBlock>
-using stream_output_port_types = typename fixedBlock_ports_data<TBlock>::stream::output_port_types;
+template<PortReflectable TBlock>
+using stream_output_port_types = typename stream_output_ports<TBlock>::template transform<port::type>;
 
-template<typename TBlock>
+template<PortReflectable TBlock>
 using stream_input_port_types_tuple = typename stream_input_port_types<TBlock>::tuple_type;
 
-template<typename TBlock>
-using stream_return_type = typename fixedBlock_ports_data<TBlock>::stream::output_port_types::tuple_or_type;
+template<PortReflectable TBlock>
+using stream_return_type = typename stream_output_port_types<TBlock>::tuple_or_type;
 
-template<typename TBlock>
+template<PortReflectable TBlock>
 using all_input_port_names = typename all_input_ports<TBlock>::template transform<detail::port_name>;
 
-template<typename TBlock>
+template<PortReflectable TBlock>
 using all_output_port_names = typename all_output_ports<TBlock>::template transform<detail::port_name>;
-
-template<typename TBlock>
-constexpr bool block_defines_ports_as_member_variables = fixedBlock_ports_data<TBlock>::member_ports_detector::value;
-
-template<typename TBlock, typename TPortType>
-using get_port_member_descriptor = typename meta::to_typelist<refl::descriptor::member_list<TBlock>>::template filter<detail::is_port_or_collection_descriptor>::template filter<detail::member_descriptor_has_type<TPortType>::template matches>::template at<0>;
 
 // TODO: Why is this not done with requires?
 // mkretz: I don't understand the question. "this" in the question is unclear.
@@ -217,7 +125,7 @@ namespace detail {
 template<std::size_t... Is>
 auto can_processOne_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(std::get<Is>(input)...));
 
-template<typename TBlock>
+template<PortReflectable TBlock>
 using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBlock>, vir::simdize<stream_input_port_types_tuple<TBlock>>::size()>;
 } // namespace detail
 
@@ -231,27 +139,25 @@ using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBloc
  * `processOne_simd(integral_constant N)`, which returns SIMD object(s) of width N.
  */
 template<typename TBlock>
-concept can_processOne_simd =                                                     //
-    traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
-        { detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
+concept can_processOne_simd = //
+    PortReflectable<TBlock> and traits::block::stream_input_ports<TBlock>::template none_of<port::is_dynamic_port_collection> and traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+        { detail::can_processOne_invoke_test(block, input_simds, stream_input_ports<TBlock>::index_sequence) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
     };
 
 template<typename TBlock>
-concept can_processOne_simd_const =                                               //
-    traits::block::stream_input_ports<TBlock>::template all_of<port::is_port> and // checks we don't have port collections inside
-    traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(const TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
-        { detail::can_processOne_invoke_test(block, input_simds, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
+concept can_processOne_simd_const = //
+    PortReflectable<TBlock> and traits::block::stream_input_ports<TBlock>::template none_of<port::is_dynamic_port_collection> and traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(const TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+        { detail::can_processOne_invoke_test(block, input_simds, stream_input_ports<TBlock>::index_sequence) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
     };
 
 template<typename TBlock>
-concept can_processOne_scalar = requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
-    { detail::can_processOne_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
+concept can_processOne_scalar = PortReflectable<TBlock> and requires(TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
+    { detail::can_processOne_invoke_test(block, inputs, stream_input_ports<TBlock>::index_sequence) } -> std::same_as<stream_return_type<TBlock>>;
 };
 
 template<typename TBlock>
-concept can_processOne_scalar_const = requires(const TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
-    { detail::can_processOne_invoke_test(block, inputs, std::make_index_sequence<traits::block::stream_input_ports<TBlock>::size()>()) } -> std::same_as<stream_return_type<TBlock>>;
+concept can_processOne_scalar_const = PortReflectable<TBlock> and requires(const TBlock& block, const stream_input_port_types_tuple<TBlock>& inputs) {
+    { detail::can_processOne_invoke_test(block, inputs, stream_input_ports<TBlock>::index_sequence) } -> std::same_as<stream_return_type<TBlock>>;
 };
 
 template<typename TBlock>
@@ -339,19 +245,16 @@ struct DummyOutputSpan : public DummyWriterSpan<T> {
 };
 static_assert(OutputSpanLike<DummyOutputSpan<int>>);
 
-template<typename Port, bool isInputStdSpan, bool isOutputStdSpan>
+template<gr::detail::PortDescription Port, bool isInputStdSpan, bool isOutputStdSpan>
 constexpr auto* port_to_processBulk_argument_helper() {
-    if constexpr (requires(Port p) { // array of ports
-                      typename Port::value_type;
-                      p.cbegin() != p.cend();
-                  }) {
-        if constexpr (Port::value_type::kIsInput) {
+    if constexpr (Port::kIsDynamicCollection) { // vector of ports
+        if constexpr (Port::kIsInput) {
             if constexpr (isInputStdSpan) {
                 return static_cast<std::span<std::span<const typename Port::value_type::value_type>>*>(nullptr);
             } else {
                 return static_cast<std::span<DummyInputSpan<const typename Port::value_type::value_type>>*>(nullptr);
             }
-        } else if constexpr (Port::value_type::kIsOutput) {
+        } else if constexpr (Port::kIsOutput) {
             if constexpr (isOutputStdSpan) {
                 return static_cast<std::span<std::span<typename Port::value_type::value_type>>*>(nullptr);
             } else {
@@ -376,25 +279,17 @@ constexpr auto* port_to_processBulk_argument_helper() {
     }
 }
 
-template<typename Port>
-struct port_to_processBulk_argument_std_std {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, true>())>;
-};
+template<gr::detail::PortDescription Port>
+using port_to_processBulk_argument_std_std = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, true>())>;
 
-template<typename Port>
-struct port_to_processBulk_argument_std_notstd {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, false>())>;
-};
+template<gr::detail::PortDescription Port>
+using port_to_processBulk_argument_std_notstd = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, true, false>())>;
 
-template<typename Port>
-struct port_to_processBulk_argument_notstd_std {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, true>())>;
-};
+template<gr::detail::PortDescription Port>
+using port_to_processBulk_argument_notstd_std = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, true>())>;
 
-template<typename Port>
-struct port_to_processBulk_argument_notstd_notstd {
-    using type = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, false>())>;
-};
+template<gr::detail::PortDescription Port>
+using port_to_processBulk_argument_notstd_notstd = std::remove_pointer_t<decltype(port_to_processBulk_argument_helper<Port, false, false>())>;
 
 template<typename>
 struct nothing_you_ever_wanted {};
@@ -408,13 +303,14 @@ auto can_processBulk_invoke_test(auto& block, auto& inputs, auto& outputs, std::
 } // namespace detail
 
 template<typename TBlock, template<typename> typename TArguments>
-concept can_processBulk_helper = requires(TBlock& n, typename meta::transform_types_nested<TArguments, traits::block::stream_input_ports<TBlock>>::tuple_type inputs, typename meta::transform_types_nested<TArguments, traits::block::stream_output_ports<TBlock>>::tuple_type outputs) {
-    { detail::can_processBulk_invoke_test(n, inputs, outputs, std::make_index_sequence<stream_input_port_types<TBlock>::size>(), std::make_index_sequence<stream_output_port_types<TBlock>::size>()) } -> std::same_as<work::Status>;
+concept can_processBulk_helper = requires(TBlock& n, typename traits::block::stream_input_ports<TBlock>::template transform<TArguments>::tuple_type inputs, typename traits::block::stream_output_ports<TBlock>::template transform<TArguments>::tuple_type outputs) {
+    { detail::can_processBulk_invoke_test(n, inputs, outputs, stream_input_ports<TBlock>::index_sequence, stream_output_ports<TBlock>::index_sequence) } -> std::same_as<work::Status>;
 };
 
 template<typename TBlock>
-concept can_processBulk = can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_notstd> || //
-                          can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_notstd>;
+concept can_processBulk = PortReflectable<TBlock> &&                                                                                                                                          //
+                          (can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_notstd> || //
+                              can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_notstd>);
 
 /**
  * Satisfied if `TDerived` has a member function `processBulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a

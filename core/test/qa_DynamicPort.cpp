@@ -23,13 +23,13 @@ public:
     gr::PortIn<T>  original;
     gr::PortOut<R> scaled;
 
+    GR_MAKE_REFLECTABLE(scale, original, scaled);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a) const noexcept {
         return a * Scale;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 class adder : public gr::Block<adder<T>> {
@@ -38,30 +38,33 @@ public:
     gr::PortIn<T>  addend1;
     gr::PortOut<T> sum;
 
+    GR_MAKE_REFLECTABLE(adder, addend0, addend1, sum);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a, V b) const noexcept {
         return a + b;
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
-
 template<typename T>
 class cout_sink : public gr::Block<cout_sink<T>> {
 public:
     gr::PortIn<T> sink;
 
+    GR_MAKE_REFLECTABLE(cout_sink, sink);
+
     void processOne(T value) { fmt::print("Sinking a value: {}\n", value); }
 };
 
 static_assert(gr::BlockLike<cout_sink<float>>);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (cout_sink<T>), sink);
 
 template<typename T, T val, std::size_t count = 10UZ>
 class repeater_source : public gr::Block<repeater_source<T, val>> {
 public:
     gr::PortOut<T> value;
     std::size_t    _counter = 0;
+
+    GR_MAKE_REFLECTABLE(repeater_source, value);
 
     T processOne() {
         _counter++;
@@ -73,7 +76,6 @@ public:
 };
 
 static_assert(gr::BlockLike<repeater_source<int, 42>>);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T val, std::size_t count), (repeater_source<T, val, count>), value);
 
 const boost::ut::suite PortApiTests = [] {
     using namespace boost::ut;
@@ -88,12 +90,6 @@ const boost::ut::suite PortApiTests = [] {
         static_assert(PortLike<PortOut<float>>);
         static_assert(PortLike<MsgPortIn>);
         static_assert(PortLike<MsgPortOut>);
-
-        static_assert(PortLike<PortInNamed<float, "in">>);
-        static_assert(PortLike<decltype(PortInNamed<float, "">("in"))>);
-        static_assert(PortLike<PortOutNamed<float, "out">>);
-        static_assert(PortLike<MsgPortInNamed<"in_msg">>);
-        static_assert(PortLike<MsgPortOutNamed<"out_msg">>);
 
         static_assert(PortIn<float, RequiredSamples<>>::Required::kMinSamples == 1LU);
         static_assert(PortIn<float, RequiredSamples<>>::Required::kMaxSamples == std::numeric_limits<std::size_t>::max());

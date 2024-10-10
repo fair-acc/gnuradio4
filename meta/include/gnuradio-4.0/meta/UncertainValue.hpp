@@ -109,6 +109,9 @@ using UncertainValueType_t = detail::UncertainValueValueType<T>::type;
 
 /********************** some basic math operation definitions *********************************/
 
+// FIXME: make operators of UncertainValue hidden friends or members to reduce compile time (simplifies overload
+// resolution)
+
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
     requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
 [[nodiscard]] inline constexpr auto

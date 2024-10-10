@@ -67,6 +67,47 @@ struct concat_impl<A, B, C, D, More...> {
 template<typename... Ts>
 using concat = typename detail::concat_impl<Ts...>::type;
 
+// outer_product ////////
+namespace detail {
+template<typename...>
+struct outer_product_impl;
+
+template<typename... As>
+struct outer_product_impl<typelist<As...>> {
+    using type = typelist<As...>;
+};
+
+template<typename... Bs>
+struct outer_product_impl<typelist<>, typelist<Bs...>> {
+    using type = typelist<>;
+};
+
+template<typename A0, typename... Bs>
+struct outer_product_impl<typelist<A0>, typelist<Bs...>> {
+    using type = typelist<typelist<A0, Bs>...>;
+};
+
+template<typename A0, typename A1, typename... Bs>
+struct outer_product_impl<typelist<A0, A1>, typelist<Bs...>> {
+    using type = typelist<typelist<A0, Bs>..., typelist<A1, Bs>...>;
+};
+
+template<typename A0, typename A1, typename A2, typename... As, typename... Bs>
+struct outer_product_impl<typelist<A0, A1, A2, As...>, typelist<Bs...>> {
+    using tmp  = typename outer_product_impl<typelist<As...>, typelist<Bs...>>::type;
+    using type = concat<typelist<typelist<A0, Bs>..., typelist<A1, Bs>..., typelist<A2, Bs>...>, tmp>;
+};
+
+template<typename A, typename B, typename... More>
+requires(sizeof...(More) > 0)
+struct outer_product_impl<A, B, More...> {
+    using type = typename outer_product_impl<typename outer_product_impl<A, B>::type, More...>::type;
+};
+} // namespace detail
+
+template<typename... Ts>
+using outer_product = typename detail::outer_product_impl<Ts...>::type;
+
 // split_at, left_of, right_of ////////////////
 namespace detail {
 template<unsigned N>
@@ -180,20 +221,20 @@ struct transform_types_impl<Template, typelist<Ts...>> {
     using type = typelist<Template<Ts>...>;
 };
 
-template<template<typename> class Template, typename List>
-struct transform_types_nested_impl;
+template<template<typename, size_t> class Template, typename List, typename IdxSeq = decltype(std::make_index_sequence<List::size()>())>
+struct transform_types_indexed_impl;
 
-template<template<typename> class Template, typename... Ts>
-struct transform_types_nested_impl<Template, typelist<Ts...>> {
-    using type = typelist<typename Template<Ts>::type...>;
+template<template<typename, size_t> class Template, typename... Ts, size_t... Is>
+struct transform_types_indexed_impl<Template, typelist<Ts...>, std::index_sequence<Is...>> {
+    using type = typelist<Template<Ts, Is>...>;
 };
 } // namespace detail
 
 template<template<typename> class Template, typename List>
 using transform_types = typename detail::transform_types_impl<Template, List>::type;
 
-template<template<typename> class Template, typename List>
-using transform_types_nested = typename detail::transform_types_nested_impl<Template, List>::type;
+template<template<typename, size_t> class Template, typename List>
+using transform_types_indexed = typename detail::transform_types_indexed_impl<Template, List>::type;
 
 // transform_value_type
 template<typename T>
@@ -331,6 +372,8 @@ struct typelist {
 
     static inline constexpr std::integral_constant<std::size_t, sizeof...(Ts)> size = {};
 
+    static inline constexpr auto index_sequence = std::make_index_sequence<sizeof...(Ts)>();
+
     template<template<typename...> class Other>
     using apply = Other<Ts...>;
 
@@ -341,7 +384,7 @@ struct typelist {
 
     template<class F, typename... LeadingArguments>
     static constexpr void for_each(F&& f, LeadingArguments&&... args) {
-        for_each_impl(std::forward<F>(f), std::make_index_sequence<sizeof...(Ts)>{}, std::forward<LeadingArguments>(args)...);
+        for_each_impl(std::forward<F>(f), index_sequence, std::forward<LeadingArguments>(args)...);
     }
 
     template<std::size_t I>
@@ -359,14 +402,11 @@ struct typelist {
     template<typename... Other>
     static constexpr inline bool are_convertible_from = (std::convertible_to<Other, Ts> && ...);
 
-    template<typename F, typename Tup>
-    requires(sizeof...(Ts) == std::tuple_size_v<std::remove_cvref_t<Tup>>)
-    static constexpr auto construct(Tup&& args_tuple) {
-        return std::apply([]<typename... Args>(Args&&... args) { return std::make_tuple(F::template apply<Ts>(std::forward<Args>(args))...); }, std::forward<Tup>(args_tuple));
-    }
-
     template<template<typename> typename Trafo>
     using transform = meta::transform_types<Trafo, this_t>;
+
+    template<template<typename, size_t> typename Trafo>
+    using transform_with_index = meta::transform_types_indexed<Trafo, this_t>;
 
     template<template<typename...> typename Pred>
     constexpr static bool all_of = (Pred<Ts>::value && ...);
@@ -397,8 +437,14 @@ struct typelist {
     template<typename Matcher = typename this_t::safe_head>
     constexpr static bool all_same = ((std::is_same_v<Matcher, Ts> && ...));
 
-    template<template<typename...> typename Predicate>
-    using filter = concat<std::conditional_t<Predicate<Ts>::value, typelist<Ts>, typelist<>>...>;
+    template<typename T, template<typename...> typename... Predicates>
+    static constexpr bool eval_pred_all_of = (Predicates<T>::value and ...);
+
+    template<template<typename...> typename... Predicates>
+    using filter = concat<std::conditional_t<eval_pred_all_of<Ts, Predicates...>, typelist<Ts>, typelist<>>...>;
+
+    template<typename ToErase>
+    using erase = concat<std::conditional_t<std::is_same_v<ToErase, Ts>, typelist<>, typelist<Ts>>...>;
 
     template<template<typename> typename Pred>
     using find = typename detail::find_type<Pred, Ts...>::type;
@@ -438,10 +484,46 @@ constexpr bool is_any_of_v = std::disjunction_v<std::is_same<T, Ts>...>;
 namespace detail {
 template<template<typename...> typename OtherTypelist, typename... Args>
 meta::typelist<Args...> to_typelist_helper(OtherTypelist<Args...>*);
+
+template<typename T, size_t... Is>
+meta::typelist<std::remove_pointer_t<decltype([](size_t) -> std::add_pointer_t<T> { return nullptr; }(Is))>...> array_to_typelist_helper(std::index_sequence<Is...>);
+
+template<template<typename, size_t> typename ArrayLike, typename T, size_t N>
+decltype(array_to_typelist_helper<T>(std::make_index_sequence<N>())) to_typelist_helper(ArrayLike<T, N>*);
 } // namespace detail
 
 template<typename OtherTypelist>
 using to_typelist = decltype(detail::to_typelist_helper(static_cast<OtherTypelist*>(nullptr)));
+
+static_assert(std::same_as<to_typelist<std::array<int, 3>>, meta::typelist<int, int, int>>);
+
+namespace detail {
+template<typename T>
+struct flatten_impl;
+
+template<typename... Ts>
+struct flatten_impl<typelist<Ts...>> {
+    using type = concat<Ts...>;
+};
+} // namespace detail
+
+// Flatten a typelist of typelists into a single typelist.
+template<typename T>
+using flatten = typename detail::flatten_impl<T>::type;
+
+namespace detail {
+template<auto Collection, template<auto> class UnaryOp, typename = decltype(std::make_index_sequence<Collection.size()>())>
+struct transform_to_typelist_impl;
+
+template<auto Collection, template<auto> class UnaryOp, size_t... Is>
+struct transform_to_typelist_impl<Collection, UnaryOp, std::index_sequence<Is...>> {
+    using type = typelist<UnaryOp<Collection[Is]>...>;
+};
+} // namespace detail
+
+// Build a typelist from applying UnaryOp to all elements in the given Collection.
+template<auto Collection, template<auto> class UnaryOp>
+using transform_to_typelist = typename detail::transform_to_typelist_impl<Collection, UnaryOp>::type;
 
 } // namespace gr::meta
 

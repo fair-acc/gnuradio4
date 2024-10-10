@@ -329,6 +329,8 @@ public:
     Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -1.0f;
     Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +1.0f;
 
+    GR_MAKE_REFLECTABLE(DataSink, in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+
     using Block<DataSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
     struct Poller {
@@ -966,7 +968,6 @@ private:
 
 } // namespace gr::basic
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::DataSink, in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 auto registerDataSink = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
 
 #endif

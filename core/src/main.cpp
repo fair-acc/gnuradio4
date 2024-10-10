@@ -10,24 +10,26 @@ template<typename T>
 struct CountSource : public gr::Block<CountSource<T>> {
     gr::PortOut<T> random;
 
+    GR_MAKE_REFLECTABLE(CountSource, random);
+
     constexpr T processOne() { return 42; }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(CountSource, random);
 
 template<typename T>
 struct ExpectSink : public gr::Block<ExpectSink<T>> {
     gr::PortIn<T> sink;
 
+    GR_MAKE_REFLECTABLE(ExpectSink, sink);
+
     void processOne(T value) { std::cout << value << std::endl; }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(ExpectSink, sink);
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
 struct scale : public gr::Block<scale<T, Scale, R>> {
     gr::PortIn<T>  original;
     gr::PortOut<R> scaled;
+
+    GR_MAKE_REFLECTABLE(scale, original, scaled);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a) const noexcept {
@@ -35,13 +37,13 @@ struct scale : public gr::Block<scale<T, Scale, R>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, T Scale, typename R), (scale<T, Scale, R>), original, scaled);
-
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
 struct adder : public gr::Block<adder<T>> {
     gr::PortIn<T>  addend0;
     gr::PortIn<T>  addend1;
     gr::PortOut<R> sum;
+
+    GR_MAKE_REFLECTABLE(adder, addend0, addend1, sum);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a, V b) const noexcept {
@@ -49,18 +51,15 @@ struct adder : public gr::Block<adder<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename R), (adder<T, R>), addend0, addend1, sum);
-using gr::PortType::STREAM, gr::PortDirection::INPUT, gr::PortDirection::OUTPUT;
-
 template<typename T, std::size_t Count = 2>
-class duplicate : public gr::Block<duplicate<T, Count>, gr::meta::typelist<gr::PortInNamed<T, "in">>, gr::repeated_ports<Count, T, "out", STREAM, OUTPUT>> {
-    using base = gr::Block<duplicate<T, Count>, gr::meta::typelist<gr::PortInNamed<T, "in">>, gr::repeated_ports<Count, T, "out", STREAM, OUTPUT>>;
+struct duplicate : public gr::Block<duplicate<T, Count>> {
+    gr::PortIn<T>                     in;
+    std::array<gr::PortOut<T>, Count> out;
 
-public:
-    using return_type = typename gr::traits::block::stream_return_type<base>;
+    GR_MAKE_REFLECTABLE(duplicate, in, out);
 
-    [[nodiscard]] constexpr return_type processOne(T a) const noexcept {
-        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::make_tuple(((void)Is, a)...); }(std::make_index_sequence<Count>());
+    [[nodiscard]] constexpr auto processOne(T a) const noexcept {
+        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::tuple{((void)Is, a)...}; }(std::make_index_sequence<Count>());
     }
 };
 
@@ -71,6 +70,8 @@ struct delay : public gr::Block<delay<T, Depth>> {
     gr::PortOut<T>       out;
     std::array<T, Depth> buffer = {};
     int                  pos    = 0;
+
+    GR_MAKE_REFLECTABLE(delay, in, out);
 
     [[nodiscard]] constexpr T processOne(T val) noexcept {
         T ret       = buffer[pos];
@@ -84,7 +85,28 @@ struct delay : public gr::Block<delay<T, Depth>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t Depth), (delay<T, Depth>), in, out);
+template<typename TDescr, typename TPort>
+void reflectPort(auto idx, const TPort& obj) {
+    fmt::print("  {}.       name: {} / {}\n"
+               "           type: {} / {}\n"
+               "     descriptor: {}\n",
+        idx.value, TDescr::Name.view(), obj.name, gr::refl::type_name<typename TDescr::value_type>.view(), gr::refl::type_name<typename TPort::value_type>.view(), gr::refl::type_name<TDescr>.view());
+}
+
+template<gr::refl::reflectable TBlock>
+void reflectBlock(const TBlock& obj) {
+    using inputs  = gr::traits::block::stream_input_ports<TBlock>;
+    using outputs = gr::traits::block::stream_output_ports<TBlock>;
+    fmt::print("reflecting on '{}'\n"
+               "# reflectable data members: {}\n"
+               "# input streams: {}\n"
+               "# output streams: {}\n",
+        gr::refl::type_name<TBlock>.view(), gr::refl::data_member_count<TBlock>, inputs::size(), outputs::size());
+    fmt::print("-- input streams:\n");
+    inputs::for_each([&]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
+    fmt::print("-- output streams:\n");
+    outputs::for_each([&]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
+}
 
 int main() {
     using gr::merge;
@@ -97,23 +119,33 @@ int main() {
     {
         // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
         auto merged = mergeByIndex<0, 0>(scale<int, -1>(), mergeByIndex<0, 0>(scale<int, 2>(), adder<int>()));
+        reflectBlock(merged);
 
         // execute graph
         std::array<int, 4> a = {1, 2, 3, 4};
         std::array<int, 4> b = {10, 10, 10, 10};
+
+        // -2 + 10
+        // -4 + 10
+        // -6 + 10
+        // -8 + 10
 
         int r = 0;
         for (std::size_t i = 0; i < 4; ++i) {
             r += merged.processOne(a[i], b[i]);
         }
 
-        fmt::print("Result of graph execution: {}\n", r);
+        constexpr int expect = 20;
 
-        assert(r == 20);
+        fmt::print("Result of graph execution: {}, expected: {}\n", r, expect);
+
+        assert(r == expect);
     }
 
     {
         auto merged = mergeByIndex<0, 0>(duplicate<int, 2>(), scale<int, 2>());
+        static_assert(std::same_as<decltype(merged)::ReturnType, std::tuple<int, int>>);
+        reflectBlock(merged);
 
         // execute graph
         std::array<int, 4> a = {1, 2, 3, 4};
@@ -121,12 +153,15 @@ int main() {
         for (std::size_t i = 0; i < 4; ++i) {
             auto tuple    = merged.processOne(a[i]);
             auto [r1, r2] = tuple;
-            fmt::print("{} {} \n", r1, r2);
+            static_assert(std::same_as<std::remove_cvref_t<decltype(r1)>, int>);
+            static_assert(std::same_as<std::remove_cvref_t<decltype(r2)>, int>);
+            fmt::print("{} {}, expected: {} {} \n", r1, r2, a[i] * 2, a[i]);
         }
     }
 
     {
         auto merged = merge<"scaled", "addend1">(scale<int, 2>(), adder<int>());
+        reflectBlock(merged);
 
         // execute graph
         std::array<int, 4> a = {1, 2, 3, 4};
@@ -143,7 +178,8 @@ int main() {
     }
 
     {
-        auto merged = mergeByIndex<1, 0>(mergeByIndex<0, 0>(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
+        auto merged = merge<"out1", "original">(merge<"out0", "original">(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
+        reflectBlock(merged);
 
         // execute graph
         std::array<int, 4> a = {1, 2, 3, 4};
@@ -168,6 +204,6 @@ int main() {
         auto random = CountSource<int>{};
 
         auto merged = merge<"random", "original">(std::move(random), scale<int, 2>());
-        merged.processOne();
+        fmt::print("{}\n", merged.processOne());
     }
 }

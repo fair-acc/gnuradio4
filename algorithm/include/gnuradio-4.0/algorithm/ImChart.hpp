@@ -26,6 +26,7 @@
 #endif
 
 #include "gnuradio-4.0/meta/utils.hpp"
+#include "gnuradio-4.0/meta/reflection.hpp"
 #include <bitset>
 #include <iostream>
 

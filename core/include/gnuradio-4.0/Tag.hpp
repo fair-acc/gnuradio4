@@ -7,8 +7,7 @@
 
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
-
-#include "reflection.hpp"
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #ifdef __cpp_lib_hardware_interference_size
 using std::hardware_constructive_interference_size;
@@ -71,6 +70,8 @@ struct alignas(hardware_constructive_interference_size) Tag {
     signed_index_type index{0};
     property_map      map{};
 
+    GR_MAKE_REFLECTABLE(Tag, index, map);
+
     Tag() = default; // TODO: remove -- needed only for Clang <=15
 
     Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
@@ -109,8 +110,6 @@ struct alignas(hardware_constructive_interference_size) Tag {
 };
 
 } // namespace gr
-
-ENABLE_REFLECTION(gr::Tag, index, map);
 
 namespace gr {
 using meta::fixed_string;

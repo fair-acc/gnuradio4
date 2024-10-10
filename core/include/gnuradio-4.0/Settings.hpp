@@ -16,25 +16,22 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
 #include <fmt/chrono.h>
 #pragma GCC diagnostic pop
 
-#if defined(__GNUC__) || defined(__clang__)
-#define NO_INLINE __attribute__((noinline))
+#if defined(__clang__)
+#define NO_INLINE [[gnu::noinline]]
+#elif defined(__GNUC__)
+#define NO_INLINE [[gnu::noinline, gnu::noipa]]
 #else
 #define NO_INLINE
 #endif
 
 namespace gr {
-
-namespace detail {
-template<typename T>
-concept HasBaseType = requires { typename std::remove_cvref_t<T>::base_t; };
-}; // namespace detail
 
 namespace settings {
 
@@ -55,13 +52,13 @@ inline constexpr static bool isSupportedType() {
 }
 
 template<typename T, typename TMember>
-inline constexpr static bool isWritableMember(TMember member) {
-    return traits::port::is_not_any_port_or_collection<T> && !std::is_const_v<T> && is_writable(member) && settings::isSupportedType<T>();
+constexpr bool isWritableMember() {
+    return !traits::port::AnyPort<T> && !std::is_const_v<T> && !std::is_const_v<TMember> && settings::isSupportedType<T>();
 }
 
 template<typename T, typename TMember>
-inline constexpr static bool isReadableMember(TMember member) {
-    return traits::port::is_not_any_port_or_collection<T> && is_readable(member) && settings::isSupportedType<T>();
+constexpr bool isReadableMember() {
+    return !traits::port::AnyPort<T> && settings::isSupportedType<T>();
 }
 
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {
@@ -301,14 +298,6 @@ class CtxSettings : public SettingsBase {
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
-    template<typename Func>
-    inline constexpr static void processMembers(Func func) {
-        // reflect and iterate via known base-class member fields
-        refl::util::for_each(refl::reflect<typename std::remove_cvref_t<TBlock>::base_t>().members, func);
-        // reflect and iterate via known derived class member fields
-        refl::util::for_each(refl::reflect<TBlock>().members, func);
-    }
-
 public:
     // Settings configuration
     std::uint64_t expiry_time{std::numeric_limits<std::uint64_t>::max()}; // in ns, expiry time of parameter set after the last use, std::numeric_limits<std::uint64_t>::max() == no expiry time
@@ -324,7 +313,7 @@ public:
             static_assert(HasSettingsResetCallback<TBlock>, "if provided, reset() may have no function parameters");
         }
 
-        if constexpr (refl::is_reflectable<TBlock>()) {
+        if constexpr (refl::reflectable<TBlock>) {
             constexpr bool hasMetaInfo = requires(TBlock t) {
                 {
                     unwrap_if_wrapped_t<decltype(t.meta_information)> {}
@@ -337,10 +326,11 @@ public:
             }
 
             // handle meta-information for UI and other non-processing-related purposes
-            auto processOneMember = [&]<typename TFieldMeta>(TFieldMeta member) {
-                using RawType         = std::remove_cvref_t<typename TFieldMeta::value_type>;
-                using Type            = unwrap_if_wrapped_t<RawType>;
-                const auto memberName = std::string(get_display_name(member));
+            refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                using MemberType = refl::data_member_type<TBlock, kIdx>;
+                using RawType    = std::remove_cvref_t<MemberType>;
+                using Type       = unwrap_if_wrapped_t<RawType>;
+                auto memberName  = std::string(refl::data_member_name<TBlock, kIdx>.view());
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
                     _block->meta_information.value[memberName + "::description"]   = std::string(RawType::description());
@@ -350,14 +340,13 @@ public:
                 }
 
                 // detect whether field has one of the DEFAULT_TAGS signature
-                if constexpr (settings::isWritableMember<Type>(member)) {
-                    if constexpr (std::ranges::find(gr::tag::kDefaultTags, std::string_view(get_display_name_const(member).c_str())) != gr::tag::kDefaultTags.cend()) {
+                if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    if constexpr (std::ranges::find(gr::tag::kDefaultTags, refl::data_member_name<TBlock, kIdx>.view()) != gr::tag::kDefaultTags.cend()) {
                         _autoForwardParameters.emplace(memberName);
                     }
-                    _allWritableMembers.emplace(memberName);
+                    _allWritableMembers.emplace(std::move(memberName));
                 }
-            };
-            processMembers(processOneMember);
+            });
         }
     }
 
@@ -438,7 +427,7 @@ public:
 
     [[nodiscard]] property_map set(const property_map& parameters, SettingsCtx ctx = {}) override {
         property_map ret;
-        if constexpr (refl::is_reflectable<TBlock>()) {
+        if constexpr (refl::reflectable<TBlock>) {
             std::lock_guard lg(_mutex);
             if (ctx.time == 0ULL) {
                 ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
@@ -454,11 +443,12 @@ public:
             auto& currentAutoUpdateParameters = _autoUpdateParameters[ctx];
 
             for (const auto& [key, value] : parameters) {
-                bool isSet            = false;
-                auto processOneMember = [&]<typename TFieldMeta>(TFieldMeta member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
-                    if constexpr (settings::isWritableMember<Type>(member)) {
-                        const auto fieldName = std::string_view(get_display_name(member));
+                bool isSet = false;
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
                         if (fieldName == key && std::holds_alternative<Type>(value)) {
                             if (currentAutoUpdateParameters.contains(key)) {
                                 currentAutoUpdateParameters.erase(key);
@@ -474,8 +464,7 @@ public:
                             }());
                         }
                     }
-                };
-                processMembers(processOneMember);
+                });
                 if (!isSet) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
@@ -567,7 +556,7 @@ public:
     }
 
     NO_INLINE void autoUpdate(const Tag& tag) override {
-        if constexpr (refl::is_reflectable<TBlock>()) {
+        if constexpr (refl::reflectable<TBlock>) {
             std::lock_guard lg(_mutex);
             const auto      tagCtx = createSettingsCtxFromTag(tag);
 
@@ -593,16 +582,16 @@ public:
             const property_map& parameters = tag.map;
             bool                wasChanged = false;
             for (const auto& [key, value] : parameters) {
-                auto processOneMember = [&]<typename TFieldMeta>(TFieldMeta member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
-                    if constexpr (settings::isWritableMember<Type>(member)) {
-                        if (std::string_view(get_display_name(member)) == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<Type>(value)) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<Type>(value)) {
                             _stagedParameters.insert_or_assign(key, value);
                             wasChanged = true;
                         }
                     }
-                };
-                processMembers(processOneMember);
+                });
             }
 
             if (tagCtx == std::nullopt && !wasChanged) { // not context and no parameters in the Tag
@@ -707,7 +696,7 @@ public:
 
     [[nodiscard]] NO_INLINE ApplyStagedParametersResult applyStagedParameters() override {
         ApplyStagedParametersResult result;
-        if constexpr (refl::is_reflectable<TBlock>()) {
+        if constexpr (refl::reflectable<TBlock>) {
             std::lock_guard lg(_mutex);
 
             // prepare old settings if required
@@ -724,13 +713,15 @@ public:
             // update staged and forward parameters based on member properties
             property_map staged;
             for (const auto& [key, stagedValue] : _stagedParameters) {
-                auto applyOneMemberChanges = [&key, &staged, &result, &stagedValue, this]<typename TFieldMeta>(TFieldMeta member) {
-                    using RawType = std::remove_cvref_t<typename TFieldMeta::value_type>;
-                    using Type    = unwrap_if_wrapped_t<RawType>;
-                    if constexpr (settings::isWritableMember<Type>(member)) {
-                        if (std::string(get_display_name(member)) == key && std::holds_alternative<Type>(stagedValue)) {
+                refl::for_each_data_member_index<TBlock>([&key, &staged, &result, &stagedValue, this](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using RawType    = std::remove_cvref_t<MemberType>;
+                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        if (refl::data_member_name<TBlock, kIdx>.view() == key && std::holds_alternative<Type>(stagedValue)) {
+                            auto& member = refl::data_member<kIdx>(*_block);
                             if constexpr (is_annotated<RawType>()) {
-                                if (member(*_block).validate_and_set(std::get<Type>(stagedValue))) {
+                                if (member.validate_and_set(std::get<Type>(stagedValue))) {
                                     if constexpr (HasSettingsChangedCallback<TBlock>) {
                                         staged.insert_or_assign(key, stagedValue);
                                     } else {
@@ -738,22 +729,18 @@ public:
                                     }
                                 } else {
                                     // TODO: replace with pmt error message on msgOut port (to note: clang compiler bug/issue)
+                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
 #if !defined(__EMSCRIPTEN__) && !defined(__clang__)
-                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                        _block->unique_name, _block->name, member(*_block), std::get<Type>(stagedValue),                                          //
-                                        std::string(get_display_name(member)), RawType::LimitType::MinRange,
-                                        RawType::LimitType::MaxRange, //
-                                        RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+                                        _block->unique_name, _block->name,
 #else
-                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                        "_block->uniqueName", "_block->name", member(*_block), std::get<Type>(stagedValue),                                       //
-                                        std::string(get_display_name(member)), RawType::LimitType::MinRange,
+                                        "_block->uniqueName", "_block->name",
+#endif
+                                        member, std::get<Type>(stagedValue), refl::data_member_name<TBlock, kIdx>.view(), RawType::LimitType::MinRange,
                                         RawType::LimitType::MaxRange, //
                                         RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
-#endif
                                 }
                             } else {
-                                member(*_block) = std::get<Type>(stagedValue);
+                                member = std::get<Type>(stagedValue);
                                 result.appliedParameters.insert_or_assign(key, stagedValue);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, stagedValue);
@@ -766,8 +753,7 @@ public:
                             result.forwardParameters.insert_or_assign(key, stagedValue);
                         }
                     }
-                };
-                processMembers(applyOneMemberChanges);
+                });
             }
 
             updateActiveParametersImpl();
@@ -797,7 +783,7 @@ public:
     }
 
     NO_INLINE void updateActiveParameters() noexcept override {
-        if constexpr (refl::is_reflectable<TBlock>()) {
+        if constexpr (refl::reflectable<TBlock>) {
             std::lock_guard lg(_mutex);
             updateActiveParametersImpl();
         }
@@ -805,13 +791,13 @@ public:
 
 private:
     NO_INLINE void updateActiveParametersImpl() noexcept {
-        auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
-            using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
-            if constexpr (settings::isReadableMember<Type>(member)) {
-                _activeParameters.insert_or_assign(get_display_name_const(member).str(), static_cast<Type>(member(*_block)));
+        refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
+            using MemberType = refl::data_member_type<TBlock, kIdx>;
+            using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+            if constexpr (settings::isReadableMember<Type, MemberType>()) {
+                _activeParameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), static_cast<Type>(refl::data_member<kIdx>(*_block)));
             }
-        };
-        processMembers(processOneMember);
+        });
     }
 
     [[nodiscard]] NO_INLINE std::optional<pmtv::pmt> findBestMatchCtx(const pmtv::pmt& contextToSearch) const {
@@ -902,13 +888,14 @@ private:
 
     [[nodiscard]] NO_INLINE property_map setStagedImpl(const property_map& parameters) {
         property_map ret;
-        if constexpr (refl::is_reflectable<TBlock>()) {
+        if constexpr (refl::reflectable<TBlock>) {
             for (const auto& [key, value] : parameters) {
                 bool isSet            = false;
-                auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
-                    using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
-                    if constexpr (settings::isWritableMember<Type>(member)) {
-                        const auto fieldName = std::string_view(get_display_name(member));
+                refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
                         if (fieldName == key && std::holds_alternative<Type>(value)) {
                             _stagedParameters.insert_or_assign(key, value);
                             isSet = true;
@@ -921,8 +908,7 @@ private:
                             }());
                         }
                     }
-                };
-                processMembers(processOneMember);
+                });
                 if (!isSet) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
@@ -1030,15 +1016,14 @@ private:
 
     NO_INLINE void storeCurrentParameters(property_map& parameters) {
         // take a copy of the field -> map value of the old settings
-        if constexpr (refl::is_reflectable<TBlock>()) {
-            auto processOneMember = [&, this]<typename TFieldMeta>(TFieldMeta member) {
-                using Type = unwrap_if_wrapped_t<std::remove_cvref_t<typename TFieldMeta::value_type>>;
-
-                if constexpr (settings::isReadableMember<Type>(member)) {
-                    parameters.insert_or_assign(get_display_name(member), pmtv::pmt(member(*_block)));
+        if constexpr (refl::reflectable<TBlock>) {
+            refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
+                using MemberType = refl::data_member_type<TBlock, kIdx>;
+                using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                if constexpr (settings::isReadableMember<Type, MemberType>()) {
+                    parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*_block)));
                 }
-            };
-            processMembers(processOneMember);
+            });
         }
     }
 

@@ -10,7 +10,7 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/MemoryMonitor.hpp>
 
 namespace gr::testing {
@@ -75,6 +75,8 @@ Additionally, the block provides three optional output ports for real-time strea
     // If it takes more time to collect `evaluate_perf_rate` samples than the actual update rate can be much higher than `publish_rate`.
     gr::Annotated<float, "in sec", Doc<"write output approx. every `N` seconds">, Visible>                   publish_rate{1.f};
     gr::Annotated<std::string, "file path", Doc<"path to output csv file, `` -> print to console">, Visible> output_csv_file_path = "";
+
+    GR_MAKE_REFLECTABLE(PerformanceMonitor, in, outRes, outRate, publish_rate, evaluate_perf_rate, output_csv_file_path);
 
     // statistics of updates
     gr::Size_t n_writes{0U};
@@ -179,8 +181,6 @@ private:
 };
 
 } // namespace gr::testing
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T), (gr::testing::PerformanceMonitor<T>), in, outRes, outRate, publish_rate, evaluate_perf_rate, output_csv_file_path);
 
 auto registerPerformanceMonitor = gr::registerBlock<gr::testing::PerformanceMonitor, float, double>(gr::globalBlockRegistry());
 

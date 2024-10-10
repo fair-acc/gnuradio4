@@ -21,6 +21,8 @@ struct source : public gr::Block<source<T, min, count>> {
 
     gr::Size_t n_samples_max;
 
+    GR_MAKE_REFLECTABLE(source, out, n_samples_max);
+
     friend constexpr std::size_t available_samples(const source& self) noexcept { return self.n_samples_max - n_samples_produced; }
 
     [[nodiscard]] constexpr auto processOne_simd(auto N) const noexcept -> vir::simdize<T, decltype(N)::value> {
@@ -45,6 +47,8 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     gr::PortIn<T, gr::RequiredSamples<N_MIN, N_MAX>> in;
     uint64_t                                         should_receive_n_samples = 0;
     int64_t                                          _last_tag_position       = -1;
+
+    GR_MAKE_REFLECTABLE(sink, in, should_receive_n_samples);
 
     [[nodiscard]] constexpr auto processOne(T a) noexcept {
         // optional user-level tag processing
@@ -73,8 +77,5 @@ constexpr auto cascade(aggregate&& src, std::function<base()> generator = [] { r
 }
 
 } // namespace bm::test
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t min, std::size_t count, bool use_bulk_operation), (bm::test::source<T, min, count, use_bulk_operation>), out, n_samples_max);
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t N_MIN, std::size_t N_MAX), (bm::test::sink<T, N_MIN, N_MAX>), in, should_receive_n_samples);
 
 #endif // GNURADIO_BM_TEST_HELPER_HPP

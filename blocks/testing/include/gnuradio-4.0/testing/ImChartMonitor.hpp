@@ -22,6 +22,8 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
     float       sample_rate = 1000.0f;
     std::string signal_name = "unknown signal";
 
+    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name);
+
     HistoryBuffer<T>   _historyBufferX{1000};
     HistoryBuffer<T>   _historyBufferY{1000};
     HistoryBuffer<Tag> _historyBufferTags{1000};
@@ -98,7 +100,6 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 
 } // namespace gr::testing
 
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::ImChartMonitor, in, sample_rate, signal_name)
 inline const auto registerImChartMonitor = gr::registerBlock<gr::testing::ImChartMonitor, float, double, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_IMCHARTMONITOR_HPP

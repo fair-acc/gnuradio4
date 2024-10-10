@@ -245,6 +245,7 @@ endif ()
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
+target_link_libraries(pmtv INTERFACE refl-cpp)
 
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)

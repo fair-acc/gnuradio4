@@ -4,7 +4,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include <pmtv/pmt.hpp>
 
 #include <semaphore>
@@ -248,6 +248,8 @@ public:
     std::string type       = std::string(magic_enum::enum_name(_type));
     std::string parameters; // x-www-form-urlencoded encoded POST parameters
 
+    GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
+
     ~HttpBlock() { stopThread(); }
 
     void
@@ -291,8 +293,7 @@ public:
         _ready.release();
     }
 
-    void
-    processMessages(gr::MsgPortInNamed<"__Builtin"> &port, std::span<const gr::Message> message) {
+    void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> message) {
         gr::Block<HttpBlock<T>, BlockingIO<false>>::processMessages(port, message);
 
         std::ranges::for_each(message, [this](auto &m) {
@@ -318,8 +319,6 @@ public:
 static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 
 } // namespace gr::http
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::http::HttpBlock, out, url, endpoint, type, parameters);
 auto registerHttpBlock = gr::registerBlock<gr::http::HttpBlock, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_HTTP_BLOCK_HPP

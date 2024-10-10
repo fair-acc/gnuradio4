@@ -54,6 +54,8 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     A<gr::Size_t, "max overflow count", Doc<"0: disable">>                                    max_overflow_count = 10U;
     A<gr::Size_t, "max fragment count", Doc<"0: disable">>                                    max_fragment_count = 100U;
 
+    GR_MAKE_REFLECTABLE(SoapyBlock, out, device, device_parameter, sample_rate, rx_channels, rx_antennae, rx_center_frequency, rx_bandwdith, rx_gains, max_chunck_size, max_time_out_us, max_overflow_count);
+
     Device                          _device{};
     Device::Stream<T, SOAPY_SDR_RX> _rxStream{};
     gr::Size_t                      _fragmentCount = 0U;
@@ -88,34 +90,33 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     void resume() { _rxStream.activate(); }
     void stop() { _device.reset(); }
 
-    constexpr work::Status processBulk(OutputSpanLike auto& output)
-    requires(nPorts == 1U)
+    constexpr work::Status processBulk(OutputSpanLike auto&... outputs)
+    requires(nPorts == sizeof...(outputs))
     {
         // special case single ouput -> simplifies connect API because this doesn't require sub-indices
-        auto maxSamples = static_cast<std::uint32_t>(output.size()); // max available samples
-        maxSamples      = std::min(maxSamples, max_chunck_size.value);
+        const auto maxSamples = std::min({max_chunck_size.value, static_cast<std::uint32_t>(outputs.size())...}); // max available samples
 
         int       flags   = 0;
         long long time_ns = 0; // driver specifc
 
         // non-blocking/blocking depending on the value of max_time_out_us (0...)
-        int ret = _rxStream.readStream(flags, time_ns, max_time_out_us, std::span<T>(output).subspan(0, maxSamples));
+        int ret = _rxStream.readStream(flags, time_ns, max_time_out_us, std::span<T>(outputs).subspan(0, maxSamples)...);
         // for detailed debugging: detail::printSoapyReturnDebugInfo(ret, flags, time_ns);
 
         auto status = handleDeviceStreamingErrors(ret, flags);
         if (ret >= 0 && status == work::Status::OK) {
-            output.publish(static_cast<std::size_t>(ret));
+            (outputs.publish(static_cast<std::size_t>(ret)), ...);
             return work::Status::OK;
         }
 
         // no data or some failure occured
-        output.publish(0UZ);
+        (outputs.publish(0UZ), ...);
         return status;
     }
 
     template<OutputSpanLike TOutputBuffer>
     constexpr work::Status processBulk(std::span<TOutputBuffer>& outputs)
-    requires(nPorts > 1U)
+    requires(nPorts == std::dynamic_extent)
     {
         // general case multiple ouputs
         auto maxSamples = static_cast<std::uint32_t>(outputs[0].size()); // max available samples
@@ -124,23 +125,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         int       flags   = 0;
         int       ret     = SOAPY_SDR_TIMEOUT;
         long long time_ns = 0; // driver specifc
-        if constexpr (nPorts == 2UZ) {
-            ret = _rxStream.readStream(flags, time_ns, max_time_out_us, //
-                std::span<T>(outputs[0]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[1]).subspan(0, maxSamples));
-        } else if constexpr (nPorts == 3UZ) {
-            ret = _rxStream.readStream(flags, time_ns, max_time_out_us, //
-                std::span<T>(outputs[0]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[1]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[2]).subspan(0, maxSamples));
-        } else if constexpr (nPorts == 4UZ) {
-            ret = _rxStream.readStream(flags, time_ns, max_time_out_us, //
-                std::span<T>(outputs[0]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[1]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[2]).subspan(0, maxSamples),        //
-                std::span<T>(outputs[3]).subspan(0, maxSamples));
-        } else {
-            // fully dynamic case
+        {
             std::vector<std::span<T>> output(rx_channels->size());
             for (std::size_t i = 0UZ; i < rx_channels->size(); ++i) {
                 output[i] = std::span<T>(outputs[i]).subspan(0, maxSamples);
@@ -290,11 +275,6 @@ static_assert(std::is_constructible_v<SoapyBlock<std::complex<float>>, gr::prope
 static_assert(std::is_constructible_v<SoapySimpleSource<std::complex<float>>, gr::property_map>, "SoapyBlock not default constructible w/ property_map");
 
 } // namespace gr::blocks::soapy
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, std::size_t nPorts), (gr::blocks::soapy::SoapyBlock<T, nPorts>), out, //
-    device, device_parameter, sample_rate,                                                                             //
-    rx_channels, rx_antennae, rx_center_frequency, rx_bandwdith, rx_gains,                                             //
-    max_chunck_size, max_time_out_us, max_overflow_count)
 
 const inline auto registerSoapy = gr::registerBlock<gr::blocks::soapy::SoapySimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry()) //
                                   | gr::registerBlock<gr::blocks::soapy::SoapyDualSimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry());

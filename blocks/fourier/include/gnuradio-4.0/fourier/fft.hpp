@@ -113,6 +113,8 @@ On the choice of window (mathematically aka. apodisation) functions
     Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -std::numeric_limits<float>::max();
     Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +std::numeric_limits<float>::max();
 
+    GR_MAKE_REFLECTABLE(FFT, in, out, algorithm, fftSize, window, outputInDb, outputInDeg, unwrapPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+
     // semi-private caching vectors (need to be public for unit-test) -> TODO: move to FFT implementations, casting from T -> U::value_type should be done there
     std::vector<InDataType>  _inData             = std::vector<InDataType>(fftSize, 0);
     std::vector<OutDataType> _outData            = std::vector<OutDataType>(gr::meta::complex_like<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
@@ -213,9 +215,6 @@ template<typename T>
 using DefaultFFT = FFT<T, typename OutputDataSet<T>::type, gr::algorithm::FFT>;
 
 } // namespace gr::blocks::fft
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, typename U, template<typename, typename> typename FourierAlgoImpl), (gr::blocks::fft::FFT<T, U, FourierAlgoImpl>), //
-    in, out, algorithm, fftSize, window, outputInDb, outputInDeg, unwrapPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
 auto registerFFT = gr::registerBlock<gr::blocks::fft::DefaultFFT, float, double>(gr::globalBlockRegistry());
 

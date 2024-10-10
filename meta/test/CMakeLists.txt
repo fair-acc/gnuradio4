@@ -1,3 +1,5 @@
+add_ut_test(qa_fixed_string)
+add_ut_test(qa_reflection)
 add_ut_test(qa_formatter)
 add_ut_test(qa_traits)
 add_ut_test(qa_UncertainValue)

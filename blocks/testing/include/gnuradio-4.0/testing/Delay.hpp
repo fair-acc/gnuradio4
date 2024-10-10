@@ -16,6 +16,8 @@ struct Delay : public gr::Block<Delay<T>> {
     PortOut<T> out;
     uint32_t   delay_ms = 0;
 
+    GR_MAKE_REFLECTABLE(Delay, in, out, delay_ms);
+
     bool              _waiting = true;
     clock::time_point _start_time;
 
@@ -43,8 +45,6 @@ struct Delay : public gr::Block<Delay<T>> {
 };
 
 } // namespace gr::testing
-
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::testing::Delay, in, out, delay_ms)
 
 auto registerTestingDelay = gr::registerBlock<gr::testing::Delay, float, double>(gr::globalBlockRegistry());
 

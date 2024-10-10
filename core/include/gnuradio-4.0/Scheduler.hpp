@@ -15,7 +15,7 @@
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Profiler.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 namespace gr::scheduler {
@@ -42,10 +42,10 @@ protected:
     std::recursive_mutex                _jobListsMutex; // only used when modifying and copying the graph->local job list
     JobLists                            _jobLists = std::make_shared<std::vector<std::vector<BlockModel*>>>();
 
-    MsgPortOutNamed<"__ForChildren"> _toChildMessagePort;
-    MsgPortInNamed<"__FromChildren"> _fromChildMessagePort;
-    std::vector<gr::Message>         _pendingMessagesToChildren;
-    bool                             _messagePortsConnected = false;
+    MsgPortOutForChildren    _toChildMessagePort;
+    MsgPortInFromChildren    _fromChildMessagePort;
+    std::vector<gr::Message> _pendingMessagesToChildren;
+    bool                     _messagePortsConnected = false;
 
 public:
     using base_t = Block<Derived>;
@@ -53,6 +53,8 @@ public:
     Annotated<gr::Size_t, "timeout", Doc<"sleep timeout to wait if graph has made no progress ">>                              timeout_ms                      = 10U;
     Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 20U;
     Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
+
+    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio);
 
     constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
 
@@ -99,7 +101,7 @@ public:
         _pendingMessagesToChildren.clear();
     }
 
-    void processMessages(gr::MsgPortInNamed<"__Builtin">& port, std::span<const gr::Message> messages) {
+    void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> messages) {
         base_t::processMessages(port, messages); // filters messages and calls own property handler
         for (const gr::Message& msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
@@ -235,7 +237,6 @@ protected:
         std::lock_guard lock(_jobListsMutex);
         _graph.forEachBlockMutable([this](auto& block) {
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block.changeState(lifecycle::RUNNING));
-            for_each_port([](auto& port) { port.publishPendingTags(); }, outputPorts<PortType::STREAM>(this));
         });
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
@@ -480,7 +481,5 @@ private:
     }
 };
 } // namespace gr::scheduler
-
-ENABLE_REFLECTION_FOR_TEMPLATE_FULL((typename T, gr::scheduler::ExecutionPolicy execution, gr::profiling::ProfilerLike TProfiler), (gr::scheduler::SchedulerBase<T, execution, TProfiler>), timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio);
 
 #endif // GNURADIO_SCHEDULER_HPP

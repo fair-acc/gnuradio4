@@ -17,13 +17,13 @@ struct ArraySource : public gr::Block<ArraySource<T>> {
     std::array<gr::PortOut<T>, 2> outA{};
     std::array<gr::PortOut<T>, 2> outB{};
 
-    template<gr::OutputSpanLike TOutputSpan1, gr::OutputSpanLike TOutputSpan2>
-    gr::work::Status processBulk(std::span<TOutputSpan1>&, std::span<TOutputSpan2>&) {
+    GR_MAKE_REFLECTABLE(ArraySource, outA, outB);
+
+    template<gr::OutputSpanLike TOutputSpan1, gr::OutputSpanLike TOutputSpan2, gr::OutputSpanLike TOutputSpan3, gr::OutputSpanLike TOutputSpan4>
+    gr::work::Status processBulk(TOutputSpan1&, TOutputSpan2&, TOutputSpan3&, TOutputSpan4&) {
         return gr::work::Status::OK;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(ArraySource, outA, outB);
 
 template<typename T>
 struct ArraySink : public gr::Block<ArraySink<T>> {
@@ -38,13 +38,13 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
     gr::Annotated<std::vector<int16_t>, "int16_t vector setting">                   int16_vector;
     gr::Annotated<std::vector<std::complex<double>>, "std::complex vector setting"> complex_vector;
 
-    template<gr::InputSpanLike TInputSpan1, gr::InputSpanLike TInputSpan2>
-    gr::work::Status processBulk(std::span<TInputSpan1>&, std::span<TInputSpan2>&) {
+    GR_MAKE_REFLECTABLE(ArraySink, inA, inB, bool_setting, string_setting, complex_setting, bool_vector, string_vector, double_vector, int16_vector, complex_vector);
+
+    template<gr::InputSpanLike TInputSpan1, gr::InputSpanLike TInputSpan2, gr::InputSpanLike TInputSpan3, gr::InputSpanLike TInputSpan4>
+    gr::work::Status processBulk(TInputSpan1&, TInputSpan2&, TInputSpan3&, TInputSpan4&) {
         return gr::work::Status::OK;
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(ArraySink, inA, inB, bool_setting, string_setting, complex_setting, bool_vector, string_vector, double_vector, int16_vector, complex_vector);
 
 struct TestContext {
     explicit TestContext(std::vector<std::filesystem::path> paths) : loader(registry, std::move(paths)) {}
@@ -229,10 +229,10 @@ connections:
             auto&      arraySource0 = graph1.emplaceBlock<ArraySource<double>>();
             auto&      arraySource1 = graph1.emplaceBlock<ArraySource<double>>();
 
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink)));
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink)));
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB", 0>(arraySource0).to<"inA", 0>(arraySink)));
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB", 1>(arraySource1).to<"inA", 1>(arraySink)));
+            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA0">(arraySource0).to<"inB1">(arraySink)));
+            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA1">(arraySource1).to<"inB0">(arraySink)));
+            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB0">(arraySource0).to<"inA0">(arraySink)));
+            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB1">(arraySource1).to<"inA1">(arraySink)));
 
             expect(graph1.reconnectAllEdges());
 

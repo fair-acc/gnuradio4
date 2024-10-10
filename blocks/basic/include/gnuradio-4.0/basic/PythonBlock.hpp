@@ -87,6 +87,8 @@ myBlock.processBulk(ins, outs);
     A<gr::Size_t, "n_outputs", Visible, Doc<"number of inputs">, Limits<1U, 32U>> n_outputs    = 0U;
     std::string                                                                   pythonScript = "";
 
+    GR_MAKE_REFLECTABLE(PythonBlock, inputs, outputs, n_inputs, n_outputs, pythonScript);
+
     PyModuleDef*        _moduleDefinitions = myBlockPythonDefinitions<T>();
     python::Interpreter _interpreter{this, _moduleDefinitions};
     std::string         _prePythonDefinition = fmt::format(R"p(import {0}
@@ -236,7 +238,6 @@ private:
 };
 
 } // namespace gr::basic
-ENABLE_REFLECTION_FOR_TEMPLATE(gr::basic::PythonBlock, inputs, outputs, n_inputs, n_outputs, pythonScript)
 
 template<typename T>
 gr::basic::PythonBlock<T>* getPythonBlockFromCapsule(PyObject* capsule) {

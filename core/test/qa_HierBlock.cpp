@@ -5,7 +5,11 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 template<typename T, typename R = decltype(std::declval<T>() * std::declval<T>())>
-struct scale : public gr::Block<scale<T, R>, gr::PortInNamed<T, "original">, gr::PortOutNamed<R, "scaled">> {
+struct scale : public gr::Block<scale<T, R>> {
+    gr::PortIn<T>  original;
+    gr::PortOut<R> scaled;
+    GR_MAKE_REFLECTABLE(scale, original, scaled);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a) const noexcept {
         return a * 2;
@@ -13,7 +17,12 @@ struct scale : public gr::Block<scale<T, R>, gr::PortInNamed<T, "original">, gr:
 };
 
 template<typename T, typename R = decltype(std::declval<T>() + std::declval<T>())>
-struct adder : public gr::Block<adder<T>, gr::PortInNamed<T, "addend0">, gr::PortInNamed<T, "addend1">, gr::PortOutNamed<R, "sum">> {
+struct adder : public gr::Block<adder<T>> {
+    gr::PortIn<T>  addend0;
+    gr::PortIn<T>  addend1;
+    gr::PortOut<R> sum;
+    GR_MAKE_REFLECTABLE(adder, addend0, addend1, sum);
+
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(V a, V b) const noexcept {
         return a + b;
@@ -114,6 +123,8 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
     gr::PortOut<T, gr::RequiredSamples<1, 1024>> out;
     std::size_t                                  remaining_events_count;
 
+    GR_MAKE_REFLECTABLE(fixed_source, out, remaining_events_count);
+
     T value = 1;
 
     gr::work::Result work(std::size_t requested_work) {
@@ -145,12 +156,12 @@ struct fixed_source : public gr::Block<fixed_source<T>> {
     }
 };
 
-ENABLE_REFLECTION_FOR_TEMPLATE(fixed_source, out, remaining_events_count);
-
 template<typename T>
 struct cout_sink : public gr::Block<cout_sink<T>> {
     gr::PortIn<T, gr::RequiredSamples<1, 1024>> in;
     std::size_t                                 remaining = 0;
+
+    GR_MAKE_REFLECTABLE(cout_sink, in, remaining);
 
     void processOne(T value) {
         remaining--;
@@ -159,8 +170,6 @@ struct cout_sink : public gr::Block<cout_sink<T>> {
         }
     }
 };
-
-ENABLE_REFLECTION_FOR_TEMPLATE(cout_sink, in, remaining);
 
 gr::Graph make_graph(std::size_t events_count) {
     gr::Graph graph;

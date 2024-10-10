@@ -7,7 +7,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/reflection.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -32,6 +32,9 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
     gr::PortIn<T, gr::Doc<"In">, gr::RequiredSamples<24, 24, false>> inPort;
     // gr::PortIn<T, Doc<"In">> inPort;
     gr::PortOut<T>                            outPort;
+
+    GR_MAKE_REFLECTABLE(RealignTagsToChunks, inPort, outPort);
+
     double                                    sampling_rate = 1.0;
     constexpr static gr::TagPropagationPolicy tag_policy    = gr::TagPropagationPolicy::TPP_DONT;
 
@@ -58,7 +61,6 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         }
     }
 };
-ENABLE_REFLECTION_FOR_TEMPLATE(RealignTagsToChunks, inPort, outPort);
 
 static_assert(gr::HasProcessBulkFunction<RealignTagsToChunks<float>>);
 
@@ -82,16 +84,15 @@ static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCE
 } // namespace gr::testing
 
 const boost::ut::suite TagTests = [] {
-    using namespace boost::ut;
     using namespace gr;
 
-    "TagReflection"_test = [] {
-        static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
-        static_assert(refl::descriptor::type_descriptor<gr::Tag>::name == "gr::Tag");
-        static_assert(refl::member_list<Tag>::size == 2, "index and map being declared");
-        static_assert(refl::trait::get_t<0, refl::member_list<Tag>>::name == "index", "class field index is public API");
-        static_assert(refl::trait::get_t<1, refl::member_list<Tag>>::name == "map", "class field map is public API");
-    };
+    static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
+    static_assert(gr::refl::class_name<gr::Tag> == "gr::Tag");
+    static_assert(gr::refl::data_member_count<Tag> == 2, "index and map being declared");
+    static_assert(gr::refl::data_member_name<Tag, 0> == "index", "class field index is public API");
+    static_assert(gr::refl::data_member_name<Tag, 1> == "map", "class field map is public API");
+
+    using namespace boost::ut;
 
     "DefaultTags"_test = [] {
         using namespace std::string_view_literals;

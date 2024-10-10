@@ -7,27 +7,8 @@
 
 namespace gr::traits::port {
 
-template<typename T>
-concept HasFixedInfo = requires {
-    typename T::value_type;
-    { T::static_name() };
-    { T::direction() } -> std::same_as<PortDirection>;
-    { T::type() } -> std::same_as<PortType>;
-};
-
-template<typename T>
-using has_fixed_info = std::integral_constant<bool, HasFixedInfo<T>>;
-
-template<typename T>
-struct has_fixed_info_or_is_typelist : std::false_type {};
-
-template<typename T>
-    requires HasFixedInfo<T>
-struct has_fixed_info_or_is_typelist<T> : std::true_type {};
-
-template<typename T>
-    requires(meta::is_typelist_v<T> and T::template all_of<has_fixed_info>)
-struct has_fixed_info_or_is_typelist<T> : std::true_type {};
+// -------------------------------
+// traits for 'Port' types
 
 template<typename Port>
 using is_input = std::integral_constant<bool, Port::direction() == PortDirection::INPUT>;
@@ -38,81 +19,64 @@ concept is_input_v = is_input<Port>::value;
 template<typename Port>
 using is_output = std::integral_constant<bool, Port::direction() == PortDirection::OUTPUT>;
 
-template<typename Port>
-concept is_output_v = is_output<Port>::value;
-
 template<typename Type>
-concept is_port_v = is_output_v<Type> || is_input_v<Type>;
+concept is_port_v = is_output<Type>::value || is_input_v<Type>;
 
 template<typename Type>
 using is_port = std::integral_constant<bool, is_port_v<Type>>;
 
+// actually tuple-like (including std::array)
+template<typename T>
+struct is_port_tuple : std::false_type {};
+
+template<typename... Ts>
+struct is_port_tuple<std::tuple<Ts...>> : std::conjunction<is_port<Ts>...> {};
+
+template<typename T, std::size_t N>
+struct is_port_tuple<std::array<T, N>> : is_port<T> {};
+
 template<typename Collection>
-concept is_port_collection_v = is_port_v<typename Collection::value_type>;
+concept is_port_collection_v = is_port_v<typename Collection::value_type> and not is_port_tuple<Collection>::value;
 
 template<typename T>
-auto
-unwrap_port_helper() {
-    if constexpr (port::is_port_v<T>) {
-        return static_cast<T *>(nullptr);
-    } else if constexpr (port::is_port_collection_v<T>) {
-        return static_cast<typename T::value_type *>(nullptr);
-    } else {
-        meta::print_types<meta::message_type<"Is not a port or a collection of ports">, T>{};
-    }
-}
+using is_port_collection = std::bool_constant<is_port_collection_v<T>>;
 
 template<typename T>
-using unwrap_port = std::remove_pointer_t<decltype(unwrap_port_helper<T>())>;
+concept AnyPort = is_port_v<T> or is_port_v<typename T::value_type> or is_port_tuple<T>::value;
 
-struct kind {
-    template<PortType matcherPortType>
-    struct tester_for {
-        template<typename Port>
-        static constexpr bool matches_kind = matcherPortType == PortType::ANY || matcherPortType == Port::kPortType;
+// -------------------------------
+// traits for 'PortDescriptor' types
+// FIXME: better name "describes_" instead of "is_"?
 
-        template<typename T>
-        constexpr static bool
-        is_port_or_collection_helper() {
-            if constexpr (port::is_port_v<T> || port::is_port_collection_v<T>) {
-                return matches_kind<unwrap_port<T>>;
-            } else {
-                return false;
-            }
-        }
+template<gr::detail::PortDescription T>
+using is_stream_port = std::bool_constant<PortType::STREAM == T::kPortType>;
 
-        template<typename T>
-        using is_port_or_collection = std::integral_constant<bool, is_port_or_collection_helper<T>()>;
+template<gr::detail::PortDescription T>
+using is_message_port = std::bool_constant<PortType::MESSAGE == T::kPortType>;
 
-        template<typename T>
-        using is_input_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_input_v<unwrap_port<T>>>;
+template<gr::detail::PortDescription T>
+using is_input_port = std::bool_constant<T::kIsInput>;
 
-        template<typename T>
-        using is_output_port_or_collection = std::integral_constant<bool, is_port_or_collection<T>() && port::is_output_v<unwrap_port<T>>>;
-    };
+template<gr::detail::PortDescription T>
+using is_output_port = std::bool_constant<T::kIsOutput>;
+
+template<gr::detail::PortDescription T>
+using is_dynamic_port_collection = std::bool_constant<T::kIsDynamicCollection>;
+
+template<PortType portFlavor>
+struct is_port_flavor {
+    template<gr::detail::PortDescription T>
+    using eval = std::bool_constant<portFlavor == PortType::ANY or portFlavor == T::kPortType>;
 };
 
-template<typename PortOrCollection>
-auto
-type_helper() {
-    if constexpr (is_port_v<PortOrCollection>) {
-        return static_cast<typename PortOrCollection::value_type *>(nullptr);
-    } else {
-        return static_cast<std::vector<typename PortOrCollection::value_type::value_type> *>(nullptr);
-    }
-}
+template<gr::detail::PortDescription PortOrCollection>
+using type = typename PortOrCollection::value_type;
 
-template<typename PortOrCollection>
-using type = std::remove_pointer_t<decltype(type_helper<PortOrCollection>())>;
+template<gr::detail::PortDescription... Ports>
+struct min_samples : std::integral_constant<std::size_t, std::max({Ports::Required::kMinSamples...})> {};
 
-template<typename... Ports>
-struct min_samples : std::integral_constant<std::size_t, std::max({ Ports::Required::kMinSamples... })> {};
-
-template<typename... Ports>
-struct max_samples : std::integral_constant<std::size_t, std::max({ Ports::Required::kMaxSamples... })> {};
-
-template<typename Type>
-constexpr bool is_not_any_port_or_collection = !gr::traits::port::kind::tester_for<PortType::ANY>::is_port_or_collection<Type>();
+template<gr::detail::PortDescription... Ports>
+struct max_samples : std::integral_constant<std::size_t, std::max({Ports::Required::kMaxSamples...})> {};
 
 } // namespace gr::traits::port
 
