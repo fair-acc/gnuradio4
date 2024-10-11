@@ -46,7 +46,7 @@ struct all_port_descriptors_impl {
             } else if constexpr (port::is_port_tuple<T>::value) {
                 // tuple<Ports...> -> typelist<PortDescriptor...>
                 // array<Port, N> -> typelist<PortDescriptor, PortDescriptor, ...>
-                return [=]<size_t... Is>(std::index_sequence<Is...>) { return meta::typelist<typename std::tuple_element_t<Is, T>::template make_port_descriptor<name + meta::fixed_string_from_number<Is>, Idx, Is>...>{}; }(std::make_index_sequence<std::tuple_size_v<T>>());
+                return [=]<size_t... Is>(std::index_sequence<Is...>) { return meta::typelist<typename std::tuple_element_t<Is, T>::template make_port_descriptor<name + '#' + meta::fixed_string_from_number<Is>, Idx, Is>...>{}; }(std::make_index_sequence<std::tuple_size_v<T>>());
             } else if constexpr (port::is_port_collection<T>::value) {
                 // vector<Port> -> PortDescriptor|PortCollection
                 return meta::typelist<typename T::value_type::template make_port_descriptor<name, Idx, gr::detail::PortCollection>>{};
@@ -112,6 +112,33 @@ using all_input_port_names = typename all_input_ports<TBlock>::template transfor
 
 template<PortReflectable TBlock>
 using all_output_port_names = typename all_output_ports<TBlock>::template transform<detail::port_name>;
+
+template<fixed_string Name, typename PortList, typename = std::make_index_sequence<PortList::size>>
+struct try_index_for_name;
+
+template<fixed_string Name, typename... Ps, std::size_t... Is>
+struct try_index_for_name<Name, meta::typelist<Ps...>, std::index_sequence<Is...>>
+{
+    static constexpr int has_match = ((Ps() == Name) + ...);
+
+    static constexpr std::size_t value = has_match ? ((Ps() == Name ? Is : 0u) + ...) : meta::invalid_index;
+};
+
+template<typename NameList, fixed_string Name>
+concept NameLookupSucceeds = try_index_for_name<Name, NameList>::has_match > 0;
+
+template<typename NameList, fixed_string Name>
+concept NameLookupIsUnique = try_index_for_name<Name, NameList>::has_match == 1;
+
+template<fixed_string Name, typename PortList>
+consteval std::size_t indexForName() {
+    using NameList = typename PortList::template transform<detail::port_name>;
+    static_assert(NameLookupSucceeds<NameList, Name>, //
+        "The requested port does not exist. Inspect the detailed error message for the 'NameList' argument to the 'NameLookupSucceeds' concept to see all valid port names.");
+    static_assert(NameLookupIsUnique<NameList, Name>, //
+        "The given Block has more than one port with the requested name. This should never happen, except for MergedGraph blocks (which is subject to change).");
+    return try_index_for_name<Name, NameList>::value;
+}
 
 // TODO: Why is this not done with requires?
 // mkretz: I don't understand the question. "this" in the question is unclear.
