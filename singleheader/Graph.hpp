@@ -16610,10 +16610,10 @@ using is_output_port = std::bool_constant<T::kIsOutput>;
 template<gr::detail::PortDescription T>
 using is_dynamic_port_collection = std::bool_constant<T::kIsDynamicCollection>;
 
-template<PortType portFlavor>
-struct is_port_flavor {
+template<PortType portType>
+struct is_port_type {
     template<gr::detail::PortDescription T>
-    using eval = std::bool_constant<portFlavor == PortType::ANY or portFlavor == T::kPortType>;
+    using eval = std::bool_constant<portType == PortType::ANY or portType == T::kPortType>;
 };
 
 template<gr::detail::PortDescription PortOrCollection>
@@ -19318,10 +19318,10 @@ template<PortReflectable TBlock>
 using all_port_descriptors = typename detail::all_port_descriptors_impl<TBlock>::type;
 
 template<PortReflectable TBlock, PortType portType>
-using input_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_input_port, port::is_port_flavor<portType>::template eval>;
+using input_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_input_port, port::is_port_type<portType>::template eval>;
 
 template<PortReflectable TBlock, PortType portType>
-using output_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_output_port, port::is_port_flavor<portType>::template eval>;
+using output_port_descriptors = typename all_port_descriptors<TBlock>::template filter<port::is_output_port, port::is_port_type<portType>::template eval>;
 
 template<PortReflectable TBlock>
 using all_input_ports = typename all_port_descriptors<TBlock>::template filter<port::is_input_port>;
@@ -22619,15 +22619,15 @@ constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>&
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
-template<std::size_t Index, PortType portFlavor, PortReflectable Self>
+template<std::size_t Index, PortType portType, PortReflectable Self>
 [[nodiscard]] constexpr auto& inputPort(Self* self) noexcept {
-    using TRequestedPortType = typename traits::block::input_port_descriptors<Self, portFlavor>::template at<Index>;
+    using TRequestedPortType = typename traits::block::input_port_descriptors<Self, portType>::template at<Index>;
     return TRequestedPortType::getPortObject(*self);
 }
 
-template<std::size_t Index, PortType portFlavor, PortReflectable Self>
+template<std::size_t Index, PortType portType, PortReflectable Self>
 [[nodiscard]] constexpr auto& outputPort(Self* self) noexcept {
-    using TRequestedPortType = typename traits::block::output_port_descriptors<Self, portFlavor>::template at<Index>;
+    using TRequestedPortType = typename traits::block::output_port_descriptors<Self, portType>::template at<Index>;
     return TRequestedPortType::getPortObject(*self);
 }
 
@@ -22649,14 +22649,14 @@ template<fixed_string Name, PortReflectable Self>
     return outputPort<Index, PortType::ANY, Self>(self);
 }
 
-template<PortType portFlavor, PortReflectable Self>
+template<PortType portType, PortReflectable Self>
 [[nodiscard]] constexpr auto inputPorts(Self* self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(inputPort<Idx, portFlavor>(self)...); }(traits::block::input_port_descriptors<Self, portFlavor>::index_sequence);
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(inputPort<Idx, portType>(self)...); }(traits::block::input_port_descriptors<Self, portType>::index_sequence);
 }
 
-template<PortType portFlavor, PortReflectable Self>
+template<PortType portType, PortReflectable Self>
 [[nodiscard]] constexpr auto outputPorts(Self* self) noexcept {
-    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx, portFlavor>(self)...); }(traits::block::output_port_descriptors<Self, portFlavor>::index_sequence);
+    return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx, portType>(self)...); }(traits::block::output_port_descriptors<Self, portType>::index_sequence);
 }
 
 namespace work {
