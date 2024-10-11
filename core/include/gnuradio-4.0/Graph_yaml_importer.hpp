@@ -15,117 +15,9 @@
 
 #include "Graph.hpp"
 #include "PluginLoader.hpp"
-
-namespace YAML {
-// YAML custom converter for complex numbers
-template<typename T>
-requires std::same_as<T, double> || std::same_as<T, float>
-struct convert<std::complex<T>> {
-    static Node encode(const std::complex<T>& rhs) {
-        Node node;
-        node.push_back(rhs.real());
-        node.push_back(rhs.imag());
-        return node;
-    }
-
-    static bool decode(const Node& node, std::complex<T>& rhs) {
-        if (!node.IsSequence() || node.size() != 2) {
-            return false;
-        }
-        rhs = std::complex<T>(node[0].as<T>(), node[1].as<T>());
-        return true;
-    }
-};
-} // namespace YAML
+#include "YamlUtils.hpp"
 
 namespace gr {
-
-namespace detail {
-
-template<typename T>
-inline auto toYamlString(const T& value) {
-    if constexpr (std::is_same_v<std::string, std::remove_cvref_t<T>>) {
-        return value;
-    } else if constexpr (std::is_same_v<bool, std::remove_cvref_t<T>>) {
-        return value ? "true" : "false";
-    } else if constexpr (requires { std::to_string(value); }) {
-        return std::to_string(value);
-    } else {
-        return "";
-    }
-}
-
-struct YamlSeq {
-    YAML::Emitter& out;
-
-    YamlSeq(YAML::Emitter& out_) : out(out_) { out << YAML::BeginSeq; }
-
-    ~YamlSeq() { out << YAML::EndSeq; }
-
-    template<typename F>
-    requires std::is_invocable_v<F>
-    void writeFn(const char* /*key*/, F&& fun) {
-        fun();
-    }
-};
-
-struct YamlMap {
-    YAML::Emitter& out;
-
-    YamlMap(YAML::Emitter& out_) : out(out_) { out << YAML::BeginMap; }
-
-    ~YamlMap() { out << YAML::EndMap; }
-
-    template<typename T>
-    void write(const std::string_view& key, const std::vector<T>& value) {
-        out << YAML::Key << key.data();
-        YamlSeq seq(out);
-        for (const auto& elem : value) {
-            if constexpr (std::same_as<T, std::complex<double>> || std::same_as<T, std::complex<float>>) {
-                writeComplexValue(out, elem);
-            } else {
-                out << YAML::Value << toYamlString(elem);
-            }
-        }
-    }
-
-    template<typename T>
-    void write(const std::string_view& key, const T& value) {
-        out << YAML::Key << key.data();
-        if constexpr (std::same_as<T, std::complex<double>> || std::same_as<T, std::complex<float>>) {
-            writeComplexValue(out, value);
-        } else {
-            out << YAML::Value << toYamlString(value);
-        }
-    }
-
-    template<typename F>
-    void writeFn(const std::string_view& key, F&& fun) {
-        out << YAML::Key << key.data();
-        out << YAML::Value;
-        fun();
-    }
-
-private:
-    template<typename T>
-    requires std::same_as<T, std::complex<double>> || std::same_as<T, std::complex<float>>
-    void writeComplexValue(YAML::Emitter& outEmitter, const T& value) {
-        YamlSeq seq(outEmitter);
-        outEmitter << YAML::Value << toYamlString(value.real());
-        outEmitter << YAML::Value << toYamlString(value.imag());
-    }
-};
-
-inline std::size_t parseIndex(std::string_view str) {
-    std::size_t index{};
-    auto [_, src_ec] = std::from_chars(str.begin(), str.end(), index);
-    if (src_ec != std::errc()) {
-        throw fmt::format("Unable to parse the index");
-    }
-    return index;
-}
-
-} // namespace detail
 
 inline gr::Graph loadGrc(PluginLoader& loader, const std::string& yamlSrc) {
     Graph testGraph;
@@ -137,10 +29,10 @@ inline gr::Graph loadGrc(PluginLoader& loader, const std::string& yamlSrc) {
     for (const auto& grcBlock : blocks) {
         auto name = grcBlock["name"].as<std::string>();
         auto id   = grcBlock["id"].as<std::string>();
+        /// TODO: when using saveGrc template_args is not saved, this has to be implemented
+        auto templateArgs = grcBlock["template_args"];
 
-        // TODO: Discuss how GRC should store the node types, how we should
-        // in general handle nodes that are parametrised by more than one type
-        auto currentBlock = loader.instantiate(id, "double");
+        auto currentBlock = loader.instantiate(id, templateArgs.IsDefined() ? templateArgs.as<std::string>() : "double");
         if (!currentBlock) {
             throw fmt::format("Unable to create block of type '{}'", id);
         }
@@ -149,80 +41,20 @@ inline gr::Graph loadGrc(PluginLoader& loader, const std::string& yamlSrc) {
         property_map newProperties;
 
         auto parameters = grcBlock["parameters"];
-        if (parameters && parameters.IsMap()) {
-            // TODO this applyStagedParameters is a workaround to make sure that currentBlock_settings is not empty
-            // but contains the default values of the block (needed to covert the parameter values to the right type) should this be based on metadata/reflection?
-            currentBlock->settings().updateActiveParameters();
-            auto currentBlockSettings = currentBlock->settings().get();
-            for (const auto& kv : parameters) {
-                const auto& key = kv.first.as<std::string>();
+        currentBlock->settings().loadParametersFromYAML(parameters);
+        auto parametersCtx = grcBlock["ctx_parameters"];
+        if (parametersCtx.IsDefined()) {
+            for (const auto& ctxPar : parametersCtx) {
+                auto ctxName       = ctxPar["context"].as<std::string>();
+                auto ctxTime       = ctxPar["time"].as<std::uint64_t>(); // in ns
+                auto ctxParameters = ctxPar["parameters"];
 
-                if (auto it = currentBlockSettings.find(key); it != currentBlockSettings.end()) {
-                    using variant_type_list    = meta::to_typelist<pmtv::pmt>;
-                    const YAML::Node& grcValue = kv.second;
-
-                    // This is a known property of this node
-                    auto tryType = [&]<typename T>() {
-                        if (it->second.index() == variant_type_list::index_of<T>()) {
-                            const auto& value  = grcValue.template as<T>();
-                            newProperties[key] = value;
-                            return true;
-                        }
-
-                        if (it->second.index() == variant_type_list::index_of<std::vector<T>>()) {
-#if (defined __clang__) && (!defined __EMSCRIPTEN__)
-                            if constexpr (std::is_same_v<T, bool>) {
-                                // gcc-stdlibc++/clang-libc++ have different implementations for std::vector<bool>
-                                // see https://en.cppreference.com/w/cpp/container/vector_bool for details
-                                const auto&       value = grcValue.template as<std::vector<int>>(); // need intermediary vector
-                                std::vector<bool> boolVector;
-                                for (int intValue : value) {
-                                    boolVector.push_back(intValue != 0);
-                                }
-                                newProperties[key] = boolVector;
-                                return true;
-                            }
-#endif
-                            const auto& value  = grcValue.template as<std::vector<T>>();
-                            newProperties[key] = value;
-                            return true;
-                        }
-
-                        return false;
-                    };
-
-                    // clang-format off
-                    tryType.operator()<std::int8_t>() ||
-                    tryType.operator()<std::int16_t>() ||
-                    tryType.operator()<std::int32_t>() ||
-                    tryType.operator()<std::int64_t>() ||
-                    tryType.operator()<std::uint8_t>() ||
-                    tryType.operator()<std::uint16_t>() ||
-                    tryType.operator()<std::uint32_t>() ||
-                    tryType.operator()<std::uint64_t>() ||
-                    tryType.operator()<bool>() ||
-                    tryType.operator()<float>() ||
-                    tryType.operator()<double>() ||
-                    tryType.operator()<std::string>() ||
-                    tryType.operator()<std::complex<float>>() ||
-                    tryType.operator()<std::complex<double>>() ||
-                    [&] {
-                        // Fallback to string, and non-defined property
-                        const auto& value = grcValue.template as<std::string>();
-                        currentBlock->metaInformation()[key] = value;
-                        return true;
-                    }();
-                    // clang-format on
-
-                } else {
-                    const auto& value                    = kv.second.as<std::string>();
-                    currentBlock->metaInformation()[key] = value;
-                }
+                currentBlock->settings().loadParametersFromYAML(ctxParameters, SettingsCtx{ctxTime, ctxName});
             }
         }
-
-        std::ignore         = currentBlock->settings().set(newProperties);
-        std::ignore         = currentBlock->settings().activateContext();
+        if (const auto failed = currentBlock->settings().activateContext(); failed == std::nullopt) {
+            throw gr::exception("Settings for context could not be activated");
+        }
         createdBlocks[name] = &testGraph.addBlock(std::move(currentBlock));
     } // for blocks
 
@@ -283,20 +115,60 @@ inline std::string saveGrc(const gr::Graph& testGraph) {
                 std::string typeName(fullTypeName.cbegin(), std::find(fullTypeName.cbegin(), fullTypeName.cend(), '<'));
                 map.write("id", std::move(typeName));
 
-                const auto& settingsMap = node.settings().get();
-                if (!node.metaInformation().empty() || !settingsMap.empty()) {
-                    map.writeFn("parameters", [&]() {
-                        detail::YamlMap parameters(out);
-                        auto            writeMap = [&](const auto& localMap) {
-                            for (const auto& [settingsKey, settingsValue] : localMap) {
-                                std::visit([&]<typename T>(const T& value) { parameters.write(settingsKey, value); }, settingsValue);
-                            }
-                        };
+                const auto& stored = node.settings().getStoredAll();
+                // Helper function to write parameters
+                auto writeParameters = [&](const property_map& settingsMap, const property_map& metaInformation = {}) {
+                    detail::YamlMap parameters(out);
+                    auto            writeMap = [&](const auto& localMap) {
+                        for (const auto& [settingsKey, settingsValue] : localMap) {
+                            std::visit([&]<typename T>(const T& value) { parameters.write(settingsKey, value); }, settingsValue);
+                        }
+                    };
+                    writeMap(settingsMap);
+                    if (!metaInformation.empty()) {
+                        writeMap(metaInformation);
+                    }
+                };
 
-                        writeMap(settingsMap);
-                        writeMap(node.metaInformation());
-                    });
+                if (stored.contains("")) {
+                    const auto& ctxParameters = stored.at("");
+                    const auto& settingsMap   = ctxParameters.back().second; // write only the last parameters
+                    if (!node.metaInformation().empty() || !settingsMap.empty()) {
+                        map.writeFn("parameters", [&]() { writeParameters(settingsMap, node.metaInformation()); });
+                    }
                 }
+
+                // write context parameters
+                map.writeFn("ctx_parameters", [&]() {
+                    detail::YamlSeq ctxParamsSeq(out);
+
+                    for (const auto& [ctx, ctxParameters] : stored) {
+                        if (ctx == "") {
+                            continue;
+                        }
+
+                        for (const auto& [ctxTime, settingsMap] : ctxParameters) {
+                            detail::YamlMap ctxParamMap(out);
+
+                            // Convert ctxTime.context to a string, regardless of its actual type
+                            std::string contextStr = std::visit(
+                                [](const auto& arg) -> std::string {
+                                    using T = std::decay_t<decltype(arg)>;
+                                    if constexpr (std::is_same_v<T, std::string>) {
+                                        return arg;
+                                    } else if constexpr (std::is_arithmetic_v<T>) {
+                                        return std::to_string(arg);
+                                    }
+                                    return "";
+                                },
+                                ctxTime.context);
+
+                            ctxParamMap.write("context", contextStr);
+                            ctxParamMap.write("time", ctxTime.time);
+                            ctxParamMap.writeFn("parameters", [&]() { writeParameters(settingsMap); });
+                        }
+                    }
+                });
             };
 
             testGraph.forEachBlock(writeBlock);
