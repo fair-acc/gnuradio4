@@ -446,11 +446,13 @@ public:
 
     template<StreamCallback<T> Callback>
     void registerStreamingCallback(std::size_t maxChunkSize, Callback&& callback) {
+        std::lock_guard lg(_listener_mutex);
         addListener(std::make_unique<ContinuousListener<Callback>>(maxChunkSize, std::forward<Callback>(callback), *this), false);
     }
 
     template<trigger::Matcher M, DataSetCallback<T> Callback>
     void registerTriggerCallback(M&& matcher, std::size_t preSamples, std::size_t postSamples, Callback&& callback) {
+        std::lock_guard lg(_listener_mutex);
         addListener(std::make_unique<TriggerListener<Callback, M>>(std::forward<M>(matcher), preSamples, postSamples, std::forward<Callback>(callback)), false);
         ensureHistorySize(preSamples);
     }
