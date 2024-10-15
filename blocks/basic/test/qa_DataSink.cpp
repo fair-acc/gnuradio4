@@ -13,6 +13,7 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/basic/DataSink.hpp>
+#include <gnuradio-4.0/basic/StreamToDataSet.hpp>
 #include <gnuradio-4.0/testing/Delay.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -34,6 +35,13 @@ struct fmt::formatter<gr::Tag> {
 namespace gr::basic::data_sink_test {
 
 constexpr auto kProcessingDelayMs = 600u;
+
+template<typename T>
+std::vector<T> getIota(std::size_t n, const T& first = {}) {
+    std::vector<T> v(n);
+    std::iota(v.begin(), v.end(), first);
+    return v;
+}
 
 /**
  * Example tag matcher (trigger::Matcher implementation) for the multiplexed listener case (interleaved data). As a toy example, we use
@@ -860,6 +868,95 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto& [poller, samplesSeen] = polling.get();
         expect(eq(samplesSeen + poller->drop_count, static_cast<std::size_t>(kSamples)));
+    };
+
+    "data set poller"_test = [] {
+        gr::Graph testGraph;
+        auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
+        auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
+        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}});
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(delay)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));
+
+        auto genTrigger = [](gr::Tag::signed_index_type index, std::string triggerName, std::string triggerCtx = {}) {
+            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
+        };
+
+        source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
+        source._tags.push_back(genTrigger(800, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
+
+        auto polling = std::async([] {
+            std::shared_ptr<DataSetSink<float>::Poller> poller;
+            expect(spinUntil(4s, [&poller] {
+                poller = DataSinkRegistry::instance().getDataSetPoller<float>(DataSinkQuery::sinkName("test_sink"), BlockingMode::Blocking);
+                return poller != nullptr;
+            })) << boost::ut::fatal;
+            std::vector<DataSet<float>> receivedDataSets;
+            bool                        seenFinished = false;
+            while (!seenFinished) {
+                seenFinished = poller->finished.load();
+                while (poller->process([&receivedDataSets](const auto& dataSets) { receivedDataSets.insert(receivedDataSets.end(), dataSets.begin(), dataSets.end()); })) {
+                }
+            }
+            return std::pair(poller, receivedDataSets);
+        });
+
+        Scheduler sched{std::move(testGraph)};
+        expect(sched.runAndWait().has_value());
+
+        const auto& [poller, receivedDataSets] = polling.get();
+        expect(eq(receivedDataSets.size(), 2UZ));
+        expect(eq(receivedDataSets[0].signal_values, getIota(300, 300.f)));
+        expect(eq(receivedDataSets[0].signal_names, std::vector{"test signal"s}));
+        expect(eq(receivedDataSets[0].signal_units, std::vector{"test unit"s}));
+        expect(eq(receivedDataSets[0].timing_events.size(), 1UZ));
+        expect(eq(receivedDataSets[0].timing_events[0].size(), 0UZ));
+        expect(eq(receivedDataSets[1].signal_values, getIota(300, 700.f)));
+        expect(eq(receivedDataSets[1].signal_names, std::vector{"test signal"s}));
+        expect(eq(receivedDataSets[1].signal_units, std::vector{"test unit"s}));
+    };
+
+    "data set callback"_test = [] {
+        gr::Graph testGraph;
+        auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
+        auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
+        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}});
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(delay)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));
+
+        auto genTrigger = [](gr::Tag::signed_index_type index, std::string triggerName, std::string triggerCtx = {}) {
+            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
+        };
+
+        source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
+        source._tags.push_back(genTrigger(800, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
+
+        std::vector<DataSet<float>> receivedDataSets;
+        auto                        callback = [&receivedDataSets](const auto& ds) { receivedDataSets.push_back(ds); };
+
+        auto registerThread = std::thread([&] { //
+            expect(spinUntil(4s, [&] { return DataSinkRegistry::instance().registerDataSetCallback<float>(DataSinkQuery::sinkName("test_sink"), callback); })) << boost::ut::fatal;
+        });
+
+        Scheduler sched{std::move(testGraph)};
+        expect(sched.runAndWait().has_value());
+        registerThread.join();
+
+        expect(eq(receivedDataSets.size(), 2UZ));
+        expect(eq(receivedDataSets[0].signal_values, getIota(300, 300.f)));
+        expect(eq(receivedDataSets[0].signal_names, std::vector{"test signal"s}));
+        expect(eq(receivedDataSets[0].signal_units, std::vector{"test unit"s}));
+        expect(eq(receivedDataSets[0].timing_events.size(), 1UZ));
+        expect(eq(receivedDataSets[0].timing_events[0].size(), 0UZ));
+        expect(eq(receivedDataSets[1].signal_values, getIota(300, 700.f)));
+        expect(eq(receivedDataSets[1].signal_names, std::vector{"test signal"s}));
+        expect(eq(receivedDataSets[1].signal_units, std::vector{"test unit"s}));
     };
 };
 

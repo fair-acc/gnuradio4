@@ -21,6 +21,9 @@ enum class BlockingMode { NonBlocking, Blocking };
 template<typename T>
 class DataSink;
 
+template<typename T>
+class DataSetSink;
+
 // Until clang-format can handle concepts
 // clang-format off
 
@@ -32,6 +35,12 @@ concept DataSetCallback = std::invocable<T, DataSet<V>>;
  */
 template<typename T, typename V>
 concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const Tag>> || std::invocable<T, std::span<const V>, std::span<const Tag>, const DataSink<V>&>;
+
+
+template<typename T, typename V>
+concept DataSetMatcher =
+    std::invocable<T, gr::DataSet<V>> &&
+    std::is_same_v<std::invoke_result_t<T, gr::DataSet<V>>, bool>;
 
 // clang-format on
 
@@ -75,6 +84,27 @@ public:
     }
 
     template<typename T>
+    void registerSink(DataSetSink<T>* sink) {
+        std::lock_guard lg{_mutex};
+        _sinks.push_back(sink);
+        for (const auto& name : sink->signal_names) {
+            _sink_by_signal_name[name] = sink;
+        }
+    }
+
+    template<typename T>
+    void unregisterSink(DataSetSink<T>* sink) {
+        std::lock_guard lg{_mutex};
+        std::erase_if(_sinks, [sink](const std::any& v) -> bool {
+            auto ptr = std::any_cast<DataSetSink<T>*>(v);
+            return ptr && ptr == sink;
+        });
+        for (const auto& name : sink->signal_names) {
+            _sink_by_signal_name.erase(name);
+        }
+    }
+
+    template<typename T>
     void updateSignalName(DataSink<T>* sink, std::string_view oldName, std::string_view newName) {
         std::lock_guard lg{_mutex};
         _sink_by_signal_name.erase(std::string(oldName));
@@ -82,37 +112,68 @@ public:
     }
 
     template<typename T>
+    void updateSignalNames(DataSetSink<T>* sink, std::span<const std::string> oldNames_, std::span<const std::string> newNames_) {
+        std::lock_guard          lg{_mutex};
+        std::vector<std::string> removedNames;
+        auto                     oldNames = std::vector(oldNames_.begin(), oldNames_.end());
+        auto                     newNames = std::vector(newNames_.begin(), newNames_.end());
+        std::ranges::sort(oldNames);
+        std::ranges::sort(newNames);
+        std::set_difference(oldNames.begin(), oldNames.end(), newNames.begin(), newNames.end(), std::back_inserter(removedNames));
+        for (const auto& name : removedNames) {
+            _sink_by_signal_name.erase(name);
+        }
+        for (const auto& name : newNames) {
+            _sink_by_signal_name[name] = sink;
+        }
+    }
+
+    template<typename T>
     std::shared_ptr<typename DataSink<T>::Poller> getStreamingPoller(const DataSinkQuery& query, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         return sink ? sink->getStreamingPoller(block) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
     std::shared_ptr<typename DataSink<T>::DataSetPoller> getTriggerPoller(const DataSinkQuery& query, M&& matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         return sink ? sink->getTriggerPoller(std::forward<M>(matcher), preSamples, postSamples, block) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
     std::shared_ptr<typename DataSink<T>::DataSetPoller> getMultiplexedPoller(const DataSinkQuery& query, M&& matcher, std::size_t maximumWindowSize, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         return sink ? sink->getMultiplexedPoller(std::forward<M>(matcher), maximumWindowSize, block) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
     std::shared_ptr<typename DataSink<T>::DataSetPoller> getSnapshotPoller(const DataSinkQuery& query, M&& matcher, std::chrono::nanoseconds delay, BlockingMode block = BlockingMode::Blocking) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         return sink ? sink->getSnapshotPoller(std::forward<M>(matcher), delay, block) : nullptr;
+    }
+
+    template<typename T, DataSetMatcher<T> M>
+    std::shared_ptr<typename DataSetSink<T>::Poller> getDataSetPoller(const DataSinkQuery& query, M&& matcher, BlockingMode block = BlockingMode::Blocking) {
+        std::lock_guard lg{_mutex};
+        auto            sink = find<DataSetSink<T>>(query);
+        return sink ? sink->getPoller(std::forward<M>(matcher), block) : nullptr;
+    }
+
+    template<typename T>
+    std::shared_ptr<typename DataSetSink<T>::Poller> getDataSetPoller(const DataSinkQuery& query, BlockingMode block = BlockingMode::Blocking) {
+        std::lock_guard lg{_mutex};
+        auto            sink = find<DataSetSink<T>>(query);
+        return sink ? sink->getPoller(block) : nullptr;
     }
 
     template<typename T, StreamCallback<T> Callback>
     bool registerStreamingCallback(const DataSinkQuery& query, std::size_t maxChunkSize, Callback&& callback) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         if (!sink) {
             return false;
         }
@@ -124,7 +185,7 @@ public:
     template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
     bool registerTriggerCallback(const DataSinkQuery& query, M&& matcher, std::size_t preSamples, std::size_t postSamples, Callback&& callback) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         if (!sink) {
             return false;
         }
@@ -136,7 +197,7 @@ public:
     template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
     bool registerMultiplexedCallback(const DataSinkQuery& query, M&& matcher, std::size_t maximumWindowSize, Callback&& callback) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         if (!sink) {
             return false;
         }
@@ -148,7 +209,7 @@ public:
     template<typename T, DataSetCallback<T> Callback, trigger::Matcher M>
     bool registerSnapshotCallback(const DataSinkQuery& query, M&& matcher, std::chrono::nanoseconds delay, Callback&& callback) {
         std::lock_guard lg{_mutex};
-        auto            sink = findSink<T>(query);
+        auto            sink = find<DataSink<T>>(query);
         if (!sink) {
             return false;
         }
@@ -157,14 +218,38 @@ public:
         return true;
     }
 
+    template<typename T, DataSetCallback<T> Callback, DataSetMatcher<T> M>
+    bool registerDataSetCallback(const DataSinkQuery& query, M&& matcher, Callback&& callback) {
+        std::lock_guard lg{_mutex};
+        auto            sink = find<DataSetSink<T>>(query);
+        if (!sink) {
+            return false;
+        }
+
+        sink->registerCallback(std::forward<M>(matcher), std::forward<Callback>(callback));
+        return true;
+    }
+
+    template<typename T, DataSetCallback<T> Callback>
+    bool registerDataSetCallback(const DataSinkQuery& query, Callback&& callback) {
+        std::lock_guard lg{_mutex};
+        auto            sink = find<DataSetSink<T>>(query);
+        if (!sink) {
+            return false;
+        }
+
+        sink->registerCallback(std::forward<Callback>(callback));
+        return true;
+    }
+
 private:
     template<typename T>
-    DataSink<T>* findSink(const DataSinkQuery& query) {
+    T* find(const DataSinkQuery& query) {
         if (query._signal_name) {
             const auto it = _sink_by_signal_name.find(*query._signal_name);
             if (it != _sink_by_signal_name.end()) {
                 try {
-                    return std::any_cast<DataSink<T>*>(it->second);
+                    return std::any_cast<T*>(it->second);
                 } catch (...) {
                     return nullptr;
                 }
@@ -173,19 +258,19 @@ private:
         }
         auto sinkNameMatches = [&query](const std::any& v) {
             try {
-                const auto sink = std::any_cast<DataSink<T>*>(v);
+                const auto sink = std::any_cast<T*>(v);
                 return query._sink_name == sink->name;
             } catch (...) {
                 return false;
             }
         };
 
-        const auto it = std::find_if(_sinks.begin(), _sinks.end(), sinkNameMatches);
+        const auto it = std::ranges::find_if(_sinks, sinkNameMatches);
         if (it == _sinks.end()) {
             return nullptr;
         }
 
-        return std::any_cast<DataSink<T>*>(*it);
+        return std::any_cast<T*>(*it);
     }
 };
 
@@ -241,7 +326,7 @@ template<typename T>
 } // namespace detail
 
 /**
- * @brief generic data sink for exporting arbitrary-typed streams to non-GR C++ APIs.
+ * @brief generic data sink for exporting streams to non-GR C++ APIs.
  *
  * Each sink registers with a (user-defined/exchangeable) global registry that can be
  * queried by the non-GR caller to find the sink responsible for a given signal name, etc.
@@ -273,6 +358,8 @@ template<typename T>
  * N.B. due to the nature of the GR scheduler, signals from the same sink are notified
  * synchronously (/asynchronously) if handled by the same (/different) sink block.
  *
+ * This block type is mean for non-data set input streams. For input streams of type DataSet<T>, use
+ * @see DataSetSink<T>.
  * @tparam T input sample type
  */
 template<typename T>
@@ -308,6 +395,9 @@ if data is not being retrieved in time, or non-blocking, i.e. data being dropped
 the user-defined buffer size is full.
 N.B. due to the nature of the GR scheduler, signals from the same sink are notified
 synchronously (/asynchronously) if handled by the same (/different) sink block.
+
+This block type is mean for non-data set input streams. For input streams of type DataSet<T>, use
+@see DataSetSink<T>.
 
 @tparam T input sample type
 )"">;
@@ -968,8 +1058,197 @@ private:
     };
 };
 
+/**
+ * @brief data sink for exporting data set streams to non-GR C++ APIs.
+ *
+ * Like DataSink, but for exporting DataSet objects via poller or registered callback.
+ * It provides a similar but simpler API to DataSink, basically handing out the data sets
+ * as is, allowing basic filtering via a predicate on data set objects.
+ *
+ * @tparam T sample type in the data set
+ */
+template<typename T>
+class DataSetSink : public Block<DataSetSink<T>> {
+    using Description = Doc<R""(@brief data sink for exporting data set streams to non-GR C++ APIs.
+
+ Like DataSink, but for exporting DataSet objects via poller or registered callback.
+ It provides a similar but simpler API to DataSink, basically handing out the data sets
+ as is, allowing basic filtering via a predicate on data set objects.
+
+ @tparam T sample type in the data set
+)"">;
+    struct AbstractListener;
+
+    static constexpr std::size_t                  _listener_buffer_size = 1024;
+    std::deque<std::unique_ptr<AbstractListener>> _listeners;
+    bool                                          _listeners_finished = false;
+    std::mutex                                    _listener_mutex;
+
+public:
+    PortIn<DataSet<T>, RequiredSamples<std::dynamic_extent, _listener_buffer_size>> in;
+    std::vector<std::string>                                                        signal_names;
+
+    GR_MAKE_REFLECTABLE(DataSetSink, in);
+
+    using Block<DataSetSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
+
+    struct Poller {
+        gr::CircularBuffer<DataSet<T>> buffer = gr::CircularBuffer<DataSet<T>>(_listener_buffer_size);
+        decltype(buffer.new_reader())  reader = buffer.new_reader();
+        decltype(buffer.new_writer())  writer = buffer.new_writer();
+
+        std::atomic<bool>        finished   = false;
+        std::atomic<std::size_t> drop_count = 0;
+
+        [[nodiscard]] bool process(std::invocable<std::span<DataSet<T>>> auto fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
+            const auto nProcess = std::min(reader.available(), requested);
+            if (nProcess == 0) {
+                return false;
+            }
+
+            auto readData = reader.get(nProcess);
+            fnc(readData);
+            std::ignore = readData.consume(nProcess);
+            return true;
+        }
+    };
+
+    template<DataSetMatcher<T> M>
+    std::shared_ptr<Poller> getPoller(M&& matcher, BlockingMode blockMode = BlockingMode::Blocking) {
+        const auto      block   = blockMode == BlockingMode::Blocking;
+        auto            handler = std::make_shared<Poller>();
+        std::lock_guard lg(_listener_mutex);
+        handler->finished = _listeners_finished;
+        addListener(std::make_unique<Listener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, block), block);
+        return handler;
+    }
+
+    std::shared_ptr<Poller> getPoller(BlockingMode blockMode = BlockingMode::Blocking) {
+        return getPoller([](const auto&) { return true; }, blockMode);
+    }
+
+    template<DataSetMatcher<T> M, DataSetCallback<T> Callback>
+    void registerCallback(M&& matcher, Callback&& callback) {
+        std::lock_guard lg(_listener_mutex);
+        addListener(std::make_unique<Listener<Callback, M>>(std::forward<M>(matcher), std::forward<Callback>(callback)), false);
+    }
+
+    template<DataSetCallback<T> Callback>
+    void registerCallback(Callback&& callback) {
+        registerCallback([](const auto&) { return true; }, std::forward<Callback>(callback));
+    }
+
+    void start() noexcept { DataSinkRegistry::instance().registerSink(this); }
+
+    void stop() noexcept {
+        DataSinkRegistry::instance().unregisterSink(this);
+        std::lock_guard lg(_listener_mutex);
+        for (auto& listener : _listeners) {
+            listener->stop();
+        }
+        _listeners_finished = true;
+    }
+
+    [[nodiscard]] work::Status processBulk(std::span<const DataSet<T>>& inData) noexcept {
+        if (!inData.empty()) {
+            const auto& ds = inData.back();
+            if (ds.signal_names != signal_names) {
+                DataSinkRegistry::instance().updateSignalNames(this, signal_names, ds.signal_names);
+                signal_names = ds.signal_names;
+            }
+        }
+        std::lock_guard lg(_listener_mutex);
+        for (auto& listener : _listeners) {
+            listener->process(inData);
+        }
+        return work::Status::OK;
+    }
+
+private:
+    void addListener(std::unique_ptr<AbstractListener>&& l, bool block) {
+        if (block) {
+            _listeners.push_back(std::move(l));
+        } else {
+            _listeners.push_front(std::move(l));
+        }
+    }
+
+    struct AbstractListener {
+        bool expired = false;
+
+        virtual ~AbstractListener() = default;
+
+        void setExpired() { expired = true; }
+
+        virtual void process(std::span<const DataSet<T>> data) = 0;
+        virtual void stop()                                    = 0;
+    };
+
+    template<typename Callback, DataSetMatcher<T> TMatcher>
+    struct Listener : public AbstractListener {
+        bool                  block           = false;
+        TMatcher              matcher         = {};
+        gr::property_map      trigger_state;
+        std::weak_ptr<Poller> polling_handler = {};
+
+        Callback callback;
+
+        template<DataSetMatcher<T> Matcher>
+        explicit Listener(Matcher&& matcher, std::shared_ptr<Poller> handler, bool doBlock) : block(doBlock), matcher(std::forward<Matcher>(matcher)), polling_handler{std::move(handler)} {}
+
+        template<typename CallbackFW, DataSetMatcher<T> Matcher>
+        explicit Listener(Matcher&& matcher, CallbackFW&& cb) : matcher(std::forward<Matcher>(matcher)), callback{std::forward<CallbackFW>(cb)} {}
+
+        inline bool publishDataSet(const DataSet<T>& data) {
+            if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
+                callback(std::move(data));
+                return true;
+            } else {
+                auto poller = polling_handler.lock();
+                if (!poller) {
+                    this->setExpired();
+                    return false;
+                }
+
+                auto writeData = poller->writer.tryReserve(1);
+                if (writeData.empty()) {
+                    return false;
+                } else {
+                    if (block) {
+                        writeData[0] = std::move(data);
+                        writeData.publish(1);
+                    } else {
+                        if (poller->writer.available() > 0) {
+                            writeData[0] = std::move(data);
+                            writeData.publish(1);
+                        } else {
+                            poller->drop_count++;
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+
+        void process(std::span<const DataSet<T>> inData) override {
+            for (const auto& ds : inData) {
+                if (matcher(ds)) {
+                    publishDataSet(ds);
+                }
+            }
+        }
+
+        void stop() override {
+            if (auto p = polling_handler.lock()) {
+                p->finished = true;
+            }
+        }
+    };
+};
+
 } // namespace gr::basic
 
 auto registerDataSink = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
+auto registerDataSetSink = gr::registerBlock<gr::basic::DataSetSink, float, double>(gr::globalBlockRegistry());
 
 #endif
