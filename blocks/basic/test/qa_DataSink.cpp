@@ -374,7 +374,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto runner1 = std::async([] {
-            std::shared_ptr<DataSink<float>::Poller> poller;
+            std::shared_ptr<StreamingPoller<float>> poller;
             expect(spinUntil(4s, [&poller] {
                 poller = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"), BlockingMode::Blocking);
                 return poller != nullptr;
@@ -392,7 +392,7 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         auto runner2 = std::async([] {
-            std::shared_ptr<DataSink<float>::Poller> poller;
+            std::shared_ptr<StreamingPoller<float>> poller;
             expect(spinUntil(4s, [&poller] {
                 poller = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::signalName("test signal"), BlockingMode::Blocking);
                 return poller != nullptr;
@@ -470,7 +470,7 @@ const boost::ut::suite DataSinkTests = [] {
                 return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
 
-            std::shared_ptr<DataSink<int32_t>::DataSetPoller> poller;
+            std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
                 // lookup by signal name
                 poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 3, 2, BlockingMode::Blocking);
@@ -531,8 +531,11 @@ const boost::ut::suite DataSinkTests = [] {
             std::vector<int32_t>                              receivedData;
             std::vector<Tag>                                  receivedTags;
             bool                                              seenFinished = false;
-            auto                                              isTrigger    = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
-            std::shared_ptr<DataSink<int32_t>::DataSetPoller> poller;
+            auto                                              isTrigger    = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
+                const auto type = tag.get("TYPE");
+                return (type && std::get<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+            };
+            std::shared_ptr<DataSetPoller<int32_t>>           poller;
             expect(spinUntil(4s, [&] {
                 poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 0UZ, 2UZ, BlockingMode::Blocking);
                 return poller != nullptr;
@@ -597,7 +600,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto registerThread = std::thread([&] { expect(spinUntil(4s, [&] { return DataSinkRegistry::instance().registerSnapshotCallback<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, callback); })) << boost::ut::fatal; });
 
         auto poller_result = std::async([isTrigger, kDelay] {
-            std::shared_ptr<DataSink<int32_t>::DataSetPoller> poller;
+            std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
                 poller = DataSinkRegistry::instance().getSnapshotPoller<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, BlockingMode::Blocking);
                 return poller != nullptr;
@@ -690,7 +693,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         for (std::size_t i = 0; i < matchers.size(); ++i) {
             auto f = std::async([i, &matchers]() {
-                std::shared_ptr<DataSink<int32_t>::DataSetPoller> poller;
+                std::shared_ptr<DataSetPoller<int32_t>> poller;
                 expect(spinUntil(4s, [&] {
                     poller = DataSinkRegistry::instance().getMultiplexedPoller<int32_t>(DataSinkQuery::sinkName("test_sink"), Matcher(matchers[i]), 100000, BlockingMode::Blocking);
                     return poller != nullptr;
@@ -748,7 +751,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto polling = std::async([] {
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
 
-            std::shared_ptr<DataSink<float>::DataSetPoller> poller;
+            std::shared_ptr<DataSetPoller<float>> poller;
             expect(spinUntil(4s, [&] {
                 poller = DataSinkRegistry::instance().getTriggerPoller<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, 3000, 2000, BlockingMode::Blocking);
                 return poller != nullptr;
@@ -843,7 +846,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(invalid_type_poller, nullptr));
 
         auto polling = std::async([] {
-            std::shared_ptr<DataSink<float>::Poller> poller;
+            std::shared_ptr<StreamingPoller<float>> poller;
             expect(spinUntil(4s, [&poller] {
                 poller = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"));
                 return poller != nullptr;
@@ -889,7 +892,7 @@ const boost::ut::suite DataSinkTests = [] {
         source._tags.push_back(genTrigger(800, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
 
         auto polling = std::async([] {
-            std::shared_ptr<DataSetSink<float>::Poller> poller;
+            std::shared_ptr<DataSetPoller<float>> poller;
             expect(spinUntil(4s, [&poller] {
                 poller = DataSinkRegistry::instance().getDataSetPoller<float>(DataSinkQuery::sinkName("test_sink"), BlockingMode::Blocking);
                 return poller != nullptr;
