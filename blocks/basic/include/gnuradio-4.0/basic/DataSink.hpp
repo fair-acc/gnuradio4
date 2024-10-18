@@ -1090,10 +1090,10 @@ class DataSetSink : public Block<DataSetSink<T>> {
     std::mutex                                    _listener_mutex;
 
 public:
-    PortIn<DataSet<T>, RequiredSamples<std::dynamic_extent, detail::data_sink_data_set_buffer_size>> in;
-    std::vector<std::string>                                                                         signal_names;
-
-    GR_MAKE_REFLECTABLE(DataSetSink, in);
+    PortIn<DataSet<T>>       in;
+    std::vector<std::string> signal_names;
+    std::vector<std::string> signal_units;
+    GR_MAKE_REFLECTABLE(DataSetSink, in, signal_names, signal_units);
 
     using Block<DataSetSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
@@ -1134,13 +1134,22 @@ public:
     }
 
     [[nodiscard]] work::Status processBulk(std::span<const DataSet<T>>& inData) noexcept {
-        if (!inData.empty()) {
-            const auto& ds = inData.back();
-            if (ds.signal_names != signal_names) {
-                DataSinkRegistry::instance().updateSignalNames(this, signal_names, ds.signal_names);
-                signal_names = ds.signal_names;
-            }
+        bool        settingsChanged = false;
+        const auto& ds              = inData.back();
+        if (ds.signal_names != signal_names) {
+            DataSinkRegistry::instance().updateSignalNames(this, signal_names, ds.signal_names);
+            signal_names    = ds.signal_names;
+            settingsChanged = true;
         }
+        if (ds.signal_units != signal_units) {
+            signal_units    = ds.signal_units;
+            settingsChanged = true;
+        }
+
+        if (settingsChanged) {
+            this->notifyListeners(block::property::kSetting, {{"signal_names", signal_names}, {"signal_units", signal_units}});
+        }
+
         std::lock_guard lg(_listener_mutex);
         for (auto& listener : _listeners) {
             listener->process(inData);
