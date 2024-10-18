@@ -1479,9 +1479,11 @@ protected:
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
+
+            // See https://github.com/fair-acc/gnuradio4/issues/444
             for_each_reader_span(
                 [&processedIn](auto& in) {
-                    if (in.isConsumeRequested()) {
+                    if (in.isConsumeRequested() && in.isConnected) {
                         processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
                     }
                 },
@@ -1489,11 +1491,12 @@ protected:
 
             for_each_writer_span(
                 [&processedOut](auto& out) {
-                    if (out.isPublishRequested()) {
+                    if (out.isPublishRequested() && out.isConnected) {
                         processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
                     }
                 },
                 outputSpans);
+            
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
                 emitErrorMessage("Block::workInternal:", fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
@@ -1891,7 +1894,7 @@ template<BlockLike TBlock>
             if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
                 if constexpr (is_annotated<RawType>()) {
                     ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
-                        RawType::visible() ? "" : "_",                                                             //
+                        RawType::visible() ? "" : "_",                                                   //
                         refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view(), //
                         RawType::description(), RawType::unit(),
                         RawType::documentation(), //

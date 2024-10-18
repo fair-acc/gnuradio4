@@ -1,8 +1,8 @@
 #ifndef GNURADIO_NODE_NODE_TRAITS_HPP
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
-#include <gnuradio-4.0/meta/utils.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 #include "Port.hpp"
 #include "PortTraits.hpp"
@@ -24,7 +24,7 @@ class MergedGraph;
 
 template<typename T>
 concept PortReflectable = refl::reflectable<T> and std::same_as<std::remove_const_t<T>, typename T::derived_t>;
-}
+} // namespace gr
 
 namespace gr::traits::block {
 
@@ -204,6 +204,8 @@ static_assert(ReaderSpanLike<DummyReaderSpan<int>>);
 template<typename T>
 struct DummyInputSpan : public DummyReaderSpan<T> {
     DummyReaderSpan<gr::Tag> rawTags{};
+    bool                     isConnected = true;
+    bool                     isSync      = true;
     auto                     tags() { return std::views::empty<std::pair<Tag::signed_index_type, const property_map&>>; }
     [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type /*untilLocalIndex*/) const { return {}; }
     void                     consumeTags(gr::Tag::signed_index_type /*untilLocalIndex*/) {}
@@ -240,6 +242,8 @@ static_assert(WriterSpanLike<DummyWriterSpan<int>>);
 template<typename T>
 struct DummyOutputSpan : public DummyWriterSpan<T> {
     DummyWriterSpan<gr::Tag> tags{};
+    bool                     isConnected = true;
+    bool                     isSync      = true;
 
     void publishTag(property_map&, gr::Tag::signed_index_type) {}
 };

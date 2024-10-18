@@ -284,6 +284,8 @@ struct Async {};
 template<typename T>
 concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, gr::Tag::signed_index_type n) {
     { span.consume(0) };
+    { span.isConnected } -> std::convertible_to<bool>;
+    { span.isSync } -> std::convertible_to<bool>;
     { span.rawTags };
     requires ReaderSpanLike<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
     { span.tags() } -> std::ranges::range;
@@ -306,6 +308,8 @@ concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && 
 template<typename T>
 concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& span, property_map& tagData, Tag::signed_index_type tagOffset) {
     span.publish(0UZ);
+    { span.isConnected } -> std::convertible_to<bool>;
+    { span.isSync } -> std::convertible_to<bool>;
     requires WriterSpanLike<std::remove_cvref_t<decltype(span.tags)>>;
     { *span.tags.begin() } -> std::same_as<gr::Tag&>;
     { span.publishTag(tagData, tagOffset) } -> std::same_as<void>;
@@ -349,7 +353,7 @@ struct PortDescriptor {
 
     static constexpr NameT Name{};
 
-    PortDescriptor() = delete;
+    PortDescriptor()  = delete;
     ~PortDescriptor() = delete;
 };
 
@@ -421,13 +425,13 @@ struct Port {
     using TagWriterSpanType = decltype(std::declval<TagWriterType>().reserve(0UZ));
 
     // public properties
-    constexpr static bool kIsSynch      = !std::disjunction_v<std::is_same<Async, Attributes>...>;
-    constexpr static bool kIsOptional   = std::disjunction_v<std::is_same<Optional, Attributes>...>;
+    constexpr static bool kIsSynch    = !std::disjunction_v<std::is_same<Async, Attributes>...>;
+    constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>;
 
     std::string_view name;
 
-    std::int16_t          priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    T                     default_value = T{};
+    std::int16_t priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    T            default_value = T{};
 
     //
     std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> min_samples = Required::kMinSamples;
@@ -445,8 +449,13 @@ struct Port {
     struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
         TagReaderSpanType      rawTags;
         Tag::signed_index_type streamIndex;
+        bool                   isConnected = true; // true if Port is connected
+        bool                   isSync      = true; // true if  Port is Sync
 
-        InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader) : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)), rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), streamIndex{reader.position()} {};
+        InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
+            : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)),               //
+              rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), //
+              streamIndex{reader.position()}, isConnected(connected), isSync(sync) {};
 
         InputSpan(const InputSpan&)            = default;
         InputSpan& operator=(const InputSpan&) = default;
@@ -515,14 +524,20 @@ struct Port {
         TagWriterSpanType      tags;
         Tag::signed_index_type streamIndex;
         std::size_t            tagsPublished{0UZ};
+        bool                   isConnected = true; // true if Port is connected
+        bool                   isSync      = true; // true if  Port is Sync
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
+              tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
+              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {};
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())), streamIndex{streamOffset} {};
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), //
+              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
+              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {};
 
         OutputSpan(const OutputSpan&)            = default;
         OutputSpan& operator=(const OutputSpan&) = default;
@@ -790,21 +805,21 @@ public:
     InputSpan<spanReleasePolicy> get(std::size_t nSamples)
     requires(kIsInput)
     {
-        return InputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader());
+        return InputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader(), this->isConnected(), this->isSynchronous());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto reserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::Reserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
     auto tryReserve(std::size_t nSamples)
     requires(kIsOutput)
     {
-        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position());
+        return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
     inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
@@ -920,10 +935,10 @@ static_assert(std::is_default_constructible_v<PortOut<float>>);
  */
 class DynamicPort {
 public:
-    std::string_view   name;
-    std::int16_t&      priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t&       min_samples;
-    std::size_t&       max_samples;
+    std::string_view name;
+    std::int16_t&    priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t&     min_samples;
+    std::size_t&     max_samples;
 
 private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition

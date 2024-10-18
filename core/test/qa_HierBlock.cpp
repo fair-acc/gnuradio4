@@ -176,7 +176,7 @@ struct cout_sink : public gr::Block<cout_sink<T>> {
     }
 };
 
-gr::Graph make_graph(std::size_t events_count) {
+gr::Graph make_graph(std::size_t /*events_count*/) {
     gr::Graph graph;
 
     // auto& source_leftBlock  = graph.emplaceBlock<fixed_source<double>>({{"remaining_events_count", events_count}});
