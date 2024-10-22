@@ -118,9 +118,9 @@ On the choice of window (mathematically aka. apodisation) functions
     // semi-private caching vectors (need to be public for unit-test) -> TODO: move to FFT implementations, casting from T -> U::value_type should be done there
     std::vector<InDataType>  _inData             = std::vector<InDataType>(fftSize, 0);
     std::vector<OutDataType> _outData            = std::vector<OutDataType>(gr::meta::complex_like<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
-    std::vector<value_type>  _magnitudeSpectrum  = std::vector<value_type>(_outData.size(), 0);
-    std::vector<value_type>  _phaseSpectrum      = std::vector<value_type>(_outData.size(), 0);
-    constexpr static bool    computeHalfSpectrum = gr::meta::complex_like<T>;
+    std::vector<value_type>  _magnitudeSpectrum  = std::vector<value_type>(gr::meta::complex_like<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
+    std::vector<value_type>  _phaseSpectrum      = std::vector<value_type>(gr::meta::complex_like<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
+    constexpr static bool    computeFullSpectrum = gr::meta::complex_like<T>;
 
     void settingsChanged(const property_map& /*old_settings*/, const property_map& newSettings) noexcept {
         if (!newSettings.contains("fftSize") && !newSettings.contains("window")) {
@@ -139,9 +139,9 @@ On the choice of window (mathematically aka. apodisation) functions
 
         // N.B. this should become part of the Fourier transform implementation
         _inData.resize(fftSize, 0);
-        _outData.resize(computeHalfSpectrum ? newSize : (1U + newSize / 2), 0);
-        _magnitudeSpectrum.resize(computeHalfSpectrum ? newSize : (newSize / 2), 0);
-        _phaseSpectrum.resize(computeHalfSpectrum ? newSize : (newSize / 2), 0);
+        _outData.resize(computeFullSpectrum ? newSize : (1U + newSize / 2), 0);
+        _magnitudeSpectrum.resize(computeFullSpectrum ? newSize : (newSize / 2), 0);
+        _phaseSpectrum.resize(computeFullSpectrum ? newSize : (newSize / 2), 0);
     }
 
     [[nodiscard]] constexpr work::Status processBulk(std::span<const T> input, std::span<U> output) {
@@ -162,8 +162,8 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         _outData           = _fftImpl.compute(_inData);
-        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum, algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = computeHalfSpectrum, .outputInDb = outputInDb});
-        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum, algorithm::fft::ConfigPhase{.computeHalfSpectrum = computeHalfSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase});
+        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum, algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .outputInDb = outputInDb});
+        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum, algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase});
 
         output[0] = createDataset();
 
