@@ -66,5 +66,16 @@ RUN apt-get update -y \
     && rm -rf /var/lib/apt/lists/* \
     && chown -R root:users $EMSDK_HOME && chmod -R 777 $EMSDK_HOME
 
+# Install GitHub command-line interface (gh)
+# Instructions copied from https://github.com/cli/cli/blob/trunk/docs/install_linux.md
+RUN mkdir -p -m 755 /etc/apt/keyrings \
+    && curl -s https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install gh -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 USER user
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
