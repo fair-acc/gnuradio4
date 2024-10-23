@@ -785,6 +785,7 @@ private:
         std::size_t postSamples = 0;
 
         DataSet<T>                      dataset_template;
+        gr::property_map                trigger_matcher_state;
         TMatcher                        trigger_matcher = {};
         std::deque<PendingWindow>       pending_trigger_windows; // triggers that still didn't receive all their data
         std::weak_ptr<DataSetPoller<T>> polling_handler = {};
@@ -831,7 +832,7 @@ private:
         }
 
         void process(std::span<const T> history, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher("", Tag{0, *tagData0}, {}) == trigger::MatchResult::Matching) {
+            if (tagData0 && trigger_matcher("", Tag{0, *tagData0}, trigger_matcher_state) == trigger::MatchResult::Matching) {
                 DataSet<T> dataset = dataset_template;
                 dataset.signal_values.reserve(preSamples + postSamples); // TODO maybe make the circ. buffer smaller but preallocate these
 
@@ -879,6 +880,7 @@ private:
     struct MultiplexedListener : public AbstractListener {
         bool                            block = false;
         M                               matcher;
+        gr::property_map                matcher_state;
         DataSet<T>                      dataset_template;
         std::optional<DataSet<T>>       pending_dataset;
         std::size_t                     maximumWindowSize;
@@ -926,7 +928,7 @@ private:
 
         void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0) {
-                const auto obsr = matcher("", Tag{0, *tagData0}, {});
+                const auto obsr = matcher("", Tag{0, *tagData0}, matcher_state);
                 if (obsr == trigger::MatchResult::NotMatching || obsr == trigger::MatchResult::Matching) {
                     if (pending_dataset) {
                         if (obsr == trigger::MatchResult::NotMatching) {
@@ -985,6 +987,7 @@ private:
         std::size_t                     sample_delay = 0;
         DataSet<T>                      dataset_template;
         M                               trigger_matcher = {};
+        gr::property_map                trigger_matcher_state;
         std::deque<PendingSnapshot>     pending;
         std::weak_ptr<DataSetPoller<T>> polling_handler = {};
         Callback                        callback;
@@ -1032,7 +1035,7 @@ private:
         }
 
         void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher("", {0, *tagData0}, {}) == trigger::MatchResult::Matching) {
+            if (tagData0 && trigger_matcher("", {0, *tagData0}, trigger_matcher_state) == trigger::MatchResult::Matching) {
                 auto new_pending = PendingSnapshot{*tagData0, sample_delay, sample_delay};
                 // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased)
                 auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto& other) { return other.pending_samples < delay; });
