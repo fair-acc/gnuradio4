@@ -94,7 +94,7 @@ On the choice of window (mathematically aka. apodisation) functions
     using OutDataType = std::complex<value_type>;
 
     PortIn<T>  in{};
-    PortOut<U> out{};
+    PortOut<U, RequiredSamples<1, 1>> out{};
 
     FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl{};
     gr::algorithm::window::Type                               _windowType = gr::algorithm::window::Type::Hann;
