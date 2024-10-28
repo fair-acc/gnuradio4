@@ -85,7 +85,7 @@ public:
 
     void connectBlockMessagePorts() {
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
-        _toChildMessagePort.connect(_graph.msgIn);
+        std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
         _graph.forEachBlockMutable([this, &toSchedulerBuffer](auto& block) {
