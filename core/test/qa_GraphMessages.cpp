@@ -272,8 +272,8 @@ const boost::ut::suite RunningGraphTests = [] {
 
     gr::MsgPortOut toGraph;
     gr::MsgPortIn  fromGraph;
-    expect(eq(ConnectionResult::SUCCESS, toGraph.connect(scheduler.graph().msgIn)));
-    expect(eq(ConnectionResult::SUCCESS, scheduler.graph().msgOut.connect(fromGraph)));
+    expect(eq(ConnectionResult::SUCCESS, toGraph.connect(scheduler.msgIn)));
+    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromGraph)));
 
     auto waitForAReply = [&](std::chrono::milliseconds maxWait = 1s, std::source_location currentSource = std::source_location::current()) {
         auto startedAt = std::chrono::system_clock::now();
