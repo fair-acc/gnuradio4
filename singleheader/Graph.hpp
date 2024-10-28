@@ -25952,9 +25952,9 @@ inline auto& globalPluginLoader() {
 
 // #include <gnuradio-4.0/Sequence.hpp>
 
-// #include <gnuradio-4.0/meta/typelist.hpp>
-
 // #include <gnuradio-4.0/meta/reflection.hpp>
+
+// #include <gnuradio-4.0/meta/typelist.hpp>
 
 // #include <gnuradio-4.0/thread/thread_pool.hpp>
 
@@ -26195,7 +26195,13 @@ public:
         const auto&         data       = message.data.value();
         const std::string&  type       = std::get<std::string>(data.at("type"s));
         const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
-        const property_map& properties = std::get<property_map>(data.at("properties"s));
+        const property_map& properties = [&] {
+            if (auto it = data.find("properties"s); it != data.end()) {
+                return std::get<property_map>(it->second);
+            } else {
+                return property_map{};
+            }
+        }();
 
         auto& newBlock = emplaceBlock(type, parameters, properties);
 
@@ -26228,7 +26234,13 @@ public:
         const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
         const std::string&  type       = std::get<std::string>(data.at("type"s));
         const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
-        const property_map& properties = std::get<property_map>(data.at("properties"s));
+        const property_map& properties = [&] {
+            if (auto it = data.find("properties"s); it != data.end()) {
+                return std::get<property_map>(it->second);
+            } else {
+                return property_map{};
+            }
+        }();
 
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {

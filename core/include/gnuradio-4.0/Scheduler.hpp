@@ -84,13 +84,16 @@ public:
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
     void connectBlockMessagePorts() {
-        _graph.forEachBlockMutable([this](auto& block) {
+        auto toSchedulerBuffer = _fromChildMessagePort.buffer();
+        _toChildMessagePort.connect(_graph.msgIn);
+        _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
+
+        _graph.forEachBlockMutable([this, &toSchedulerBuffer](auto& block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()));
             }
 
-            auto buffer = _fromChildMessagePort.buffer();
-            block.msgOut->setBuffer(buffer.streamBuffer, buffer.tagBuffer);
+            block.msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
         });
 
         // Forward any messages to children that were received before the scheduler was initialised
@@ -108,7 +111,7 @@ public:
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
                 if (_messagePortsConnected) {
                     WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-                    msgSpan[0]                   = std::move(msg);
+                    msgSpan[0]                  = std::move(msg);
                 } else {
                     // if not yet connected, keep messages to children in cache and forward when connecting
                     _pendingMessagesToChildren.push_back(msg);
@@ -235,9 +238,7 @@ protected:
         }
 
         std::lock_guard lock(_jobListsMutex);
-        _graph.forEachBlockMutable([this](auto& block) {
-            this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block.changeState(lifecycle::RUNNING));
-        });
+        _graph.forEachBlockMutable([this](auto& block) { this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block.changeState(lifecycle::RUNNING)); });
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
             static_cast<Derived*>(this)->poolWorker(0UZ, _jobLists);
