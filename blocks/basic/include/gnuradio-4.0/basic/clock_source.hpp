@@ -93,10 +93,16 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
                 throw gr::exception("The input tag_times vector should be ascending.");
             }
         }
+        if (newSettings.contains("chunk_size")) {
+            if (chunk_size.value < 1) {
+                using namespace gr::message;
+                throw gr::exception("The number of samples per update (`chunk_size`) must be >= 1.");
+            }
+        }
     }
 
     work::Status processBulk(OutputSpanLike auto& outSpan) noexcept {
-        if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
+        if (n_samples_max > 0UZ && n_samples_produced >= n_samples_max) {
             outSpan.publish(0UZ);
             return work::Status::DONE;
         }
@@ -106,8 +112,8 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
             std::this_thread::sleep_until(_nextTimePoint);
         }
 
-        const gr::Size_t remainingSamples = n_samples_max - n_samples_produced;
-        gr::Size_t       samplesToProduce = std::min(remainingSamples, chunk_size.value);
+        const gr::Size_t remainingSamples = (n_samples_max > 0UZ) ? n_samples_max - n_samples_produced : std::numeric_limits<gr::Size_t>::max();
+        gr::Size_t       samplesToProduce = std::min({remainingSamples, chunk_size.value, static_cast<gr::Size_t>(outSpan.size())});
 
         gr::Size_t samplesToNextTimeTag = std::numeric_limits<uint32_t>::max();
         if (!tag_times.value.empty()) {
@@ -160,13 +166,6 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
                 samplesToProduce = samplesToNextTimeTag;
                 _nextTimeTag++;
             }
-        }
-
-        samplesToProduce = std::min(samplesToProduce, n_samples_max.value);
-
-        if (static_cast<std::uint32_t>(outSpan.size()) < samplesToProduce) {
-            outSpan.publish(0UZ);
-            return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
         outSpan.publish(static_cast<std::size_t>(samplesToProduce));
