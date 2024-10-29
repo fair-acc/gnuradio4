@@ -800,12 +800,12 @@ public:
         return result;
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
+    inline constexpr void publishTag(property_map&& tag_data, Tag::index_type tagOffset = 0UZ) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
 
-    inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(tag_data, tagOffset); }
+    inline constexpr void publishTag(const property_map& tag_data, Tag::index_type tagOffset = 0UZ) noexcept { processPublishTag(tag_data, tagOffset); }
 
     template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::signed_index_type tagOffset) noexcept {
+    inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::index_type tagOffset) noexcept {
         if (_outputTags.empty()) {
             _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
         } else {
@@ -828,12 +828,12 @@ public:
 
     inline constexpr void publishEoS() noexcept {
         const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
-        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
+        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::index_type>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
         const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
-        for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::signed_index_type>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
+        for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::index_type>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }

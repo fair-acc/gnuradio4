@@ -46,7 +46,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         std::copy(inSamples.begin(), inSamples.end(), outSamples.begin());
         std::size_t tagsForwarded = 0;
         for (gr::Tag tag : inSamples.rawTags) {
-            if (tag.index < (inSamples.streamIndex + (static_cast<gr::Tag::signed_index_type>(inSamples.size()) + 1) / 2)) {
+            if (tag.index < (inSamples.streamIndex + (static_cast<gr::Tag::index_type>(inSamples.size()) + 1) / 2)) {
                 tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
                 outSamples.publishTag(tag.map, 0);
                 tagsForwarded++;
@@ -87,7 +87,6 @@ const boost::ut::suite TagTests = [] {
     using namespace gr;
 
     static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
-    static_assert(gr::refl::class_name<gr::Tag> == "gr::Tag");
     static_assert(gr::refl::data_member_count<Tag> == 2, "index and map being declared");
     static_assert(gr::refl::data_member_name<Tag, 0> == "index", "class field index is public API");
     static_assert(gr::refl::data_member_name<Tag, 1> == "map", "class field map is public API");

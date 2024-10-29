@@ -57,7 +57,7 @@ const boost::ut::suite PortTests = [] {
             auto tagSpan   = tagWriter.tryReserve(5);
             expect(eq(writeSpan.size(), 6UZ));
             expect(eq(tagSpan.size(), 5UZ));
-            tagSpan[0] = {-1, {{"id", "tag@-1"}, {"id0", true}}};
+            tagSpan[0] = {0, {{"id", "tag@100"}, {"id0", true}}};
             tagSpan[1] = {1, {{"id", "tag@101"}, {"id1", true}}};
             tagSpan[2] = {3, {{"id", "tag@103"}, {"id3", true}}};
             tagSpan[3] = {4, {{"id", "tag@104"}, {"id4", true}}};
@@ -68,10 +68,10 @@ const boost::ut::suite PortTests = [] {
         }
         { // partial consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(6);
-            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{-1, {{"id", "tag@-1"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
-            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, gr::property_map{{"id", "tag@-1"}, {"id0", true}}), std::make_pair(1L, gr::property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(3L, gr::property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(4L, gr::property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(5L, gr::property_map{{"id", "tag@105"}, {"id5", true}})}));
+            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{0, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
+            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, gr::property_map{{"id", "tag@100"}, {"id0", true}}), std::make_pair(1L, gr::property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(3L, gr::property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(4L, gr::property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(5L, gr::property_map{{"id", "tag@105"}, {"id5", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(6)));
-            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@-1"}, {"id0", true}}});
+            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@100"}, {"id0", true}}});
             expect(data.consume(3));
         }
         { // full consume
@@ -79,21 +79,21 @@ const boost::ut::suite PortTests = [] {
             expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-2L, gr::property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(0L, gr::property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, gr::property_map{{"id", "tag@104"}, {"id4", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(3) | std::views::take(2)));
-            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@103"}, {"id1", true}, {"id3", true}}});
+            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@103"}, {"id1", true}, {"id3", true}}});
         }
         { // get empty range
             auto data = in.get<SpanReleasePolicy::ProcessAll>(0);
             expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{4, {{"id", "tag@104"}, {"id4", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, gr::property_map{{"id", "tag@104"}, {"id4", true}})}));
             expect(std::ranges::equal(data, std::ranges::empty_view<int>()));
-            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@104"}, {"id4", true}}});
+            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@104"}, {"id4", true}}});
         }
         { // get last sample
             auto data = in.get<SpanReleasePolicy::ProcessAll>(1);
             expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, gr::property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5) | std::views::take(1)));
-            expect(data.getMergedTag() == gr::Tag{-1, {{"id", "tag@105"}, {"id4", true}, {"id5", true}}});
+            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@105"}, {"id4", true}, {"id5", true}}});
         }
     };
 

@@ -34,7 +34,7 @@ concept DataSetCallback = std::invocable<T, DataSet<V>>;
  * Stream callback functions receive the span of data, with optional tags and reference to the sink.
  */
 template<typename T, typename V>
-concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const Tag>> || std::invocable<T, std::span<const V>, std::span<const Tag>, const DataSink<V>&>;
+concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable<T, std::span<const V>, std::span<const RelativeIndexTag>> || std::invocable<T, std::span<const V>, std::span<const RelativeIndexTag>, const DataSink<V>&>;
 
 
 template<typename T, typename V>
@@ -70,14 +70,13 @@ struct StreamingPoller {
         }
 
         auto readData = reader.get(nProcess);
-        if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
-            auto       tags         = tag_reader.get();
-            const auto it           = std::find_if_not(tags.begin(), tags.end(), [until = static_cast<int64_t>(samples_read + nProcess)](const auto& tag) { return tag.index < until; });
-            auto       relevantTags = std::vector<Tag>(tags.begin(), it);
-            for (auto& t : relevantTags) {
-                t.index -= static_cast<int64_t>(samples_read);
-            }
-            fnc(readData, std::span<const Tag>(relevantTags));
+        if constexpr (requires { fnc(std::span<const T>(), std::span<const RelativeIndexTag>()); }) {
+            auto       tags             = tag_reader.get();
+            const auto it               = std::ranges::find_if_not(tags, [until = samples_read + nProcess](const auto& tag) { return tag.index < until; });
+            auto       relevantTagsView = std::span(tags.begin(), it) | std::views::transform([this](const auto& v) { return RelativeIndexTag{tagIndexDifference(v.index, samples_read), v.map}; });
+            auto       relevantTags     = std::vector(relevantTagsView.begin(), relevantTagsView.end());
+
+            fnc(readData, relevantTags);
             std::ignore = tags.consume(relevantTags.size());
         } else {
             auto tags   = tag_reader.get();
@@ -648,7 +647,7 @@ private:
     template<typename Callback>
     struct ContinuousListener : public AbstractListener {
         static constexpr auto hasCallback       = !std::is_same_v<Callback, gr::meta::null_type>;
-        static constexpr auto callbackTakesTags = std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>> || std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>;
+        static constexpr auto callbackTakesTags = std::is_invocable_v<Callback, std::span<const T>, std::span<const RelativeIndexTag>> || std::is_invocable_v<Callback, std::span<const T>, std::span<const RelativeIndexTag>, const DataSink<T>&>;
 
         const DataSink<T>&              parent_sink;
         bool                            block           = false;
@@ -656,9 +655,9 @@ private:
         std::optional<detail::Metadata> _pendingMetadata;
 
         // callback-only
-        std::size_t      buffer_fill = 0;
-        std::vector<T>   buffer;
-        std::vector<Tag> tag_buffer;
+        std::size_t                   buffer_fill = 0;
+        std::vector<T>                buffer;
+        std::vector<RelativeIndexTag> tag_buffer;
 
         // polling-only
         std::weak_ptr<StreamingPoller<T>> polling_handler = {};
@@ -669,10 +668,10 @@ private:
 
         explicit ContinuousListener(std::shared_ptr<StreamingPoller<T>> poller, bool doBlock, const DataSink<T>& parent) : parent_sink(parent), block(doBlock), polling_handler{std::move(poller)} {}
 
-        inline void callCallback(std::span<const T> data, std::span<const Tag> tags) {
-            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>) {
+        inline void callCallback(std::span<const T> data, std::span<const RelativeIndexTag> tags) {
+            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const RelativeIndexTag>, const DataSink<T>&>) {
                 callback(std::move(data), tags, parent_sink);
-            } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>) {
+            } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const RelativeIndexTag>>) {
                 callback(std::move(data), tags);
             } else {
                 callback(std::move(data));
@@ -689,7 +688,7 @@ private:
                     std::ranges::copy(data.first(n), buffer.begin() + static_cast<std::ptrdiff_t>(buffer_fill));
                     if constexpr (callbackTakesTags) {
                         if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
-                            tag_buffer.emplace_back(static_cast<Tag::signed_index_type>(buffer_fill), std::move(*tag));
+                            tag_buffer.emplace_back(static_cast<RelativeIndexTag::index_type>(buffer_fill), std::move(*tag));
                         }
                         _pendingMetadata.reset();
                         tagData0.reset();
@@ -708,7 +707,7 @@ private:
                 // send out complete chunks directly
                 while (data.size() >= buffer.size()) {
                     if constexpr (callbackTakesTags) {
-                        std::vector<Tag> tags;
+                        std::vector<RelativeIndexTag> tags;
                         if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
                             tags.emplace_back(0, std::move(*tag));
                         }
@@ -745,7 +744,7 @@ private:
                 if (toWrite > 0) {
                     if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
                         auto tw = poller->tag_writer.reserve(1);
-                        tw[0]   = {static_cast<Tag::signed_index_type>(samples_written), std::move(*tag)};
+                        tw[0]   = {static_cast<Tag::index_type>(samples_written), std::move(*tag)};
                         tw.publish(1);
                     }
                     _pendingMetadata.reset();
@@ -839,7 +838,7 @@ private:
                 const auto preSampleView = history.subspan(0UZ, std::min(preSamples, history.size()));
                 dataset.signal_values.insert(dataset.signal_values.end(), preSampleView.rbegin(), preSampleView.rend());
 
-                dataset.timing_events = {{{static_cast<Tag::signed_index_type>(preSampleView.size()), *tagData0}}};
+                dataset.timing_events = {{{static_cast<RelativeIndexTag::index_type>(preSampleView.size()), *tagData0}}};
                 pending_trigger_windows.push_back({.dataset = std::move(dataset), .pending_post_samples = postSamples});
             }
 
@@ -932,7 +931,7 @@ private:
                 if (obsr == trigger::MatchResult::NotMatching || obsr == trigger::MatchResult::Matching) {
                     if (pending_dataset) {
                         if (obsr == trigger::MatchResult::NotMatching) {
-                            pending_dataset->timing_events[0].push_back({static_cast<Tag::signed_index_type>(pending_dataset->signal_values.size()), *tagData0});
+                            pending_dataset->timing_events[0].push_back({static_cast<RelativeIndexTag::index_type>(pending_dataset->signal_values.size()), *tagData0});
                         }
                         bool published = this->publishDataSet(std::move(*pending_dataset));
                         if (published) {
@@ -1050,7 +1049,7 @@ private:
                 }
 
                 DataSet<T> dataset    = dataset_template;
-                dataset.timing_events = {{{-static_cast<Tag::signed_index_type>(it->delay), std::move(it->tag_data)}}};
+                dataset.timing_events = {{{-static_cast<RelativeIndexTag::index_type>(it->delay), std::move(it->tag_data)}}};
                 dataset.signal_values = {inData[it->pending_samples]};
                 bool published        = this->publishDataSet(std::move(dataset));
                 if (published) {
