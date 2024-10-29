@@ -367,12 +367,12 @@ public:
 
     constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
-    using RasamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
-    using ResamplingLimit = Limits<1UL, std::numeric_limits<RasamplingValue>::max()>;
-    using ReasmplingDoc   = Doc<"For each `input_chunk_size` input samples, `output_chunk_size` output samples are published (in>out: Decimate, in<out: Interpolate, in==out: No change)">;
+    using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
+    using ResamplingLimit = Limits<1UL, std::numeric_limits<ResamplingValue>::max()>;
+    using ResamplingDoc   = Doc<"For each `input_chunk_size` input samples, `output_chunk_size` output samples are published (in>out: Decimate, in<out: Interpolate, in==out: No change)">;
 
-    A<RasamplingValue, "input_chunk_size", ReasmplingDoc, ResamplingLimit>  input_chunk_size                                                     = ResamplingControl::kInputChunkSize;
-    A<RasamplingValue, "output_chunk_size", ReasmplingDoc, ResamplingLimit> output_chunk_size                                                    = ResamplingControl::kOutputChunkSize;
+    A<ResamplingValue, "input_chunk_size", ResamplingDoc, ResamplingLimit>  input_chunk_size                                                     = ResamplingControl::kInputChunkSize;
+    A<ResamplingValue, "output_chunk_size", ResamplingDoc, ResamplingLimit> output_chunk_size                                                    = ResamplingControl::kOutputChunkSize;
     using StrideValue                                                                                                                            = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>       stride             = StrideControl::kStride;
     A<bool, "disconnect on done", Doc<"If no downstream blocks, declare itself 'DONE' and disconnect from upstream blocks.">> disconnect_on_done = true;
@@ -1496,7 +1496,7 @@ protected:
                     }
                 },
                 outputSpans);
-            
+
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
                 emitErrorMessage("Block::workInternal:", fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
