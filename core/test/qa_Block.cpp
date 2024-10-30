@@ -8,6 +8,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #if !DISABLE_SIMD
@@ -898,6 +899,51 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         expect(eq(resultBlock.performed_work, 48UZ));
         auto resultSink = sink.work(100);
         expect(eq(resultSink.performed_work, 100UZ));
+    };
+};
+
+const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace std::chrono_literals;
+    using namespace gr::basic;
+
+    "Test BlockingIO"_test = [] {
+        // This test demonstrates how to properly verify that a BlockingIO block has finished execution.
+        // The main issue is that BlockingIO blocks run in a separate thread and may continue executing for some time after join().
+        // Standard detection mechanisms might not always accurately determine the block's completion status.
+        // Therefore, we need to implement additional checks to ensure that the BlockingIO block has fully stopped.
+
+        gr::Graph flow;
+        // ClockSource has a BlockingIO attribute
+        auto& source  = flow.emplaceBlock<ClockSource<float>>({{"sample_rate", 10.f}, {"n_samples_max", gr::Size_t(0)}});
+        auto& monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+
+        auto scheduler = scheduler::Simple(std::move(flow));
+
+        auto client = std::thread([&scheduler] {
+            const auto startTime = std::chrono::steady_clock::now();
+            auto       isExpired = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
+            bool       expired   = false;
+            while (!expired) {
+                expired = isExpired();
+                std::this_thread::sleep_for(100ms);
+            }
+            scheduler.requestStop();
+        });
+
+        auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
+        client.join();
+
+        // Additional check to be sure that ClockSource is in STOPPED state.
+        while (source.state() != lifecycle::State::STOPPED) {
+            std::this_thread::sleep_for(10ms);
+        }
+        schedulerThread.join();
     };
 };
 
