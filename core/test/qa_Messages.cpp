@@ -675,6 +675,9 @@ const boost::ut::suite MessagesTests = [] {
         auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
 
         client.join();
+        while (source.state() != lifecycle::State::STOPPED) {
+            std::this_thread::sleep_for(10ms);
+        }
         schedulerThread.join();
     } | schedulingPolicies;
 };
