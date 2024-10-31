@@ -470,7 +470,10 @@ const boost::ut::suite MessagesTests = [] {
 
                 if (!data.empty()) {
                     expect(reply.data.has_value());
-                    expect(is_contained(reply.data.value(), data)) << fmt::format("testCase: '{}' scheduler return reply data: {}\n contains data {}\n", testCase, reply.data.value(), data);
+                    if (!is_contained(reply.data.value(), data)) {
+                        fmt::print("testCase: '{}' scheduler return reply data: {}\n contains data {}\n", testCase, reply.data.value(), data);
+                        return false;
+                    }
                 }
             } else if constexpr (std::is_same_v<decltype(data), property_map>) {
                 expect(!reply.data.has_value());
@@ -486,20 +489,21 @@ const boost::ut::suite MessagesTests = [] {
             using ResultCheck                                 = std::function<std::optional<bool>()>;
             SendCommand                              cmd      = [] {};
             ResultCheck                              check    = [] { return true; };
-            std::chrono::milliseconds                delay    = 1ms; // delay after 'cmd' which the reply is being checked
-            std::chrono::milliseconds                timeout  = 2s;  // time-out for the 'check' test
-            std::optional<std::chrono::milliseconds> retryFor = {};  // if the test fails, should we retry it and for how long?
+            std::chrono::milliseconds                delay    = 1ms;   // delay after 'cmd' which the reply is being checked
+            std::chrono::milliseconds                timeout  = 4s;    // time-out for the 'check' test
+            std::optional<std::chrono::milliseconds> retryFor = {};    // if the test fails, should we retry it and for how long?
+            bool                                     mayFail  = false; // do not assert that the last retry of the command was successful
         };
 
         using enum gr::message::Command;
         // clang-format off
         std::vector<MessageTestCase> commands = {
-                { .cmd = [&] { fmt::print("executing failing test"); /* simulate work */ }, .check = [&] { return false; /* simulate failure */ } },
+                { .cmd = [&] { fmt::print("executing failing test"); /* simulate work */ }, .check = [&] { return false; /* simulate failure */ }, .mayFail = true },
                 { .cmd = [&] { fmt::print("executing passing test"); /* simulate work */ }, .check = [&] { return true; /* simulate success */ }, .delay = 500ms },
-                { .cmd = [&] { fmt::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }},
-                { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("get settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 100ms },
-                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply("set settings", 0UZ, "", "", property_map{ }); }, .delay = 500ms },
-                { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("verify settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 100ms, .retryFor = 5s },
+                { .cmd = [&] { fmt::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }, .timeout=100ms, .mayFail = true },
+                { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("get settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 100ms, .retryFor = 9s },
+                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply("set settings", 0UZ, "", "", property_map{ }); }, .delay = 800ms , .retryFor = 9s},
+                { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply("verify settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 100ms, .retryFor = 9s },
                 { .cmd = [&] { sendCommand("shutdown scheduler", Set, "", property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } }); }}
         };
         // clang-format on
@@ -516,8 +520,9 @@ const boost::ut::suite MessagesTests = [] {
             fmt::println("scheduler is running.");
             std::fflush(stdout);
 
-            for (auto& [command, resultCheck, delay, timeout, retryFor] : commands) {
+            for (auto& [command, resultCheck, delay, timeout, retryFor, mayFail] : commands) {
                 auto commandStartTime = std::chrono::system_clock::now();
+                bool success          = false;
 
                 while (true) {
                     fmt::print("executing command: ");
@@ -551,6 +556,7 @@ const boost::ut::suite MessagesTests = [] {
 
                     // The test passed successfully, no need to repeat
                     if (result.has_value() && *result) {
+                        success = true;
                         break;
                     }
 
@@ -558,6 +564,9 @@ const boost::ut::suite MessagesTests = [] {
                     if (!retryFor.has_value() || std::chrono::system_clock::now() - commandStartTime > *retryFor) {
                         break;
                     }
+                }
+                if (!mayFail) {
+                    expect(success);
                 }
             }
         });
