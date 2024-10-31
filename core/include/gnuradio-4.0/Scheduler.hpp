@@ -271,8 +271,8 @@ protected:
         }
 
         [[maybe_unused]] auto currentProgress    = this->_graph.progress().value();
-        gr::Size_t            inactiveCycleCount = 0U;
-        gr::Size_t            msgToCount         = 0U;
+        std::size_t           inactiveCycleCount = 0UZ;
+        std::size_t           msgToCount         = 0UZ;
         auto                  activeState        = this->state();
         do {
             [[maybe_unused]] auto pe = profiler_handler.startCompleteEvent("scheduler_base.work");
@@ -281,7 +281,7 @@ protected:
                 currentProgress = this->_graph.progress().value();
             }
 
-            bool processMessages = msgToCount == 0U;
+            bool processMessages = msgToCount == 0UZ;
             if (processMessages) {
                 if (runnerID == 0UZ || _nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
@@ -311,8 +311,10 @@ protected:
                     _graph.ackTopologyChange();
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+                msgToCount = 0UZ;
             } else { // other states
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+                msgToCount = 0UZ;
             }
 
             // optionally tracking progress and block if there is none
@@ -321,13 +323,14 @@ protected:
                 if (currentProgress == progressAfter) {
                     inactiveCycleCount++;
                 } else {
-                    inactiveCycleCount = 0U;
+                    inactiveCycleCount = 0UZ;
                 }
 
                 currentProgress = progressAfter;
                 if (inactiveCycleCount > timeout_inactivity_count) {
                     // allow scheduler process to sleep before retrying (N.B. intended to save CPU/battery power)
                     std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+                    msgToCount = 0UZ;
                 }
             }
         } while (lifecycle::isActive(activeState));
