@@ -528,14 +528,14 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            std::vector<int32_t>                              receivedData;
-            std::vector<Tag>                                  receivedTags;
-            bool                                              seenFinished = false;
-            auto                                              isTrigger    = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
+            std::vector<int32_t> receivedData;
+            std::vector<Tag>     receivedTags;
+            bool                 seenFinished = false;
+            auto                 isTrigger    = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
                 const auto type = tag.get("TYPE");
                 return (type && std::get<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
-            std::shared_ptr<DataSetPoller<int32_t>>           poller;
+            std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
                 poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 0UZ, 2UZ, BlockingMode::Blocking);
                 return poller != nullptr;

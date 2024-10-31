@@ -662,7 +662,7 @@ private:
 
         // polling-only
         std::weak_ptr<StreamingPoller<T>> polling_handler = {};
-        Callback              callback;
+        Callback                          callback;
 
         template<typename CallbackFW>
         explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW&& c, const DataSink<T>& parent) : parent_sink(parent), buffer(maxChunkSize), callback{std::forward<CallbackFW>(c)} {}
@@ -1182,9 +1182,9 @@ private:
 
     template<typename Callback, DataSetMatcher<T> TMatcher>
     struct Listener : public AbstractListener {
-        bool                  block           = false;
-        TMatcher              matcher         = {};
-        gr::property_map      trigger_state;
+        bool                            block   = false;
+        TMatcher                        matcher = {};
+        gr::property_map                trigger_state;
         std::weak_ptr<DataSetPoller<T>> polling_handler = {};
 
         Callback callback;
@@ -1244,7 +1244,7 @@ private:
 
 } // namespace gr::basic
 
-auto registerDataSink = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
+auto registerDataSink    = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
 auto registerDataSetSink = gr::registerBlock<gr::basic::DataSetSink, float, double>(gr::globalBlockRegistry());
 
 #endif

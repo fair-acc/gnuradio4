@@ -35,7 +35,7 @@ class thread_exception : public std::error_category {
     using std::error_category::error_category;
 
 public:
-    constexpr thread_exception() : std::error_category(){};
+    constexpr thread_exception() : std::error_category() {};
 
     const char* name() const noexcept override { return "thread_exception"; };
 

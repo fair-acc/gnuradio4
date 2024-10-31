@@ -9,8 +9,8 @@ const boost::ut::suite ThreadPoolTests = [] {
         expect(nothrow([] { gr::thread_pool::BasicThreadPool("test", gr::thread_pool::IO_BOUND, 4UL); }));
         expect(nothrow([] { gr::thread_pool::BasicThreadPool("test2", gr::thread_pool::CPU_BOUND, 4UL); }));
 
-        std::atomic<int>                   enqueueCount{ 0 };
-        std::atomic<int>                   executeCount{ 0 };
+        std::atomic<int>                 enqueueCount{0};
+        std::atomic<int>                 executeCount{0};
         gr::thread_pool::BasicThreadPool pool("TestPool", gr::thread_pool::IO_BOUND, 1, 2);
         expect(nothrow([&] { pool.sleepDuration = std::chrono::milliseconds(1); }));
         expect(nothrow([&] { pool.keepAliveDuration = std::chrono::seconds(10); }));
@@ -53,7 +53,7 @@ const boost::ut::suite ThreadPoolTests = [] {
         expect(nothrow([&] { pool.setThreadSchedulingPolicy(pool.getSchedulingPolicy(), pool.getSchedulingPriority()); }));
     };
     "contention tests"_test = [] {
-        std::atomic<int>                   counter{ 0 };
+        std::atomic<int>                 counter{0};
         gr::thread_pool::BasicThreadPool pool("contention", gr::thread_pool::IO_BOUND, 1, 4);
         pool.waitUntilInitialised();
         expect(that % pool.isInitialised());
@@ -79,12 +79,12 @@ const boost::ut::suite ThreadPoolTests = [] {
         struct bounds_def {
             std::uint32_t min, max;
         };
-        std::array<bounds_def, 5> bounds{ bounds_def{ 1, 1 }, bounds_def{ 1, 4 }, bounds_def{ 2, 2 }, bounds_def{ 2, 8 }, bounds_def{ 4, 8 } };
+        std::array<bounds_def, 5> bounds{bounds_def{1, 1}, bounds_def{1, 4}, bounds_def{2, 2}, bounds_def{2, 8}, bounds_def{4, 8}};
 
         for (const auto [minThreads, maxThreads] : bounds) {
-            for (const auto taskCount : { 2, 8, 32 }) {
+            for (const auto taskCount : {2, 8, 32}) {
                 fmt::print("## Test with min={} and max={} and taskCount={}\n", minThreads, maxThreads, taskCount);
-                std::atomic<int> counter{ 0 };
+                std::atomic<int> counter{0};
 
                 // Pool with min and max thread count
                 gr::thread_pool::BasicThreadPool pool("count_test", gr::thread_pool::IO_BOUND, minThreads, maxThreads);
@@ -117,6 +117,4 @@ const boost::ut::suite ThreadPoolTests = [] {
     };
 };
 
-int
-main() { /* tests are statically executed */
-}
+int main() { /* tests are statically executed */ }

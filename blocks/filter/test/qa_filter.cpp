@@ -7,19 +7,18 @@
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
 
 template<typename T, typename Range>
-    requires std::floating_point<T>
-constexpr size_t
-estimate_settling_time(const Range &step_response, std::size_t offset = 0, T step_value = 1.0, T threshold = 0.001) {
+requires std::floating_point<T>
+constexpr size_t estimate_settling_time(const Range& step_response, std::size_t offset = 0, T step_value = 1.0, T threshold = 0.001) {
     if (offset >= step_response.size()) {
         throw std::out_of_range("Offset is greater than the size of the step response.");
     }
     const T lower_bound = step_value - threshold;
     const T upper_bound = step_value + threshold;
 
-    auto    begin       = step_response.begin() + static_cast<typename Range::difference_type>(offset);
-    auto    end         = step_response.end();
+    auto begin = step_response.begin() + static_cast<typename Range::difference_type>(offset);
+    auto end   = step_response.end();
 
-    auto    it          = std::find_if(begin, end, [lower_bound, upper_bound](T sample) { return sample >= lower_bound && sample <= upper_bound; });
+    auto it = std::find_if(begin, end, [lower_bound, upper_bound](T sample) { return sample >= lower_bound && sample <= upper_bound; });
 
     // If no such sample is found, return an error
     if (it == end) {
@@ -46,8 +45,8 @@ const boost::ut::suite SequenceTests = [] {
 
     "FIR and IIR general tests"_test = [] {
         std::vector<double> fir_coeffs(10, 0.1); // box car filter
-        std::vector<double> iir_coeffs_b{ 0.55, 0 };
-        std::vector<double> iir_coeffs_a{ 1, -0.45 };
+        std::vector<double> iir_coeffs_b{0.55, 0};
+        std::vector<double> iir_coeffs_a{1, -0.45};
 
         // Create FIR and IIR filter instances
         fir_filter<double> fir_filter;
@@ -89,8 +88,8 @@ const boost::ut::suite SequenceTests = [] {
     "IIR equality tests"_test = [] {
         //        std::vector<double>              iir_coeffs_b{ 0.55, 0 };
         //        std::vector<double>              iir_coeffs_a{ 1, -0.45 };
-        std::vector<double>               iir_coeffs_b{ 0.020083365564211, 0.040166731128423, 0.020083365564211 };
-        std::vector<double>               iir_coeffs_a{ 1.0, -1.561018075800718, 0.641351538057563 };
+        std::vector<double> iir_coeffs_b{0.020083365564211, 0.040166731128423, 0.020083365564211};
+        std::vector<double> iir_coeffs_a{1.0, -1.561018075800718, 0.641351538057563};
 
         iir_filter<double, IIRForm::DF_I> iir_filter_I;
         iir_filter_I.b = iir_coeffs_b;
@@ -102,8 +101,8 @@ const boost::ut::suite SequenceTests = [] {
         iir_filter_IT.b = iir_coeffs_b;
         iir_filter_IT.a = iir_coeffs_a;
         iir_filter<double, IIRForm::DF_II_TRANSPOSED> iir_filter_IIT;
-        iir_filter_IIT.b           = iir_coeffs_b;
-        iir_filter_IIT.a           = iir_coeffs_a;
+        iir_filter_IIT.b = iir_coeffs_b;
+        iir_filter_IIT.a = iir_coeffs_a;
 
         constexpr double tolerance = 0.00001;
         for (std::size_t i = 0UL; i < 20; ++i) {
@@ -118,12 +117,10 @@ const boost::ut::suite SequenceTests = [] {
 
 #if defined(__GNUC__) && !defined(__OPTIMIZE__)
             fmt::print("input[{:2}]={}-> IIR= {:4.2f} (I) {:4.2f} (II) {:4.2f} (I-T) {:4.2f} (II-T)\n", //
-                       i, input, form_I, form_II, form_I_T, form_II_T);
+                i, input, form_I, form_II, form_I_T, form_II_T);
 #endif
         }
     };
 };
 
-int
-main() { /* not needed for UT */
-}
+int main() { /* not needed for UT */ }

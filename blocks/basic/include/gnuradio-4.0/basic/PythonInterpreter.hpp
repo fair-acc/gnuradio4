@@ -29,48 +29,38 @@
 
 namespace gr::python {
 
-inline static PyObject *TrueObj  = Py_True;
-inline static PyObject *FalseObj = Py_False;
-inline static PyObject *NoneObj  = Py_None;
+inline static PyObject* TrueObj  = Py_True;
+inline static PyObject* FalseObj = Py_False;
+inline static PyObject* NoneObj  = Py_None;
 
-constexpr inline bool
-isPyDict(const PyObject *obj) {
-    return PyDict_Check(obj);
-}
+constexpr inline bool isPyDict(const PyObject* obj) { return PyDict_Check(obj); }
 
-constexpr inline void
-PyDecRef(PyObject *obj) { // wrapper to isolate unsafe warning on C-API casts
+constexpr inline void PyDecRef(PyObject* obj) { // wrapper to isolate unsafe warning on C-API casts
     Py_XDECREF(obj);
 }
 
-constexpr inline void
-PyIncRef(PyObject *obj) { // wrapper to isolate unsafe warning on C-API casts
+constexpr inline void PyIncRef(PyObject* obj) { // wrapper to isolate unsafe warning on C-API casts
     Py_XINCREF(obj);
 }
 
-constexpr inline std::string
-PyBytesAsString(PyObject *op) {
-    return PyBytes_AsString(op);
-}
+constexpr inline std::string PyBytesAsString(PyObject* op) { return PyBytes_AsString(op); }
 
 class PyObjectGuard {
-    PyObject *_ptr;
+    PyObject* _ptr;
 
-    void
-    move(PyObjectGuard &&other) noexcept {
+    void move(PyObjectGuard&& other) noexcept {
         PyDecRef(_ptr);
         std::swap(_ptr, other._ptr);
     }
 
 public:
-    explicit PyObjectGuard(PyObject *ptr = nullptr) : _ptr(ptr) {}
+    explicit PyObjectGuard(PyObject* ptr = nullptr) : _ptr(ptr) {}
 
-    explicit PyObjectGuard(PyObjectGuard &&other) noexcept : _ptr(other._ptr) { move(std::move(other)); }
+    explicit PyObjectGuard(PyObjectGuard&& other) noexcept : _ptr(other._ptr) { move(std::move(other)); }
 
     ~PyObjectGuard() { PyDecRef(_ptr); }
 
-    PyObjectGuard &
-    operator=(PyObjectGuard &&other) noexcept {
+    PyObjectGuard& operator=(PyObjectGuard&& other) noexcept {
         if (this != &other) {
             move(std::move(other));
         }
@@ -90,13 +80,9 @@ public:
         return *this;
     }
 
+    operator PyObject*() const { return _ptr; }
 
-    operator PyObject *() const { return _ptr; }
-
-    PyObject *
-    get() const {
-        return _ptr;
-    }
+    PyObject* get() const { return _ptr; }
 };
 
 class PyGILGuard {
@@ -107,26 +93,22 @@ public:
 
     ~PyGILGuard() { PyGILState_Release(_state); }
 
-    PyGILGuard(const PyGILGuard &) = delete;
-    PyGILGuard &
-    operator=(const PyGILGuard &)
-            = delete;
+    PyGILGuard(const PyGILGuard&)            = delete;
+    PyGILGuard& operator=(const PyGILGuard&) = delete;
 };
 
-[[nodiscard]] inline std::string
-toString(PyObject *object) {
+[[nodiscard]] inline std::string toString(PyObject* object) {
     PyObjectGuard strObj(PyObject_Repr(object));
     PyObjectGuard bytesObj(PyUnicode_AsEncodedString(strObj.get(), "utf-8", "strict"));
     return python::PyBytesAsString(bytesObj.get());
 }
 
-[[nodiscard]] inline std::string
-toLineCountAnnotated(std::string_view code, std::size_t min = 0UZ, std::size_t max = std::numeric_limits<std::size_t>::max(), std::size_t marker = std::numeric_limits<std::size_t>::max() - 1UZ) {
+[[nodiscard]] inline std::string toLineCountAnnotated(std::string_view code, std::size_t min = 0UZ, std::size_t max = std::numeric_limits<std::size_t>::max(), std::size_t marker = std::numeric_limits<std::size_t>::max() - 1UZ) {
     if (code.empty()) {
         return "";
     }
     auto splitLines = [](std::string_view str) {
-        std::istringstream       stream{ std::string(str) }; // Convert string_view to string
+        std::istringstream       stream{std::string(str)}; // Convert string_view to string
         std::vector<std::string> lines;
         std::string              line;
         while (std::getline(stream, line)) {
@@ -145,8 +127,7 @@ toLineCountAnnotated(std::string_view code, std::size_t min = 0UZ, std::size_t m
     return annotatedCode;
 }
 
-[[nodiscard]] inline std::string
-getDebugPythonObjectAttributes(PyObject *obj) {
+[[nodiscard]] inline std::string getDebugPythonObjectAttributes(PyObject* obj) {
     if (obj == nullptr) {
         return "The provided PyObject is null.\n";
     }
@@ -161,15 +142,14 @@ getDebugPythonObjectAttributes(PyObject *obj) {
     std::string ret;
     Py_ssize_t  size = PyList_Size(dirList);
     for (Py_ssize_t i = 0; i < size; i++) {
-        PyObject     *attrName = PyList_GetItem(dirList, i); // borrowed reference, no need to decref
+        PyObject*     attrName = PyList_GetItem(dirList, i); // borrowed reference, no need to decref
         PyObjectGuard attrValue(PyObject_GetAttr(obj, attrName));
         ret += std::format("item {:3}: key: {} value: {}\n", i, toString(attrName), attrValue ? toString(attrValue) : "<Unable to retrieve value>");
     }
     return ret;
 }
 
-inline void
-throwCurrentPythonError(std::string_view msg, std::source_location location = std::source_location::current(), std::string_view pythonCode = "") {
+inline void throwCurrentPythonError(std::string_view msg, std::source_location location = std::source_location::current(), std::string_view pythonCode = "") {
     PyObjectGuard exception(PyErr_GetRaisedException());
     if (!exception) {
         throw gr::exception(std::format("{}\nPython error: <unknown exception>\ntrace-back: {}", msg, toLineCountAnnotated(pythonCode)), location);
@@ -188,14 +168,13 @@ throwCurrentPythonError(std::string_view msg, std::source_location location = st
     throw gr::exception(std::format("{}\nPython error: {}\n{}", msg, toString(exception), toLineCountAnnotated(pythonCode, min, max, marker)), location);
 }
 
-[[nodiscard]] inline std::string
-getDictionary(std::string_view moduleName) {
-    PyObject *module = PyDict_GetItemString(PyImport_GetModuleDict(), moduleName.data());
+[[nodiscard]] inline std::string getDictionary(std::string_view moduleName) {
+    PyObject* module = PyDict_GetItemString(PyImport_GetModuleDict(), moduleName.data());
     if (module == nullptr) {
         return "";
     }
 
-    if (PyObject *module_dict = PyModule_GetDict(module); module_dict != nullptr) {
+    if (PyObject* module_dict = PyModule_GetDict(module); module_dict != nullptr) {
         PyObjectGuard dictGuard(PyObject_Repr(module_dict));
         return PyUnicode_AsUTF8(dictGuard);
     }
@@ -208,8 +187,7 @@ concept NoParamNoReturn = requires(T t) {
 };
 
 template<typename T>
-int
-numpyType() noexcept {
+int numpyType() noexcept {
     // clang-format off
     if constexpr (std::is_same_v<T, bool>)          return NPY_BOOL;
     else if constexpr (std::is_same_v<T, std::int8_t>)   return NPY_BYTE;
@@ -230,31 +208,29 @@ numpyType() noexcept {
 }
 
 template<typename T>
-    requires std::is_arithmetic_v<T> || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>
-constexpr inline PyObject *
-toPyArray(T *arrayData, std::initializer_list<std::size_t> dimensions) {
+requires std::is_arithmetic_v<T> || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>
+constexpr inline PyObject* toPyArray(T* arrayData, std::initializer_list<std::size_t> dimensions) {
     assert(dimensions.size() >= 1 && "nDim needs to be >= 1");
 
     std::vector<npy_intp> npyDims(dimensions.begin(), dimensions.end());
     // N.B. reinterpret cast is needed to access NumPy's unsafe C-API
-    void     *data    = const_cast<void *>(reinterpret_cast<const void *>(arrayData));
-    PyObject *npArray = PyArray_SimpleNewFromData(static_cast<int>(dimensions.size()), npyDims.data(), python::numpyType<std::remove_cv_t<T>>(), data);
+    void*     data    = const_cast<void*>(reinterpret_cast<const void*>(arrayData));
+    PyObject* npArray = PyArray_SimpleNewFromData(static_cast<int>(dimensions.size()), npyDims.data(), python::numpyType<std::remove_cv_t<T>>(), data);
     if (!npArray) {
         python::throwCurrentPythonError("Unable to create NumPy array");
     }
-    PyArray_CLEARFLAGS(reinterpret_cast<PyArrayObject *>(npArray), NPY_ARRAY_OWNDATA);
+    PyArray_CLEARFLAGS(reinterpret_cast<PyArrayObject*>(npArray), NPY_ARRAY_OWNDATA);
 
     if constexpr (!std::is_const_v<T>) {
-        PyArray_ENABLEFLAGS(reinterpret_cast<PyArrayObject *>(npArray), NPY_ARRAY_WRITEABLE);
+        PyArray_ENABLEFLAGS(reinterpret_cast<PyArrayObject*>(npArray), NPY_ARRAY_WRITEABLE);
     } else {
-        PyArray_CLEARFLAGS(reinterpret_cast<PyArrayObject *>(npArray), NPY_ARRAY_WRITEABLE);
+        PyArray_CLEARFLAGS(reinterpret_cast<PyArrayObject*>(npArray), NPY_ARRAY_WRITEABLE);
     }
     return npArray;
 }
 
 template<typename T>
-std::string
-sanitizedPythonBlockName() {
+std::string sanitizedPythonBlockName() {
     std::string str = gr::meta::type_name<T>();
     std::replace(str.begin(), str.end(), ':', '_');
     std::replace(str.begin(), str.end(), '<', '_');
@@ -279,15 +255,15 @@ enum class EnforceFunction { MANDATORY, OPTIONAL };
 class Interpreter {
     static std::atomic<std::size_t> _nInterpreters;
     static std::atomic<std::size_t> _nNumPyInit;
-    static PyThreadState           *_interpreterThreadState;
-    PyModuleDef                    *_moduleDefinitions;
-    PyObject                       *_pMainModule; // borrowed reference
-    PyObject                       *_pMainDict;   // borrowed reference
+    static PyThreadState*           _interpreterThreadState;
+    PyModuleDef*                    _moduleDefinitions;
+    PyObject*                       _pMainModule; // borrowed reference
+    PyObject*                       _pMainDict;   // borrowed reference
     PyObjectGuard                   _pCapsule;
 
 public:
     template<typename T>
-    explicit(false) Interpreter(T *classReference, PyModuleDef *moduleDefinitions = nullptr, std::source_location location = std::source_location::current()) : _moduleDefinitions(moduleDefinitions) {
+    explicit(false) Interpreter(T* classReference, PyModuleDef* moduleDefinitions = nullptr, std::source_location location = std::source_location::current()) : _moduleDefinitions(moduleDefinitions) {
         if (_nInterpreters.fetch_add(1UZ, std::memory_order_relaxed) == 0UZ) {
             Py_Initialize();
             if (PyErr_Occurred()) {
@@ -318,7 +294,7 @@ public:
         if (classReference == nullptr || moduleDefinitions == nullptr) {
             return;
         }
-        _pCapsule = PyObjectGuard(PyCapsule_New(static_cast<void *>(classReference), _moduleDefinitions->m_name, nullptr));
+        _pCapsule = PyObjectGuard(PyCapsule_New(static_cast<void*>(classReference), _moduleDefinitions->m_name, nullptr));
         if (!_pCapsule) {
             python::throwCurrentPythonError(fmt::format("Interpreter(*{}) - failed to create a capsule", gr::meta::type_name<T>()));
         }
@@ -327,7 +303,7 @@ public:
 
         // replaces the 'PyImport_AppendInittab("ClassName", &classDefinition)' to allow for other blocks being added
         // after the global Python interpreter is already being initialised
-        PyObject *m = PyModule_Create(moduleDefinitions);
+        PyObject* m = PyModule_Create(moduleDefinitions);
         if (m) {
             int ret = PyDict_SetItemString(PyImport_GetModuleDict(), moduleDefinitions->m_name, m);
             python::PyDecRef(m); // The module dict holds a reference now.
@@ -340,7 +316,7 @@ public:
         if (PyDict_GetItemString(PyImport_GetModuleDict(), moduleDefinitions->m_name)) { // module successfully inserted - performing some additional checks
             assert(python::getDictionary(moduleDefinitions->m_name).size() > 0 && "dictionary exist for module");
 
-            if (PyObject *imported_module = PyImport_ImportModule(moduleDefinitions->m_name); imported_module != nullptr) {
+            if (PyObject* imported_module = PyImport_ImportModule(moduleDefinitions->m_name); imported_module != nullptr) {
                 python::PyDecRef(imported_module);
             } else {
                 python::throwCurrentPythonError(fmt::format("Check import of {} failed.", _moduleDefinitions->m_name), location);
@@ -357,28 +333,17 @@ public:
     }
 
     // Prevent copying and moving
-    Interpreter(const Interpreter &) = delete;
-    Interpreter &
-    operator=(const Interpreter &)
-            = delete;
-    Interpreter(Interpreter &&) = delete;
-    Interpreter &
-    operator=(Interpreter &&)
-            = delete;
+    Interpreter(const Interpreter&)            = delete;
+    Interpreter& operator=(const Interpreter&) = delete;
+    Interpreter(Interpreter&&)                 = delete;
+    Interpreter& operator=(Interpreter&&)      = delete;
 
-    PyObject *
-    getModule() {
-        return _pMainModule;
-    }
+    PyObject* getModule() { return _pMainModule; }
 
-    PyObject *
-    getDictionary() {
-        return _pMainDict;
-    }
+    PyObject* getDictionary() { return _pMainDict; }
 
     template<NoParamNoReturn Func>
-    void
-    invoke(Func func, std::string_view pythonCode = "", std::source_location location = std::source_location::current()) {
+    void invoke(Func func, std::string_view pythonCode = "", std::source_location location = std::source_location::current()) {
         assert(Py_IsInitialized());
         PyGILGuard localGuard;
         if (_interpreterThreadState != PyThreadState_Get()) {
@@ -396,7 +361,7 @@ public:
     }
 
     template<EnforceFunction forced = EnforceFunction::MANDATORY>
-    python::PyObjectGuard invokeFunction(std::string_view functionName, PyObject *functionArguments = nullptr, std::source_location location = std::source_location::current()) {
+    python::PyObjectGuard invokeFunction(std::string_view functionName, PyObject* functionArguments = nullptr, std::source_location location = std::source_location::current()) {
         PyGILGuard localGuard;
         const bool hasFunction = PyObject_HasAttrString(getModule(), functionName.data());
         if constexpr (forced == EnforceFunction::MANDATORY) {
@@ -413,9 +378,9 @@ public:
     }
 };
 
-std::atomic<std::size_t> Interpreter::_nInterpreters{ 0UZ };
-std::atomic<std::size_t> Interpreter::_nNumPyInit{ 0UZ };
-PyThreadState           *Interpreter::_interpreterThreadState = nullptr;
+std::atomic<std::size_t> Interpreter::_nInterpreters{0UZ};
+std::atomic<std::size_t> Interpreter::_nNumPyInit{0UZ};
+PyThreadState*           Interpreter::_interpreterThreadState = nullptr;
 
 } // namespace gr::python
 

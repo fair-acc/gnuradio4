@@ -28,8 +28,8 @@ const boost::ut::suite global_benchmarks = [] {
         throw std::invalid_argument("fails here on purpose");
     };
 #if not defined(_LIBCPP_VERSION)
-    "using marker"_benchmark.repeat<10>() = [] (MarkerMap<"source", "sink1", "sink2", "finish">& marker) {
-        std::barrier start(3, [&marker] { marker.at<"source">().now(); }); // 1 source + 2 sinks
+    "using marker"_benchmark.repeat<10>() = [](MarkerMap<"source", "sink1", "sink2", "finish">& marker) {
+        std::barrier start(3, [&marker] { marker.at<"source">().now(); });  // 1 source + 2 sinks
         std::barrier finish(3, [&marker] { marker.at<"finish">().now(); }); // 1 source + 2 sinks
         std::jthread source([&start, &finish] {
             start.arrive_and_wait();

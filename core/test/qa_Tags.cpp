@@ -31,7 +31,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
     // gr::PortIn<T, Doc<"In">, RequiredSamples<1024, 1024, true>> inPort;
     gr::PortIn<T, gr::Doc<"In">, gr::RequiredSamples<24, 24, false>> inPort;
     // gr::PortIn<T, Doc<"In">> inPort;
-    gr::PortOut<T>                            outPort;
+    gr::PortOut<T> outPort;
 
     GR_MAKE_REFLECTABLE(RealignTagsToChunks, inPort, outPort);
 

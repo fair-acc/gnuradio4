@@ -48,14 +48,13 @@ class HistoryBuffer {
 
     buffer_type _buffer{};
     std::size_t _capacity = N;
-    std::size_t _write_position{ 0 };
-    std::size_t _size{ 0UZ };
+    std::size_t _write_position{0};
+    std::size_t _size{0UZ};
 
     /**
      * @brief maps the logical index to the physical index in the buffer.
      */
-    [[nodiscard]] constexpr inline std::size_t
-    map_index(std::size_t index) const noexcept {
+    [[nodiscard]] constexpr inline std::size_t map_index(std::size_t index) const noexcept {
         if constexpr (N == std::dynamic_extent) { // runtime checks
             if (std::has_single_bit(_capacity)) { // _capacity is a power of two
                 return (_write_position + index) & (_capacity - 1UZ);
@@ -86,8 +85,7 @@ public:
     /**
      * @brief Adds an element to the end expiring the oldest element beyond the buffer's capacities.
      */
-    constexpr void
-    push_back(const T &value) noexcept {
+    constexpr void push_back(const T& value) noexcept {
         if (_size < _capacity) [[unlikely]] {
             ++_size;
         }
@@ -103,8 +101,7 @@ public:
      * @brief Adds a range of elements the end expiring the oldest elements beyond the buffer's capacities.
      */
     template<typename Iter>
-    constexpr void
-    push_back_bulk(Iter cbegin, Iter cend) noexcept {
+    constexpr void push_back_bulk(Iter cbegin, Iter cend) noexcept {
         for (auto it = cbegin; it != cend; ++it) {
             push_back(*it);
         }
@@ -114,9 +111,8 @@ public:
      * @brief Adds a range of elements the end expiring the oldest elements beyond the buffer's capacities.
      */
     template<typename Range>
-    constexpr void
-    push_back_bulk(const Range &range) noexcept {
-        for (const auto &item : range) {
+    constexpr void push_back_bulk(const Range& range) noexcept {
+        for (const auto& item : range) {
             push_back(item);
         }
     }
@@ -124,132 +120,71 @@ public:
     /**
      * @brief unchecked accesses of the element at the specified logical index.
      */
-    constexpr T &
-    operator[](std::size_t index) noexcept {
-        return _buffer[map_index(index)];
-    }
+    constexpr T& operator[](std::size_t index) noexcept { return _buffer[map_index(index)]; }
 
-    [[nodiscard]] constexpr const T &
-    operator[](std::size_t index) const noexcept {
-        return _buffer[map_index(index)];
-    }
+    [[nodiscard]] constexpr const T& operator[](std::size_t index) const noexcept { return _buffer[map_index(index)]; }
 
-    [[nodiscard]] constexpr T &
-    at(std::size_t index) noexcept(false) {
+    [[nodiscard]] constexpr T& at(std::size_t index) noexcept(false) {
         if (index >= _size) {
             throw std::out_of_range(fmt::format("index {} out of range [0, {})", index, _size));
         }
         return _buffer[map_index(index)];
     }
 
-    [[nodiscard]] constexpr const T &
-    at(std::size_t index) const noexcept(false) {
+    [[nodiscard]] constexpr const T& at(std::size_t index) const noexcept(false) {
         if (index >= _size) {
             throw std::out_of_range(fmt::format("index {} out of range [0, {})", index, _size));
         }
         return _buffer[map_index(index)];
     }
 
-    [[nodiscard]] constexpr size_t
-    size() const noexcept {
-        return _size;
-    }
+    [[nodiscard]] constexpr size_t size() const noexcept { return _size; }
 
-    [[nodiscard]] constexpr bool
-    empty() const noexcept {
-        return _size == 0;
-    }
+    [[nodiscard]] constexpr bool empty() const noexcept { return _size == 0; }
 
-    [[nodiscard]] constexpr size_t
-    capacity() const noexcept {
-        return _capacity;
-    }
+    [[nodiscard]] constexpr size_t capacity() const noexcept { return _capacity; }
 
-    [[nodiscard]] constexpr T *
-    data() noexcept {
-        return _buffer.data();
-    }
+    [[nodiscard]] constexpr T* data() noexcept { return _buffer.data(); }
 
-    [[nodiscard]] constexpr const T *
-    data() const noexcept {
-        return _buffer.data();
-    }
+    [[nodiscard]] constexpr const T* data() const noexcept { return _buffer.data(); }
 
     /**
      * @brief Returns a span of elements with given (optional) length with the last element being the newest
      */
-    [[nodiscard]] constexpr std::span<const T>
-    get_span(std::size_t index, std::size_t length = std::dynamic_extent) const {
+    [[nodiscard]] constexpr std::span<const T> get_span(std::size_t index, std::size_t length = std::dynamic_extent) const {
         length = std::clamp(length, 0LU, std::min(_size - index, length));
         return std::span<const T>(&_buffer[map_index(index)], length);
     }
 
-    [[nodiscard]] auto
-    begin() noexcept {
-        return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position));
-    }
+    [[nodiscard]] auto begin() noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position)); }
 
-    constexpr void
-    reset(T defaultValue = T()) {
+    constexpr void reset(T defaultValue = T()) {
         _size           = 0UZ;
         _write_position = 0UZ;
         std::fill(_buffer.begin(), _buffer.end(), defaultValue);
     }
 
-    [[nodiscard]] constexpr auto
-    begin() const noexcept {
-        return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position));
-    }
+    [[nodiscard]] constexpr auto begin() const noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position)); }
 
-    [[nodiscard]] constexpr auto
-    cbegin() const noexcept {
-        return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position));
-    }
+    [[nodiscard]] constexpr auto cbegin() const noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position)); }
 
-    [[nodiscard]] auto
-    end() noexcept {
-        return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position + _size));
-    }
+    [[nodiscard]] auto end() noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position + _size)); }
 
-    [[nodiscard]] constexpr auto
-    end() const noexcept {
-        return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position + _size));
-    }
+    [[nodiscard]] constexpr auto end() const noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position + _size)); }
 
-    [[nodiscard]] constexpr auto
-    cend() const noexcept {
-        return end();
-    }
+    [[nodiscard]] constexpr auto cend() const noexcept { return end(); }
 
-    [[nodiscard]] auto
-    rbegin() noexcept {
-        return std::make_reverse_iterator(end());
-    }
+    [[nodiscard]] auto rbegin() noexcept { return std::make_reverse_iterator(end()); }
 
-    [[nodiscard]] constexpr auto
-    rbegin() const noexcept {
-        return std::make_reverse_iterator(cend());
-    }
+    [[nodiscard]] constexpr auto rbegin() const noexcept { return std::make_reverse_iterator(cend()); }
 
-    [[nodiscard]] constexpr auto
-    crbegin() const noexcept {
-        return rbegin();
-    }
+    [[nodiscard]] constexpr auto crbegin() const noexcept { return rbegin(); }
 
-    [[nodiscard]] auto
-    rend() noexcept {
-        return std::make_reverse_iterator(begin());
-    }
+    [[nodiscard]] auto rend() noexcept { return std::make_reverse_iterator(begin()); }
 
-    [[nodiscard]] constexpr auto
-    rend() const noexcept {
-        return std::make_reverse_iterator(cbegin());
-    }
+    [[nodiscard]] constexpr auto rend() const noexcept { return std::make_reverse_iterator(cbegin()); }
 
-    [[nodiscard]] constexpr auto
-    crend() const noexcept {
-        return rend();
-    }
+    [[nodiscard]] constexpr auto crend() const noexcept { return rend(); }
 };
 
 } // namespace gr
