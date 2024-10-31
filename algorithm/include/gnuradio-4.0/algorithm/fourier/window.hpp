@@ -38,9 +38,8 @@ inline static constexpr gr::meta::fixed_string TypeNames = "[None, Rectangular, 
 
 namespace detail {
 template<typename T>
-    requires std::is_floating_point_v<T>
-constexpr T
-bessel_i0(const T x) noexcept {
+requires std::is_floating_point_v<T>
+constexpr T bessel_i0(const T x) noexcept {
     T   sum  = 1;
     T   term = 1;
     int k    = 1;
@@ -68,9 +67,8 @@ bessel_i0(const T x) noexcept {
  * @param Container std::vector containing the values of the window function.
  */
 template<gr::meta::array_or_vector_type ContainerType, typename T = ContainerType::value_type>
-    requires std::is_floating_point_v<T>
-void
-create(ContainerType &container, Type windowFunction, const T beta = static_cast<T>(1.6)) {
+requires std::is_floating_point_v<T>
+void create(ContainerType& container, Type windowFunction, const T beta = static_cast<T>(1.6)) {
     constexpr T       pi2 = 2 * std::numbers::pi_v<T>;
     const std::size_t n   = container.size();
     if (n == 0) {
@@ -118,7 +116,7 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
         // Reference: Nuttall, A. (1981). Some Windows with Very Good Sidelobe Behavior. IEEE Transactions on Acoustics, Speech, and Signal Processing, 29(1), 84-91.
         const T a = pi2 / static_cast<T>(n - 1);
         std::ranges::transform(std::views::iota(0UL, n), container.begin(), [a](const auto i) {
-            constexpr std::array<T, 4> coeff = { static_cast<T>(0.355768), static_cast<T>(0.487396), static_cast<T>(0.144232), static_cast<T>(0.012604) };
+            constexpr std::array<T, 4> coeff = {static_cast<T>(0.355768), static_cast<T>(0.487396), static_cast<T>(0.144232), static_cast<T>(0.012604)};
             const T                    ai    = a * static_cast<T>(i);
             return coeff[0] - coeff[1] * std::cos(ai) + coeff[2] * std::cos(2 * ai) - coeff[3] * std::cos(3 * ai);
         });
@@ -129,7 +127,7 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
         // reference: Harris, F. J. (1978). On the use of windows for harmonic analysis with the discrete Fourier transform. Proceedings of the IEEE, 66(1), 51-83.
         const T a = pi2 / static_cast<T>(n - 1);
         std::ranges::transform(std::views::iota(0UL, n), container.begin(), [a](const auto i) {
-            constexpr std::array<T, 4> coeff = { static_cast<T>(0.35875), static_cast<T>(0.48829), static_cast<T>(0.14128), static_cast<T>(0.01168) };
+            constexpr std::array<T, 4> coeff = {static_cast<T>(0.35875), static_cast<T>(0.48829), static_cast<T>(0.14128), static_cast<T>(0.01168)};
             const T                    ai    = a * static_cast<T>(i);
             return coeff[0] - coeff[1] * std::cos(ai) + coeff[2] * std::cos(2 * ai) - coeff[3] * std::cos(3 * ai);
         });
@@ -141,8 +139,7 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
         const T a = pi2 / static_cast<T>(n - 1);
         std::ranges::transform(std::views::iota(0UL, n), container.begin(), [a](const auto i) {
             const T ai = a * static_cast<T>(i);
-            return static_cast<T>(0.3635819) - static_cast<T>(0.4891775) * std::cos(ai) + static_cast<T>(0.1365995) * std::cos(static_cast<T>(2.) * ai)
-                 - static_cast<T>(0.0106411) * std::cos(static_cast<T>(3.) * ai);
+            return static_cast<T>(0.3635819) - static_cast<T>(0.4891775) * std::cos(ai) + static_cast<T>(0.1365995) * std::cos(static_cast<T>(2.) * ai) - static_cast<T>(0.0106411) * std::cos(static_cast<T>(3.) * ai);
         });
         return;
     }
@@ -151,7 +148,7 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
         // reference: D'Antona, G., & Ferrero, A. (2006). Digital Signal Processing for Measurement Systems: Theory and Applications. Springer.
         const T a = pi2 / static_cast<T>(n - 1);
         std::ranges::transform(std::views::iota(0UL, n), container.begin(), [a](const auto i) {
-            constexpr std::array<T, 5> coeff = { static_cast<T>(1.0), static_cast<T>(1.93), static_cast<T>(1.29), static_cast<T>(0.388), static_cast<T>(0.032) };
+            constexpr std::array<T, 5> coeff = {static_cast<T>(1.0), static_cast<T>(1.93), static_cast<T>(1.29), static_cast<T>(0.388), static_cast<T>(0.032)};
             const T                    ai    = a * static_cast<T>(i);
             return coeff[0] - coeff[1] * std::cos(ai) + coeff[2] * std::cos(2 * ai) - coeff[3] * std::cos(3 * ai) + coeff[4] * std::cos(4 * ai);
         });
@@ -167,8 +164,12 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
     case Kaiser: {
         // formula: w(n) = I0(beta * sqrt(1 - ((2*n/(N-1)) - 1)^2)) / I0(beta)
         // reference: J. F. Kaiser and R. W. Schafer. On the use of the i0-sinh window for spectrum analysis. IEEE Transactions on Acoustics, Speech, and Signal Processing, 28(1):105–107, 1980.
-        if (beta < 0) throw std::invalid_argument("beta must be non-negative");
-        if (n <= 1) throw std::invalid_argument("n must be larger than one");
+        if (beta < 0) {
+            throw std::invalid_argument("beta must be non-negative");
+        }
+        if (n <= 1) {
+            throw std::invalid_argument("n must be larger than one");
+        }
 
         const T factor = static_cast<T>(1) / static_cast<T>(n - 1);
         const T i0Beta = detail::bessel_i0(static_cast<T>(beta)); // Compute the zeroth order modified Bessel function of the first kind for beta
@@ -193,19 +194,16 @@ create(ContainerType &container, Type windowFunction, const T beta = static_cast
  * @return A std::vector<float> containing the values of the window function.
  */
 template<typename T = float>
-    requires std::is_floating_point_v<T>
-[[nodiscard]] auto
-create(Type windowFunction, const std::size_t n, const T beta = static_cast<T>(1.6)) {
+requires std::is_floating_point_v<T>
+[[nodiscard]] auto create(Type windowFunction, const std::size_t n, const T beta = static_cast<T>(1.6)) {
     std::vector<T> container(n);
     create(container, windowFunction, beta);
     return container;
 }
 
 // this is to speed-up typical instantiations
-template void
-create<std::vector<float>>(std::vector<float> &container, Type windowFunction, float beta);
-template void
-create<std::vector<double>>(std::vector<double> &container, Type windowFunction, double beta);
+template void create<std::vector<float>>(std::vector<float>& container, Type windowFunction, float beta);
+template void create<std::vector<double>>(std::vector<double>& container, Type windowFunction, double beta);
 
 } // namespace gr::algorithm::window
 

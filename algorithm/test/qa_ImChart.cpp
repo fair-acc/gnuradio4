@@ -4,8 +4,8 @@
 
 #include <fmt/format.h>
 
-#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 
 const boost::ut::suite<"ImChart"> windowTests = [] {
     using namespace boost::ut;
@@ -26,7 +26,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
 
         expect(eq(axisOffset, LinearAxisTransform::toScreen(xMin, xMin, xMax, axisOffset, axisWidth))) << "xMin does not correspond to min axis index";
         expect(eq(axisWidth - 1UZ, LinearAxisTransform::toScreen(xMax, xMin, xMax, axisOffset, axisWidth))) << "xMax does not correspond to max axis index";
-    } | std::vector{ 10., 20., 42., 50., 100. };
+    } | std::vector{10., 20., 42., 50., 100.};
 
     "log axis transform"_test = [](const double valueCoordinate) {
         using namespace gr::graphs;
@@ -49,10 +49,10 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
         expect(throws([] { std::ignore = LogAxisTransform::toScreen(1.0, 10., 0., 5UZ, 65UZ); }));
         expect(throws([] { std::ignore = LogAxisTransform::fromScreen(40, 0., 100., 5UZ, 65UZ); }));
         expect(throws([] { std::ignore = LogAxisTransform::fromScreen(40, 10., 0., 5UZ, 65UZ); }));
-    } | std::vector{ 10., 20., 42., 50., 100. };
+    } | std::vector{10., 20., 42., 50., 100.};
 
     "optimal tick position"_test = [](std::size_t axisWidth) {
-        for (std::size_t minGapSize : { 1UZ, 2UZ, 3UZ }) {
+        for (std::size_t minGapSize : {1UZ, 2UZ, 3UZ}) {
             auto tickPositions = gr::graphs::detail::optimalTickScreenPositions(axisWidth, minGapSize);
 
             // first and last tick index fulfill [0, axisWidth - 1].
@@ -72,7 +72,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
                 expect(ge(actualGap, minGapSize)) << fmt::format("gap size {} less than minimum required {} at axis width {}", actualGap, minGapSize, axisWidth);
             }
         }
-    } | std::vector{ 10UZ, 20UZ, 42UZ, 50UZ, 100UZ };
+    } | std::vector{10UZ, 20UZ, 42UZ, 50UZ, 100UZ};
 
     constexpr std::size_t sizeX = 120;
     constexpr std::size_t sizeY = 16;
@@ -95,13 +95,13 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
             cosineYValues[i] = 3.0 * std::cos(xValues[i] * 0.2);
         }
 
-        auto chart = defaultConstructor ? gr::graphs::ImChart<sizeX, sizeY>() : gr::graphs::ImChart<sizeX, sizeY>({ { xMin, xMax }, { yMin, yMax } });
+        auto chart = defaultConstructor ? gr::graphs::ImChart<sizeX, sizeY>() : gr::graphs::ImChart<sizeX, sizeY>({{xMin, xMax}, {yMin, yMax}});
 
         expect(nothrow([&] { chart.draw(xValues, sineYValues, "sine-like"); }));
         expect(nothrow([&] { chart.draw(xValues, cosineYValues, "cosine-like"); }));
 
         expect(nothrow([&] { chart.draw(); }));
-    } | std::vector{ true, false };
+    } | std::vector{true, false};
 
     "basic chart - no data"_test = [&]() {
         using namespace gr::graphs;
@@ -127,7 +127,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
             gauss2[i]               = 2.0 * std::exp(-std::pow(xValues[i] - mu2, 2.) / (2.0 * std::pow(sigma2, 2.)));
         }
 
-        auto chart        = gr::graphs::ImChart<sizeX, sizeY>({ { xMin, xMax }, { 0.0, 5.0 } });
+        auto chart        = gr::graphs::ImChart<sizeX, sizeY>({{xMin, xMax}, {0.0, 5.0}});
         chart.draw_border = true;
         expect(nothrow([&] { chart.draw<Style::Bars>(xValues, gauss1, "gauss-like1"); }));
         expect(nothrow([&] { chart.draw<Style::Bars>(xValues, gauss2, "gauss-like2"); }));
@@ -147,7 +147,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
             sineYValues[i] = 3.0 * std::sin(xValues[i] * 0.2);
         }
 
-        auto chart = gr::graphs::ImChart<sizeX, sizeY>({ { xMin, xMax }, { yMin, yMax } });
+        auto chart = gr::graphs::ImChart<sizeX, sizeY>({{xMin, xMax}, {yMin, yMax}});
         expect(nothrow([&] { chart.draw<Style::Marker>(xValues, sineYValues, "sine-like"); }));
 
         expect(nothrow([&] { chart.draw(); }));
@@ -165,7 +165,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
             sineYValues[i] = -5.0 + 3.0 * std::sin(xValues[i] * 0.2);
         }
 
-        auto chart = gr::graphs::ImChart<sizeX, sizeY>({ { xMin, xMax }, { -10, 0 } });
+        auto chart = gr::graphs::ImChart<sizeX, sizeY>({{xMin, xMax}, {-10, 0}});
         expect(nothrow([&] { chart.draw(xValues, sineYValues, "sine-like"); }));
 
         expect(nothrow([&] { chart.draw(); }));
@@ -183,7 +183,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
             sineYValues[i] = -5.0 + 3.0 * std::sin(xValues[i] * 0.2);
         }
 
-        auto chart = gr::graphs::ImChart<sizeX, sizeY>({ { -50, +50 }, { -10, 0 } });
+        auto chart = gr::graphs::ImChart<sizeX, sizeY>({{-50, +50}, {-10, 0}});
         expect(nothrow([&] { chart.draw(xValues, sineYValues, "sine-like"); }));
 
         expect(nothrow([&] { chart.draw(); }));
@@ -199,7 +199,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
         };
 
         std::vector<double> xValues;
-        for (auto subrange : { sequence_range(0.1, 0.9, 0.1), sequence_range(1.0, 9.0, 1.0), sequence_range(10.0, 90.0, 10.0), sequence_range(100.0, 1000.0, 100.0) }) {
+        for (auto subrange : {sequence_range(0.1, 0.9, 0.1), sequence_range(1.0, 9.0, 1.0), sequence_range(10.0, 90.0, 10.0), sequence_range(100.0, 1000.0, 100.0)}) {
             std::ranges::move(subrange, std::back_inserter(xValues));
         }
         std::vector<double> response1(xValues.size());
@@ -214,7 +214,7 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
             }
         }
 
-        auto chart = gr::graphs::ImChart<width, 16, LogAxisTransform>({ { 0.1, 1'000.0 }, { -100, 0 } });
+        auto chart = gr::graphs::ImChart<width, 16, LogAxisTransform>({{0.1, 1'000.0}, {-100, 0}});
         expect(nothrow([&] { chart.draw(xValues, response1, "low-pass1"); }));
         expect(nothrow([&] { chart.draw(xValues, response2, "low-pass2"); }));
 
@@ -243,5 +243,4 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
     };
 };
 
-int
-main() { /* not needed for UT */ }
+int main() { /* not needed for UT */ }

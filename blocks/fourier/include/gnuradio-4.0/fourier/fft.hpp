@@ -93,7 +93,7 @@ On the choice of window (mathematically aka. apodisation) functions
     using InDataType  = std::conditional_t<gr::meta::complex_like<T>, std::complex<value_type>, value_type>;
     using OutDataType = std::complex<value_type>;
 
-    PortIn<T>  in{};
+    PortIn<T>                         in{};
     PortOut<U, RequiredSamples<1, 1>> out{};
 
     FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl{};

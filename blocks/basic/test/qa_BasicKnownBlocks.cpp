@@ -1,11 +1,11 @@
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/basic/clock_source.hpp>
-#include <gnuradio-4.0/basic/common_blocks.hpp>
 #include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/Selector.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
+#include <gnuradio-4.0/basic/clock_source.hpp>
+#include <gnuradio-4.0/basic/common_blocks.hpp>
 
 const boost::ut::suite KnownBlockTests = [] {
     using namespace boost::ut;
@@ -30,7 +30,4 @@ const boost::ut::suite KnownBlockTests = [] {
     };
 };
 
-int
-main() {
-    return boost::ut::cfg<boost::ut::override>.run();
-}
+int main() { return boost::ut::cfg<boost::ut::override>.run(); }

@@ -16,8 +16,7 @@ inline constexpr std::size_t N_ITER = 10;
 // inline constexpr std::size_t N_SAMPLES = gr::util::round_up(1'000'000, 1024);
 inline constexpr std::size_t N_SAMPLES = gr::util::round_up(10'000, 1024);
 
-void
-loop_over_work(auto &node) {
+void loop_over_work(auto& node) {
     using namespace boost::ut;
     using namespace benchmark;
     test::n_samples_produced = 0LU;
@@ -29,8 +28,7 @@ loop_over_work(auto &node) {
     expect(eq(test::n_samples_consumed, N_SAMPLES)) << "consumed too many/few samples";
 }
 
-void
-invoke_work(auto &sched) {
+void invoke_work(auto& sched) {
     using namespace boost::ut;
     using namespace benchmark;
     test::n_samples_produced = 0LU;
@@ -48,8 +46,8 @@ inline const boost::ut::suite _constexpr_bm = [] {
     using namespace gr::blocks::filter;
 
     std::vector<float> fir_coeffs(10.f, 0.1f); // box car filter
-    std::vector<float> iir_coeffs_b{ 0.55f, 0.f };
-    std::vector<float> iir_coeffs_a{ 1.f, -0.45f };
+    std::vector<float> iir_coeffs_b{0.55f, 0.f};
+    std::vector<float> iir_coeffs_a{1.f, -0.45f};
 
     {
         auto mergedBlock = merge<"out", "in">(::test::source<float>(N_SAMPLES), ::test::sink<float>());
@@ -85,59 +83,57 @@ inline const boost::ut::suite _constexpr_bm = [] {
 
     {
         gr::graph testGraph;
-        auto     &src  = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
-        auto     &sink = testGraph.emplaceBlock<::test::sink<float>>();
+        auto&     src  = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
+        auto&     sink = testGraph.emplaceBlock<::test::sink<float>>();
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::simple sched{std::move(testGraph)};
 
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
         gr::graph testGraph;
-        auto     &src    = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
-        auto     &sink   = testGraph.emplaceBlock<::test::sink<float>>();
-        auto     &filter = testGraph.emplaceBlock<fir_filter<float>>({ { "b", fir_coeffs } });
+        auto&     src    = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
+        auto&     sink   = testGraph.emplaceBlock<::test::sink<float>>();
+        auto&     filter = testGraph.emplaceBlock<fir_filter<float>>({{"b", fir_coeffs}});
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, &::test::source<float>::out).to<"in">(filter)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::simple sched{std::move(testGraph)};
 
         "runtime   src->fir_filter->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
         gr::graph testGraph;
-        auto     &src    = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
-        auto     &sink   = testGraph.emplaceBlock<::test::sink<float>>();
-        auto     &filter = testGraph.emplaceBlock<iir_filter<float, IIRForm::DF_I>>({ { "b", iir_coeffs_b }, { "a", iir_coeffs_a } });
+        auto&     src    = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
+        auto&     sink   = testGraph.emplaceBlock<::test::sink<float>>();
+        auto&     filter = testGraph.emplaceBlock<iir_filter<float, IIRForm::DF_I>>({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}});
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, &::test::source<float>::out).to<"in">(filter)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::simple sched{std::move(testGraph)};
 
         "runtime   src->iir_filter->sink - direct-form I"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
     {
         gr::graph testGraph;
-        auto     &src    = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
-        auto     &sink   = testGraph.emplaceBlock<::test::sink<float>>();
-        auto     &filter = testGraph.emplaceBlock<iir_filter<float, IIRForm::DF_II>>({ { "b", iir_coeffs_b }, { "a", iir_coeffs_a } });
+        auto&     src    = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
+        auto&     sink   = testGraph.emplaceBlock<::test::sink<float>>();
+        auto&     filter = testGraph.emplaceBlock<iir_filter<float, IIRForm::DF_II>>({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}});
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, &::test::source<float>::out).to<"in">(filter)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(filter).to(sink, &::test::sink<float>::in)));
 
-        gr::scheduler::simple sched{ std::move(testGraph) };
+        gr::scheduler::simple sched{std::move(testGraph)};
 
         "runtime   src->iir_filter->sink - direct-form II"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 };
 
-int
-main() { /* not needed by the UT framework */
-}
+int main() { /* not needed by the UT framework */ }

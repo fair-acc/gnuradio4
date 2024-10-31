@@ -8,32 +8,24 @@
 namespace gr::algorithm {
 
 template<typename TInput, typename TOutput = std::conditional<gr::meta::complex_like<TInput>, TInput, std::complex<typename TInput::value_type>>>
-    requires((gr::meta::complex_like<TInput> || std::floating_point<TInput>) && (gr::meta::complex_like<TOutput>) )
+requires((gr::meta::complex_like<TInput> || std::floating_point<TInput>) && (gr::meta::complex_like<TOutput>))
 struct FFT {
     using Precision = TOutput::value_type;
 
     std::vector<TOutput> twiddleFactors{};
-    std::size_t          fftSize{ 0 };
+    std::size_t          fftSize{0};
 
-    FFT()                   = default;
-    FFT(const FFT &rhs)     = delete;
-    FFT(FFT &&rhs) noexcept = delete;
-    FFT &
-    operator=(const FFT &rhs)
-            = delete;
-    FFT &
-    operator=(FFT &&rhs) noexcept
-            = delete;
+    FFT()                              = default;
+    FFT(const FFT& rhs)                = delete;
+    FFT(FFT&& rhs) noexcept            = delete;
+    FFT& operator=(const FFT& rhs)     = delete;
+    FFT& operator=(FFT&& rhs) noexcept = delete;
 
     ~FFT() = default;
 
-    void
-    initAll() {
-        precomputeTwiddleFactors();
-    }
+    void initAll() { precomputeTwiddleFactors(); }
 
-    auto
-    compute(const std::ranges::input_range auto &in, std::ranges::output_range<TOutput> auto &&out) {
+    auto compute(const std::ranges::input_range auto& in, std::ranges::output_range<TOutput> auto&& out) {
         if constexpr (requires(std::size_t n) { out.resize(n); }) {
             if (out.size() != in.size()) {
                 out.resize(in.size());
@@ -74,8 +66,8 @@ struct FFT {
             const auto half_s = s / 2;
             for (std::size_t k = 0; k < fftSize; k += s) {
                 for (std::size_t j = 0; j < half_s; j++) {
-                    const auto t{ twiddleFactors[omega_kCounter++] * out[k + j + half_s] };
-                    const auto u{ out[k + j] };
+                    const auto t{twiddleFactors[omega_kCounter++] * out[k + j + half_s]};
+                    const auto u{out[k + j]};
                     out[k + j]          = u + t;
                     out[k + j + half_s] = u - t;
                 }
@@ -85,30 +77,27 @@ struct FFT {
         return out;
     }
 
-    auto
-    compute(const std::ranges::input_range auto &in) {
-        return compute(in, std::vector<TOutput>(in.size()));
-    }
+    auto compute(const std::ranges::input_range auto& in) { return compute(in, std::vector<TOutput>(in.size())); }
 
 private:
-    void
-    bitReversalPermutation(std::vector<TOutput> &vec) const noexcept {
+    void bitReversalPermutation(std::vector<TOutput>& vec) const noexcept {
         for (std::size_t j = 0, rev = 0; j < fftSize; j++) {
-            if (j < rev) std::swap(vec[j], vec[rev]);
+            if (j < rev) {
+                std::swap(vec[j], vec[rev]);
+            }
             auto maskLen = static_cast<std::size_t>(std::countr_zero(j + 1) + 1);
             rev ^= fftSize - (fftSize >> maskLen);
         }
     }
 
-    void
-    precomputeTwiddleFactors() {
+    void precomputeTwiddleFactors() {
         twiddleFactors.clear();
         const auto minus2Pi = Precision(-2. * std::numbers::pi);
         for (std::size_t s = 2; s <= fftSize; s *= 2) {
-            const std::size_t m{ s / 2 };
-            const TOutput     w{ std::exp(TOutput(0., minus2Pi / static_cast<Precision>(s))) };
+            const std::size_t m{s / 2};
+            const TOutput     w{std::exp(TOutput(0., minus2Pi / static_cast<Precision>(s)))};
             for (std::size_t k = 0; k < fftSize; k += s) {
-                TOutput wk{ 1., 0. };
+                TOutput wk{1., 0.};
                 for (std::size_t j = 0; j < m; j++) {
                     twiddleFactors.push_back(wk);
                     wk *= w;

@@ -3,8 +3,8 @@
 
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
-#include <gnuradio-4.0/meta/utils.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 #include <atomic>
 #include <expected>

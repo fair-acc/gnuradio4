@@ -8,8 +8,8 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>
 
@@ -23,39 +23,29 @@ public:
 
     GR_MAKE_REFLECTABLE(FixedSource, out);
 
-    [[nodiscard]] constexpr auto
-    processOne() noexcept {
-        return value;
-    }
+    [[nodiscard]] constexpr auto processOne() noexcept { return value; }
 
-    void
-    trigger() {
-        super_t::emitMessage("custom_kind", {});
-    }
+    void trigger() { super_t::emitMessage("custom_kind", {}); }
 };
 
 template<typename T>
 class HttpTestSink : public gr::Block<HttpTestSink<T>> {
 public:
-    gr::PortIn<T>         in;
+    gr::PortIn<T> in;
 
     GR_MAKE_REFLECTABLE(HttpTestSink, in);
 
     T                     value{};
     std::function<void()> stopFunc;
 
-    constexpr void
-    processOne(T val) {
+    constexpr void processOne(T val) {
         value = val;
         if (!value.empty()) {
             stopFunc();
         }
     }
 
-    void
-    reset() {
-        value = {};
-    }
+    void reset() { value = {}; }
 };
 
 const boost::ut::suite HttpBlocktests = [] {
@@ -65,26 +55,26 @@ const boost::ut::suite HttpBlocktests = [] {
     using namespace std::chrono_literals;
 
 #ifdef __EMSCRIPTEN__
-    std::thread emscriptenThread{ [&]() {
+    std::thread emscriptenThread{[&]() {
         // see ./pre.js for the emscripten server implementation
         emscripten_run_script("startServer();");
-    } };
+    }};
 #endif
 
     "http GET"_test = [&] {
 #ifndef __EMSCRIPTEN__
         httplib::Server server;
-        server.Get("/echo", [](const httplib::Request, httplib::Response &res) { res.set_content("Hello world!", "text/plain"); });
+        server.Get("/echo", [](const httplib::Request, httplib::Response& res) { res.set_content("Hello world!", "text/plain"); });
 
-        auto thread = std::thread{ [&server] { server.listen("localhost", 8080); } };
+        auto thread = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
 #endif
 
         gr::Graph graph;
-        auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/echo" } });
+        auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/echo"}});
 
-        auto &sink = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto& sink = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -106,16 +96,16 @@ const boost::ut::suite HttpBlocktests = [] {
     "http GET 404"_test = [&] {
 #ifndef __EMSCRIPTEN__
         httplib::Server server;
-        server.Get("/does-not-exist", [](const httplib::Request, httplib::Response &res) { res.status = httplib::StatusCode::NotFound_404; });
+        server.Get("/does-not-exist", [](const httplib::Request, httplib::Response& res) { res.status = httplib::StatusCode::NotFound_404; });
 
-        auto thread = std::thread{ [&server] { server.listen("localhost", 8080); } };
+        auto thread = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
 #endif
 
         gr::Graph graph;
-        auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/does-not-exist" } });
-        auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/does-not-exist"}});
+        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -135,16 +125,16 @@ const boost::ut::suite HttpBlocktests = [] {
     "http POST"_test = [] {
 #ifndef __EMSCRIPTEN__
         httplib::Server server;
-        server.Post("/number", [](const httplib::Request &, httplib::Response &res) { res.set_content("OK", "text/plain"); });
+        server.Post("/number", [](const httplib::Request&, httplib::Response& res) { res.set_content("OK", "text/plain"); });
 
-        auto thread = std::thread{ [&server] { server.listen("localhost", 8080); } };
+        auto thread = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
 #endif
 
         gr::Graph graph;
-        auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/number" }, { "type"s, "POST" }, { "parameters"s, "param=42" } });
-        auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/number"}, {"type"s, "POST"}, {"parameters"s, "param=42"}});
+        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -165,8 +155,8 @@ const boost::ut::suite HttpBlocktests = [] {
 #ifndef __EMSCRIPTEN__
         std::atomic_bool shutdown = false;
         httplib::Server  server;
-        server.Get("/notify", [&](const httplib::Request, httplib::Response &res) {
-            res.set_chunked_content_provider("text/plain", [&](size_t, httplib::DataSink &sink) {
+        server.Get("/notify", [&](const httplib::Request, httplib::Response& res) {
+            res.set_chunked_content_provider("text/plain", [&](size_t, httplib::DataSink& sink) {
                 if (shutdown) {
                     return false;
                 }
@@ -179,14 +169,14 @@ const boost::ut::suite HttpBlocktests = [] {
             });
         });
 
-        auto thread = std::thread{ [&server] { server.listen("localhost", 8080); } };
+        auto thread = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
 #endif
 
         gr::Graph graph;
-        auto     &source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto     &httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({ { "url"s, "http://localhost:8080" }, { "endpoint"s, "/notify" }, { "type"s, "SUBSCRIBE" } });
-        auto     &sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/notify"}, {"type"s, "SUBSCRIBE"}});
+        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -209,7 +199,4 @@ const boost::ut::suite HttpBlocktests = [] {
 #endif
 };
 
-int
-main() { /* tests are statically executed */
-    return boost::ut::cfg<boost::ut::override>.run();
-}
+int main() { /* tests are statically executed */ return boost::ut::cfg<boost::ut::override>.run(); }

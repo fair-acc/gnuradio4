@@ -15,10 +15,7 @@ public:
 
     GR_MAKE_REFLECTABLE(convert, in, out);
 
-    [[nodiscard]] constexpr auto
-    processOne(From value) const noexcept {
-        return static_cast<To>(value);
-    }
+    [[nodiscard]] constexpr auto processOne(From value) const noexcept { return static_cast<To>(value); }
 };
 
 } // namespace good

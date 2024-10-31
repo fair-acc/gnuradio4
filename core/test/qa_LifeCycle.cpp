@@ -33,36 +33,25 @@ struct MockStateMachine : public lifecycle::StateMachine<MockStateMachine<storag
     int         resumeCalled{};
     int         resetCalled{};
 
-    void
-    start() {
+    void start() {
         startCalled++;
         if constexpr (throwException) { // throw voluntary exception
             throw std::domain_error("start() throws specific exception");
         }
     }
 
-    void
-    stop() {
+    void stop() {
         stopCalled++;
         if constexpr (throwException) { // throw voluntary unknown exception
             throw "unknown/unnamed exception";
         }
     }
 
-    void
-    pause() {
-        pauseCalled++;
-    }
+    void pause() { pauseCalled++; }
 
-    void
-    resume() {
-        resumeCalled++;
-    }
+    void resume() { resumeCalled++; }
 
-    void
-    reset() {
-        resetCalled++;
-    }
+    void reset() { resetCalled++; }
 };
 
 } // namespace gr::test
@@ -139,14 +128,14 @@ const boost::ut::suite StateMachineTest = [] {
 
     "StateMachine all State transitions"_test = [] {
         std::map<State, std::vector<State>> allowedTransitions = {
-            { State::IDLE, { State::INITIALISED, State::REQUESTED_STOP, State::STOPPED } },
-            { State::INITIALISED, { State::RUNNING, State::REQUESTED_STOP, State::STOPPED } },
-            { State::RUNNING, { State::REQUESTED_PAUSE, State::REQUESTED_STOP } },
-            { State::REQUESTED_PAUSE, { State::PAUSED } },
-            { State::PAUSED, { State::RUNNING, State::REQUESTED_STOP } },
-            { State::REQUESTED_STOP, { State::STOPPED } },
-            { State::STOPPED, { State::INITIALISED } },
-            { State::ERROR, { State::INITIALISED } },
+            {State::IDLE, {State::INITIALISED, State::REQUESTED_STOP, State::STOPPED}},
+            {State::INITIALISED, {State::RUNNING, State::REQUESTED_STOP, State::STOPPED}},
+            {State::RUNNING, {State::REQUESTED_PAUSE, State::REQUESTED_STOP}},
+            {State::REQUESTED_PAUSE, {State::PAUSED}},
+            {State::PAUSED, {State::RUNNING, State::REQUESTED_STOP}},
+            {State::REQUESTED_STOP, {State::STOPPED}},
+            {State::STOPPED, {State::INITIALISED}},
+            {State::ERROR, {State::INITIALISED}},
         };
 
         magic_enum::enum_for_each<State>([&allowedTransitions](State fromState) {
@@ -161,8 +150,7 @@ const boost::ut::suite StateMachineTest = [] {
                 bool isValid = isValidTransition(fromState, toState);
 
                 // Assert that the function's validity matches the expected validity
-                expect(isValid == isAllowed) << fmt::format("Transition from {} to {} should be {}", magic_enum::enum_name(fromState), magic_enum::enum_name(toState),
-                                                            isAllowed ? "allowed" : "disallowed");
+                expect(isValid == isAllowed) << fmt::format("Transition from {} to {} should be {}", magic_enum::enum_name(fromState), magic_enum::enum_name(toState), isAllowed ? "allowed" : "disallowed");
             });
         });
     };
@@ -195,7 +183,7 @@ const boost::ut::suite StateMachineTest = [] {
 
     "StateMachine misc"_test = [] {
         magic_enum::enum_for_each<State>([&](State state) {
-            std::vector<State> allowedState{ RUNNING, REQUESTED_PAUSE, PAUSED };
+            std::vector<State> allowedState{RUNNING, REQUESTED_PAUSE, PAUSED};
 
             if (std::ranges::find(allowedState, state) != allowedState.end()) {
                 expect(isActive(state));
@@ -205,7 +193,7 @@ const boost::ut::suite StateMachineTest = [] {
         });
 
         magic_enum::enum_for_each<State>([&](State state) {
-            std::vector<State> allowedState{ REQUESTED_STOP, STOPPED };
+            std::vector<State> allowedState{REQUESTED_STOP, STOPPED};
 
             if (std::ranges::find(allowedState, state) != allowedState.end()) {
                 expect(isShuttingDown(state));
@@ -236,10 +224,7 @@ const boost::ut::suite StateMachineTest = [] {
         struct MockStateMachine : public gr::lifecycle::StateMachine<void> {
             int startCalled{};
 
-            void
-            start() {
-                startCalled++;
-            }
+            void start() { startCalled++; }
         } machine;
 
         expect(machine.state() == State::IDLE);
@@ -280,6 +265,4 @@ const boost::ut::suite StateMachineTest = [] {
     };
 };
 
-int
-main() { /* tests are statically executed */
-}
+int main() { /* tests are statically executed */ }
