@@ -198,8 +198,12 @@ inline static const char* kSetting        = "Settings";       ///< asynchronous 
                                                               // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
 inline static const char* kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
 
-inline static const char* kStoreDefaults = "StoreDefaults"; ///< store present settings as default, for counterpart @see kResetDefaults
-inline static const char* kResetDefaults = "ResetDefaults"; ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
+inline static const char* kStoreDefaults    = "StoreDefaults";    ///< store present settings as default, for counterpart @see kResetDefaults
+inline static const char* kResetDefaults    = "ResetDefaults";    ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
+inline static const char* kActiveContext    = "ActiveContext";    ///< retrieve and set active context
+inline static const char* kSettingsCtx      = "SettingsCtx";      ///< retrieve/creates/remove a new stored context
+inline static const char* kSettingsContexts = "SettingsContexts"; ///< retrieve/creates/remove a new stored context
+
 } // namespace block::property
 
 namespace block {
@@ -290,6 +294,9 @@ enum class Category {
  * - `kLifeCycleState`: Manages and reports the block's lifecycle state.
  * - `kSetting` & `kStagedSetting`: Handle real-time and non-real-time configuration adjustments.
  * - `kStoreDefaults` & `kResetDefaults`: Facilitate storing and reverting to default settings.
+ * - `kActiveContext`: Returns current active context and allows to set a new one
+ * - `kSettingsCtx`: Manages Settings Contexts Add/Remove/Get
+ * - `kSettingsContexts`: Returns all Contextxs
  *
  * These properties can be interacted with through messages, supporting operations like setting values, querying states, and subscribing to updates.
  * This model provides a flexible interface for blocks to adapt their processing based on runtime conditions and external inputs.
@@ -423,13 +430,16 @@ public:
 
     using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
     std::map<std::string, PropertyCallback> propertyCallbacks{
-        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},           //
-        {block::property::kEcho, &Block::propertyCallbackEcho},                     //
-        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState}, //
-        {block::property::kSetting, &Block::propertyCallbackSettings},              //
-        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},  //
-        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},   //
-        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},   //
+        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},               //
+        {block::property::kEcho, &Block::propertyCallbackEcho},                         //
+        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState},     //
+        {block::property::kSetting, &Block::propertyCallbackSettings},                  //
+        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},      //
+        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},       //
+        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},       //
+        {block::property::kActiveContext, &Block::propertyCallbackActiveContext},       //
+        {block::property::kSettingsCtx, &Block::propertyCallbackSettingsCtx},           //
+        {block::property::kSettingsContexts, &Block::propertyCallbackSettingsContexts}, //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -1048,6 +1058,162 @@ protected:
         if (message.cmd == Set) {
             settings().resetDefaults();
             return std::nullopt;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message> propertyCallbackActiveContext(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kActiveContext);
+
+        if (message.cmd == Get) {
+            message.data = {{"context", settings().activeContext().context}};
+            return message;
+        }
+
+        if (message.cmd == Set) {
+            if (!message.data.has_value()) {
+                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+            }
+
+            const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
+
+            std::string contextStr;
+            if (auto it = dataMap.find("context"); it != dataMap.end()) {
+                if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
+                    contextStr = *stringPtr;
+                } else {
+                    throw gr::exception(fmt::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
+                }
+            } else {
+                throw gr::exception(fmt::format("propertyCallbackActiveContext - context name not found, msg: {}", message));
+            }
+
+            std::uint64_t time = 0;
+            if (auto it = dataMap.find("time"); it != dataMap.end()) {
+                if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
+                    time = *timePtr;
+                }
+            }
+
+            auto ctx = settings().activateContext(SettingsCtx{
+                .time    = time,
+                .context = contextStr,
+            });
+
+            if (!ctx.has_value()) {
+                throw gr::exception(fmt::format("propertyCallbackActiveContext - failed to activate context {}, msg: {}", contextStr, message));
+            }
+
+            message.data = {{"context", ctx.value().context}};
+            return message;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message> propertyCallbackSettingsCtx(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kSettingsCtx);
+
+        if (!message.data.has_value()) {
+            throw gr::exception(fmt::format("block {} (aka. {}) cannot get/set {} w/o data msg: {}", unique_name, name, propertyName, message));
+        }
+
+        const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
+
+        std::string contextStr;
+        if (auto it = dataMap.find("context"); it != dataMap.end()) {
+            if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
+                contextStr = *stringPtr;
+            } else {
+                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
+            }
+        } else {
+            throw gr::exception(fmt::format("propertyCallbackSettingsCtx - context name not found, msg: {}", message));
+        }
+
+        std::uint64_t time = 0;
+        if (auto it = dataMap.find("time"); it != dataMap.end()) {
+            if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
+                time = *timePtr;
+            }
+        }
+
+        SettingsCtx ctx{
+            .time    = time,
+            .context = contextStr,
+        };
+
+        pmtv::map_t parameters;
+        if (message.cmd == Get) {
+            std::vector<std::string> paramKeys;
+            auto                     itParam = dataMap.find("parameters");
+            if (itParam != dataMap.end()) {
+                auto keys = std::get_if<std::vector<std::string>>(&itParam->second);
+                if (keys) {
+                    paramKeys = *keys;
+                }
+            }
+
+            if (auto params = settings().getStored(paramKeys, ctx); params.has_value()) {
+                parameters = params.value();
+            }
+            message.data = {{"parameters", parameters}};
+            return message;
+        }
+
+        if (message.cmd == Set) {
+            if (auto it = dataMap.find("parameters"); it != dataMap.end()) {
+                auto params = std::get_if<pmtv::map_t>(&it->second);
+                if (params) {
+                    parameters = *params;
+                }
+            }
+
+            message.data = {{"failed_to_set", settings().set(parameters, ctx)}};
+            return message;
+        }
+
+        // Removed a Context
+        if (message.cmd == Disconnect) {
+            if (ctx.context == "") {
+                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
+            }
+
+            if (!settings().removeContext(ctx)) {
+                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - could not delete context {}, msg: {}", ctx.context, message));
+            }
+            return std::nullopt;
+        }
+
+        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message> propertyCallbackSettingsContexts(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kSettingsContexts);
+
+        if (message.cmd == Get) {
+            const std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare>& stored = settings().getStoredAll();
+
+            std::vector<std::string>   contexts;
+            std::vector<std::uint64_t> times;
+            for (const auto& [ctxName, ctxParameters] : stored) {
+                for (const auto& [ctx, properties] : ctxParameters) {
+                    if (const auto stringPtr = std::get_if<std::string>(&ctx.context); stringPtr) {
+                        contexts.push_back(*stringPtr);
+                        times.push_back(ctx.time);
+                    }
+                }
+            }
+
+            message.data = {
+                {"contexts", contexts},
+                {"times", times},
+            };
+            return message;
         }
 
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
