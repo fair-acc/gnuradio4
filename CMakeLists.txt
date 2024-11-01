@@ -233,7 +233,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         cpp-httplib
         GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-        GIT_TAG v0.15.3
+        GIT_TAG v0.18.1
 )
 
 FetchContent_MakeAvailable(fmt pmt ut yaml-cpp vir-simd cpp-httplib)
