@@ -355,6 +355,177 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(43, std::get<int>(stagedSettings.at("factor"))));
             };
         };
+
+        "Block<T>-level active context tests"_test = [] {
+            gr::MsgPortOut toBlock;
+            TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
+            unitTestBlock.init(unitTestBlock.progress, unitTestBlock.ioThreadPool);
+            gr::MsgPortIn fromBlock;
+
+            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
+            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+
+            "get all contexts default - w/o explicit serviceName"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSettingsContexts /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                expect(eq(allStored.size(), 1UZ));
+                expect(allStored.contains(""s));
+
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kSettingsContexts)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("contexts"));
+                auto contexts = std::get<std::vector<std::string>>(reply.data.value().at("contexts"));
+                expect(eq(contexts.size(), 1UZ));
+                expect(eq(contexts, std::vector<std::string>{""}));
+            };
+
+            "get active context - w/o explicit serviceName"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("context"));
+                expect(eq(""s, std::get<std::string>(reply.data.value().at("context"))));
+            };
+
+            "create active test_context - w/o explicit serviceName"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "test_context"}, {"time", 1UZ}} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const auto allStored = unitTestBlock.settings().getStoredAll();
+                expect(allStored.contains("test_context"s));
+
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kSettingsCtx)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("failed_to_set"));
+                auto failed_to_set = std::get<pmtv::map_t>(reply.data.value().at("failed_to_set"));
+                expect(failed_to_set.empty());
+            };
+
+            "create active new_context - w/o explicit serviceName"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "new_context"}, {"time", 2UZ}} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const auto allStored = unitTestBlock.settings().getStoredAll();
+                expect(allStored.contains("new_context"s));
+
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kSettingsCtx)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("failed_to_set"));
+                auto failed_to_set = std::get<pmtv::map_t>(reply.data.value().at("failed_to_set"));
+                expect(failed_to_set.empty());
+            };
+
+            "activate new_context - w/o explicit serviceName"_test = [&] {
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {{"context", "new_context"}, {"time", 2UZ}} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                std::string activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
+                expect(eq("new_context"s, activeContext));
+
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("context"));
+                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at("context"))));
+            };
+
+            "get active new_context - w/o explicit serviceName"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("context"));
+                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at("context"))));
+            };
+
+            "get all contexts - w/o explicit serviceName"_test = [&] {
+                expect(eq(unitTestBlock.settings().getStoredAll().size(), 3UZ));
+
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSettingsContexts /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                expect(eq(allStored.size(), 3UZ));
+                expect(allStored.contains(""s));
+                expect(allStored.contains("new_context"s));
+                expect(allStored.contains("test_context"s));
+
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kSettingsContexts)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("contexts"));
+                auto contexts = std::get<std::vector<std::string>>(reply.data.value().at("contexts"));
+                auto times    = std::get<std::vector<std::uint64_t>>(reply.data.value().at("times"));
+                expect(eq(contexts.size(), 3UZ));
+                expect(eq(times.size(), 3UZ));
+                expect(eq(contexts, std::vector<std::string>{"", "new_context", "test_context"}));
+                // We do not check the default context as it's time is now()
+                expect(eq(times[1], 2UZ));
+                expect(eq(times[2], 1UZ));
+            };
+
+            "remove new_context - w/o explicit serviceName"_test = [&] {
+                sendMessage<Disconnect>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "new_context"}, {"time", 2UZ}} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
+                std::string activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
+                expect(eq(""s, activeContext));
+            };
+
+            "get active back to default context '' - w/o explicit serviceName"_test = [&] {
+                sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply = returnReplyMsg(fromBlock);
+                expect(reply.cmd == Final) << fmt::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.serviceName, unitTestBlock.unique_name));
+                expect(eq(reply.clientRequestID, ""s));
+                expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
+                expect(reply.data.has_value());
+                expect(reply.data.value().contains("context"));
+                expect(eq(""s, std::get<std::string>(reply.data.value().at("context"))));
+            };
+        };
     };
 
     "Multi-Block<T> message passing tests"_test = [] {

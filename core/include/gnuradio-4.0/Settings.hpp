@@ -192,6 +192,17 @@ struct SettingsBase {
     virtual void resetDefaults() = 0;
 
     /**
+     * @brief return the name of the active context
+     */
+    [[nodiscard]] virtual const SettingsCtx& activeContext() const noexcept = 0;
+
+    /**
+     * @brief removes the given context
+     * @return true on success
+     */
+    [[nodiscard]] virtual bool removeContext(SettingsCtx ctx) = 0;
+
+    /**
      * @brief Set new activate context and set staged parameters
      * @return best match context or std::nullopt if best match context is not found in storage
      */
@@ -516,6 +527,44 @@ public:
         if constexpr (HasSettingsResetCallback<TBlock>) {
             _block->reset();
         }
+    }
+
+    [[nodiscard]] NO_INLINE const SettingsCtx& activeContext() const noexcept override { return _activeCtx; }
+
+    [[nodiscard]] NO_INLINE bool removeContext(SettingsCtx ctx) override {
+        if (ctx.context == "") {
+            return false; // Forbid removing default context
+        }
+
+        auto it = _storedParameters.find(ctx.context);
+        if (it == _storedParameters.end()) {
+            return false;
+        }
+
+        if (ctx.time == 0ULL) {
+            ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+#ifdef __EMSCRIPTEN__
+            ctx.time += _timePrecisionTolerance;
+#endif
+        }
+
+        std::vector<std::pair<SettingsCtx, property_map>>& vec     = it->second;
+        auto                                               exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.first.time == ctx.time; });
+
+        if (exactIt == vec.end()) {
+            return false;
+        }
+        vec.erase(exactIt);
+
+        if (vec.empty()) {
+            _storedParameters.erase(ctx.context);
+        }
+
+        if (_activeCtx.context == ctx.context) {
+            std::ignore = activateContext(); // Activate default context
+        }
+
+        return true;
     }
 
     [[nodiscard]] NO_INLINE std::optional<SettingsCtx> activateContext(SettingsCtx ctx = {}) override {
