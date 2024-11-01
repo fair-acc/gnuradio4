@@ -97,7 +97,7 @@ public:
         return {requested_work, requested_work, ok ? gr::work::Status::DONE : gr::work::Status::ERROR};
     }
 
-    gr::work::Status draw() override { return gr::work::Status::OK; }
+    gr::work::Status draw(const property_map& config = {}) override { return gr::work::Status::OK; }
 
     void processScheduledMessages() override {
         // TODO
