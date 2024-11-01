@@ -32,7 +32,7 @@ public:
     virtual std::uint8_t abi_version() const = 0;
 
     virtual std::span<const std::string_view> providedBlocks() const                                                                    = 0;
-    virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, const gr::property_map& params) = 0;
+    virtual std::unique_ptr<gr::BlockModel>   createBlock(std::string_view name, std::string_view type, const gr::property_map& params) = 0;
     virtual std::vector<std::string_view>     knownBlockParameterizations(std::string_view block) const                                 = 0;
 };
 

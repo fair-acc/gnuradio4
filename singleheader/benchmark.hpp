@@ -3884,7 +3884,7 @@ template<Numeric T>
 std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t significant_digits = 0) {
     static constexpr std::array  si_prefixes{'q', 'r', 'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', ' ', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'};
     static constexpr long double base  = 1000.0L;
-    auto                  value = static_cast<long double>(value_base);
+    auto                         value = static_cast<long double>(value_base);
 
     std::size_t exponent = 10U;
     if (value == 0.0L) {

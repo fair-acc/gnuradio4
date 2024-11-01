@@ -10,63 +10,63 @@
 namespace gr::algorithm {
 
 namespace detail {
-    template<typename TData>
-    struct FFTwImplTypes {
-        using PlanType        = fftwf_plan;
-        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftwf_complex, float>;
-        using OutAlgoDataType = fftwf_complex;
-    };
+template<typename TData>
+struct FFTwImplTypes {
+    using PlanType        = fftwf_plan;
+    using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftwf_complex, float>;
+    using OutAlgoDataType = fftwf_complex;
+};
 
-    template<typename TData>
-       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
-    struct FFTwImplTypes<TData> {
-        using PlanType        = fftw_plan;
-        using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftw_complex, double>;
-        using OutAlgoDataType = fftw_complex;
-    };
+template<typename TData>
+requires(std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+struct FFTwImplTypes<TData> {
+    using PlanType        = fftw_plan;
+    using InAlgoDataType  = std::conditional_t<gr::meta::complex_like<TData>, fftw_complex, double>;
+    using OutAlgoDataType = fftw_complex;
+};
 
-    template<typename TData>
-    struct FFTwImplFreeIn {
-        using InAlgoDataType = FFTwImplTypes<TData>::InAlgoDataType;
-        void operator()(InAlgoDataType *ptr) { fftwf_free(ptr); }
-    };
+template<typename TData>
+struct FFTwImplFreeIn {
+    using InAlgoDataType = FFTwImplTypes<TData>::InAlgoDataType;
+    void operator()(InAlgoDataType* ptr) { fftwf_free(ptr); }
+};
 
-    template<typename TData>
-       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
-    struct FFTwImplFreeIn<TData> {
-        using InAlgoDataType = FFTwImplTypes<TData>::InAlgoDataType;
-        void operator()(InAlgoDataType *ptr) { fftw_free(ptr); }
-    };
+template<typename TData>
+requires(std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+struct FFTwImplFreeIn<TData> {
+    using InAlgoDataType = FFTwImplTypes<TData>::InAlgoDataType;
+    void operator()(InAlgoDataType* ptr) { fftw_free(ptr); }
+};
 
-    template<typename TData>
-    struct FFTwImplFreeOut {
-        using OutAlgoDataType = FFTwImplTypes<TData>::OutAlgoDataType;
-        void operator()(OutAlgoDataType *ptr) { fftwf_free(ptr); }
-    };
+template<typename TData>
+struct FFTwImplFreeOut {
+    using OutAlgoDataType = FFTwImplTypes<TData>::OutAlgoDataType;
+    void operator()(OutAlgoDataType* ptr) { fftwf_free(ptr); }
+};
 
-    template<typename TData>
-       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
-    struct FFTwImplFreeOut<TData> {
-        using OutAlgoDataType = FFTwImplTypes<TData>::OutAlgoDataType;
-        void operator()(OutAlgoDataType *ptr) { fftw_free(ptr); }
-    };
+template<typename TData>
+requires(std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+struct FFTwImplFreeOut<TData> {
+    using OutAlgoDataType = FFTwImplTypes<TData>::OutAlgoDataType;
+    void operator()(OutAlgoDataType* ptr) { fftw_free(ptr); }
+};
 
-    template<typename TData>
-    struct FFTwImplDestroyPlan {
-        using PlanType = FFTwImplTypes<TData>::PlanType;
-        void operator()(PlanType ptr) { fftwf_destroy_plan(ptr); }
-    };
+template<typename TData>
+struct FFTwImplDestroyPlan {
+    using PlanType = FFTwImplTypes<TData>::PlanType;
+    void operator()(PlanType ptr) { fftwf_destroy_plan(ptr); }
+};
 
-    template<typename TData>
-       requires (std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
-    struct FFTwImplDestroyPlan<TData> {
-        using PlanType = FFTwImplTypes<TData>::PlanType;
-        void operator()(PlanType ptr) { fftw_destroy_plan(ptr); }
-    };
-}
+template<typename TData>
+requires(std::is_same_v<TData, std::complex<double>> || std::is_same_v<TData, double>)
+struct FFTwImplDestroyPlan<TData> {
+    using PlanType = FFTwImplTypes<TData>::PlanType;
+    void operator()(PlanType ptr) { fftw_destroy_plan(ptr); }
+};
+} // namespace detail
 
 template<typename TInput, typename TOutput = std::conditional<gr::meta::complex_like<TInput>, TInput, std::complex<typename TInput::value_type>>>
-    requires((gr::meta::complex_like<TInput> || std::floating_point<TInput>) && (gr::meta::complex_like<TOutput>) )
+requires((gr::meta::complex_like<TInput> || std::floating_point<TInput>) && (gr::meta::complex_like<TOutput>))
 struct FFTw {
 private:
     inline static std::mutex fftw_plan_mutex;
@@ -149,28 +149,23 @@ public:
     using OutUniquePtr    = typename FFTwImpl<AlgoDataType>::OutUniquePtr;
     using PlanUniquePtr   = typename FFTwImpl<AlgoDataType>::PlanUniquePtr;
 
-    std::size_t   fftSize{ 0 };
-    std::string   wisdomPath{ ".gr_fftw_wisdom" };
-    int           sign{ FFTW_FORWARD };
-    unsigned int  flags{ FFTW_ESTIMATE }; // FFTW_EXHAUSTIVE, FFTW_MEASURE, FFTW_ESTIMATE
+    std::size_t   fftSize{0};
+    std::string   wisdomPath{".gr_fftw_wisdom"};
+    int           sign{FFTW_FORWARD};
+    unsigned int  flags{FFTW_ESTIMATE}; // FFTW_EXHAUSTIVE, FFTW_MEASURE, FFTW_ESTIMATE
     InUniquePtr   fftwIn{};
     OutUniquePtr  fftwOut{};
     PlanUniquePtr fftwPlan{};
 
-    FFTw()                    = default;
-    FFTw(const FFTw &rhs)     = delete;
-    FFTw(FFTw &&rhs) noexcept = delete;
-    FFTw &
-    operator=(const FFTw &rhs)
-            = delete;
-    FFTw &
-    operator=(FFTw &&rhs) noexcept
-            = delete;
+    FFTw()                               = default;
+    FFTw(const FFTw& rhs)                = delete;
+    FFTw(FFTw&& rhs) noexcept            = delete;
+    FFTw& operator=(const FFTw& rhs)     = delete;
+    FFTw& operator=(FFTw&& rhs) noexcept = delete;
 
     ~FFTw() { clearFftw(); }
 
-    auto
-    compute(const std::ranges::input_range auto &in, std::ranges::output_range<TOutput> auto &&out) {
+    auto compute(const std::ranges::input_range auto& in, std::ranges::output_range<TOutput> auto&& out) {
         if constexpr (requires(std::size_t n) { out.resize(n); }) {
             if (out.size() != in.size()) {
                 out.resize(in.size());
@@ -194,7 +189,7 @@ public:
 
         // precision is defined by output type, if needed cast input
         if constexpr (!std::is_same_v<TInput, AlgoDataType>) {
-            std::span<AlgoDataType> inSpan(reinterpret_cast<AlgoDataType *>(fftwIn.get()), in.size());
+            std::span<AlgoDataType> inSpan(reinterpret_cast<AlgoDataType*>(fftwIn.get()), in.size());
             std::ranges::transform(in.begin(), in.end(), inSpan.begin(), [](const auto c) { return static_cast<AlgoDataType>(c); });
         } else {
             std::memcpy(fftwIn.get(), &(*in.begin()), sizeof(InAlgoDataType) * fftSize);
@@ -220,41 +215,26 @@ public:
         return out;
     }
 
-    auto
-    compute(const std::ranges::input_range auto &in) {
-        return compute(in, std::vector<TOutput>());
-    }
+    auto compute(const std::ranges::input_range auto& in) { return compute(in, std::vector<TOutput>()); }
 
-    [[nodiscard]] inline int
-    importWisdom() const {
+    [[nodiscard]] inline int importWisdom() const {
         // lock file while importing wisdom?
         return FFTwImpl<AlgoDataType>::importWisdomFromFilename(wisdomPath);
     }
 
-    [[nodiscard]] inline int
-    exportWisdom() const {
+    [[nodiscard]] inline int exportWisdom() const {
         // lock file while exporting wisdom?
         return FFTwImpl<AlgoDataType>::exportWisdomToFilename(wisdomPath);
     }
 
-    [[nodiscard]] inline int
-    importWisdomFromString(const std::string &wisdomString) const {
-        return FFTwImpl<AlgoDataType>::importWisdomFromString(wisdomString);
-    }
+    [[nodiscard]] inline int importWisdomFromString(const std::string& wisdomString) const { return FFTwImpl<AlgoDataType>::importWisdomFromString(wisdomString); }
 
-    [[nodiscard]] std::string
-    exportWisdomToString() const {
-        return FFTwImpl<AlgoDataType>::exportWisdomToString();
-    }
+    [[nodiscard]] std::string exportWisdomToString() const { return FFTwImpl<AlgoDataType>::exportWisdomToString(); }
 
-    inline void
-    forgetWisdom() const {
-        return FFTwImpl<AlgoDataType>::forgetWisdom();
-    }
+    inline void forgetWisdom() const { return FFTwImpl<AlgoDataType>::forgetWisdom(); }
 
 private:
-    [[nodiscard]] constexpr std::size_t
-    getOutputSize() const {
+    [[nodiscard]] constexpr std::size_t getOutputSize() const {
         if constexpr (gr::meta::complex_like<TInput>) {
             return fftSize;
         } else {
@@ -262,14 +242,13 @@ private:
         }
     }
 
-    void
-    initAll() {
+    void initAll() {
         clearFftw();
-        fftwIn  = InUniquePtr(static_cast<InAlgoDataType *>(FFTwImpl<AlgoDataType>::malloc(sizeof(InAlgoDataType) * fftSize)));
-        fftwOut = OutUniquePtr(static_cast<OutAlgoDataType *>(FFTwImpl<AlgoDataType>::malloc(sizeof(OutAlgoDataType) * getOutputSize())));
+        fftwIn  = InUniquePtr(static_cast<InAlgoDataType*>(FFTwImpl<AlgoDataType>::malloc(sizeof(InAlgoDataType) * fftSize)));
+        fftwOut = OutUniquePtr(static_cast<OutAlgoDataType*>(FFTwImpl<AlgoDataType>::malloc(sizeof(OutAlgoDataType) * getOutputSize())));
 
         {
-            std::lock_guard lg{ fftw_plan_mutex };
+            std::lock_guard lg{fftw_plan_mutex};
             // what to do if error is returned
             std::ignore = importWisdom();
             fftwPlan    = PlanUniquePtr(FFTwImpl<AlgoDataType>::plan(static_cast<int>(fftSize), fftwIn.get(), fftwOut.get(), sign, flags));
@@ -277,10 +256,9 @@ private:
         }
     }
 
-    void
-    clearFftw() {
+    void clearFftw() {
         {
-            std::lock_guard lg{ fftw_plan_mutex };
+            std::lock_guard lg{fftw_plan_mutex};
             fftwPlan.reset();
         }
         fftwIn.reset();

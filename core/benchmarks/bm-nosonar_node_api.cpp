@@ -23,7 +23,7 @@ template<typename T, char op>
 struct math_bulk_op : public gr::Block<math_bulk_op<T, op>> {
     gr::PortIn<T, gr::RequiredSamples<1, N_MAX>>  in;
     gr::PortOut<T, gr::RequiredSamples<1, N_MAX>> out;
-    T value = static_cast<T>(1.0f);
+    T                                             value = static_cast<T>(1.0f);
 
     GR_MAKE_REFLECTABLE(math_bulk_op, in, out, value);
 
@@ -138,7 +138,7 @@ template<typename T, char op>
 struct gen_operation_SIMD : public gr::Block<gen_operation_SIMD<T, op>> {
     gr::PortIn<T, gr::RequiredSamples<1, N_MAX>>  in;
     gr::PortOut<T, gr::RequiredSamples<1, N_MAX>> out;
-    T value = static_cast<T>(1.0f);
+    T                                             value = static_cast<T>(1.0f);
 
     GR_MAKE_REFLECTABLE(gen_operation_SIMD, in, out, value);
 

@@ -12882,7 +12882,7 @@ public:
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
-    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize){};
+    explicit SingleProducerStrategy(const std::size_t bufferSize = SIZE) : _size(bufferSize) {};
     SingleProducerStrategy(const SingleProducerStrategy&)  = delete;
     SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
     void operator=(const SingleProducerStrategy&)          = delete;
@@ -13791,8 +13791,6 @@ static_assert(BufferLike<CircularBuffer<int32_t>>);
 #ifndef GNURADIO_DATASET_HPP
 #define GNURADIO_DATASET_HPP
 
-// #include <gnuradio-4.0/meta/reflection.hpp>
-
 // #include "Tag.hpp"
 #ifndef GNURADIO_TAG_HPP
 #define GNURADIO_TAG_HPP
@@ -14389,9 +14387,9 @@ struct fmt::formatter<std::expected<Value, Error>> {
 
 #endif // GNURADIO_FORMATTER_HPP
 
-// #include <gnuradio-4.0/meta/utils.hpp>
-
 // #include <gnuradio-4.0/meta/reflection.hpp>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
 
 
 #ifdef __cpp_lib_hardware_interference_size
@@ -14601,6 +14599,8 @@ inline constexpr std::array<std::string_view, 14> kDefaultTags = {"sample_rate",
 
 #include <chrono>
 #include <cstdint>
+// #include <gnuradio-4.0/meta/reflection.hpp>
+
 #include <map>
 // #include <pmtv/pmt.hpp>
 
@@ -14761,9 +14761,9 @@ static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity"
 
 // #include <gnuradio-4.0/meta/formatter.hpp>
 
-// #include <gnuradio-4.0/meta/utils.hpp>
-
 // #include <gnuradio-4.0/meta/reflection.hpp>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
 
 
 // #include <pmtv/pmt.hpp>
@@ -20229,7 +20229,7 @@ class thread_exception : public std::error_category {
     using std::error_category::error_category;
 
 public:
-    constexpr thread_exception() : std::error_category(){};
+    constexpr thread_exception() : std::error_category() {};
 
     const char* name() const noexcept override { return "thread_exception"; };
 
@@ -20575,8 +20575,7 @@ namespace detail {
 
 // TODO remove all the below and use std when moved to modules // support code from mpunits for basic_fixed_string
 template<class InputIt1, class InputIt2>
-constexpr bool
-equal(InputIt1 first1, InputIt1 last1, InputIt2 first2) {
+constexpr bool equal(InputIt1 first1, InputIt1 last1, InputIt2 first2) {
     for (; first1 != last1; ++first1, ++first2) {
         if (!(*first1 == *first2)) {
             return false;
@@ -20586,23 +20585,23 @@ equal(InputIt1 first1, InputIt1 last1, InputIt2 first2) {
 }
 
 template<class I1, class I2, class Cmp>
-constexpr auto
-lexicographical_compare_three_way(I1 f1, I1 l1, I2 f2, I2 l2, Cmp comp) -> decltype(comp(*f1, *f2)) {
+constexpr auto lexicographical_compare_three_way(I1 f1, I1 l1, I2 f2, I2 l2, Cmp comp) -> decltype(comp(*f1, *f2)) {
     using ret_t = decltype(comp(*f1, *f2));
-    static_assert(std::disjunction_v<std::is_same<ret_t, std::strong_ordering>, std::is_same<ret_t, std::weak_ordering>, std::is_same<ret_t, std::partial_ordering>>,
-                  "The return type must be a comparison category type.");
+    static_assert(std::disjunction_v<std::is_same<ret_t, std::strong_ordering>, std::is_same<ret_t, std::weak_ordering>, std::is_same<ret_t, std::partial_ordering>>, "The return type must be a comparison category type.");
 
     bool exhaust1 = (f1 == l1);
     bool exhaust2 = (f2 == l2);
-    for (; !exhaust1 && !exhaust2; exhaust1 = (++f1 == l1), exhaust2 = (++f2 == l2))
-        if (auto c = comp(*f1, *f2); c != 0) return c;
+    for (; !exhaust1 && !exhaust2; exhaust1 = (++f1 == l1), exhaust2 = (++f2 == l2)) {
+        if (auto c = comp(*f1, *f2); c != 0) {
+            return c;
+        }
+    }
 
     return !exhaust1 ? std::strong_ordering::greater : !exhaust2 ? std::strong_ordering::less : std::strong_ordering::equal;
 }
 
 template<class I1, class I2>
-constexpr auto
-lexicographical_compare_three_way(I1 f1, I1 l1, I2 f2, I2 l2) {
+constexpr auto lexicographical_compare_three_way(I1 f1, I1 l1, I2 f2, I2 l2) {
     return lexicographical_compare_three_way(f1, l1, f2, l2, std::compare_three_way());
 }
 
@@ -20615,94 +20614,69 @@ lexicographical_compare_three_way(I1 f1, I1 l1, I2 f2, I2 l2) {
  */
 template<typename CharT, std::size_t N>
 struct basic_fixed_string {
-    CharT data_[N + 1]   = {};
+    CharT data_[N + 1] = {};
 
-    using iterator       = CharT *;
-    using const_iterator = const CharT *;
+    using iterator       = CharT*;
+    using const_iterator = const CharT*;
 
     constexpr explicit(false) basic_fixed_string(CharT ch) noexcept { data_[0] = ch; }
 
     constexpr explicit(false) basic_fixed_string(const CharT (&txt)[N + 1]) noexcept {
-        if constexpr (N != 0)
-            for (std::size_t i = 0; i < N; ++i) data_[i] = txt[i];
+        if constexpr (N != 0) {
+            for (std::size_t i = 0; i < N; ++i) {
+                data_[i] = txt[i];
+            }
+        }
     }
 
-    [[nodiscard]] constexpr bool
-    empty() const noexcept {
-        return N == 0;
-    }
+    [[nodiscard]] constexpr bool empty() const noexcept { return N == 0; }
 
-    [[nodiscard]] constexpr std::size_t
-    size() const noexcept {
-        return N;
-    }
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
 
-    [[nodiscard]] constexpr const CharT *
-    data() const noexcept {
-        return data_;
-    }
+    [[nodiscard]] constexpr const CharT* data() const noexcept { return data_; }
 
-    [[nodiscard]] constexpr const CharT *
-    c_str() const noexcept {
-        return data();
-    }
+    [[nodiscard]] constexpr const CharT* c_str() const noexcept { return data(); }
 
-    [[nodiscard]] constexpr const CharT &
-    operator[](std::size_t index) const noexcept {
-        return data()[index];
-    }
+    [[nodiscard]] constexpr const CharT& operator[](std::size_t index) const noexcept { return data()[index]; }
 
-    [[nodiscard]] constexpr CharT
-    operator[](std::size_t index) noexcept {
-        return data()[index];
-    }
+    [[nodiscard]] constexpr CharT operator[](std::size_t index) noexcept { return data()[index]; }
 
-    [[nodiscard]] constexpr iterator
-    begin() noexcept {
-        return data();
-    }
+    [[nodiscard]] constexpr iterator begin() noexcept { return data(); }
 
-    [[nodiscard]] constexpr const_iterator
-    begin() const noexcept {
-        return data();
-    }
+    [[nodiscard]] constexpr const_iterator begin() const noexcept { return data(); }
 
-    [[nodiscard]] constexpr iterator
-    end() noexcept {
-        return data() + size();
-    }
+    [[nodiscard]] constexpr iterator end() noexcept { return data() + size(); }
 
-    [[nodiscard]] constexpr const_iterator
-    end() const noexcept {
-        return data() + size();
-    }
+    [[nodiscard]] constexpr const_iterator end() const noexcept { return data() + size(); }
 
     template<std::size_t N2>
-    [[nodiscard]] constexpr friend basic_fixed_string<CharT, N + N2>
-    operator+(const basic_fixed_string &lhs, const basic_fixed_string<CharT, N2> &rhs) noexcept {
+    [[nodiscard]] constexpr friend basic_fixed_string<CharT, N + N2> operator+(const basic_fixed_string& lhs, const basic_fixed_string<CharT, N2>& rhs) noexcept {
         CharT txt[N + N2 + 1] = {};
 
-        for (size_t i = 0; i != N; ++i) txt[i] = lhs[i];
-        for (size_t i = 0; i != N2; ++i) txt[N + i] = rhs[i];
+        for (size_t i = 0; i != N; ++i) {
+            txt[i] = lhs[i];
+        }
+        for (size_t i = 0; i != N2; ++i) {
+            txt[N + i] = rhs[i];
+        }
 
         return basic_fixed_string<CharT, N + N2>(txt);
     }
 
-    [[nodiscard]] constexpr bool
-    operator==(const basic_fixed_string &other) const {
-        if (size() != other.size()) return false;
+    [[nodiscard]] constexpr bool operator==(const basic_fixed_string& other) const {
+        if (size() != other.size()) {
+            return false;
+        }
         return detail::equal(begin(), end(), other.begin()); // TODO std::ranges::equal(*this, other)
     }
 
     template<std::size_t N2>
-    [[nodiscard]] friend constexpr bool
-    operator==(const basic_fixed_string &, const basic_fixed_string<CharT, N2> &) {
+    [[nodiscard]] friend constexpr bool operator==(const basic_fixed_string&, const basic_fixed_string<CharT, N2>&) {
         return false;
     }
 
     template<std::size_t N2>
-    [[nodiscard]] friend constexpr auto
-    operator<=>(const basic_fixed_string &lhs, const basic_fixed_string<CharT, N2> &rhs) {
+    [[nodiscard]] friend constexpr auto operator<=>(const basic_fixed_string& lhs, const basic_fixed_string<CharT, N2>& rhs) {
         // TODO std::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
         return detail::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
     }
@@ -20723,35 +20697,32 @@ using fixed_string = basic_fixed_string<char, N>;
  * https://en.cppreference.com/w/cpp/utility/functional/move_only_function/move_only_function
  */
 class move_only_function {
-    using FunPtr            = std::unique_ptr<void, void (*)(void *)>;
-    FunPtr _erased_fun      = { nullptr, [](void *) {} };
-    void   (*_call)(void *) = nullptr;
+    using FunPtr         = std::unique_ptr<void, void (*)(void*)>;
+    FunPtr _erased_fun   = {nullptr, [](void*) {}};
+    void (*_call)(void*) = nullptr;
 
 public:
     constexpr move_only_function() = default;
 
     template<typename F>
-        requires(!std::same_as<move_only_function, std::remove_cvref<F>> && !std::is_reference_v<F>)
-    constexpr move_only_function(F &&fun) : _erased_fun(new F(std::forward<F>(fun)), [](void *ptr) { delete static_cast<F *>(ptr); }), _call([](void *ptr) { (*static_cast<F *>(ptr))(); }) {}
+    requires(!std::same_as<move_only_function, std::remove_cvref<F>> && !std::is_reference_v<F>)
+    constexpr move_only_function(F&& fun) : _erased_fun(new F(std::forward<F>(fun)), [](void* ptr) { delete static_cast<F*>(ptr); }), _call([](void* ptr) { (*static_cast<F*>(ptr))(); }) {}
 
     template<typename F>
-        requires(!std::is_reference_v<F>)
-    constexpr move_only_function &
-    operator=(F &&fun) {
-        _erased_fun = FunPtr(new F(std::forward<F>(fun)), [](void *ptr) { delete static_cast<F *>(ptr); });
-        _call       = [](void *ptr) { (*static_cast<F *>(ptr))(); };
+    requires(!std::is_reference_v<F>)
+    constexpr move_only_function& operator=(F&& fun) {
+        _erased_fun = FunPtr(new F(std::forward<F>(fun)), [](void* ptr) { delete static_cast<F*>(ptr); });
+        _call       = [](void* ptr) { (*static_cast<F*>(ptr))(); };
         return *this;
     }
 
-    constexpr void
-    operator()() {
+    constexpr void operator()() {
         if (_call) {
             _call(_erased_fun.get());
         }
     }
 
-    constexpr void
-    operator()() const {
+    constexpr void operator()() const {
         if (_call) {
             _call(_erased_fun.get());
         }
@@ -20765,16 +20736,10 @@ struct Task {
     int32_t            priority = 0;
     int32_t            cpuID    = -1;
 
-    std::weak_ordering
-    operator<=>(const Task &other) const noexcept {
-        return priority <=> other.priority;
-    }
+    std::weak_ordering operator<=>(const Task& other) const noexcept { return priority <=> other.priority; }
 
     // We want to reuse objects to avoid reallocations
-    void
-    reset() noexcept {
-        *this = Task();
-    }
+    void reset() noexcept { *this = Task(); }
 };
 
 template<bool lock, typename... Args>
@@ -20784,7 +20749,7 @@ struct conditional_lock : public std::scoped_lock<Args...> {
 
 template<typename... Args>
 struct conditional_lock<false, Args...> {
-    conditional_lock(const Args &...){};
+    conditional_lock(const Args&...) {};
 };
 
 class TaskQueue {
@@ -20794,47 +20759,42 @@ public:
 private:
     mutable gr::AtomicMutex<> _mutex;
 
-    TaskContainer             _tasks;
+    TaskContainer _tasks;
 
     template<bool shouldLock>
     using conditional_lock = conditional_lock<shouldLock, gr::AtomicMutex<>>;
 
 public:
-    TaskQueue()                       = default;
-    TaskQueue(const TaskQueue &queue) = delete;
-    TaskQueue &
-    operator=(const TaskQueue &queue)
-            = delete;
+    TaskQueue()                                  = default;
+    TaskQueue(const TaskQueue& queue)            = delete;
+    TaskQueue& operator=(const TaskQueue& queue) = delete;
 
     ~TaskQueue() { clear(); }
 
     template<bool shouldLock = true>
-    void
-    clear() {
+    void clear() {
         conditional_lock<shouldLock> lock(_mutex);
         _tasks.clear();
     }
 
     template<bool shouldLock = true>
-    std::size_t
-    size() const {
+    std::size_t size() const {
         conditional_lock<shouldLock> lock(_mutex);
         return _tasks.size();
     }
 
     template<bool shouldLock = true>
-    void
-    push(TaskContainer jobContainer) {
+    void push(TaskContainer jobContainer) {
         conditional_lock<shouldLock> lock(_mutex);
         assert(!jobContainer.empty());
-        auto      &job                = jobContainer.front();
+        auto&      job                = jobContainer.front();
         const auto currentJobPriority = job.priority;
 
-        const auto insertPosition     = [&] {
+        const auto insertPosition = [&] {
             if (currentJobPriority == 0) {
                 return _tasks.end();
             } else {
-                return std::find_if(_tasks.begin(), _tasks.end(), [currentJobPriority](const auto &task) { return task.priority < currentJobPriority; });
+                return std::find_if(_tasks.begin(), _tasks.end(), [currentJobPriority](const auto& task) { return task.priority < currentJobPriority; });
             }
         }();
 
@@ -20842,8 +20802,7 @@ public:
     }
 
     template<bool shouldLock = true>
-    TaskContainer
-    pop() {
+    TaskContainer pop() {
         conditional_lock<shouldLock> lock(_mutex);
         TaskContainer                result;
         if (!_tasks.empty()) {
@@ -20860,7 +20819,7 @@ class TaskQueue;
 enum TaskType { IO_BOUND = 0, CPU_BOUND = 1 };
 
 template<typename T>
-concept ThreadPool = requires(T t, std::function<void()> &&func) {
+concept ThreadPool = requires(T t, std::function<void()>&& func) {
     { t.execute(std::move(func)) } -> std::same_as<void>;
 };
 
@@ -20917,13 +20876,10 @@ class BasicThreadPool {
     static std::atomic<uint64_t> _globalPoolId;
     static std::atomic<uint64_t> _taskID;
 
-    static std::string
-    generateName() {
-        return fmt::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1));
-    }
+    static std::string generateName() { return fmt::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1)); }
 
-    std::atomic_bool        _initialised = ATOMIC_FLAG_INIT;
-    std::atomic_bool        _shutdown    = false;
+    std::atomic_bool _initialised = ATOMIC_FLAG_INIT;
+    std::atomic_bool _shutdown    = false;
 
     std::condition_variable _condition;
     std::atomic_size_t      _numTaskedQueued = 0U; // cache for _taskQueue.size()
@@ -20931,26 +20887,24 @@ class BasicThreadPool {
     TaskQueue               _taskQueue;
     TaskQueue               _recycledTasks;
 
-    std::mutex              _threadListMutex;
-    std::atomic_size_t      _numThreads = 0U;
-    std::list<std::thread>  _threads;
+    std::mutex             _threadListMutex;
+    std::atomic_size_t     _numThreads = 0U;
+    std::list<std::thread> _threads;
 
-    std::vector<bool>       _affinityMask;
-    thread::Policy          _schedulingPolicy   = thread::Policy::OTHER;
-    int                     _schedulingPriority = 0;
+    std::vector<bool> _affinityMask;
+    thread::Policy    _schedulingPolicy   = thread::Policy::OTHER;
+    int               _schedulingPriority = 0;
 
-    const std::string       _poolName;
-    const TaskType          _taskType;
-    const uint32_t          _minThreads;
-    const uint32_t          _maxThreads;
+    const std::string _poolName;
+    const TaskType    _taskType;
+    const uint32_t    _minThreads;
+    const uint32_t    _maxThreads;
 
 public:
     std::chrono::microseconds sleepDuration     = std::chrono::milliseconds(1);
     std::chrono::milliseconds keepAliveDuration = std::chrono::seconds(10);
 
-    BasicThreadPool(const std::string_view &name = generateName(), const TaskType taskType = TaskType::CPU_BOUND, uint32_t min = std::thread::hardware_concurrency(),
-                    uint32_t max = std::thread::hardware_concurrency())
-        : _poolName(name), _taskType(taskType), _minThreads(std::min(min, max)), _maxThreads(max) {
+    BasicThreadPool(const std::string_view& name = generateName(), const TaskType taskType = TaskType::CPU_BOUND, uint32_t min = std::thread::hardware_concurrency(), uint32_t max = std::thread::hardware_concurrency()) : _poolName(name), _taskType(taskType), _minThreads(std::min(min, max)), _maxThreads(max) {
         assert(min > 0 && "minimum number of threads must be > 0");
         for (uint32_t i = 0; i < _minThreads; ++i) {
             createWorkerThread();
@@ -20960,106 +20914,60 @@ public:
     ~BasicThreadPool() {
         _shutdown = true;
         _condition.notify_all();
-        for (auto &t : _threads) {
+        for (auto& t : _threads) {
             t.join();
         }
     }
 
-    BasicThreadPool(const BasicThreadPool &) = delete;
-    BasicThreadPool(BasicThreadPool &&)      = delete;
-    BasicThreadPool &
-    operator=(const BasicThreadPool &)
-            = delete;
-    BasicThreadPool &
-    operator=(BasicThreadPool &&)
-            = delete;
+    BasicThreadPool(const BasicThreadPool&)            = delete;
+    BasicThreadPool(BasicThreadPool&&)                 = delete;
+    BasicThreadPool& operator=(const BasicThreadPool&) = delete;
+    BasicThreadPool& operator=(BasicThreadPool&&)      = delete;
 
-    [[nodiscard]] std::string
-    poolName() const noexcept {
-        return _poolName;
-    }
+    [[nodiscard]] std::string poolName() const noexcept { return _poolName; }
 
-    [[nodiscard]] uint32_t
-    minThreads() const noexcept {
-        return _minThreads;
-    };
+    [[nodiscard]] uint32_t minThreads() const noexcept { return _minThreads; };
 
-    [[nodiscard]] uint32_t
-    maxThreads() const noexcept {
-        return _maxThreads;
-    };
+    [[nodiscard]] uint32_t maxThreads() const noexcept { return _maxThreads; };
 
-    [[nodiscard]] std::size_t
-    numThreads() const noexcept {
-        return std::atomic_load_explicit(&_numThreads, std::memory_order_acquire);
-    }
+    [[nodiscard]] std::size_t numThreads() const noexcept { return std::atomic_load_explicit(&_numThreads, std::memory_order_acquire); }
 
-    [[nodiscard]] std::size_t
-    numTasksRunning() const noexcept {
-        return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire);
-    }
+    [[nodiscard]] std::size_t numTasksRunning() const noexcept { return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire); }
 
-    [[nodiscard]] std::size_t
-    numTasksQueued() const {
-        return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire);
-    }
+    [[nodiscard]] std::size_t numTasksQueued() const { return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire); }
 
-    [[nodiscard]] std::size_t
-    numTasksRecycled() const {
-        return _recycledTasks.size();
-    }
+    [[nodiscard]] std::size_t numTasksRecycled() const { return _recycledTasks.size(); }
 
-    [[nodiscard]] bool
-    isInitialised() const {
-        return _initialised.load(std::memory_order::acquire);
-    }
+    [[nodiscard]] bool isInitialised() const { return _initialised.load(std::memory_order::acquire); }
 
-    void
-    waitUntilInitialised() const {
-        _initialised.wait(false);
-    }
+    void waitUntilInitialised() const { _initialised.wait(false); }
 
-    void
-    requestShutdown() {
+    void requestShutdown() {
         _shutdown = true;
         _condition.notify_all();
-        for (auto &t : _threads) {
+        for (auto& t : _threads) {
             t.join();
         }
     }
 
-    [[nodiscard]] bool
-    isShutdown() const {
-        return _shutdown;
-    }
+    [[nodiscard]] bool isShutdown() const { return _shutdown; }
 
     //
 
-    [[nodiscard]] std::vector<bool>
-    getAffinityMask() const {
-        return _affinityMask;
-    }
+    [[nodiscard]] std::vector<bool> getAffinityMask() const { return _affinityMask; }
 
-    void
-    setAffinityMask(const std::vector<bool> &threadAffinityMask) {
+    void setAffinityMask(const std::vector<bool>& threadAffinityMask) {
         _affinityMask.clear();
         std::copy(threadAffinityMask.begin(), threadAffinityMask.end(), std::back_inserter(_affinityMask));
         cleanupFinishedThreads();
         updateThreadConstraints();
     }
 
-    [[nodiscard]] auto
-    getSchedulingPolicy() const {
-        return _schedulingPolicy;
-    }
+    [[nodiscard]] auto getSchedulingPolicy() const { return _schedulingPolicy; }
 
-    [[nodiscard]] auto
-    getSchedulingPriority() const {
-        return _schedulingPriority;
-    }
+    [[nodiscard]] auto getSchedulingPriority() const { return _schedulingPriority; }
 
-    void
-    setThreadSchedulingPolicy(const thread::Policy schedulingPolicy = thread::Policy::OTHER, const int schedulingPriority = 0) {
+    void setThreadSchedulingPolicy(const thread::Policy schedulingPolicy = thread::Policy::OTHER, const int schedulingPriority = 0) {
         _schedulingPolicy   = schedulingPolicy;
         _schedulingPriority = schedulingPriority;
         cleanupFinishedThreads();
@@ -21068,14 +20976,12 @@ public:
 
     // TODO: Do we need support for cancellation?
     template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = std::invoke_result_t<Callable, Args...>>
-        requires(std::is_same_v<R, void>)
-    void
-    execute(Callable &&func, Args &&...args) {
+    requires(std::is_same_v<R, void>)
+    void execute(Callable&& func, Args&&... args) {
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
-                throw std::invalid_argument(
-                        fmt::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), fmt::join(_affinityMask.begin(), _affinityMask.end(), ", ")));
+                throw std::invalid_argument(fmt::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), fmt::join(_affinityMask.begin(), _affinityMask.end(), ", ")));
             }
         }
         _numTaskedQueued.fetch_add(1U);
@@ -21098,9 +21004,8 @@ public:
     }
 
     template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = std::invoke_result_t<Callable, Args...>>
-        requires(!std::is_same_v<R, void>)
-    [[nodiscard]] std::future<R>
-    execute(Callable &&func, Args &&...funcArgs) {
+    requires(!std::is_same_v<R, void>)
+    [[nodiscard]] std::future<R> execute(Callable&& func, Args&&... funcArgs) {
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
@@ -21124,8 +21029,7 @@ public:
     }
 
 private:
-    void
-    cleanupFinishedThreads() {
+    void cleanupFinishedThreads() {
         std::scoped_lock lock(_threadListMutex);
         // TODO:
         // (C++Ref) A thread that has finished executing code, but has not yet been
@@ -21134,16 +21038,14 @@ private:
         // std::erase_if(_threads, [](auto &thread) { return !thread.joinable(); });
     }
 
-    void
-    updateThreadConstraints() {
+    void updateThreadConstraints() {
         std::scoped_lock lock(_threadListMutex);
         // std::erase_if(_threads, [](auto &thread) { return !thread.joinable(); });
 
-        std::for_each(_threads.begin(), _threads.end(), [this, threadID = std::size_t{ 0 }](auto &thread) mutable { this->updateThreadConstraints(threadID++, thread); });
+        std::for_each(_threads.begin(), _threads.end(), [this, threadID = std::size_t{0}](auto& thread) mutable { this->updateThreadConstraints(threadID++, thread); });
     }
 
-    void
-    updateThreadConstraints(const std::size_t threadID, std::thread &thread) const {
+    void updateThreadConstraints(const std::size_t threadID, std::thread& thread) const {
         thread::setThreadName(fmt::format("{}#{}", _poolName, threadID), thread);
         thread::setThreadSchedulingParameter(_schedulingPolicy, _schedulingPriority, thread);
         if (!_affinityMask.empty()) {
@@ -21157,8 +21059,7 @@ private:
         }
     }
 
-    std::vector<bool>
-    distributeThreadAffinityAcrossCores(const std::vector<bool> &globalAffinityMask, const std::size_t threadID) const {
+    std::vector<bool> distributeThreadAffinityAcrossCores(const std::vector<bool>& globalAffinityMask, const std::size_t threadID) const {
         if (globalAffinityMask.empty()) {
             return {};
         }
@@ -21174,27 +21075,25 @@ private:
         return affinityMask;
     }
 
-    void
-    createWorkerThread() {
+    void createWorkerThread() {
         std::scoped_lock  lock(_threadListMutex);
         const std::size_t nThreads = numThreads();
-        std::thread      &thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
+        std::thread&      thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
         updateThreadConstraints(nThreads + 1, thread);
     }
 
     template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args>
-    auto
-    createTask(Callable &&func, Args &&...funcArgs) {
-        const auto getTask = [&recycledTasks = _recycledTasks](Callable &&f, Args &&...args) {
+    auto createTask(Callable&& func, Args&&... funcArgs) {
+        const auto getTask = [&recycledTasks = _recycledTasks](Callable&& f, Args&&... args) {
             auto extracted = recycledTasks.pop();
             if (extracted.empty()) {
                 if constexpr (sizeof...(Args) == 0) {
-                    extracted.push_front(Task{ .id = _taskID.fetch_add(1U) + 1U, .func = std::move(f) });
+                    extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::move(f)});
                 } else {
-                    extracted.push_front(Task{ .id = _taskID.fetch_add(1U) + 1U, .func = std::move(std::bind_front(std::forward<decltype(func)>(f), std::forward<decltype(func)>(args)...)) });
+                    extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::move(std::bind_front(std::forward<decltype(func)>(f), std::forward<decltype(func)>(args)...))});
                 }
             } else {
-                auto &task = extracted.front();
+                auto& task = extracted.front();
                 task.id    = _taskID.fetch_add(1U) + 1U;
                 if constexpr (sizeof...(Args) == 0) {
                     task.func = std::move(f);
@@ -21206,7 +21105,7 @@ private:
         };
 
         auto  taskContainer = getTask(std::forward<decltype(func)>(func), std::forward<decltype(func)>(funcArgs)...);
-        auto &task          = taskContainer.front();
+        auto& task          = taskContainer.front();
 
         if constexpr (!taskName.empty()) {
             task.name = taskName.c_str();
@@ -21217,8 +21116,7 @@ private:
         return taskContainer;
     }
 
-    TaskQueue::TaskContainer
-    popTask() {
+    TaskQueue::TaskContainer popTask() {
         auto result = _taskQueue.pop();
         if (!result.empty()) {
             _numTaskedQueued.fetch_sub(1U);
@@ -21226,8 +21124,7 @@ private:
         return result;
     }
 
-    void
-    worker() {
+    void worker() {
         constexpr uint32_t N_SPIN       = 1 << 8;
         uint32_t           noop_counter = 0;
         const auto         threadID     = _numThreads.fetch_add(1);
@@ -21244,7 +21141,7 @@ private:
         do {
             if (TaskQueue::TaskContainer currentTaskContainer = popTask(); !currentTaskContainer.empty()) {
                 assert(!currentTaskContainer.empty());
-                auto &currentTask = currentTaskContainer.front();
+                auto& currentTask = currentTaskContainer.front();
                 _numTasksRunning.fetch_add(1);
                 bool nameSet = !(currentTask.name.empty());
                 if (nameSet) {
@@ -22554,9 +22451,9 @@ struct hash<gr::SettingsCtx> {
 
 // #include <gnuradio-4.0/meta/formatter.hpp>
 
-// #include <gnuradio-4.0/meta/utils.hpp>
-
 // #include <gnuradio-4.0/meta/reflection.hpp>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
 
 
 #include <atomic>
@@ -25624,7 +25521,7 @@ public:
     virtual std::uint8_t abi_version() const = 0;
 
     virtual std::span<const std::string_view> providedBlocks() const                                                                    = 0;
-    virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, const gr::property_map& params) = 0;
+    virtual std::unique_ptr<gr::BlockModel>   createBlock(std::string_view name, std::string_view type, const gr::property_map& params) = 0;
     virtual std::vector<std::string_view>     knownBlockParameterizations(std::string_view block) const                                 = 0;
 };
 

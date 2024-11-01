@@ -6,8 +6,7 @@
 #include <ranges>
 #include <thread>
 
-int
-main() {
+int main() {
     setlocale(LC_ALL, "");
     constexpr std::size_t sizeX = 121;
     constexpr std::size_t sizeY = 41;
@@ -17,7 +16,7 @@ main() {
     constexpr double      yMax  = +5.0;
 
     using namespace gr::graphs;
-    auto animator = ImChart<sizeX, sizeY>({ { xMin, xMax }, { yMin, yMax } });
+    auto animator = ImChart<sizeX, sizeY>({{xMin, xMax}, {yMin, yMax}});
     // auto animator = ImChart<sizeX, sizeY>();
     double phase = 0.;
 

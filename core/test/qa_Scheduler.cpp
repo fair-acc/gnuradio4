@@ -28,8 +28,8 @@ public:
 // define some example graph nodes
 template<typename T>
 struct CountSource : public gr::Block<CountSource<T>> {
-    gr::PortOut<T>          out;
-    gr::Size_t              n_samples_max = 0;
+    gr::PortOut<T> out;
+    gr::Size_t     n_samples_max = 0;
 
     GR_MAKE_REFLECTABLE(CountSource, out, n_samples_max);
 
@@ -56,8 +56,8 @@ static_assert(gr::BlockLike<CountSource<float>>);
 
 template<typename T>
 struct ExpectSink : public gr::Block<ExpectSink<T>> {
-    gr::PortIn<T>                                   in;
-    gr::Size_t                                      n_samples_max = 0;
+    gr::PortIn<T> in;
+    gr::Size_t    n_samples_max = 0;
 
     GR_MAKE_REFLECTABLE(ExpectSink, in, n_samples_max);
 
@@ -106,9 +106,9 @@ struct Scale : public gr::Block<Scale<T>> {
 template<typename T>
 struct Adder : public gr::Block<Adder<T>> {
     using R = decltype(std::declval<T>() + std::declval<T>());
-    gr::PortIn<T>           addend0;
-    gr::PortIn<T>           addend1;
-    gr::PortOut<R>          sum;
+    gr::PortIn<T>  addend0;
+    gr::PortIn<T>  addend1;
+    gr::PortOut<R> sum;
 
     GR_MAKE_REFLECTABLE(Adder, addend0, addend1, sum);
 
@@ -245,8 +245,8 @@ struct LifecycleSource : public gr::Block<LifecycleSource<T>> {
 
     GR_MAKE_REFLECTABLE(LifecycleSource, out);
 
-    std::int32_t   n_samples_produced = 0;
-    std::int32_t   n_samples_max      = 10;
+    std::int32_t n_samples_produced = 0;
+    std::int32_t n_samples_max      = 10;
 
     [[nodiscard]] constexpr T processOne() noexcept {
         n_samples_produced++;
@@ -296,8 +296,8 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
 
     GR_MAKE_REFLECTABLE(BusyLoopBlock, in, out);
 
-    gr::Sequence   _produceCount{0};
-    gr::Sequence   _invokeCount{0};
+    gr::Sequence _produceCount{0};
+    gr::Sequence _invokeCount{0};
 
     [[nodiscard]] constexpr gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) noexcept {
         auto produceCount = _produceCount.value();

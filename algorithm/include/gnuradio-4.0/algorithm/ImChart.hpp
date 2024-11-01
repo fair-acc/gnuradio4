@@ -25,8 +25,8 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include "gnuradio-4.0/meta/utils.hpp"
 #include "gnuradio-4.0/meta/reflection.hpp"
+#include "gnuradio-4.0/meta/utils.hpp"
 #include <bitset>
 #include <iostream>
 
@@ -36,63 +36,45 @@ class Color {
 public:
     enum class Type : std::uint8_t { Default, Blue, Red, Green, Yellow, Magenta, Cyan, LightBlue, LightRed, LightGreen, LightYellow, LightMagenta, LightCyan, White, LightGray, DarkGray, Black };
 
-    [[nodiscard]] constexpr static const char *
-    get(Type colour) noexcept {
-        for (const auto &[colType, colStr] : Colors) {
-            if (colType == colour) return colStr;
+    [[nodiscard]] constexpr static const char* get(Type colour) noexcept {
+        for (const auto& [colType, colStr] : Colors) {
+            if (colType == colour) {
+                return colStr;
+            }
         }
         return Colors[0].second; // fallback, should not happen if Colors array is correctly defined.
     }
 
-    [[nodiscard]] constexpr static const char *
-    get(std::size_t index) noexcept {
-        return Colors[index % Colors.size()].second;
-    }
+    [[nodiscard]] constexpr static const char* get(std::size_t index) noexcept { return Colors[index % Colors.size()].second; }
 
-    [[nodiscard]] constexpr static uint8_t
-    getIndex(Type colour) noexcept {
-        return static_cast<uint8_t>(colour);
-    }
+    [[nodiscard]] constexpr static uint8_t getIndex(Type colour) noexcept { return static_cast<uint8_t>(colour); }
 
-    [[nodiscard]] constexpr static Type
-    next(Type colour) noexcept {
-        return magic_enum::enum_next_value_circular(colour);
-    }
+    [[nodiscard]] constexpr static Type next(Type colour) noexcept { return magic_enum::enum_next_value_circular(colour); }
 
-    [[nodiscard]] constexpr static Type
-    prev(Type colour) noexcept {
-        return magic_enum::enum_prev_value_circular(colour);
-    }
+    [[nodiscard]] constexpr static Type prev(Type colour) noexcept { return magic_enum::enum_prev_value_circular(colour); }
 
 private:
-    constexpr static std::array<std::pair<Type, const char *>, 17UZ> Colors = {
-        std::make_pair(Type::Default, "\x1B[39m"), //
-        std::make_pair(Type::Blue, "\x1B[34m"),         std::make_pair(Type::Red, "\x1B[31m"),       std::make_pair(Type::Green, "\x1B[32m"),      std::make_pair(Type::Yellow, "\x1B[33m"),
-        std::make_pair(Type::Magenta, "\x1B[35m"),      std::make_pair(Type::Cyan, "\x1B[36m"), //
-        std::make_pair(Type::LightBlue, "\x1B[94m"),    std::make_pair(Type::LightRed, "\x1B[91m"),  std::make_pair(Type::LightGreen, "\x1B[92m"), std::make_pair(Type::LightYellow, "\x1B[93m"),
-        std::make_pair(Type::LightMagenta, "\x1B[95m"), std::make_pair(Type::LightCyan, "\x1B[96m"), //
-        std::make_pair(Type::White, "\x1B[97m"),        std::make_pair(Type::LightGray, "\x1B[37m"), std::make_pair(Type::DarkGray, "\x1B[90m"),   std::make_pair(Type::Black, "\x1B[30m")
-    };
+    constexpr static std::array<std::pair<Type, const char*>, 17UZ> Colors = {std::make_pair(Type::Default, "\x1B[39m"),                                                                                                                                                                   //
+        std::make_pair(Type::Blue, "\x1B[34m"), std::make_pair(Type::Red, "\x1B[31m"), std::make_pair(Type::Green, "\x1B[32m"), std::make_pair(Type::Yellow, "\x1B[33m"), std::make_pair(Type::Magenta, "\x1B[35m"), std::make_pair(Type::Cyan, "\x1B[36m"),                               //
+        std::make_pair(Type::LightBlue, "\x1B[94m"), std::make_pair(Type::LightRed, "\x1B[91m"), std::make_pair(Type::LightGreen, "\x1B[92m"), std::make_pair(Type::LightYellow, "\x1B[93m"), std::make_pair(Type::LightMagenta, "\x1B[95m"), std::make_pair(Type::LightCyan, "\x1B[96m"), //
+        std::make_pair(Type::White, "\x1B[97m"), std::make_pair(Type::LightGray, "\x1B[37m"), std::make_pair(Type::DarkGray, "\x1B[90m"), std::make_pair(Type::Black, "\x1B[30m")};
 };
 
 struct LinearAxisTransform {
     template<std::floating_point T>
-    [[nodiscard]] static constexpr std::size_t
-    toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+    [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         return screenOffset + static_cast<std::size_t>((value - axisMin) / (axisMax - axisMin) * static_cast<T>(screenSize - screenOffset - 1UZ));
     }
 
     template<std::floating_point T>
-    [[nodiscard]] static constexpr T
-    fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+    [[nodiscard]] static constexpr T fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         return axisMin + static_cast<T>(screenCoordinate - screenOffset) / static_cast<T>(screenSize - screenOffset - 1UZ) * (axisMax - axisMin);
     }
 };
 
 struct LogAxisTransform {
     template<typename T>
-    [[nodiscard]] static constexpr std::size_t
-    toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+    [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         if (value <= 0 || axisMin <= 0 || axisMax <= axisMin) {
             throw std::invalid_argument(fmt::format("{} not defined for non-positive value {} in [{}, {}].", gr::meta::type_name<LogAxisTransform>(), value, axisMin, axisMax));
         }
@@ -103,8 +85,7 @@ struct LogAxisTransform {
     }
 
     template<std::floating_point T>
-    [[nodiscard]] static constexpr T
-    fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
+    [[nodiscard]] static constexpr T fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         if (axisMin <= 0UZ || axisMax <= axisMin) {
             throw std::invalid_argument(fmt::format("{} not defined for non-positive ranges [{}, {}].", gr::meta::type_name<LogAxisTransform>(), axisMin, axisMax));
         }
@@ -121,26 +102,22 @@ enum class Style { Braille, Bars, Marker };
 
 namespace detail {
 inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth, std::size_t minGapSize = 1) {
-    constexpr std::array preferredDivisors{ 10UZ, 8UZ, 5UZ, 4UZ, 3UZ, 2UZ };
+    constexpr std::array preferredDivisors{10UZ, 8UZ, 5UZ, 4UZ, 3UZ, 2UZ};
     std::size_t          reducedAxisWidth = axisWidth - 1; // because we always require & add the '0'
 
     // checks if preferred divisor evenly divides the 'axisWidth - 1'
     auto validDivisorIt = std::ranges::find_if(preferredDivisors, [&](std::size_t divisor) { return reducedAxisWidth % divisor == 0 && (reducedAxisWidth / divisor) > minGapSize; });
 
     // determine the segment size.
-    std::size_t segmentSize = validDivisorIt != preferredDivisors.end() ? (reducedAxisWidth < 10 ? *validDivisorIt : (reducedAxisWidth / *validDivisorIt))
-                                                                        : reducedAxisWidth; // default -> [0, reducedAxisWidth]
+    std::size_t segmentSize = validDivisorIt != preferredDivisors.end() ? (reducedAxisWidth < 10 ? *validDivisorIt : (reducedAxisWidth / *validDivisorIt)) : reducedAxisWidth; // default -> [0, reducedAxisWidth]
 
     auto tickRange = std::views::iota(0UZ, axisWidth) | std::views::filter([=](auto i) { return i % segmentSize == 0; });
-    return { tickRange.begin(), tickRange.end() };
+    return {tickRange.begin(), tickRange.end()};
 }
 
 } // namespace detail
 
-inline void
-resetView() {
-    fmt::println("\033[2J\033[H");
-}
+inline void resetView() { fmt::println("\033[2J\033[H"); }
 
 /**
  * @brief compact class for ASCII charting in terminal environments, supporting custom dimensions and styles.
@@ -205,28 +182,20 @@ resetView() {
  */
 template<std::size_t screenWidth, std::size_t screenHeight, typename horAxisTransform = LinearAxisTransform, typename verAxisTransform = LinearAxisTransform>
 struct ImChart {
-    std::conditional_t<screenWidth != std::dynamic_extent, const std::size_t, std::size_t>  _screen_width{ screenWidth };
-    std::conditional_t<screenHeight != std::dynamic_extent, const std::size_t, std::size_t> _screen_height{ screenHeight };
+    std::conditional_t<screenWidth != std::dynamic_extent, const std::size_t, std::size_t>  _screen_width{screenWidth};
+    std::conditional_t<screenHeight != std::dynamic_extent, const std::size_t, std::size_t> _screen_height{screenHeight};
 
     //
-    constexpr static std::size_t                   kCellWidth{ 2U };
-    constexpr static std::size_t                   kCellHeight{ 4U };
-    constexpr static std::array<const char *, 256> kBrailleCharacter{
-        "⠀", "⠁", "⠂", "⠃", "⠄", "⠅", "⠆", "⠇", "⠈", "⠉", "⠊", "⠋", "⠌", "⠍", "⠎", "⠏", "⠐", "⠑", "⠒", "⠓", "⠔", "⠕", "⠖", "⠗", "⠘", "⠙", "⠚", "⠛", "⠜", "⠝", "⠞", "⠟", "⠠", "⠡", "⠢", "⠣", "⠤",
-        "⠥", "⠦", "⠧", "⠨", "⠩", "⠪", "⠫", "⠬", "⠭", "⠮", "⠯", "⠰", "⠱", "⠲", "⠳", "⠴", "⠵", "⠶", "⠷", "⠸", "⠹", "⠺", "⠻", "⠼", "⠽", "⠾", "⠿", "⡀", "⡁", "⡂", "⡃", "⡄", "⡅", "⡆", "⡇", "⡈", "⡉",
-        "⡊", "⡋", "⡌", "⡍", "⡎", "⡏", "⡐", "⡑", "⡒", "⡓", "⡔", "⡕", "⡖", "⡗", "⡘", "⡙", "⡚", "⡛", "⡜", "⡝", "⡞", "⡟", "⡠", "⡡", "⡢", "⡣", "⡤", "⡥", "⡦", "⡧", "⡨", "⡩", "⡪", "⡫", "⡬", "⡭", "⡮",
-        "⡯", "⡰", "⡱", "⡲", "⡳", "⡴", "⡵", "⡶", "⡷", "⡸", "⡹", "⡺", "⡻", "⡼", "⡽", "⡾", "⡿", "⢀", "⢁", "⢂", "⢃", "⢄", "⢅", "⢆", "⢇", "⢈", "⢉", "⢊", "⢋", "⢌", "⢍", "⢎", "⢏", "⢐", "⢑", "⢒", "⢓",
-        "⢔", "⢕", "⢖", "⢗", "⢘", "⢙", "⢚", "⢛", "⢜", "⢝", "⢞", "⢟", "⢠", "⢡", "⢢", "⢣", "⢤", "⢥", "⢦", "⢧", "⢨", "⢩", "⢪", "⢫", "⢬", "⢭", "⢮", "⢯", "⢰", "⢱", "⢲", "⢳", "⢴", "⢵", "⢶", "⢷", "⢸",
-        "⢹", "⢺", "⢻", "⢼", "⢽", "⢾", "⢿", "⣀", "⣁", "⣂", "⣃", "⣄", "⣅", "⣆", "⣇", "⣈", "⣉", "⣊", "⣋", "⣌", "⣍", "⣎", "⣏", "⣐", "⣑", "⣒", "⣓", "⣔", "⣕", "⣖", "⣗", "⣘", "⣙", "⣚", "⣛", "⣜", "⣝",
-        "⣞", "⣟", "⣠", "⣡", "⣢", "⣣", "⣤", "⣥", "⣦", "⣧", "⣨", "⣩", "⣪", "⣫", "⣬", "⣭", "⣮", "⣯", "⣰", "⣱", "⣲", "⣳", "⣴", "⣵", "⣶", "⣷", "⣸", "⣹", "⣺", "⣻", "⣼", "⣽", "⣾", "⣿"
-    };
-    constexpr static std::array<std::array<uint8_t, kCellHeight>, kCellWidth> kBrailleDotMap{ { { 0x1, 0x2, 0x4, 0x40 }, { 0x8, 0x10, 0x20, 0x80 } } };
+    constexpr static std::size_t                                              kCellWidth{2U};
+    constexpr static std::size_t                                              kCellHeight{4U};
+    constexpr static std::array<const char*, 256>                             kBrailleCharacter{"⠀", "⠁", "⠂", "⠃", "⠄", "⠅", "⠆", "⠇", "⠈", "⠉", "⠊", "⠋", "⠌", "⠍", "⠎", "⠏", "⠐", "⠑", "⠒", "⠓", "⠔", "⠕", "⠖", "⠗", "⠘", "⠙", "⠚", "⠛", "⠜", "⠝", "⠞", "⠟", "⠠", "⠡", "⠢", "⠣", "⠤", "⠥", "⠦", "⠧", "⠨", "⠩", "⠪", "⠫", "⠬", "⠭", "⠮", "⠯", "⠰", "⠱", "⠲", "⠳", "⠴", "⠵", "⠶", "⠷", "⠸", "⠹", "⠺", "⠻", "⠼", "⠽", "⠾", "⠿", "⡀", "⡁", "⡂", "⡃", "⡄", "⡅", "⡆", "⡇", "⡈", "⡉", "⡊", "⡋", "⡌", "⡍", "⡎", "⡏", "⡐", "⡑", "⡒", "⡓", "⡔", "⡕", "⡖", "⡗", "⡘", "⡙", "⡚", "⡛", "⡜", "⡝", "⡞", "⡟", "⡠", "⡡", "⡢", "⡣", "⡤", "⡥", "⡦", "⡧", "⡨", "⡩", "⡪", "⡫", "⡬", "⡭", "⡮", "⡯", "⡰", "⡱", "⡲", "⡳", "⡴", "⡵", "⡶", "⡷", "⡸", "⡹", "⡺", "⡻", "⡼", "⡽", "⡾", "⡿", "⢀", "⢁", "⢂", "⢃", "⢄", "⢅", "⢆", "⢇", "⢈", "⢉", "⢊", "⢋", "⢌", "⢍", "⢎", "⢏", "⢐", "⢑", "⢒", "⢓", "⢔", "⢕", "⢖", "⢗", "⢘", "⢙", "⢚", "⢛", "⢜", "⢝", "⢞", "⢟", "⢠", "⢡", "⢢", "⢣", "⢤", "⢥", "⢦", "⢧", "⢨", "⢩", "⢪", "⢫", "⢬", "⢭", "⢮", "⢯", "⢰", "⢱", "⢲", "⢳", "⢴", "⢵", "⢶", "⢷", "⢸", "⢹", "⢺", "⢻", "⢼", "⢽", "⢾", "⢿", "⣀", "⣁", "⣂", "⣃", "⣄", "⣅", "⣆", "⣇", "⣈", "⣉", "⣊", "⣋", "⣌", "⣍", "⣎", "⣏", "⣐", "⣑", "⣒", "⣓", "⣔", "⣕", "⣖", "⣗", "⣘", "⣙", "⣚", "⣛", "⣜", "⣝", "⣞", "⣟", "⣠", "⣡", "⣢", "⣣", "⣤", "⣥", "⣦", "⣧", "⣨", "⣩", "⣪", "⣫", "⣬", "⣭", "⣮", "⣯", "⣰", "⣱", "⣲", "⣳", "⣴", "⣵", "⣶", "⣷", "⣸", "⣹", "⣺", "⣻", "⣼", "⣽", "⣾", "⣿"};
+    constexpr static std::array<std::array<uint8_t, kCellHeight>, kCellWidth> kBrailleDotMap{{{0x1, 0x2, 0x4, 0x40}, {0x8, 0x10, 0x20, 0x80}}};
     // bar definitions
-    constexpr static std::array<const char *, 9> kBars{ " ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" };
+    constexpr static std::array<const char*, 9> kBars{" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"};
     static_assert(static_cast<std::size_t>(std::ranges::distance(kBars)) >= kCellWidth * kCellHeight, "bar definitions must be >= kCellWidth * kCellHeight");
-    constexpr static std::array<const char *, 9> kMarker{ "X", "O", "★", "+", "❖", "◎", "○", "■", "□" };
+    constexpr static std::array<const char*, 9> kMarker{"X", "O", "★", "+", "❖", "◎", "○", "■", "□"};
 
-    constexpr static Color::Type          kFirstColor{ Color::Type::Blue }; // we like blue
+    constexpr static Color::Type          kFirstColor{Color::Type::Blue}; // we like blue
     std::vector<std::vector<std::string>> _screen;
     // _brailleArray is the 2x4 (kCellWidth k CellHeight) oversampled data array that is used
     // to in turn compute the required braille and bar characters that are inserted into the _screen array
@@ -235,7 +204,7 @@ struct ImChart {
     std::vector<std::vector<uint16_t>> _brailleArray;
 
     Color::Type              _lastColor = kFirstColor;
-    std::size_t              _n_datasets{ 0UZ };
+    std::size_t              _n_datasets{0UZ};
     std::vector<std::string> _datasets{};
     std::source_location     _location;
 
@@ -243,23 +212,17 @@ public:
     std::string axis_name_x = "x-axis []";
     std::string axis_name_y = "y-axis []";
     bool        draw_border = false;
-    double      axis_min_x{ 0.0 };
-    double      axis_max_x{ 0.0 };
-    double      axis_min_y{ 0.0 };
-    double      axis_max_y{ 0.0 };
+    double      axis_min_x{0.0};
+    double      axis_max_x{0.0};
+    double      axis_min_y{0.0};
+    double      axis_max_y{0.0};
     std::size_t n_ticks_x = std::min(10LU, screenWidth / 2U);
     std::size_t n_ticks_y = std::min(10LU, screenHeight / 2U);
 
-    constexpr ImChart(std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight, const std::source_location location = std::source_location::current()) noexcept
-        : _screen_width(screenWidth_)
-        , _screen_height(screenHeight_)
-        , _screen(_screen_height, std::vector<std::string>(_screen_width, " "))
-        , _brailleArray(_screen_width * kCellWidth, std::vector<uint16_t>(_screen_height * kCellHeight, 0UZ))
-        , _location(location) {}
+    constexpr ImChart(std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight, const std::source_location location = std::source_location::current()) noexcept : _screen_width(screenWidth_), _screen_height(screenHeight_), _screen(_screen_height, std::vector<std::string>(_screen_width, " ")), _brailleArray(_screen_width * kCellWidth, std::vector<uint16_t>(_screen_height * kCellHeight, 0UZ)), _location(location) {}
 
-    explicit ImChart(const std::tuple<std::pair<double, double>, std::pair<double, double>> &init, std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight)
-        : ImChart(screenWidth_, screenHeight_) {
-        const auto &[xBounds, yBounds] = init;
+    explicit ImChart(const std::tuple<std::pair<double, double>, std::pair<double, double>>& init, std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight) : ImChart(screenWidth_, screenHeight_) {
+        const auto& [xBounds, yBounds] = init;
         axis_min_x                     = xBounds.first;
         axis_max_x                     = xBounds.second;
         axis_min_y                     = yBounds.first;
@@ -267,8 +230,7 @@ public:
     }
 
     template<Style style = Style::Braille, std::ranges::input_range TContainer1, std::ranges::input_range TContainer2>
-    void
-    draw(const TContainer1 &xValues, const TContainer2 &yValues, std::string_view datasetName = {}) {
+    void draw(const TContainer1& xValues, const TContainer2& yValues, std::string_view datasetName = {}) {
         static_assert(std::is_same_v<std::ranges::range_value_t<TContainer1>, std::ranges::range_value_t<TContainer2>>, "x- and y- range must have same value_type");
         using ValueType = typename std::ranges::range_value_t<TContainer1>;
         static_assert(std::is_arithmetic_v<ValueType>, "collection's value_type must be a arithmetic type!");
@@ -305,7 +267,7 @@ public:
 #endif
 
         // clear braille array
-        std::ranges::for_each(_brailleArray, [](auto &line) { std::ranges::fill(line, 0UZ); });
+        std::ranges::for_each(_brailleArray, [](auto& line) { std::ranges::fill(line, 0UZ); });
         auto updateBrailleArray = [this](const uint16_t oldValue) -> uint16_t {
             uint16_t increment = ((oldValue & 0xFF) + 1UZ) & 0xFF;     // Increment and mask to first byte
             uint16_t colorBit  = ((1UZ << _n_datasets) << 8) & 0xFF00; // Shift to the second byte
@@ -324,7 +286,7 @@ public:
             auto x = *xIt;
             auto y = *yIt;
 #else
-        for (const auto &[x, y] : std::ranges::views::zip(xValues, yValues)) {
+        for (const auto& [x, y] : std::ranges::views::zip(xValues, yValues)) {
 #endif
             if (static_cast<double>(x) < axis_min_x || static_cast<double>(x) >= axis_max_x || static_cast<double>(y) < axis_min_y || static_cast<double>(y) >= axis_max_y) {
                 continue;
@@ -377,7 +339,7 @@ public:
                 }
                 const auto     colourStr     = Color::get(_lastColor);
                 constexpr auto defaultColour = Color::get(Color::Type::Default);
-                auto          &screen        = _screen[bRowIdx / kCellHeight][bColIdx / kCellWidth];
+                auto&          screen        = _screen[bRowIdx / kCellHeight][bColIdx / kCellWidth];
                 switch (style) {
                 case Style::Bars: screen.assign(fmt::format("{}{}{}", colourStr, kBars[dot], defaultColour)); break;
                 case Style::Marker: screen.assign(fmt::format("{}{}{}", colourStr, kMarker[_n_datasets - 1], Color::get(Color::Type::Default))); break;
@@ -389,8 +351,7 @@ public:
         _lastColor = Color::next(_lastColor);
     }
 
-    void
-    draw(std::source_location caller = std::source_location::current()) {
+    void draw(std::source_location caller = std::source_location::current()) {
         _location = caller;
         drawBorder();
         drawAxes();
@@ -400,23 +361,18 @@ public:
         printScreen();
     }
 
-    void
-    clearScreen() noexcept {
-        std::ranges::for_each(_screen, [](auto &line) { std::ranges::fill(line, " "); });
-        std::ranges::for_each(_brailleArray, [](auto &line) { std::ranges::fill(line, 0UZ); });
+    void clearScreen() noexcept {
+        std::ranges::for_each(_screen, [](auto& line) { std::ranges::fill(line, " "); });
+        std::ranges::for_each(_brailleArray, [](auto& line) { std::ranges::fill(line, 0UZ); });
         _lastColor  = kFirstColor;
         _n_datasets = 0UZ;
     }
 
-    void
-    reset() const noexcept {
-        fmt::print("\033[0;0H");
-    }
+    void reset() const noexcept { fmt::print("\033[0;0H"); }
 
-    void
-    printScreen() const noexcept {
-        for (const auto &row : _screen) {
-            for (const auto &cell : row) {
+    void printScreen() const noexcept {
+        for (const auto& row : _screen) {
+            for (const auto& cell : row) {
                 fmt::print("{}", cell);
             }
             fmt::print("\n");
@@ -425,8 +381,7 @@ public:
         fmt::print("{}", Color::get(Color::Type::Default));
     }
 
-    void
-    printSourceLocation() {
+    void printSourceLocation() {
         const std::size_t maxLength = _screen_width / 4UZ;
         std::string       fullPath(_location.file_name());
 
@@ -445,25 +400,20 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr std::size_t
-    getHorizontalAxisPositionY() const noexcept {
+    [[nodiscard]] constexpr std::size_t getHorizontalAxisPositionY() const noexcept {
         const double relative_position = (0.0 - axis_min_y) / (axis_max_y - axis_min_y);
         const auto   position          = static_cast<std::size_t>((1.0 - relative_position) * static_cast<double>(_screen_height));
         return std::clamp(position, 0LU, _screen_height - 3LU);
     }
 
-    [[nodiscard]] constexpr std::size_t
-    getVerticalAxisPositionX() const noexcept {
-        auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform>
-                              ? 0UZ
-                              : static_cast<std::size_t>((std::max(0. - axis_min_x, 0.) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
+    [[nodiscard]] constexpr std::size_t getVerticalAxisPositionX() const noexcept {
+        auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform> ? 0UZ : static_cast<std::size_t>((std::max(0. - axis_min_x, 0.) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
         // adjust for axis labels
         std::size_t y_label_width = std::max(fmt::format("{:G}", axis_min_y).size(), fmt::format("{:G}", axis_max_y).size());
         return std::clamp(y_axis_x, y_label_width + 3, _screen_width); // Ensure axis positions are within screen bounds
     }
 
-    void
-    drawAxes() {
+    void drawAxes() {
         const std::size_t horAxisPosY = getHorizontalAxisPositionY();
         const std::size_t verAxisPosX = getVerticalAxisPositionX();
         const std::size_t horOffset   = (axis_min_x == 0.0 || std::is_same_v<horAxisTransform, LogAxisTransform>) ? verAxisPosX : 0UZ;
@@ -479,7 +429,7 @@ public:
 
         // x-axis labels and ticks
         const std::size_t maxHorLabelWidth = std::max(fmt::format("{:+G}", axis_min_x).size(), fmt::format("{:+G}", axis_max_x).size());
-        for (const auto &relTickScreenPos : detail::optimalTickScreenPositions(_screen_width - horOffset, 1UZ)) {
+        for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(_screen_width - horOffset, 1UZ)) {
             const std::size_t tickPos   = horOffset + relTickScreenPos;
             const double      tickValue = horAxisTransform::fromScreen(tickPos, axis_min_x, axis_max_x, horOffset, _screen_width);
             if ((axis_min_x == 0 && relTickScreenPos == 0) || tickPos > _screen_width) {
@@ -500,7 +450,7 @@ public:
         }
 
         // y-axis labels and ticks
-        for (const auto &relTickScreenPos : detail::optimalTickScreenPositions(_screen_height)) {
+        for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(_screen_height)) {
             const std::size_t tickPos   = _screen_height - 1UZ - relTickScreenPos;
             const double      tickValue = verAxisTransform::fromScreen(relTickScreenPos, axis_min_y, axis_max_y, 0UZ, _screen_height);
             if (/*(axis_min_y == 0 && relTickScreenPos == 0) ||*/ tickPos > _screen_height) {
@@ -543,13 +493,12 @@ public:
         }
     }
 
-    void
-    drawLegend() {
+    void drawLegend() {
         const std::size_t cursorY = _screen_height - 1LU; // legend position on last row
         std::size_t       cursorX = getVerticalAxisPositionX() + 2LU;
 
         auto colour = kFirstColor;
-        for (const auto &datasetName : _datasets) {
+        for (const auto& datasetName : _datasets) {
             if (datasetName.empty()) {
                 continue;
             }
@@ -570,8 +519,7 @@ public:
         }
     }
 
-    void
-    drawBorder() {
+    void drawBorder() {
         if (!draw_border) {
             return;
         }

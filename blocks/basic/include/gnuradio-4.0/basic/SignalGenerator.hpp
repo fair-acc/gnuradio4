@@ -16,8 +16,7 @@ using enum Type;
 constexpr auto                                 TypeList  = magic_enum::enum_values<Type>();
 inline static constexpr gr::meta::fixed_string TypeNames = "[Const, Sin, Cos, Square, Saw, Triangle]";
 
-constexpr Type
-parse(std::string_view name) {
+constexpr Type parse(std::string_view name) {
     auto signalType = magic_enum::enum_cast<Type>(name, magic_enum::case_insensitive);
     if (!signalType.has_value()) {
         throw std::invalid_argument(fmt::format("unknown signal generator type '{}'", name));
@@ -79,14 +78,12 @@ s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
     signal_generator::Type _signalType = signal_generator::parse(signal_type);
     T                      _timeTick   = T(1.) / T(sample_rate);
 
-    void
-    settingsChanged(const property_map & /*old_settings*/, const property_map & /*new_settings*/) {
+    void settingsChanged(const property_map& /*old_settings*/, const property_map& /*new_settings*/) {
         _signalType = signal_generator::parse(signal_type);
         _timeTick   = T(1.) / T(sample_rate);
     }
 
-    [[nodiscard]] constexpr T
-    processOne(T /*input*/) noexcept {
+    [[nodiscard]] constexpr T processOne(T /*input*/) noexcept {
         using enum signal_generator::Type;
 
         constexpr T pi2 = T(2.) * std::numbers::pi_v<T>;

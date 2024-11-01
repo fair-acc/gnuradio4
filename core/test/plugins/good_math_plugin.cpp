@@ -8,12 +8,11 @@ GR_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
 namespace good {
 
 template<typename T>
-auto
-factor(const gr::property_map &params) {
+auto factor(const gr::property_map& params) {
     T factor = 1;
     if (auto it = params.find("factor"s); it != params.end()) {
-        auto &variant = it->second;
-        auto *ptr     = std::get_if<T>(&variant);
+        auto& variant = it->second;
+        auto* ptr     = std::get_if<T>(&variant);
         if (ptr) {
             factor = *ptr;
         }
@@ -32,7 +31,7 @@ public:
 
     math_base() = delete;
 
-    explicit math_base(const gr::property_map &params) : _factor(factor<T>(params)) {}
+    explicit math_base(const gr::property_map& params) : _factor(factor<T>(params)) {}
 };
 
 template<typename T>
@@ -45,8 +44,7 @@ public:
     GR_MAKE_REFLECTABLE(multiply, in, out);
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(const V &a) const noexcept {
+    [[nodiscard]] constexpr auto processOne(const V& a) const noexcept {
         return a * math_base<T>::_factor;
     }
 };
@@ -61,8 +59,7 @@ public:
     GR_MAKE_REFLECTABLE(divide, in, out);
 
     template<gr::meta::t_or_simd<T> V>
-    [[nodiscard]] constexpr auto
-    processOne(const V &a) const noexcept {
+    [[nodiscard]] constexpr auto processOne(const V& a) const noexcept {
         return a / math_base<T>::_factor;
     }
 };

@@ -21,19 +21,15 @@ enum class ReaderWriterLockType { READ, WRITE };
  * N.B. The lock is unlocked when the counter reaches 0.
  */
 class ReaderWriterLock {
-    alignas(gr::meta::kCacheLine) mutable std::atomic<std::int64_t> _activeReaderCount{ 0 };
+    alignas(gr::meta::kCacheLine) mutable std::atomic<std::int64_t> _activeReaderCount{0};
 
 public:
     ReaderWriterLock() = default;
 
-    [[nodiscard]] std::int64_t
-    value() const noexcept {
-        return std::atomic_load_explicit(&_activeReaderCount, std::memory_order_acquire);
-    }
+    [[nodiscard]] std::int64_t value() const noexcept { return std::atomic_load_explicit(&_activeReaderCount, std::memory_order_acquire); }
 
     template<ReaderWriterLockType lockType>
-    std::int64_t
-    tryLock() const noexcept {
+    std::int64_t tryLock() const noexcept {
         std::int64_t expected = _activeReaderCount.load(std::memory_order_relaxed);
         if constexpr (lockType == ReaderWriterLockType::READ) {
             if (expected < 0L) {
@@ -49,8 +45,7 @@ public:
     }
 
     template<ReaderWriterLockType lockType>
-    std::int64_t
-    lock() const noexcept {
+    std::int64_t lock() const noexcept {
         if constexpr (lockType == ReaderWriterLockType::READ) {
             std::int64_t expected = _activeReaderCount.load(std::memory_order_relaxed);
             do {
@@ -71,8 +66,7 @@ public:
     }
 
     template<ReaderWriterLockType lockType>
-    std::int64_t
-    unlock() const noexcept {
+    std::int64_t unlock() const noexcept {
         if constexpr (lockType == ReaderWriterLockType::READ) {
             return std::atomic_fetch_sub(&_activeReaderCount, 1L) - 1L;
         } else {
@@ -81,27 +75,22 @@ public:
     }
 
     template<ReaderWriterLockType lockType>
-    auto
-    scopedGuard() {
+    auto scopedGuard() {
         return ScopedLock<lockType>(*this);
     }
 
     template<ReaderWriterLockType lockType>
     class ScopedLock { // NOSONAR - class destructor is needed for guard functionality
-        ReaderWriterLock *_readWriteLock;
+        ReaderWriterLock* _readWriteLock;
 
     public:
-        ScopedLock()                   = delete;
-        ScopedLock(const ScopedLock &) = delete;
-        ScopedLock(ScopedLock &&)      = delete;
-        ScopedLock &
-        operator=(const ScopedLock &)
-                = delete;
-        ScopedLock &
-        operator=(ScopedLock &&)
-                = delete;
+        ScopedLock()                             = delete;
+        ScopedLock(const ScopedLock&)            = delete;
+        ScopedLock(ScopedLock&&)                 = delete;
+        ScopedLock& operator=(const ScopedLock&) = delete;
+        ScopedLock& operator=(ScopedLock&&)      = delete;
 
-        explicit constexpr ScopedLock(ReaderWriterLock &parent) noexcept : _readWriteLock(&parent) { _readWriteLock->lock<lockType>(); }
+        explicit constexpr ScopedLock(ReaderWriterLock& parent) noexcept : _readWriteLock(&parent) { _readWriteLock->lock<lockType>(); }
 
         ~ScopedLock() { _readWriteLock->unlock<lockType>(); }
     };

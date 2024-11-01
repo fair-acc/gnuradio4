@@ -7,8 +7,8 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <pmtv/pmt.hpp>
 
-#include <semaphore>
 #include <queue>
+#include <semaphore>
 
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
@@ -37,9 +37,9 @@ using namespace std::chrono_literals;
 namespace gr::http {
 
 enum class RequestType : char {
-    GET = 1,
+    GET       = 1,
     SUBSCRIBE = 2,
-    POST = 3,
+    POST      = 3,
 };
 
 template<typename T>
@@ -62,15 +62,14 @@ private:
     std::shared_ptr<std::thread> _thread;
     std::atomic_size_t           _pendingRequests = 0;
     std::atomic_bool             _shutdownThread  = false;
-    std::binary_semaphore        _ready{ 0 };
+    std::binary_semaphore        _ready{0};
 
 #ifndef __EMSCRIPTEN__
     std::unique_ptr<httplib::Client> _client;
 #endif
 
 #ifdef __EMSCRIPTEN__
-    void
-    queueWorkEmscripten(emscripten_fetch_t *fetch) {
+    void queueWorkEmscripten(emscripten_fetch_t* fetch) {
         pmtv::map_t result;
         result["mime-type"] = "text/plain";
         result["status"]    = static_cast<int>(fetch->status);
@@ -79,21 +78,18 @@ private:
         queueWork(result);
     }
 
-    void
-    onSuccess(emscripten_fetch_t *fetch) {
+    void onSuccess(emscripten_fetch_t* fetch) {
         queueWorkEmscripten(fetch);
         emscripten_fetch_close(fetch);
     }
 
-    void
-    onError(emscripten_fetch_t *fetch) {
+    void onError(emscripten_fetch_t* fetch) {
         // we still want to queue the response, the statusCode will just not be 200
         queueWorkEmscripten(fetch);
         emscripten_fetch_close(fetch);
     }
 
-    void
-    doRequestEmscripten() {
+    void doRequestEmscripten() {
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
         if (_type == RequestType::POST) {
@@ -110,31 +106,30 @@ private:
         attr.userData = this;
 
         attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-        attr.onsuccess  = [](emscripten_fetch_t *fetch) {
-            auto src = static_cast<HttpBlock<T> *>(fetch->userData);
+        attr.onsuccess  = [](emscripten_fetch_t* fetch) {
+            auto src = static_cast<HttpBlock<T>*>(fetch->userData);
             src->onSuccess(fetch);
         };
-        attr.onerror = [](emscripten_fetch_t *fetch) {
-            auto src = static_cast<HttpBlock<T> *>(fetch->userData);
+        attr.onerror = [](emscripten_fetch_t* fetch) {
+            auto src = static_cast<HttpBlock<T>*>(fetch->userData);
             src->onError(fetch);
         };
         const auto target = url + endpoint;
         std::ignore       = emscripten_fetch(&attr, target.c_str());
     }
 
-    void
-    runThreadEmscripten() {
+    void runThreadEmscripten() {
         if (_type == RequestType::SUBSCRIBE) {
             while (!_shutdownThread) {
                 // long polling, just keep doing requests
-                std::thread thread{ &HttpBlock::doRequestEmscripten, this };
+                std::thread thread{&HttpBlock::doRequestEmscripten, this};
                 thread.join();
             }
         } else {
             while (!_shutdownThread) {
                 while (_pendingRequests > 0) {
                     _pendingRequests--;
-                    std::thread thread{ &HttpBlock::doRequestEmscripten, this };
+                    std::thread thread{&HttpBlock::doRequestEmscripten, this};
                     thread.join();
                 }
                 _ready.acquire();
@@ -142,14 +137,13 @@ private:
         }
     }
 #else
-    void
-    runThreadNative() {
+    void runThreadNative() {
         _client = std::make_unique<httplib::Client>(url);
         _client->set_follow_location(true);
         if (_type == RequestType::SUBSCRIBE) {
             // it's long polling, be generous with timeouts
             _client->set_read_timeout(1h);
-            _client->Get(endpoint, [&](const char *data, size_t len) {
+            _client->Get(endpoint, [&](const char* data, size_t len) {
                 pmtv::map_t result;
                 result["mime-type"] = "text/plain";
                 result["status"]    = 200;
@@ -184,10 +178,9 @@ private:
     }
 #endif
 
-    void
-    queueWork(const pmtv::map_t &item) {
+    void queueWork(const pmtv::map_t& item) {
         {
-            std::lock_guard lg{ _backlog_mutex };
+            std::lock_guard lg{_backlog_mutex};
             _backlog.push(item);
         }
         const auto work = this->invokeWork();
@@ -197,44 +190,40 @@ private:
         this->ioLastWorkStatus.exchange(work, std::memory_order_relaxed);
     }
 
-    void
-    startThread() {
+    void startThread() {
         if (_thread) {
             _thread.reset();
         }
         _thread = std::shared_ptr<std::thread>(new std::thread([this]() {
 #ifdef __EMSCRIPTEN__
-                                                   runThreadEmscripten();
+            runThreadEmscripten();
 #else
                                                    runThreadNative();
 #endif
-                                               }),
-                                               [this](std::thread *t) {
-                                                   if (auto ret = this->changeStateTo(gr::lifecycle::State::REQUESTED_STOP); !ret) {
-                                                       throw std::invalid_argument(fmt::format("{}::startThread() could not change state to REQUESTED_STOP", this->name));
-                                                   }
-                                                   _shutdownThread = true;
-                                                   _ready.release();
+        }),
+            [this](std::thread* t) {
+                if (auto ret = this->changeStateTo(gr::lifecycle::State::REQUESTED_STOP); !ret) {
+                    throw std::invalid_argument(fmt::format("{}::startThread() could not change state to REQUESTED_STOP", this->name));
+                }
+                _shutdownThread = true;
+                _ready.release();
 #ifndef __EMSCRIPTEN__
-                                                   if (_client) {
-                                                       _client->stop();
-                                                   }
+                if (_client) {
+                    _client->stop();
+                }
 #endif
-                                                   if (t->joinable()) {
-                                                       t->join();
-                                                   }
-                                                   _shutdownThread = false;
-                                                   delete t;
-                                                    if (auto ret = this->changeStateTo(gr::lifecycle::State::STOPPED); !ret) {
-                                                        throw std::invalid_argument(fmt::format("{}::startThread() could not change state to STOPPED", this->name));
-                                                    }
-                                               });
+                if (t->joinable()) {
+                    t->join();
+                }
+                _shutdownThread = false;
+                delete t;
+                if (auto ret = this->changeStateTo(gr::lifecycle::State::STOPPED); !ret) {
+                    throw std::invalid_argument(fmt::format("{}::startThread() could not change state to STOPPED", this->name));
+                }
+            });
     }
 
-    void
-    stopThread() {
-        _thread.reset();
-    }
+    void stopThread() { _thread.reset(); }
 
     gr::http::RequestType _type = gr::http::RequestType::GET;
 
@@ -244,16 +233,15 @@ public:
     PortOut<pmtv::map_t> out;
 
     std::string url;
-    std::string endpoint   = "/";
-    std::string type       = std::string(magic_enum::enum_name(_type));
+    std::string endpoint = "/";
+    std::string type     = std::string(magic_enum::enum_name(_type));
     std::string parameters; // x-www-form-urlencoded encoded POST parameters
 
     GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
 
     ~HttpBlock() { stopThread(); }
 
-    void
-    settingsChanged(const property_map & /*oldSettings*/, property_map &newSettings) {
+    void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings) {
         if (newSettings.contains("url") || newSettings.contains("type")) {
             if (newSettings.contains("type")) {
                 _type = magic_enum::enum_cast<gr::http::RequestType>(type, magic_enum::case_insensitive).value_or(_type);
@@ -266,20 +254,13 @@ public:
         }
     }
 
-    void
-    start() {
-        startThread();
-    }
+    void start() { startThread(); }
 
-    void
-    stop() {
-        stopThread();
-    }
+    void stop() { stopThread(); }
 
-    [[nodiscard]] constexpr auto
-    processOne() noexcept {
+    [[nodiscard]] constexpr auto processOne() noexcept {
         pmtv::map_t     result;
-        std::lock_guard lg{ _backlog_mutex };
+        std::lock_guard lg{_backlog_mutex};
         if (!_backlog.empty()) {
             result = _backlog.front();
             _backlog.pop();
@@ -287,8 +268,7 @@ public:
         return result;
     }
 
-    void
-    trigger() {
+    void trigger() {
         _pendingRequests++;
         _ready.release();
     }
@@ -296,7 +276,7 @@ public:
     void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> message) {
         gr::Block<HttpBlock<T>, BlockingIO<false>>::processMessages(port, message);
 
-        std::ranges::for_each(message, [this](auto &m) {
+        std::ranges::for_each(message, [this](auto& m) {
             if (_type == RequestType::SUBSCRIBE) {
                 if (m.data.has_value() && m.data.value().contains("active")) {
                     // for long polling, the subscription should stay active, if and only if the messages' "active" member is true

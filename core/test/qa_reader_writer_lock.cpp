@@ -52,8 +52,6 @@ const boost::ut::suite basicTests = [] {
         expect(!rwlock.tryLock<READ>());
     };
 };
-}
+} // namespace gr::reader_writer_lock_test
 
-int
-main() { /* tests are statically executed */
-}
+int main() { /* tests are statically executed */ }

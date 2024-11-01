@@ -28,10 +28,10 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
-#include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 // this mocks the execution policy until Emscripten's libc++ does support this (Clang already does)
 #if defined(__EMSCRIPTEN__) || defined(__clang__)
@@ -47,8 +47,7 @@ inline constexpr mock_execution_policy par{};
 } // namespace execution
 
 template<typename InputIt1, typename InputIt2, typename T, typename BinaryOp1, typename BinaryOp2>
-inline T
-transform_reduce(auto, InputIt1 first1, InputIt1 last1, InputIt2 first2, T init, BinaryOp1 binary_op1, BinaryOp2 binary_op2) {
+inline T transform_reduce(auto, InputIt1 first1, InputIt1 last1, InputIt2 first2, T init, BinaryOp1 binary_op1, BinaryOp2 binary_op2) {
     return std::transform_reduce(first1, last1, first2, init, binary_op1, binary_op2);
 }
 
@@ -66,14 +65,14 @@ enum class Frequency {
 enum class Type { LOWPASS, HIGHPASS, BANDPASS, BANDSTOP };
 
 struct FilterParameters {
-    std::size_t order{ 4UZ };                                      /// default filter order
-    double      fLow{ std::numeric_limits<double>::quiet_NaN() };  /// Lower cutoff frequency [Hertz].
-    double      fHigh{ std::numeric_limits<double>::quiet_NaN() }; /// Upper cutoff frequency [Hertz].
-    double      gain{ 1.0 };                                       /// required total filter gain
-    double      rippleDb{ 0.1 };                                   /// Maximum allowed ripple in the pass-band [dB].
-    double      attenuationDb{ 40 };                               /// Minimum required attenuation in the stop-band [dB].
-    double      beta{ 1.6 };                                       /// default beta for Kaiser-type windowing
-    double      fs{ std::numeric_limits<double>::quiet_NaN() };    /// Sampling frequency for digital filters [Hertz].
+    std::size_t order{4UZ};                                      /// default filter order
+    double      fLow{std::numeric_limits<double>::quiet_NaN()};  /// Lower cutoff frequency [Hertz].
+    double      fHigh{std::numeric_limits<double>::quiet_NaN()}; /// Upper cutoff frequency [Hertz].
+    double      gain{1.0};                                       /// required total filter gain
+    double      rippleDb{0.1};                                   /// Maximum allowed ripple in the pass-band [dB].
+    double      attenuationDb{40};                               /// Minimum required attenuation in the stop-band [dB].
+    double      beta{1.6};                                       /// default beta for Kaiser-type windowing
+    double      fs{std::numeric_limits<double>::quiet_NaN()};    /// Sampling frequency for digital filters [Hertz].
 };
 
 /**
@@ -89,15 +88,15 @@ struct FilterParameters {
 template<typename T>
 struct FilterCoefficients {
     using value_type = T;
-    std::vector<T> b{};                    /// numerator coefficients
-    std::vector<T> a{ static_cast<T>(1) }; /// denominator coefficients
+    std::vector<T> b{};                  /// numerator coefficients
+    std::vector<T> a{static_cast<T>(1)}; /// denominator coefficients
 };
 
 template<typename T>
 concept HasFilterCoefficients = requires(T t) {
     typename T::value_type;
-    { t.a } -> std::convertible_to<std::vector<typename T::value_type> &>;
-    { t.b } -> std::convertible_to<std::vector<typename T::value_type> &>;
+    { t.a } -> std::convertible_to<std::vector<typename T::value_type>&>;
+    { t.b } -> std::convertible_to<std::vector<typename T::value_type>&>;
 };
 
 static_assert(HasFilterCoefficients<FilterCoefficients<double>>);
@@ -116,42 +115,41 @@ template<typename T, std::size_t bufferSize = std::dynamic_extent, typename TBas
 struct Section;
 
 template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
-[[nodiscard]] inline constexpr T
-computeFilter(const T &input, Section<T, bufferSize> &section) noexcept {
-    const auto &a             = section.a;
-    const auto &b             = section.b;
-    auto       &inputHistory  = section.inputHistory;
-    auto       &outputHistory = section.outputHistory;
+[[nodiscard]] inline constexpr T computeFilter(const T& input, Section<T, bufferSize>& section) noexcept {
+    const auto& a             = section.a;
+    const auto& b             = section.b;
+    auto&       inputHistory  = section.inputHistory;
+    auto&       outputHistory = section.outputHistory;
     if constexpr (form == Form::DF_I) {
         // y[n] = b[0]·x[n]   + b[1]·x[n-1] + … + b[N]·x[n-N]
         //      - a[1]·y[n-1] - a[2]·y[n-2] - … - a[M]·y[n-M]
         inputHistory.push_back(input);
-        T output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>())              // feed-forward path
-                 - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()); // feedback path
+        T output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>())                // feed-forward path
+                   - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()); // feedback path
         outputHistory.push_back(output);
         return output;
     } else if constexpr (form == Form::DF_II) {
         // w[n] = x[n] - a[1]·w[n-1] - a[2]·w[n-2] - … - a[M]·w[n-M]
         // y[n] =        b[0]·w[n]   + b[1]·w[n-1] + … + b[N]·w[n-N]
         if (a.size() > 1) {
-            const T w = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+            const T w = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), inputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
             inputHistory.push_back(w);
-            return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+            return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
         } else {
             inputHistory.push_back(input);
-            return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+            return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
         }
     } else if constexpr (form == Form::DF_I_TRANSPOSED) {
         // w_1[n] = x[n] - a[1]·w_2[n-1] - a[2]·w_2[n-2] - … - a[M]·w_2[n-M]
         // y[n]   = b[0]·w_2[n] + b[1]·w_2[n-1] + … + b[N]·w_2[n-N]
         T v0 = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
         outputHistory.push_back(v0);
-        return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), outputHistory.cbegin(), T{ 0 }, std::plus<>(), std::multiplies<>());
+        return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), outputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
     } else if constexpr (form == Form::DF_II_TRANSPOSED) {
         // y[n] = b_0·f[n] + \sum_(k=1)^N(b_k·f[n−k] − a_k·y[n−k])
-        T output = b[0] * input                                                                                                                                     //
-                 + std::transform_reduce(execPolicy, std::next(b.cbegin()), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()) //
-                 - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
+        T output = b[0] * input                                                                                                                                       //
+                   + std::transform_reduce(execPolicy, std::next(b.cbegin()), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()) //
+                   - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
         inputHistory.push_back(input);
         outputHistory.push_back(output);
         return output;
@@ -161,8 +159,7 @@ computeFilter(const T &input, Section<T, bufferSize> &section) noexcept {
 }
 
 template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
-inline constexpr std::vector<T>
-computeImpulseResponse(Section<T, bufferSize> &section, std::size_t length) {
+inline constexpr std::vector<T> computeImpulseResponse(Section<T, bufferSize>& section, std::size_t length) {
     std::vector<T> impulseResponse(length, T(0));
     T              input = T(1); // impulse response: first input is 1
     for (std::size_t i = 0; i < length; ++i) {
@@ -174,8 +171,7 @@ computeImpulseResponse(Section<T, bufferSize> &section, std::size_t length) {
 }
 
 template<arithmetic_or_complex_like T>
-inline constexpr std::vector<T>
-computeAutoCorrelation(const std::vector<T> &impulseResponse) {
+inline constexpr std::vector<T> computeAutoCorrelation(const std::vector<T>& impulseResponse) {
     const std::size_t length = impulseResponse.size();
     std::vector<T>    autoCorrelation(length, T(0));
     for (std::size_t lag = 0; lag < length; ++lag) {
@@ -193,22 +189,21 @@ struct Section : public FilterCoefficients<TBaseType> {
     HistoryBuffer<T, bufferSize> outputHistory{};
     std::vector<T>               autoCorrelation{}; // w.r.t. impulse response, computed for the combined feed-forward and -feedback filter length only
 
-    explicit Section(const FilterCoefficients<TBaseType> &section)
-        requires(bufferSize == std::dynamic_extent)
+    explicit Section(const FilterCoefficients<TBaseType>& section)
+    requires(bufferSize == std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section), inputHistory(section.b.size()), outputHistory(section.a.size()) {
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
 
-    explicit Section(const FilterCoefficients<TBaseType> &section)
-        requires(bufferSize != std::dynamic_extent)
+    explicit Section(const FilterCoefficients<TBaseType>& section)
+    requires(bufferSize != std::dynamic_extent)
         : FilterCoefficients<TBaseType>(section) {
         auto impulseResponse = computeImpulseResponse(*this, section.a.size() + section.b.size());
         autoCorrelation      = computeAutoCorrelation(impulseResponse);
     }
 
-    inline constexpr void
-    reset(T defaultValue = T()) {
+    inline constexpr void reset(T defaultValue = T()) {
         inputHistory.reset(defaultValue);
         outputHistory.reset(defaultValue);
     }
@@ -223,35 +218,31 @@ struct Section : public FilterCoefficients<TBaseType> {
  * Filter<double> myFilter(filterSections);
  * double outputSample = myFilter.processOne(inputSample);
  */
-template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<meta::fundamental_base_value_type_t<T>> ? Form::DF_II : Form::DF_I,
-         auto execPolicy = std::execution::seq>
+template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<meta::fundamental_base_value_type_t<T>> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
 struct Filter;
 
 template<typename T, std::size_t bufferSize, Form form, auto execPolicy>
-    requires(std::is_arithmetic_v<T>)
+requires(std::is_arithmetic_v<T>)
 struct Filter<T, bufferSize, form, execPolicy> {
     using TBaseType = meta::fundamental_base_value_type_t<T>;
     alignas(64UZ) std::vector<detail::Section<T, bufferSize>> _sectionsMeanValue;
 
 public:
     template<typename... TFilterCoefficients>
-    explicit Filter(TFilterCoefficients &&...filterSections) noexcept {
-        std::vector<FilterCoefficients<TBaseType>> filterSections_{ std::forward<TFilterCoefficients>(filterSections)... };
+    explicit Filter(TFilterCoefficients&&... filterSections) noexcept {
+        std::vector<FilterCoefficients<TBaseType>> filterSections_{std::forward<TFilterCoefficients>(filterSections)...};
         _sectionsMeanValue.reserve(filterSections_.size());
-        for (const auto &section : filterSections_) {
+        for (const auto& section : filterSections_) {
             _sectionsMeanValue.emplace_back(section);
         }
     }
 
-    constexpr void
-    reset(T defaultValue = T()) {
-        std::for_each(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), [&defaultValue](auto &section) { section.reset(defaultValue); });
+    constexpr void reset(T defaultValue = T()) {
+        std::for_each(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), [&defaultValue](auto& section) { section.reset(defaultValue); });
     }
 
-    [[nodiscard]] inline constexpr T
-    processOne(T inputSample) noexcept {
-        return std::accumulate(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), inputSample,
-                               [](T acc, auto &section) { return detail::computeFilter<T, bufferSize, form, execPolicy>(acc, section); });
+    [[nodiscard]] inline constexpr T processOne(T inputSample) noexcept {
+        return std::accumulate(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), inputSample, [](T acc, auto& section) { return detail::computeFilter<T, bufferSize, form, execPolicy>(acc, section); });
     }
 };
 
@@ -269,24 +260,23 @@ public:
  * double stddev = gr::uncertainty(outputSample);
  */
 template<typename T, std::size_t bufferSize, Form form, auto execPolicy>
-    requires(std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
+requires(std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
 struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
     using TBaseType = meta::fundamental_base_value_type_t<T>;
     alignas(64UZ) std::vector<detail::Section<TBaseType, bufferSize>> _sectionsMeanValue;
     alignas(64UZ) std::vector<detail::Section<TBaseType, bufferSize>> _sectionsSquareUncertaintyValue;
 
-    [[nodiscard]] inline constexpr TBaseType
-    propagateError(const TBaseType &inputUncertainty, detail::Section<TBaseType, bufferSize> &section) noexcept {
-        const auto &a                       = section.a;
-        const auto &b                       = section.b;
-        auto       &inputHistory            = section.inputHistory;
-        auto       &outputHistory           = section.outputHistory;
-        const auto &autocorrelationFunction = section.autoCorrelation;
+    [[nodiscard]] inline constexpr TBaseType propagateError(const TBaseType& inputUncertainty, detail::Section<TBaseType, bufferSize>& section) noexcept {
+        const auto& a                       = section.a;
+        const auto& b                       = section.b;
+        auto&       inputHistory            = section.inputHistory;
+        auto&       outputHistory           = section.outputHistory;
+        const auto& autocorrelationFunction = section.autoCorrelation;
 
         // Feed-forward path (uncorrelated uncertainties)
         inputHistory.push_back(inputUncertainty * inputUncertainty);
         TBaseType feedForwardUncertainty = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<TBaseType>(0), //
-                                                                 std::plus<>(), [](TBaseType bVal, TBaseType sigma2) { return bVal * bVal * sigma2; });
+            std::plus<>(), [](TBaseType bVal, TBaseType sigma2) { return bVal * bVal * sigma2; });
 
         if (a.size() <= 1 || autocorrelationFunction.empty()) {
             outputHistory.push_back(feedForwardUncertainty);
@@ -297,9 +287,8 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
         TBaseType feedbackUncertainty = 0;
         for (std::size_t j = 1; j < a.size(); ++j) {
             for (std::size_t k = 1; k < a.size(); ++k) {
-                int       jk{ std::abs(static_cast<int>(j) - static_cast<int>(k)) };
-                TBaseType correlationFactor
-                        = autocorrelationFunction[static_cast<std::size_t>(jk)]; // w/o causality (i.e. causality j - k < 0 -> autoC = 0.0), this is a conservative estimate, to be checked
+                int       jk{std::abs(static_cast<int>(j) - static_cast<int>(k))};
+                TBaseType correlationFactor = autocorrelationFunction[static_cast<std::size_t>(jk)]; // w/o causality (i.e. causality j - k < 0 -> autoC = 0.0), this is a conservative estimate, to be checked
                 feedbackUncertainty += a[j] * a[k] * correlationFactor * std::sqrt(outputHistory[j - 1]) * std::sqrt(outputHistory[k - 1]);
             }
         }
@@ -311,30 +300,25 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
 
 public:
     template<typename... TFilterCoefficients>
-    explicit Filter(TFilterCoefficients &&...filterSections) noexcept {
-        std::vector<FilterCoefficients<TBaseType>> filterSections_{ std::forward<TFilterCoefficients>(filterSections)... };
+    explicit Filter(TFilterCoefficients&&... filterSections) noexcept {
+        std::vector<FilterCoefficients<TBaseType>> filterSections_{std::forward<TFilterCoefficients>(filterSections)...};
         _sectionsMeanValue.reserve(filterSections_.size());
         _sectionsSquareUncertaintyValue.reserve(filterSections_.size());
-        for (const auto &section : filterSections_) {
+        for (const auto& section : filterSections_) {
             _sectionsMeanValue.emplace_back(section);
             _sectionsSquareUncertaintyValue.emplace_back(section);
         }
     }
 
-    constexpr void
-    reset(UncertainValue<T> defaultValue = T()) {
-        std::for_each(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), [&defaultValue](auto &section) { section.reset(gr::value(defaultValue)); });
-        std::for_each(_sectionsSquareUncertaintyValue.begin(), _sectionsSquareUncertaintyValue.end(),
-                      [&defaultValue](auto &section) { section.reset(gr::uncertainty(defaultValue) * gr::uncertainty(defaultValue)); });
+    constexpr void reset(UncertainValue<T> defaultValue = T()) {
+        std::for_each(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), [&defaultValue](auto& section) { section.reset(gr::value(defaultValue)); });
+        std::for_each(_sectionsSquareUncertaintyValue.begin(), _sectionsSquareUncertaintyValue.end(), [&defaultValue](auto& section) { section.reset(gr::uncertainty(defaultValue) * gr::uncertainty(defaultValue)); });
     }
 
-    [[nodiscard]] inline constexpr UncertainValue<T>
-    processOne(UncertainValue<T> inputSample) noexcept {
-        TBaseType value       = std::accumulate(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), gr::value(inputSample),
-                                                [](TBaseType acc, auto &section) { return detail::computeFilter<TBaseType, bufferSize, form, execPolicy>(acc, section); });
-        TBaseType uncertainty = std::accumulate(_sectionsSquareUncertaintyValue.begin(), _sectionsSquareUncertaintyValue.end(), gr::uncertainty(inputSample),
-                                                [this](TBaseType acc, auto &section) { return propagateError(acc, section); });
-        return { value, std::sqrt(uncertainty) };
+    [[nodiscard]] inline constexpr UncertainValue<T> processOne(UncertainValue<T> inputSample) noexcept {
+        TBaseType value       = std::accumulate(_sectionsMeanValue.begin(), _sectionsMeanValue.end(), gr::value(inputSample), [](TBaseType acc, auto& section) { return detail::computeFilter<TBaseType, bufferSize, form, execPolicy>(acc, section); });
+        TBaseType uncertainty = std::accumulate(_sectionsSquareUncertaintyValue.begin(), _sectionsSquareUncertaintyValue.end(), gr::uncertainty(inputSample), [this](TBaseType acc, auto& section) { return propagateError(acc, section); });
+        return {value, std::sqrt(uncertainty)};
     }
 };
 
@@ -346,39 +330,35 @@ struct ErrorPropagatingFilter {
     Filter<TBaseType, bufferSize, form, execPolicy> filterSquared;
 
     template<typename... TFilterCoefficients>
-    explicit ErrorPropagatingFilter(TFilterCoefficients &&...filterSections)
-        : filterMean(std::forward<TFilterCoefficients>(filterSections)...), filterSquared(std::forward<TFilterCoefficients>(filterSections)...) {}
+    explicit ErrorPropagatingFilter(TFilterCoefficients&&... filterSections) : filterMean(std::forward<TFilterCoefficients>(filterSections)...), filterSquared(std::forward<TFilterCoefficients>(filterSections)...) {}
 
-    constexpr void
-    reset(T defaultValue = T()) {
+    constexpr void reset(T defaultValue = T()) {
         filterMean.reset(defaultValue);
         filterSquared.reset(gr::value(defaultValue) * gr::value(defaultValue));
     }
 
-    T
-    processOne(const T &inputSample) {
+    T processOne(const T& inputSample) {
         T         mean   = filterMean.processOne(inputSample);
         TBaseType square = filterSquared.processOne(gr::value(inputSample) * gr::value(inputSample));
 
         if constexpr (UncertainValueLike<T>) {
-            return { mean.value, std::sqrt(std::abs(square - gr::value(mean) * gr::value(mean)) + gr::uncertainty(mean) * gr::uncertainty(mean)) };
+            return {mean.value, std::sqrt(std::abs(square - gr::value(mean) * gr::value(mean)) + gr::uncertainty(mean) * gr::uncertainty(mean))};
         } else {
-            return { mean.value, std::sqrt(std::abs(square - mean * mean)) };
+            return {mean.value, std::sqrt(std::abs(square - mean * mean))};
         }
     }
 };
 
 template<typename... Coeffs>
-[[nodiscard]] inline constexpr std::size_t
-countFilterCoefficients(const Coeffs &...coeffs) {
+[[nodiscard]] inline constexpr std::size_t countFilterCoefficients(const Coeffs&... coeffs) {
     std::size_t count   = 0;
-    auto        counter = [&count](const auto &filter) mutable {
+    auto        counter = [&count](const auto& filter) mutable {
         if constexpr (std::is_same_v<std::decay_t<decltype(filter)>, FilterCoefficients<typename std::decay_t<decltype(filter)>::value_type>>) {
             // It's a single FilterCoefficients object
             count += filter.b.size() + filter.a.size() - 1;
         } else {
             // It's a std::vector of FilterCoefficients objects
-            for (const auto &fc : filter) {
+            for (const auto& fc : filter) {
                 count += fc.b.size() + fc.a.size() - 1;
             }
         }
@@ -390,18 +370,16 @@ countFilterCoefficients(const Coeffs &...coeffs) {
 enum class ResponseType { Magnitude, MagnitudeDB, Phase, PhaseDegrees };
 
 template<Frequency frequencyType, ResponseType responseType, std::floating_point T, typename... TFilterCoefficients>
-[[nodiscard]] inline T
-calculateResponse(T normalisedDigitalFrequency, TFilterCoefficients... filterCoefficients) {
+[[nodiscard]] inline T calculateResponse(T normalisedDigitalFrequency, TFilterCoefficients... filterCoefficients) {
     using C = std::complex<T>;
     static_assert(frequencyType == Frequency::Normalised, "Frequency::Hertz not applicable for digital filters");
-    std::vector<FilterCoefficients<T>> filterCoefficients_{ std::forward<TFilterCoefficients>(filterCoefficients)... };
+    std::vector<FilterCoefficients<T>> filterCoefficients_{std::forward<TFilterCoefficients>(filterCoefficients)...};
 
     // e^(i*omega) term for the frequency
-    const std::complex<T> iOmega   = std::polar(static_cast<T>(1),
-                                              frequencyType == Frequency::RadianPerSec ? normalisedDigitalFrequency : (static_cast<T>(2) * std::numbers::pi_v<T> * normalisedDigitalFrequency));
+    const std::complex<T> iOmega   = std::polar(static_cast<T>(1), frequencyType == Frequency::RadianPerSec ? normalisedDigitalFrequency : (static_cast<T>(2) * std::numbers::pi_v<T> * normalisedDigitalFrequency));
     T                     response = responseType == ResponseType::Magnitude ? static_cast<T>(1) : static_cast<T>(0);
 
-    for (const auto &filter : filterCoefficients_) {
+    for (const auto& filter : filterCoefficients_) {
         // calculates numerator and denominator of the transfer function H(z) = B(z)/A(z)
         const auto power       = [iOmega, n = 0UZ](C acc, T coefficient) mutable { return acc + coefficient * static_cast<C>(std::pow(iOmega, -static_cast<int>(n++))); };
         C          numerator   = std::accumulate(filter.b.begin(), filter.b.end(), C(0), power);
@@ -428,14 +406,13 @@ calculateResponse(T normalisedDigitalFrequency, TFilterCoefficients... filterCoe
 }
 
 template<typename T>
-[[nodiscard]] inline constexpr std::pair<bool, T>
-normaliseFilterCoefficients(FilterCoefficients<T> &coefficients, T normalisedFrequency, T targetGain = static_cast<T>(1)) {
+[[nodiscard]] inline constexpr std::pair<bool, T> normaliseFilterCoefficients(FilterCoefficients<T>& coefficients, T normalisedFrequency, T targetGain = static_cast<T>(1)) {
     const T magnitude = calculateResponse<Frequency::Normalised, ResponseType::Magnitude>(normalisedFrequency, coefficients);
     if (magnitude == 0) {
-        return { false, magnitude };
+        return {false, magnitude};
     }
     std::ranges::transform(coefficients.b, coefficients.b.begin(), [magnitude, targetGain](T coeff) { return coeff * targetGain / magnitude; });
-    return { true, magnitude };
+    return {true, magnitude};
 }
 
 namespace iir {
@@ -456,31 +433,28 @@ enum class Design {
  */
 struct PoleZeroLocations {
     using value_type = double;
-    std::vector<std::complex<double>> poles{};     /// locations in the s- or z-plane where the transfer function goes to infinity.
-    std::vector<std::complex<double>> zeros{};     /// locations in the s- or z-plane where the transfer function becomes zero.
-    double                            gain{ 1.0 }; /// scaling factor applied to the transfer function
+    std::vector<std::complex<double>> poles{};   /// locations in the s- or z-plane where the transfer function goes to infinity.
+    std::vector<std::complex<double>> zeros{};   /// locations in the s- or z-plane where the transfer function becomes zero.
+    double                            gain{1.0}; /// scaling factor applied to the transfer function
 };
 
 template<typename T>
 concept HasPoleZeroLocations = requires(T t) {
     typename T::value_type;
-    { t.zeros } -> std::convertible_to<std::vector<std::complex<typename T::value_type>> &>;
-    { t.poles } -> std::convertible_to<std::vector<std::complex<typename T::value_type>> &>;
+    { t.zeros } -> std::convertible_to<std::vector<std::complex<typename T::value_type>>&>;
+    { t.poles } -> std::convertible_to<std::vector<std::complex<typename T::value_type>>&>;
 };
 
 static_assert(HasPoleZeroLocations<PoleZeroLocations>);
 
 template<Frequency frequencyType, ResponseType responseType>
-[[nodiscard]] inline constexpr double
-calculateResponse(double frequency, const PoleZeroLocations &value) {
+[[nodiscard]] inline constexpr double calculateResponse(double frequency, const PoleZeroLocations& value) {
     using C = std::complex<double>;
     static_assert(frequencyType != Frequency::Normalised, "Frequency::Normalised not applicable for analog filters");
 
     // s -> i·ω
-    const C    iOmega{ 0, frequencyType == Frequency::RadianPerSec ? frequency : (2. * std::numbers::pi * frequency) };
-    const auto product_over_range = [&iOmega](const auto &range) {
-        return std::accumulate(range.begin(), range.end(), C{ 1.0 }, [&iOmega](const C &acc, const C &val) { return acc * (iOmega - val); });
-    };
+    const C    iOmega{0, frequencyType == Frequency::RadianPerSec ? frequency : (2. * std::numbers::pi * frequency)};
+    const auto product_over_range = [&iOmega](const auto& range) { return std::accumulate(range.begin(), range.end(), C{1.0}, [&iOmega](const C& acc, const C& val) { return acc * (iOmega - val); }); };
     if constexpr (responseType == ResponseType::Magnitude) {
         return value.gain * std::abs(product_over_range(value.zeros) / product_over_range(value.poles));
     } else if constexpr (responseType == ResponseType::MagnitudeDB) {
@@ -492,8 +466,7 @@ calculateResponse(double frequency, const PoleZeroLocations &value) {
     }
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-calculateFilterButterworth(std::size_t order) {
+[[nodiscard]] inline constexpr PoleZeroLocations calculateFilterButterworth(std::size_t order) {
     // Butterworth design criteria: https://en.wikipedia.org/wiki/Butterworth_filter
     // place poles equally spaced along the lhs unit half-circle starting with
     // the real-pole at -1 if needed and then continue adding complex conjugate pairs
@@ -513,38 +486,26 @@ calculateFilterButterworth(std::size_t order) {
     return ret;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-calculateFilterBessel(std::size_t order) {
+[[nodiscard]] inline constexpr PoleZeroLocations calculateFilterBessel(std::size_t order) {
     // pole location data: Steve Winder, "Filter Design," Newnes Press, 1998.
     using C = std::complex<double>;
     switch (order) {
     case 0: [[fallthrough]];
-    case 1: return { .poles = { C{ -1.0000 } }, .gain = 1.0 };
-    case 2: return { .poles = { C{ -1.1030, 0.6368 }, C{ -1.1030, -0.6368 } }, .gain = 1.6221 };
-    case 3: return { .poles = { C{ -1.0509 }, C{ -1.3270, 1.0025 }, C{ -1.3270, -1.0025 } }, .gain = 2.9067 };
-    case 4: return { .poles = { C{ -1.3596, 0.4071 }, C{ -1.3596, -0.4071 }, C{ -0.9877, 1.2476 }, C{ -0.9877, -1.2476 } }, .gain = 5.1002 };
-    case 5: return { .poles = { C{ -1.3851 }, C{ -0.9606, 1.4756 }, C{ -0.9606, -1.4756 }, C{ -1.5069, 0.7201 }, C{ -1.5069, -0.7201 } }, .gain = 11.9773 };
-    case 6: return { .poles = { C{ -1.5735, 0.3213 }, C{ -1.5735, -0.3213 }, C{ -1.3836, 0.9727 }, C{ -1.3836, -0.9727 }, C{ -0.9318, 1.6640 }, C{ -0.9318, -1.6640 } }, .gain = 26.8334 };
-    case 7:
-        return { .poles = { C{ -1.6130 }, C{ -1.3797, 0.5896 }, C{ -1.3797, -0.5896 }, C{ -1.1397, 1.1923 }, C{ -1.1397, -1.1923 }, C{ -0.9104, 1.8375 }, C{ -0.9104, -1.8375 } }, .gain = 41.5419 };
-    case 8:
-        return { .poles = { C{ -1.7627, 0.2737 }, C{ -1.7627, -0.2737 }, C{ -0.8955, 2.0044 }, C{ -0.8955, -2.0044 }, C{ -1.3780, 0.8253 }, C{ -1.3780, -0.8253 }, C{ -1.6419, 1.3926 },
-                            C{ -1.6419, -1.3926 } },
-                 .gain  = 183.3982 };
-    case 9:
-        return { .poles = { C{ -1.8081 }, C{ -1.6532, 0.5126 }, C{ -1.6532, -0.5126 }, C{ -1.16532, 1.0319 }, C{ -1.16532, -1.0319 }, C{ -1.3683, 1.5685 }, C{ -1.3683, -1.5685 }, C{ -0.8788, 2.1509 },
-                            C{ -0.8788, -2.1509 } },
-                 .gain  = 306.9539 };
-    case 10:
-        return { .poles = { C{ -1.9335, 0.2424 }, C{ -1.9335, -0.2424 }, C{ -0.8684, 2.2996 }, C{ -0.8684, -2.2996 }, C{ -1.8478, 0.7295 }, C{ -1.8478, -0.7295 }, C{ -1.6669, 1.2248 },
-                            C{ -1.6669, -1.2248 }, C{ -1.3649, 1.7388 }, C{ -1.3649, -1.7388 } },
-                 .gain  = 1893.1098 };
+    case 1: return {.poles = {C{-1.0000}}, .gain = 1.0};
+    case 2: return {.poles = {C{-1.1030, 0.6368}, C{-1.1030, -0.6368}}, .gain = 1.6221};
+    case 3: return {.poles = {C{-1.0509}, C{-1.3270, 1.0025}, C{-1.3270, -1.0025}}, .gain = 2.9067};
+    case 4: return {.poles = {C{-1.3596, 0.4071}, C{-1.3596, -0.4071}, C{-0.9877, 1.2476}, C{-0.9877, -1.2476}}, .gain = 5.1002};
+    case 5: return {.poles = {C{-1.3851}, C{-0.9606, 1.4756}, C{-0.9606, -1.4756}, C{-1.5069, 0.7201}, C{-1.5069, -0.7201}}, .gain = 11.9773};
+    case 6: return {.poles = {C{-1.5735, 0.3213}, C{-1.5735, -0.3213}, C{-1.3836, 0.9727}, C{-1.3836, -0.9727}, C{-0.9318, 1.6640}, C{-0.9318, -1.6640}}, .gain = 26.8334};
+    case 7: return {.poles = {C{-1.6130}, C{-1.3797, 0.5896}, C{-1.3797, -0.5896}, C{-1.1397, 1.1923}, C{-1.1397, -1.1923}, C{-0.9104, 1.8375}, C{-0.9104, -1.8375}}, .gain = 41.5419};
+    case 8: return {.poles = {C{-1.7627, 0.2737}, C{-1.7627, -0.2737}, C{-0.8955, 2.0044}, C{-0.8955, -2.0044}, C{-1.3780, 0.8253}, C{-1.3780, -0.8253}, C{-1.6419, 1.3926}, C{-1.6419, -1.3926}}, .gain = 183.3982};
+    case 9: return {.poles = {C{-1.8081}, C{-1.6532, 0.5126}, C{-1.6532, -0.5126}, C{-1.16532, 1.0319}, C{-1.16532, -1.0319}, C{-1.3683, 1.5685}, C{-1.3683, -1.5685}, C{-0.8788, 2.1509}, C{-0.8788, -2.1509}}, .gain = 306.9539};
+    case 10: return {.poles = {C{-1.9335, 0.2424}, C{-1.9335, -0.2424}, C{-0.8684, 2.2996}, C{-0.8684, -2.2996}, C{-1.8478, 0.7295}, C{-1.8478, -0.7295}, C{-1.6669, 1.2248}, C{-1.6669, -1.2248}, C{-1.3649, 1.7388}, C{-1.3649, -1.7388}}, .gain = 1893.1098};
     default: throw std::out_of_range("supported orders are 1 to 10");
     }
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-calculateFilterChebyshevType1(std::size_t order, double rippleDb = 0.1) {
+[[nodiscard]] inline constexpr PoleZeroLocations calculateFilterChebyshevType1(std::size_t order, double rippleDb = 0.1) {
     // Cauer, W. "The realization of impedances of prescribed frequency dependence." Annalen der Physik 401.2 (1930): 157-229.
     // see also: https://en.wikipedia.org/wiki/Chebyshev_filter
 
@@ -562,8 +523,7 @@ calculateFilterChebyshevType1(std::size_t order, double rippleDb = 0.1) {
     return value;
 }
 
-[[nodiscard]] inline PoleZeroLocations
-calculateFilterChebyshevType2(std::size_t numPoles, double stopBandDb = 40) {
+[[nodiscard]] inline PoleZeroLocations calculateFilterChebyshevType2(std::size_t numPoles, double stopBandDb = 40) {
     // Cauer, W. "The realization of impedances of prescribed frequency dependence." Annalen der Physik 401.2 (1930): 157-229.
     // see also: https://en.wikipedia.org/wiki/Chebyshev_filter#Poles_and_zeroes_2
     const double epsilon = 1.0 / std::sqrt(std::pow(10, stopBandDb / 10.0) - 1);
@@ -594,8 +554,7 @@ calculateFilterChebyshevType2(std::size_t numPoles, double stopBandDb = 40) {
     return ret;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-analogToDigitalTransform(const PoleZeroLocations &analogPoleZeros, double samplingRate) {
+[[nodiscard]] inline constexpr PoleZeroLocations analogToDigitalTransform(const PoleZeroLocations& analogPoleZeros, double samplingRate) {
     // see: https://en.wikipedia.org/wiki/Bilinear_transform#Discrete-time_approximation
     const double twoFs             = 2. * samplingRate;
     auto         bilinearTransform = [twoFs](std::complex<double> s) {
@@ -616,13 +575,12 @@ analogToDigitalTransform(const PoleZeroLocations &analogPoleZeros, double sampli
 namespace details {
 
 template<std::floating_point T>
-std::vector<std::complex<T>>
-sortComplexWithConjugates(const std::vector<std::complex<T>> &numbers) {
+std::vector<std::complex<T>> sortComplexWithConjugates(const std::vector<std::complex<T>>& numbers) {
     constexpr T epsilon = 1e-10;
 
     // Separate the numbers into three groups: positive imaginary, negative imaginary, and real-only
     std::vector<std::complex<T>> positiveImag, negativeImag, realOnly;
-    for (const auto &num : numbers) {
+    for (const auto& num : numbers) {
         if (num.imag() > epsilon) {
             positiveImag.push_back(num);
         } else if (num.imag() < -epsilon) {
@@ -633,7 +591,7 @@ sortComplexWithConjugates(const std::vector<std::complex<T>> &numbers) {
     }
 
     // Sort each group based on the real part
-    auto realComparator = [](const std::complex<T> &a, const std::complex<T> &b) { return a.real() < b.real(); };
+    auto realComparator = [](const std::complex<T>& a, const std::complex<T>& b) { return a.real() < b.real(); };
     std::sort(positiveImag.begin(), positiveImag.end(), realComparator);
     std::sort(negativeImag.begin(), negativeImag.end(), realComparator);
     std::sort(realOnly.begin(), realOnly.end(), realComparator);
@@ -661,8 +619,7 @@ sortComplexWithConjugates(const std::vector<std::complex<T>> &numbers) {
 } // namespace details
 
 template<typename T, std::ranges::input_range Range>
-[[nodiscard]] inline std::vector<T>
-expandRootsToPolynomial(Range &&roots, std::size_t desiredOrder) {
+[[nodiscard]] inline std::vector<T> expandRootsToPolynomial(Range&& roots, std::size_t desiredOrder) {
     if (roots.empty()) {
         std::vector<T> coefficients(desiredOrder + 1UZ, static_cast<T>(0));
         coefficients[0] = 1.0;
@@ -670,9 +627,9 @@ expandRootsToPolynomial(Range &&roots, std::size_t desiredOrder) {
     }
 
     constexpr T    epsilon      = static_cast<T>(1e-10);
-    std::vector<T> coefficients = { static_cast<T>(1) }; // Starts with "x^0" coefficient (1.0)
+    std::vector<T> coefficients = {static_cast<T>(1)}; // Starts with "x^0" coefficient (1.0)
 
-    auto convolve = [](const std::vector<T> &a, const std::vector<T> &b) {
+    auto convolve = [](const std::vector<T>& a, const std::vector<T>& b) {
         std::vector<T> result(a.size() + b.size() - 1, static_cast<T>(0));
         for (std::size_t i = 0UZ; i < a.size(); ++i) {
             for (std::size_t j = 0UZ; j < b.size(); ++j) {
@@ -683,7 +640,7 @@ expandRootsToPolynomial(Range &&roots, std::size_t desiredOrder) {
     };
 
     for (size_t i = 0; i < roots.size(); ++i) {
-        const auto &root = roots[i];
+        const auto& root = roots[i];
 
         if (static_cast<T>(std::abs(root.imag())) > epsilon) { // complex root
             if (i + 1 >= roots.size()) {
@@ -691,42 +648,40 @@ expandRootsToPolynomial(Range &&roots, std::size_t desiredOrder) {
             }
 
             // ensure the next root is the conjugate pair.
-            const auto &next_root = roots[i + 1];
+            const auto& next_root = roots[i + 1];
             if (static_cast<T>(std::abs(root.real() - next_root.real())) > epsilon || static_cast<T>(std::abs(root.imag() + next_root.imag())) > epsilon) {
                 throw std::runtime_error(fmt::format("Complex roots {} vs. {} are not conjugate pairs.\nroots:\n{}", root, next_root, roots));
             }
 
             // use the quadratic factor for the complex root and its conjugate.
-            coefficients = convolve(coefficients, { static_cast<T>(1), -static_cast<T>(2 * root.real()), static_cast<T>(std::norm(root)) });
+            coefficients = convolve(coefficients, {static_cast<T>(1), -static_cast<T>(2 * root.real()), static_cast<T>(std::norm(root))});
             ++i; // skip the next root since it's the conjugate pair.
         } else { // real root
-            coefficients = convolve(coefficients, { static_cast<T>(1), -static_cast<T>(root.real()) });
+            coefficients = convolve(coefficients, {static_cast<T>(1), -static_cast<T>(root.real())});
         }
     }
 
     return coefficients;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-lowPassProtoToLowPass(const PoleZeroLocations &lowPassProto, FilterParameters parameters) {
+[[nodiscard]] inline constexpr PoleZeroLocations lowPassProtoToLowPass(const PoleZeroLocations& lowPassProto, FilterParameters parameters) {
     PoleZeroLocations lowPass = lowPassProto;
 
-    std::ranges::for_each(lowPass.poles, [fLow = parameters.fLow](std::complex<double> &pole) { pole *= 2. * std::numbers::pi * fLow; });
-    std::ranges::for_each(lowPass.zeros, [fLow = parameters.fLow](std::complex<double> &zero) { zero *= 2. * std::numbers::pi * fLow; });
+    std::ranges::for_each(lowPass.poles, [fLow = parameters.fLow](std::complex<double>& pole) { pole *= 2. * std::numbers::pi * fLow; });
+    std::ranges::for_each(lowPass.zeros, [fLow = parameters.fLow](std::complex<double>& zero) { zero *= 2. * std::numbers::pi * fLow; });
 
     lowPass.gain = parameters.gain * lowPassProto.gain / calculateResponse<Frequency::RadianPerSec, ResponseType::Magnitude>(0., lowPass); // normalise at DC
     return lowPass;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-lowPassProtoToHighPass(const PoleZeroLocations &lowPassProto, FilterParameters parameters) {
+[[nodiscard]] inline constexpr PoleZeroLocations lowPassProtoToHighPass(const PoleZeroLocations& lowPassProto, FilterParameters parameters) {
     PoleZeroLocations highPass = lowPassProto;
 
-    std::ranges::for_each(highPass.poles, [freqHigh = parameters.fHigh](auto &pole) { pole = 2. * std::numbers::pi * freqHigh / pole; });
+    std::ranges::for_each(highPass.poles, [freqHigh = parameters.fHigh](auto& pole) { pole = 2. * std::numbers::pi * freqHigh / pole; });
     if (highPass.zeros.empty()) {
         highPass.zeros.resize(lowPassProto.poles.size()); // zeros at infinity (represented as explicit zeros here)
     } else {
-        std::ranges::for_each(highPass.zeros, [freqHigh = parameters.fHigh](auto &zeros) { zeros = 2. * std::numbers::pi * freqHigh / zeros; });
+        std::ranges::for_each(highPass.zeros, [freqHigh = parameters.fHigh](auto& zeros) { zeros = 2. * std::numbers::pi * freqHigh / zeros; });
         if (lowPassProto.poles.size() > highPass.zeros.size()) {
             const std::size_t missingZeros = lowPassProto.poles.size() - highPass.zeros.size();
             highPass.zeros.resize(highPass.zeros.size() + missingZeros); // zeros at infinity (represented as explicit zeros here)
@@ -738,14 +693,13 @@ lowPassProtoToHighPass(const PoleZeroLocations &lowPassProto, FilterParameters p
     return highPass;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-lowPassProtoToBandPass(const PoleZeroLocations &lowPassProto, FilterParameters parameters) {
+[[nodiscard]] inline constexpr PoleZeroLocations lowPassProtoToBandPass(const PoleZeroLocations& lowPassProto, FilterParameters parameters) {
     constexpr double epsilon   = 1e-10;
     const double     omega0    = 2. * std::numbers::pi * std::sqrt(parameters.fLow * parameters.fHigh); // centre frequency
     const double     bandWidth = 2. * std::numbers::pi * std::abs(parameters.fHigh - parameters.fLow);
     const double     Q         = omega0 / bandWidth; // quality factor
 
-    const auto transform = [Q, omega0](const std::complex<double> &s) -> std::pair<std::complex<double>, std::complex<double>> {
+    const auto transform = [Q, omega0](const std::complex<double>& s) -> std::pair<std::complex<double>, std::complex<double>> {
         // https://en.wikipedia.org/wiki/Prototype_filter
         // using Zobel transform: s' <- Q(s/ω₀ + ω₀/s)
         // -> 0 = s² - (ω₀/Q)s'·s + ω₀² -> p := -(ω₀/Q)/2·s', q := ω₀²  -> s = -½p ± √[(½p)² - q]
@@ -758,14 +712,14 @@ lowPassProtoToBandPass(const PoleZeroLocations &lowPassProto, FilterParameters p
         const std::complex<double> s1 = 0.5 * (base + discriminant);
         const std::complex<double> s2 = 0.5 * (base - discriminant);
 
-        return { s1, s2 };
+        return {s1, s2};
     };
 
     PoleZeroLocations bandPass;
     bandPass.poles.reserve(2UZ * lowPassProto.poles.size());
     bandPass.zeros.reserve(2UZ * lowPassProto.zeros.size());
 
-    for (const auto &pole : lowPassProto.poles) {
+    for (const auto& pole : lowPassProto.poles) {
         auto [bpPole1, bpPole2] = transform(pole);
         bandPass.poles.push_back(bpPole1);
         bandPass.poles.push_back(bpPole2);
@@ -773,7 +727,7 @@ lowPassProtoToBandPass(const PoleZeroLocations &lowPassProto, FilterParameters p
 
     // In LP to BP transformation, zeros at the origin in the LPF become poles at infinity (or at the cutoff frequencies) in the BPF.
     // additionally, for each zero in LPF, we add two zeros at +/- ω₀ in BPF.
-    for (const auto &zero : lowPassProto.zeros) {
+    for (const auto& zero : lowPassProto.zeros) {
         if (std::norm(zero) < epsilon) {
             // for zeros at the origin, we add zeros at +/- omega0 for the BPF.
             bandPass.zeros.emplace_back(0., +omega0);
@@ -797,14 +751,13 @@ lowPassProtoToBandPass(const PoleZeroLocations &lowPassProto, FilterParameters p
     return bandPass;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-lowPassProtoToBandStop(const PoleZeroLocations &lowPassProto, FilterParameters parameters) {
+[[nodiscard]] inline constexpr PoleZeroLocations lowPassProtoToBandStop(const PoleZeroLocations& lowPassProto, FilterParameters parameters) {
     constexpr double epsilon   = 1e-10;
     const double     omega0    = 2. * std::numbers::pi * std::sqrt(parameters.fLow * parameters.fHigh); // centre frequency
     const double     bandWidth = 2. * std::numbers::pi * std::abs(parameters.fHigh - parameters.fLow);
     const double     Q         = omega0 / bandWidth; // quality factor
 
-    auto transform = [omega0, Q](const std::complex<double> &s) -> std::pair<std::complex<double>, std::complex<double>> {
+    auto transform = [omega0, Q](const std::complex<double>& s) -> std::pair<std::complex<double>, std::complex<double>> {
         // https://en.wikipedia.org/wiki/Prototype_filter
         // using Zobel transform: 1/s' <- Q(s/ω₀ + ω₀/s)
         // -> 0 = s² - ω₀/(Q·s')·s + ω₀² -> p := -ω₀/(Q·s'), q := ω₀²  -> s = -½p ± √[(½p)² - q]
@@ -817,13 +770,13 @@ lowPassProtoToBandStop(const PoleZeroLocations &lowPassProto, FilterParameters p
         std::complex<double> s1 = base + discriminant;
         std::complex<double> s2 = base - discriminant;
 
-        return { s1, s2 };
+        return {s1, s2};
     };
 
     PoleZeroLocations bandStop;
     bandStop.poles.reserve(2UZ * lowPassProto.poles.size());
     bandStop.zeros.reserve(2UZ * lowPassProto.zeros.size());
-    for (const auto &pole : lowPassProto.poles) {
+    for (const auto& pole : lowPassProto.poles) {
         auto [bpPole1, bpPole2] = transform(pole);
         bandStop.poles.push_back(bpPole1);
         bandStop.poles.push_back(bpPole2);
@@ -831,7 +784,7 @@ lowPassProtoToBandStop(const PoleZeroLocations &lowPassProto, FilterParameters p
 
     // In LP to BP transformation, zeros at the origin in the LPF become poles at infinity (or at the cutoff frequencies) in the BPF.
     // Additionally, for each zero in LPF, we add two zeros at +/- omega0 in BPF.
-    for (const auto &zero : lowPassProto.zeros) {
+    for (const auto& zero : lowPassProto.zeros) {
         if (std::norm(zero) < epsilon) {
             // For zeros at the origin, we add zeros at +/- omega0 for the BPF.
             bandStop.zeros.emplace_back(0., +omega0);
@@ -854,8 +807,7 @@ lowPassProtoToBandStop(const PoleZeroLocations &lowPassProto, FilterParameters p
     return bandStop;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations
-designAnalogFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
+[[nodiscard]] inline constexpr PoleZeroLocations designAnalogFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
     // step 1: continuous-time analog prototype
     PoleZeroLocations analogPoleZeros;
     switch (filterDesign) { // only the Elliptic and inverse Chebyshev (Type II) filters have zeros.
@@ -883,9 +835,8 @@ designAnalogFilter(const Type filterType, FilterParameters params, const Design 
 }
 
 template<std::floating_point T, std::size_t maxSectionSize = std::is_same_v<std::remove_cvref_t<T>, double> ? 4UZ : 2UZ /* == 2 -> aka. 'biquads' */>
-    requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pairs
-[[nodiscard]] inline constexpr auto
-designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
+requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pairs
+[[nodiscard]] inline constexpr auto designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
     PoleZeroLocations analogPoleZeros = designAnalogFilter(filterType, params, filterDesign);
 
     T referenceFrequency;
@@ -917,7 +868,7 @@ designFilter(const Type filterType, FilterParameters params, const Design filter
             return singleSection;
         }
         throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                                                magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+            magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     } else { // Step 4: convert the poles and zeros into biquad sections.
         constexpr double epsilon = 1e-10;
 
@@ -947,8 +898,7 @@ designFilter(const Type filterType, FilterParameters params, const Design filter
                 sections.push_back(section);
             } else {
                 throw std::invalid_argument(fmt::format("({}, {}, {}) biquad gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                                                        magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow,
-                                                        params.fHigh));
+                    magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
             }
         }
         return sections;
@@ -960,8 +910,7 @@ designFilter(const Type filterType, FilterParameters params, const Design filter
 namespace fir {
 
 template<std::floating_point T>
-[[nodiscard]] inline constexpr FilterCoefficients<T>
-generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T beta = static_cast<T>(1.6)) {
+[[nodiscard]] inline constexpr FilterCoefficients<T> generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T beta = static_cast<T>(1.6)) {
     const T    M    = static_cast<T>(N - 1) / static_cast<T>(2);
     const auto sinc = [](T x, T a = std::numbers::pi_v<T>) noexcept -> T { return x == static_cast<T>(0) ? static_cast<T>(1) : std::sin(a * x) / (a * x); };
 
@@ -969,10 +918,9 @@ generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T 
     gr::algorithm::window::create(coefficients, window, beta);
 
     std::size_t index = 0; // Index variable to keep track of the current index
-    std::ranges::transform(coefficients, coefficients.begin(),
-                           [&index, M, fc, &sinc](T coeff) { return coeff * static_cast<T>(2) * fc * sinc(static_cast<T>(2) * fc * (static_cast<T>(index++) - M)); });
+    std::ranges::transform(coefficients, coefficients.begin(), [&index, M, fc, &sinc](T coeff) { return coeff * static_cast<T>(2) * fc * sinc(static_cast<T>(2) * fc * (static_cast<T>(index++) - M)); });
 
-    return { coefficients };
+    return {coefficients};
 }
 
 /**
@@ -982,8 +930,7 @@ generateCoefficients(std::size_t N, gr::algorithm::window::Type window, T fc, T 
  * @param transitionWidth Δω is the width of the transition band (normalised to radians/sample).
  * @return always returns odd-number of required taps
  */
-[[nodiscard]] inline constexpr std::size_t
-estimateNumberOfTapsKaiser(double attenuationStopBand, double transitionWidth) {
+[[nodiscard]] inline constexpr std::size_t estimateNumberOfTapsKaiser(double attenuationStopBand, double transitionWidth) {
     auto N = static_cast<std::size_t>(std::ceil((attenuationStopBand - 8.0) / (2.285 * transitionWidth)));
     if (N % 2 == 0) {
         N++;
@@ -991,8 +938,7 @@ estimateNumberOfTapsKaiser(double attenuationStopBand, double transitionWidth) {
     return N;
 }
 
-[[nodiscard]] inline constexpr double
-estimateRequiredTransitionWidth(const Type filterType, FilterParameters params) {
+[[nodiscard]] inline constexpr double estimateRequiredTransitionWidth(const Type filterType, FilterParameters params) {
     // assumption: increase #taps to achieve the required filter corner frequencies and pass-band attenuation targets
     const double minWidthFromOrder  = 0.1 / static_cast<double>(params.order); // N.B. Butterworth approximation: 20 dB attenuation per decade and order
     double       minTransitionWidth = minWidthFromOrder;
@@ -1006,8 +952,7 @@ estimateRequiredTransitionWidth(const Type filterType, FilterParameters params) 
 }
 
 template<std::floating_point T>
-[[nodiscard]] inline constexpr FilterCoefficients<T>
-designFilter(const Type filterType, FilterParameters params, gr::algorithm::window::Type window = algorithm::window::Type::Kaiser) {
+[[nodiscard]] inline constexpr FilterCoefficients<T> designFilter(const Type filterType, FilterParameters params, gr::algorithm::window::Type window = algorithm::window::Type::Kaiser) {
     const std::size_t N = estimateNumberOfTapsKaiser(params.attenuationDb, 2. * std::numbers::pi * estimateRequiredTransitionWidth(filterType, params));
 
     // design high-pass FIR filter using the window method
@@ -1019,7 +964,7 @@ designFilter(const Type filterType, FilterParameters params, gr::algorithm::wind
             return lowPassCoefficients;
         }
         throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                                                magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     case Type::HIGHPASS: {
         // generate low-pass filter coefficients with "mirror" frequency (f_s/2 - f_c)
@@ -1035,7 +980,7 @@ designFilter(const Type filterType, FilterParameters params, gr::algorithm::wind
             return highPassCoefficients;
         }
         throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                                                magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     case Type::BANDPASS: {
         auto bandPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.beta));
@@ -1048,7 +993,7 @@ designFilter(const Type filterType, FilterParameters params, gr::algorithm::wind
             return bandPassCoefficients;
         }
         throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                                                magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     case Type::BANDSTOP: {
         auto       bandStopCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.beta));
@@ -1067,7 +1012,7 @@ designFilter(const Type filterType, FilterParameters params, gr::algorithm::wind
             return bandStopCoefficients;
         }
         throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
-                                                magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
+            magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     }
     throw std::runtime_error("unexpectedly reached this end");

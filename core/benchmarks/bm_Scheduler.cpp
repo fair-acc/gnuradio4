@@ -13,17 +13,16 @@ inline constexpr gr::Size_t  N_SAMPLES = gr::util::round_up(10'000'000, 1024);
 inline constexpr std::size_t N_NODES   = 5;
 
 template<typename T, typename Sink, typename Source>
-void
-create_cascade(gr::Graph &testGraph, Sink &src, Source &sink, std::size_t depth = 1) {
+void create_cascade(gr::Graph& testGraph, Sink& src, Source& sink, std::size_t depth = 1) {
     using namespace boost::ut;
     using namespace benchmark;
     using namespace gr::blocks::math;
 
-    std::vector<MultiplyConst<T> *> mult1;
-    std::vector<DivideConst<T> *>   mult2;
+    std::vector<MultiplyConst<T>*> mult1;
+    std::vector<DivideConst<T>*>   mult2;
     for (std::size_t i = 0; i < depth; i++) {
-        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({ { "value", T(2) }, { "name", fmt::format("mult.{}", i) } })));
-        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({ { "value", T(2) }, { "name", fmt::format("div.{}", i) } })));
+        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"value", T(2)}, {"name", fmt::format("mult.{}", i)}})));
+        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"value", T(2)}, {"name", fmt::format("div.{}", i)}})));
     }
 
     for (std::size_t i = 0; i < mult1.size(); i++) {
@@ -38,12 +37,11 @@ create_cascade(gr::Graph &testGraph, Sink &src, Source &sink, std::size_t depth 
 }
 
 template<typename T>
-gr::Graph
-test_graph_linear(std::size_t depth = 1) {
+gr::Graph test_graph_linear(std::size_t depth = 1) {
     gr::Graph testGraph;
 
-    auto &src  = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({ { "n_samples_max", N_SAMPLES } });
-    auto &sink = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
+    auto& src  = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({{"n_samples_max", N_SAMPLES}});
+    auto& sink = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
 
     create_cascade<T>(testGraph, src, sink, depth);
 
@@ -51,15 +49,14 @@ test_graph_linear(std::size_t depth = 1) {
 }
 
 template<typename T>
-gr::Graph
-test_graph_bifurcated(std::size_t depth = 1) {
+gr::Graph test_graph_bifurcated(std::size_t depth = 1) {
     using namespace boost::ut;
     using namespace benchmark;
     gr::Graph testGraph;
 
-    auto &src   = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({ { "n_samples_max", N_SAMPLES } });
-    auto &sink1 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
-    auto &sink2 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
+    auto& src   = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({{"n_samples_max", N_SAMPLES}});
+    auto& sink1 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
+    auto& sink2 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
 
     create_cascade<T>(testGraph, src, sink1, depth);
     create_cascade<T>(testGraph, src, sink2, depth);
@@ -67,8 +64,7 @@ test_graph_bifurcated(std::size_t depth = 1) {
     return testGraph;
 }
 
-void
-exec_bm(auto &scheduler, const std::string &test_case) {
+void exec_bm(auto& scheduler, const std::string& test_case) {
     using namespace boost::ut;
     using namespace benchmark;
     expect(scheduler.runAndWait().has_value()) << fmt::format("scheduler failure for test-case: {}", test_case);
@@ -108,11 +104,7 @@ exec_bm(auto &scheduler, const std::string &test_case) {
     "bifurcated graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt]() { exec_bm(sched4_mt, "bifurcated-graph BFS-sched (multi-threaded)"); };
 
     gr::scheduler::BreadthFirst<multiThreaded, Profiler> sched4_mt_prof(test_graph_bifurcated<float>(N_NODES), pool);
-    "bifurcated graph - BFS scheduler (multi-threaded) with profiling"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt_prof]() {
-        exec_bm(sched4_mt_prof, "bifurcated-graph BFS-sched (multi-threaded) with profiling");
-    };
+    "bifurcated graph - BFS scheduler (multi-threaded) with profiling"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt_prof]() { exec_bm(sched4_mt_prof, "bifurcated-graph BFS-sched (multi-threaded) with profiling"); };
 };
 
-int
-main() { /* not needed by the UT framework */
-}
+int main() { /* not needed by the UT framework */ }
