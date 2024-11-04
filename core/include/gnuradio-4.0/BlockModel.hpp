@@ -356,7 +356,7 @@ public:
 
     [[nodiscard]] virtual work::Result work(std::size_t requested_work) = 0;
 
-    [[nodiscard]] virtual work::Status draw() = 0;
+    [[nodiscard]] virtual work::Status draw(const property_map& config = {}) = 0;
 
     [[nodiscard]] virtual block::Category blockCategory() const { return block::Category::NormalBlock; }
 
@@ -452,9 +452,9 @@ public:
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override { return blockRef().work(requested_work); }
 
-    constexpr work::Status draw() override {
-        if constexpr (requires { blockRef().draw(); }) {
-            return blockRef().draw();
+    constexpr work::Status draw(const property_map& config = {}) override {
+        if constexpr (requires { blockRef().draw(config); }) {
+            return blockRef().draw(config);
         }
         return work::Status::ERROR;
     }
