@@ -113,7 +113,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
     tag("visual") / "single trigger"_test              = [&runUIExample] { runUIExample(10, "CMD_DIAG_TRIGGER1", 30, 30); };
 };
 
-gr::Tag genTrigger(gr::Tag::index_type index, std::string triggerName, std::string triggerCtx = {}) {
+gr::Tag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
     return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
                        {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
 };
@@ -236,7 +236,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             expect(eq(timingEvt0.size(), nTags[i])) << [&]() {
                 std::string ret = fmt::format("DataSet nTags: {}\n", timingEvt0.size());
                 for (const auto& tag : timingEvt0) {
-                    ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+                    ret += fmt::format("tag.index: {} .map: {}\n", tag.first, tag.second);
                 }
                 return ret;
             }();

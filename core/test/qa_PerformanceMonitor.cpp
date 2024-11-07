@@ -61,10 +61,10 @@ int main(int argc, char* argv[]) {
     auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
 
     // parameters of generated Tags
-    gr::Tag::index_type nSamplesPerTag    = 10000;
-    bool                tagWithAutoUpdate = false;
-    std::string         tagName           = tagWithAutoUpdate ? "sample_rate" : "some_random_name_1234";
-    std::string         outputCsvFilePath = "";
+    std::size_t nSamplesPerTag    = 10000UZ;
+    bool        tagWithAutoUpdate = false;
+    std::string tagName           = tagWithAutoUpdate ? "sample_rate" : "some_random_name_1234";
+    std::string outputCsvFilePath = "";
 
     if (outFilePath != "") {
         outputCsvFilePath = outFilePath;

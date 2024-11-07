@@ -105,9 +105,9 @@ struct Matcher {
     }
 };
 
-static Tag makeTag(Tag::index_type index, int year, int month, int day) { return Tag{index, {{"YEAR", year}, {"MONTH", month}, {"DAY", day}}}; }
+static Tag makeTag(std::size_t index, int year, int month, int day) { return Tag{index, {{"YEAR", year}, {"MONTH", month}, {"DAY", day}}}; }
 
-static std::vector<Tag> makeTestTags(Tag::index_type firstIndex, Tag::index_type interval) {
+static std::vector<Tag> makeTestTags(std::size_t firstIndex, std::size_t interval) {
     std::vector<Tag> tags;
     for (int y = 1; y <= 3; ++y) {
         for (int m = 1; m <= 2; ++m) {
@@ -139,9 +139,11 @@ static std::string toAsciiArt(std::span<trigger::MatchResult> states) {
     return r;
 }
 
-std::vector<Tag> absoluteTags(std::span<const RelativeIndexTag> tags, std::size_t pos) {
-    auto view = tags | std::views::transform([pos](const auto& rt) { return gr::Tag{pos + static_cast<Tag::index_type>(rt.index), rt.map}; });
-    return std::vector<Tag>(view.begin(), view.end());
+std::size_t checkedSum(std::size_t a, std::ptrdiff_t b) {
+    using namespace boost::ut;
+    const auto signedA = static_cast<std::ptrdiff_t>(a);
+    expect(ge(signedA + b, 0));
+    return static_cast<std::size_t>(signedA + b);
 }
 
 template<trigger::Matcher TMatcher>
@@ -300,20 +302,20 @@ const boost::ut::suite DataSinkTests = [] {
         std::size_t      chunksSeen2  = 0;
         std::vector<Tag> receivedTags;
 
-        auto callbackWithTags = [&samplesSeen2, &chunksSeen2, &m2, &receivedTags, &kChunkSize](std::span<const float> buffer, std::span<const RelativeIndexTag> tags) {
+        auto callbackWithTags = [&samplesSeen2, &chunksSeen2, &m2, &receivedTags, &kChunkSize](std::span<const float> buffer, std::span<const Tag> tags) {
             for (std::size_t i = 0; i < buffer.size(); ++i) {
                 expect(eq(buffer[i], static_cast<float>(samplesSeen2 + i)));
             }
 
             for (const auto& tag : tags) {
-                expect(ge(tag.index, 0));
-                expect(lt(tag.index, static_cast<RelativeIndexTag::index_type>(buffer.size())));
+                expect(ge(tag.index, 0UZ));
+                expect(lt(tag.index, buffer.size()));
             }
 
             auto lg = std::lock_guard{m2};
 
-            auto adjusted = absoluteTags(tags, samplesSeen2);
-            receivedTags.insert(receivedTags.end(), adjusted.begin(), adjusted.end());
+            auto absolute = tags | std::views::transform([&samplesSeen2](const auto& t) { return gr::Tag{t.index + samplesSeen2, t.map}; });
+            receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
             samplesSeen2 += buffer.size();
             chunksSeen2++;
             if (chunksSeen2 < 201) {
@@ -323,7 +325,7 @@ const boost::ut::suite DataSinkTests = [] {
             }
         };
 
-        auto callbackWithTagsAndSink = [&sink](std::span<const float>, std::span<const RelativeIndexTag>, const DataSink<float>& passedSink) {
+        auto callbackWithTagsAndSink = [&sink](std::span<const float>, std::span<const Tag>, const DataSink<float>& passedSink) {
             expect(eq(passedSink.name.value, "test_sink"s));
             expect(eq(sink.unique_name, passedSink.unique_name));
         };
@@ -409,8 +411,8 @@ const boost::ut::suite DataSinkTests = [] {
             while (!seenFinished) {
                 seenFinished = poller->finished;
                 while (poller->process([&received, &receivedTags](const auto& data, const auto& tags_) {
-                    auto rtags = absoluteTags(tags_, received.size());
-                    receivedTags.insert(receivedTags.end(), rtags.begin(), rtags.end());
+                    auto absolute = tags_ | std::views::transform([&received](const auto& t) { return gr::Tag{t.index + received.size(), t.map}; });
+                    receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
                     received.insert(received.end(), data.begin(), data.end());
                 })) {
                 }
@@ -479,9 +481,9 @@ const boost::ut::suite DataSinkTests = [] {
                 poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 3, 2, BlockingMode::Blocking);
                 return poller != nullptr;
             })) << boost::ut::fatal;
-            std::vector<int32_t>          receivedData;
-            std::vector<RelativeIndexTag> receivedTags;
-            bool                          seenFinished = false;
+            std::vector<int32_t>                                 receivedData;
+            std::vector<std::pair<std::ptrdiff_t, property_map>> receivedTags;
+            bool                                                 seenFinished = false;
             while (!seenFinished) {
                 seenFinished            = poller->finished;
                 [[maybe_unused]] auto r = poller->process([&receivedData, &receivedTags](const auto& datasets) {
@@ -496,7 +498,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.signal_units[0], "none"s));
                         expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{-2, +2}));
                         expect(eq(dataset.timing_events[0].size(), 1u));
-                        expect(eq(dataset.timing_events[0][0].index, 3));
+                        expect(eq(dataset.timing_events[0][0].first, 3));
                         receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
                     }
                 });
@@ -531,10 +533,11 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
         auto polling = std::async([] {
-            std::vector<int32_t>          receivedData;
-            std::vector<RelativeIndexTag> receivedTags;
-            bool                          seenFinished = false;
-            auto                          isTrigger    = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
+            std::vector<int32_t>                                 receivedData;
+            std::vector<std::pair<std::ptrdiff_t, property_map>> receivedTags;
+            bool                                                 seenFinished = false;
+
+            auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
                 const auto type = tag.get("TYPE");
                 return (type && std::get<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
@@ -562,7 +565,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.signal_units[0], "no unit"s));
                         expect(eq(dataset.signal_ranges[0], std::vector{-2, +2}));
                         expect(eq(dataset.timing_events[0].size(), 1UZ));
-                        expect(eq(dataset.timing_events[0][0].index, 0));
+                        expect(eq(dataset.timing_events[0][0].first, 0));
                         receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
                     }
                 });
@@ -625,7 +628,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.signal_units[0], "none"s));
                         expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{0, kSamples - 1}));
                         expect(eq(dataset.timing_events[0].size(), 1u));
-                        expect(eq(dataset.timing_events[0][0].index, -5000));
+                        expect(eq(dataset.timing_events[0][0].first, -5000));
                         receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
                     }
                 });
@@ -771,8 +774,8 @@ const boost::ut::suite DataSinkTests = [] {
                         receivedData.push_back(dataset.signal_values.back());
                         expect(eq(dataset.timing_events.size(), 1u));
                         expect(eq(dataset.timing_events[0].size(), 1u));
-                        expect(eq(dataset.timing_events[0][0].index, 3000));
-                        auto absolute = absoluteTags(dataset.timing_events[0], receivedData.size());
+                        expect(eq(dataset.timing_events[0][0].first, 3000));
+                        auto absolute = dataset.timing_events[0] | std::views::transform([&receivedData](const auto& t) { return gr::Tag{checkedSum(receivedData.size(), t.first), t.second}; });
                         receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
                     }
                 })) {
@@ -887,7 +890,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));
 
-        auto genTrigger = [](gr::Tag::index_type index, std::string triggerName, std::string triggerCtx = {}) {
+        auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
             return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
                                   {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
         };
@@ -936,7 +939,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));
 
-        auto genTrigger = [](gr::Tag::index_type index, std::string triggerName, std::string triggerCtx = {}) {
+        auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
             return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
                                   {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
         };

@@ -65,15 +65,13 @@ concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
  * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
-template<typename TIndex>
-struct alignas(hardware_constructive_interference_size) BasicTag {
-    using index_type = TIndex;
-    index_type   index{0};
+struct alignas(hardware_constructive_interference_size) Tag {
+    std::size_t  index{0UZ};
     property_map map{};
 
-    GR_MAKE_REFLECTABLE(BasicTag, index, map);
+    GR_MAKE_REFLECTABLE(Tag, index, map);
 
-    bool operator==(const BasicTag& other) const = default;
+    bool operator==(const Tag& other) const = default;
 
     // TODO: do we need the convenience methods below?
     void reset() noexcept {
@@ -104,21 +102,6 @@ struct alignas(hardware_constructive_interference_size) BasicTag {
     void insert_or_assign(const std::pair<std::string, pmtv::pmt>& value) { map[value.first] = value.second; }
 
     void insert_or_assign(const std::string& key, const pmtv::pmt& value) { map[key] = value; }
-};
-
-using Tag              = BasicTag<std::size_t>;
-using RelativeIndexTag = BasicTag<std::make_signed_t<std::size_t>>;
-
-constexpr std::make_signed_t<std::size_t> tagIndexDifference(Tag::index_type x, Tag::index_type y) {
-    // assuming that tag indices and stream position are never further apart than half the range of the index type,
-    // assume integer overflow if they are.
-    using signed_type         = std::make_signed_t<Tag::index_type>;
-    constexpr auto half_range = std::numeric_limits<Tag::index_type>::max() / 2;
-    auto           d          = x - y;
-    if (d > half_range) {
-        return -static_cast<signed_type>(y - x);
-    }
-    return static_cast<signed_type>(d);
 };
 
 } // namespace gr

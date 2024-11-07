@@ -137,7 +137,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
 
         if (samplesToNextTag < samplesToNextTimeTag) {
             if (_nextTagIndex < tags.size() && samplesToNextTag <= samplesToProduce) {
-                const auto tagDeltaIndex = tags[_nextTagIndex].index - static_cast<Tag::index_type>(n_samples_produced); // position w.r.t. start of this chunk
+                const auto tagDeltaIndex = tags[_nextTagIndex].index - static_cast<std::size_t>(n_samples_produced); // position w.r.t. start of this chunk
                 if (verbose_console) {
                     gr::testing::print_tag(tags[_nextTagIndex], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced + tagDeltaIndex));
                 }

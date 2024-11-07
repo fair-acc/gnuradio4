@@ -46,7 +46,7 @@ template<typename T, std::size_t N_MIN = 1UZ, std::size_t N_MAX = N_MAX>
 struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     gr::PortIn<T, gr::RequiredSamples<N_MIN, N_MAX>> in;
     uint64_t                                         should_receive_n_samples = 0;
-    std::optional<gr::Tag::index_type>               _last_tag_position;
+    std::optional<std::size_t>                       _last_tag_position;
 
     GR_MAKE_REFLECTABLE(sink, in, should_receive_n_samples);
 

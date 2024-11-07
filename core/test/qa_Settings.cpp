@@ -902,7 +902,7 @@ const boost::ut::suite TransactionTests = [] {
         const auto         timeNow      = std::chrono::system_clock::now();
 
         for (std::size_t i = 0; i < 10; i++) {
-            src._tags.push_back(gr::Tag(static_cast<gr::Tag::index_type>(i), {{"sample_rate", static_cast<float>(i)}}));
+            src._tags.push_back(gr::Tag(i, {{"sample_rate", static_cast<float>(i)}}));
         }
         // this sample_rates should not be applied
         src._tags.push_back({15, {{"sample_rate", 15.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //

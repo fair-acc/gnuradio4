@@ -283,7 +283,7 @@ struct Async {};
  * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` and including first sample.
  */
 template<typename T>
-concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, gr::Tag::index_type n) {
+concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, std::size_t n) {
     { span.consume(0) };
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
@@ -307,7 +307,7 @@ concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && 
  * - Publishing Tags: Use `publishTag(tagData, tagOffset)` to publish tags. `tagOffset` is relative to the first sample.
  */
 template<typename T>
-concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& span, property_map& tagData, Tag::index_type tagOffset) {
+concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& span, property_map& tagData, std::size_t tagOffset) {
     span.publish(0UZ);
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
@@ -449,14 +449,14 @@ struct Port {
     template<SpanReleasePolicy spanReleasePolicy>
     struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
         TagReaderSpanType rawTags;
-        Tag::index_type   streamIndex;
+        std::size_t       streamIndex;
         bool              isConnected = true; // true if Port is connected
         bool              isSync      = true; // true if  Port is Sync
 
         InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
             : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)),               //
-              rawTags(getTags(static_cast<gr::Tag::index_type>(nSamples), tagReader, reader.position())),        //
-              streamIndex{reader.position()}, isConnected(connected), isSync(sync) {};
+              rawTags(getTags(nSamples, tagReader, reader.position())),                                          //
+              streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
         InputSpan(const InputSpan&)            = default;
         InputSpan& operator=(const InputSpan&) = default;
@@ -476,15 +476,18 @@ struct Port {
         }
 
         [[nodiscard]] auto tags() {
-            return std::views::transform(rawTags, [this](auto& tag) { return std::make_pair(tagIndexDifference(tag.index, streamIndex), std::ref(tag.map)); });
+            return std::views::transform(rawTags, [this](auto& tag) {
+                const auto relIndex = tag.index >= streamIndex ? static_cast<std::ptrdiff_t>(tag.index - streamIndex) : -static_cast<std::ptrdiff_t>(streamIndex - tag.index);
+                return std::make_pair(relIndex, std::ref(tag.map));
+            });
         }
 
-        void consumeTags(gr::Tag::index_type untilLocalIndex) {
+        void consumeTags(std::size_t untilLocalIndex) {
             std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
             std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
-        [[nodiscard]] inline Tag getMergedTag(gr::Tag::index_type untilLocalIndex = 0) const {
+        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 0) const {
             auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                 assert(&sourceMap != &destinationMap);
                 for (const auto& [key, value] : sourceMap) {
@@ -497,7 +500,7 @@ struct Port {
         }
 
     private:
-        auto getTags(gr::Tag::index_type nSamples, TagReaderType& reader, gr::Tag::index_type currentStreamOffset) {
+        auto getTags(std::size_t nSamples, TagReaderType& reader, std::size_t currentStreamOffset) {
             const auto tags = reader.get(reader.available());
             const auto it   = std::ranges::find_if_not(tags, [nSamples, currentStreamOffset](const auto& tag) { return tag.index < currentStreamOffset + nSamples; });
             const auto n    = static_cast<std::size_t>(std::distance(tags.begin(), it));
@@ -513,22 +516,22 @@ struct Port {
     template<SpanReleasePolicy spanReleasePolicy, WriterSpanReservePolicy spanReservePolicy>
     struct OutputSpan : public WriterSpanType<spanReleasePolicy> {
         TagWriterSpanType tags;
-        Tag::index_type   streamIndex;
+        std::size_t       streamIndex;
         std::size_t       tagsPublished{0UZ};
         bool              isConnected = true; // true if Port is connected
         bool              isSync      = true; // true if  Port is Sync
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::index_type streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
               tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {};
+              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::index_type streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), //
               tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {};
+              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)            = default;
         OutputSpan& operator=(const OutputSpan&) = default;
@@ -541,14 +544,14 @@ struct Port {
             }
         }
 
-        inline constexpr void publishTag(property_map&& tagData, Tag::index_type tagOffset = 0UZ) noexcept { processPublishTag(std::move(tagData), tagOffset); }
+        inline constexpr void publishTag(property_map&& tagData, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tagData), tagOffset); }
 
-        inline constexpr void publishTag(const property_map& tagData, Tag::index_type tagOffset = 0UZ) noexcept { processPublishTag(tagData, tagOffset); }
+        inline constexpr void publishTag(const property_map& tagData, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(tagData, tagOffset); }
 
     private:
         template<PropertyMapType PropertyMap>
-        inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::index_type tagOffset) noexcept {
-            const auto index = streamIndex + static_cast<gr::Tag::index_type>(tagOffset);
+        inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
+            const auto index = streamIndex + tagOffset;
 
             if (tagsPublished > 0) {
                 auto& lastTag = tags[tagsPublished - 1];
@@ -813,13 +816,13 @@ public:
         return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, Tag::index_type tagOffset = 0UZ) noexcept
+    inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
         processPublishTag(std::move(tag_data), tagOffset);
     }
 
-    inline constexpr void publishTag(const property_map& tag_data, Tag::index_type tagOffset = 0UZ) noexcept
+    inline constexpr void publishTag(const property_map& tag_data, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
         processPublishTag(tag_data, tagOffset);
@@ -848,7 +851,7 @@ public:
 
 private:
     template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tag_data, Tag::index_type tagOffset) noexcept
+    inline constexpr void processPublishTag(PropertyMap&& tag_data, std::size_t tagOffset) noexcept
     requires(kIsOutput)
     {
         const auto newTagIndex = streamWriter().position() + tagOffset;
@@ -1105,11 +1108,11 @@ static_assert(PortLike<DynamicPort>);
 
 namespace detail {
 template<typename T>
-concept TagPredicate = requires(const T& t, const Tag& tag, Tag::index_type readPosition) {
+concept TagPredicate = requires(const T& t, const Tag& tag, std::size_t readPosition) {
     { t(tag, readPosition) } -> std::convertible_to<bool>;
 };
-inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag& tag, Tag::index_type readPosition) noexcept { return tag.index >= readPosition; };
-inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, Tag::index_type readPosition) noexcept {
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, std::size_t readPosition) noexcept {
     if (tag.index < readPosition) {
         return false;
     }
@@ -1118,26 +1121,26 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, Tag
 };
 } // namespace detail
 
-inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, Tag::index_type readOffset) {
+inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, std::size_t readOffset) {
     ReaderSpanLike auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
-    const Tag::index_type readPosition = port.streamReader().position();
+    const std::size_t readPosition = port.streamReader().position();
 
     // at least one tag is present -> if tag is not on the first tag position read up to the tag position
     const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto& tag) { return predicate(tag, readPosition + readOffset); });
     std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
-        return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, Tag::index_type(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
+        return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, std::size_t(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
         return std::nullopt;
     }
 }
 
-inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, Tag::index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
-inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, Tag::index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
 
 } // namespace gr
 

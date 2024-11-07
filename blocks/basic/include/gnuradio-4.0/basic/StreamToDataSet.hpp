@@ -236,7 +236,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 if (n_max.value > ds.signal_values.size()) { // do not add Tags if DataSet is full
                     const Tag& mergedTag = this->mergedInputTag();
                     if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
-                        ds.timing_events[0].emplace_back(RelativeIndexTag{static_cast<RelativeIndexTag::index_type>(ds.signal_values.size()), mergedTag.map});
+                        ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(ds.signal_values.size()), mergedTag.map);
                     }
                 }
 

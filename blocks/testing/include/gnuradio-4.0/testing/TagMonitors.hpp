@@ -123,8 +123,8 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     T processOne() noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                    //
-            [this](const auto& map, Tag::index_type tagOffset) { this->publishTag(map, tagOffset); }, //
+        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                //
+            [this](const auto& map, std::size_t tagOffset) { this->publishTag(map, tagOffset); }, //
             "processOne(...)");
 
         _nSamplesProduced++;
@@ -150,8 +150,8 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
     work::Status processBulk(OutputSpanLike auto& outSpan) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                    //
-            [&outSpan](const auto& map, Tag::index_type offset) { outSpan.publishTag(map, offset); }, //
+        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                //
+            [&outSpan](const auto& map, std::size_t offset) { outSpan.publishTag(map, offset); }, //
             "processBulk(...)");
 
         const auto nSamplesRemainder = getNProducedSamplesRemainder();
@@ -211,7 +211,7 @@ private:
             if (verbose_console) {
                 print_tag(_tags[_tagIndex], fmt::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
-            publishTagFn(_tags[_tagIndex].map, static_cast<Tag::index_type>(0));
+            publishTagFn(_tags[_tagIndex].map, 0UZ);
             this->_outputTagsChanged = true;
             _tagIndex++;
             if (repeat_tags && _tagIndex == _tags.size()) {
