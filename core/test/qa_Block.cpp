@@ -720,6 +720,36 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
     };
 
+    "Interpolation/Decimation with many tags, tags forward policy"_test = [] {
+        using namespace boost::ut;
+        using namespace gr::testing;
+
+        gr::Graph testGraph;
+        auto&     source = testGraph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(20)}});
+        source._tags     = {
+            {0, {{"key0", "value@0"}}},    //
+            {2, {{"key2", "value@2"}}},    //
+            {4, {{"key4", "value@4"}}},    //
+            {6, {{"key6", "value@6"}}},    //
+            {8, {{"ke8", "value@8"}}},     //
+            {10, {{"key10", "value@10"}}}, //
+            {12, {{"key12", "value@12"}}}, //
+            {14, {{"key14", "value@14"}}}  //
+        };
+
+        auto& intDecBlock = testGraph.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
+        auto& sink        = testGraph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(intDecBlock)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(intDecBlock).to<"in">(sink)));
+
+        gr::scheduler::Simple sched{std::move(testGraph)};
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(intDecBlock.status.process_counter, 2UZ));
+        expect(eq(intDecBlock.status.total_in, 20UZ));
+        expect(eq(intDecBlock.status.total_out, 20UZ));
+    };
+
     "SyncOrAsync ports tests"_test = [] {
         syncOrAsyncTest<true, true>();
         syncOrAsyncTest<false, true>();

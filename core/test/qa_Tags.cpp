@@ -35,8 +35,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
 
     GR_MAKE_REFLECTABLE(RealignTagsToChunks, inPort, outPort);
 
-    double                                    sampling_rate = 1.0;
-    constexpr static gr::TagPropagationPolicy tag_policy    = gr::TagPropagationPolicy::TPP_DONT;
+    double sampling_rate = 1.0;
 
     // TODO: References are required here because InputSpan and OutputSpan have internal states
     // (e.g., tagsPublished) that are unique to each instance. Copying these objects without proper

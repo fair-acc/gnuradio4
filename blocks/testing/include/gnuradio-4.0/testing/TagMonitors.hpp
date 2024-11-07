@@ -163,6 +163,7 @@ struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
             if (_tagIndex < _tags.size()) {
                 if (static_cast<gr::Size_t>(_tags[_tagIndex].index) > nSamplesRemainder) {
                     nextTagIn = static_cast<gr::Size_t>(_tags[_tagIndex].index) - nSamplesRemainder;
+                    nextTagIn = std::min(nextTagIn, n_samples_max - _nSamplesProduced);
                 }
             } else {
                 nextTagIn = isInfinite() ? static_cast<gr::Size_t>(outSpan.size()) : n_samples_max - _nSamplesProduced;

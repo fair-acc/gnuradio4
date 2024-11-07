@@ -344,7 +344,9 @@ public:
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
 
-    constexpr static bool            blockingIO    = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
+    constexpr static bool blockingIO             = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
+    constexpr static bool noDefaultTagForwarding = std::disjunction_v<std::is_same<NoDefaultTagForwarding, Arguments>...>;
+
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
     template<typename T>
@@ -364,8 +366,6 @@ public:
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
     alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{false};
-
-    constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
     using ResamplingLimit = Limits<1UL, std::numeric_limits<ResamplingValue>::max()>;
@@ -526,7 +526,7 @@ public:
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
-                if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
+                if constexpr (!noDefaultTagForwarding) {
                     publishTag(applyResult.forwardParameters, 0);
                 }
                 notifyListeners(block::property::kSetting, settings().get());
@@ -684,9 +684,8 @@ public:
     }
 
     constexpr void forwardTags(auto& outputSpanTuple) noexcept {
-        if (inputTagsPresent()) {
-            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                // publishTag(mergedInputTag().map, 0);
+        if constexpr (!noDefaultTagForwarding) {
+            if (inputTagsPresent()) {
                 for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, outputSpanTuple);
             }
         }
@@ -718,9 +717,9 @@ public:
                     }
                 };
                 if constexpr (InputSpanLike<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
-                    mergeSrcMapInto(inputSpanOrVector.getMergedTag(0).map, _mergedInputTag.map);
+                    mergeSrcMapInto(inputSpanOrVector.getMergedTag(1).map, _mergedInputTag.map);
                 } else {
-                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(0).map, _mergedInputTag.map); });
+                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(1).map, _mergedInputTag.map); });
                 }
             },
             inputSpans);
@@ -1480,10 +1479,9 @@ protected:
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
 
-            // See https://github.com/fair-acc/gnuradio4/issues/444
             for_each_reader_span(
                 [&processedIn](auto& in) {
-                    if (in.isConsumeRequested() && in.isConnected) {
+                    if (in.isConsumeRequested() && in.isConnected && in.isSync) {
                         processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
                     }
                 },
@@ -1491,7 +1489,7 @@ protected:
 
             for_each_writer_span(
                 [&processedOut](auto& out) {
-                    if (out.isPublishRequested() && out.isConnected) {
+                    if (out.isPublishRequested() && out.isConnected && out.isSync) {
                         processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
                     }
                 },
@@ -1544,7 +1542,7 @@ protected:
             processedOut = 0UZ;
         }
 
-        if (processedIn > 0 && processedOut > 0) {
+        if (processedOut > 0) {
             copyCachedOutputTags(outputSpans);
 
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
