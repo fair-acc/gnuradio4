@@ -126,7 +126,7 @@ public:
 
         std::size_t currentReserveCursor;
         std::size_t nextReserveCursor;
-        SpinWait   spinWait;
+        SpinWait    spinWait;
         do {
             currentReserveCursor = _reserveCursor.value();
             nextReserveCursor    = currentReserveCursor + nSlotsToClaim;

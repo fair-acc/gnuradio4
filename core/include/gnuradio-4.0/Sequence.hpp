@@ -55,9 +55,9 @@ public:
 
     [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
     [[nodiscard]] forceinline std::size_t addAndGet(std::size_t value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-    [[nodiscard]] forceinline std::size_t   subAndGet(std::size_t value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
-    void                                    wait(std::size_t oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
-    void                                    notify_all() noexcept { _fieldsValue.notify_all(); }
+    [[nodiscard]] forceinline std::size_t subAndGet(std::size_t value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
+    void                                  wait(std::size_t oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
+    void                                  notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {

@@ -655,9 +655,9 @@ private:
         std::optional<detail::Metadata> _pendingMetadata;
 
         // callback-only
-        std::size_t                   buffer_fill = 0;
-        std::vector<T>                buffer;
-        std::vector<Tag>              tag_buffer;
+        std::size_t      buffer_fill = 0;
+        std::vector<T>   buffer;
+        std::vector<Tag> tag_buffer;
 
         // polling-only
         std::weak_ptr<StreamingPoller<T>> polling_handler = {};
