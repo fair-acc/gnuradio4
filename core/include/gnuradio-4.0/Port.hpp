@@ -280,7 +280,7 @@ struct Async {};
  *   - Using `tags()`: Returns a `range::view` of input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
  *   - Using `rawTags`: Provides direct access to the underlying `ReaderSpan<Tag>` for advanced manipulation.
  * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
- * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` and including first sample.
+ * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` (exclusively).
  */
 template<typename T>
 concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, std::size_t n) {
@@ -468,10 +468,12 @@ struct Port {
                 if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
                 }
-                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
+                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) //
+                    || ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessNone                                       //
+                    || this->empty()) {
                     return; // no samples to be consumed -> do not consume any tags
                 }
-                consumeTags(0); // consume all tags including the one on the first sample
+                consumeTags(1); // consume all tags including the one on the first sample
             }
         }
 
@@ -483,11 +485,11 @@ struct Port {
         }
 
         void consumeTags(std::size_t untilLocalIndex) {
-            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
+            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index < streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
             std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
-        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 0) const {
+        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 1) const {
             auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                 assert(&sourceMap != &destinationMap);
                 for (const auto& [key, value] : sourceMap) {
@@ -495,7 +497,7 @@ struct Port {
                 }
             };
             Tag result{0UZ, {}};
-            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
+            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index < streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
             return result;
         }
 

@@ -70,6 +70,23 @@ struct BlockingIO {
 };
 
 /**
+ * @brief Disable default tag forwarding.
+ *
+ * There are two types of tag forwarding: (1) default All-To-All, and (2) user-implemented.
+ *
+ * By default, tag forwarding operates as All-To-All. Before tags on input ports are forwarded, they are merged.
+ * If a block has multiple ports and tags on these ports contain maps with identical keys, only one value for each key
+ * will be retained in the merged tag. This may lead to potential information loss, as it’s not guaranteed which
+ * value will be kept.
+ *
+ * This default behavior is generally sufficient. However, if it’s not suitable for your use case, you can disable it
+ * by adding the `NoDefaultTagForwarding` attribute to the template parameters. In such cases, the block should implement
+ * custom tag forwarding in the `processBulk` function. The `InputSpanLike` and `OutputSpanLike` APIs are available to simplify
+ * with custom tag forwarding.
+ */
+struct NoDefaultTagForwarding {};
+
+/**
  * @brief Annotates block, indicating to perform resampling based on the provided `inputChunkSize` and `outputChunkSize`.
  * For each `inputChunkSize` input samples, `outputChunkSize` output samples are published.
  * Thus the total number of input/output samples can be calculated as `nInput = k * inputChunkSize` and `nOutput = k * outputChunkSize`.
