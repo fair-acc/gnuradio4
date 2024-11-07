@@ -35,38 +35,32 @@ static constexpr const std::size_t kInitialCursorValue = 0L;
  * around the volatile field.
  */
 class Sequence {
-public:
-    using index_type = std::size_t;
-
-private:
-    alignas(hardware_destructive_interference_size) std::atomic<index_type> _fieldsValue{};
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> _fieldsValue{};
 
 public:
     Sequence(const Sequence&)       = delete;
     Sequence(const Sequence&&)      = delete;
     void operator=(const Sequence&) = delete;
 
-    explicit Sequence(index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+    explicit Sequence(std::size_t initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
 
-    [[nodiscard]] forceinline index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
-    forceinline void                     setValue(const index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
+    [[nodiscard]] forceinline std::size_t value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
+    forceinline void                      setValue(const std::size_t value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
 
-    [[nodiscard]] forceinline bool compareAndSet(index_type expectedSequence, index_type nextSequence) noexcept {
+    [[nodiscard]] forceinline bool compareAndSet(std::size_t expectedSequence, std::size_t nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
         return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[maybe_unused]] forceinline index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
-    [[nodiscard]] forceinline index_type    addAndGet(index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-    [[nodiscard]] forceinline index_type    subAndGet(index_type value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
-    void                                    wait(index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
+    [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
+    [[nodiscard]] forceinline std::size_t addAndGet(std::size_t value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
+    [[nodiscard]] forceinline std::size_t   subAndGet(std::size_t value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
+    void                                    wait(std::size_t oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
     void                                    notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {
-
-using index_type = Sequence::index_type;
 
 /**
  * Get the minimum sequence from an array of Sequences.
@@ -75,11 +69,11 @@ using index_type = Sequence::index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, index_type minimum = std::numeric_limits<index_type>::max()) noexcept {
+inline std::size_t getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, std::size_t minimum = std::numeric_limits<std::size_t>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
     for (const auto& s : sequences) {
-        const index_type v = s->value();
+        const std::size_t v = s->value();
         if (v < minimum) {
             minimum = v;
         }
@@ -98,7 +92,7 @@ inline index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>
 #endif
 
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
-    index_type                                              cursorSequence;
+    std::size_t                                             cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 

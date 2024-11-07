@@ -230,7 +230,6 @@ class CircularBuffer {
     using Allocator  = std::pmr::polymorphic_allocator<T>;
     using BufferType = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
     using ClaimType  = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
-    using index_type = Sequence::index_type;
 
     struct BufferImpl {
         Allocator                 _allocator{};
@@ -295,7 +294,7 @@ class CircularBuffer {
         using pointer          = typename std::span<T>::reverse_iterator;
 
         explicit WriterSpan(Writer<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; };
-        explicit constexpr WriterSpan(Writer<U>* parent, std::size_t index, index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
+        explicit constexpr WriterSpan(Writer<U>* parent, std::size_t index, std::size_t sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
             _parent->_index        = index;
             _parent->_offset       = sequence - nSlotsToClaim;
             _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
@@ -401,7 +400,7 @@ class CircularBuffer {
         std::size_t  _nRequestedSamplesToPublish{0UZ}; // controls how many samples were already requested for publishing, multiple publish() calls are allowed
         bool         _isPublishRequested{true};        // controls if publish() was invoked
         std::size_t  _index{0UZ};
-        index_type   _offset{0};
+        std::size_t  _offset{0UZ};
         std::span<T> _internalSpan{};     // internal span is managed by Writer and is shared across all WriterSpans reserved by this Writer
         std::size_t  _instanceCount{0UZ}; // number of WriterSpan instances
 
@@ -446,7 +445,7 @@ class CircularBuffer {
                 return WriterSpan<U, policy>(this);
             }
 
-            const std::optional<index_type> sequence = _buffer->_claimStrategy.tryNext(nSamples);
+            const std::optional<std::size_t> sequence = _buffer->_claimStrategy.tryNext(nSamples);
             if (sequence.has_value()) {
                 const std::size_t index = (sequence.value() + _buffer->_size - nSamples) % _buffer->_size;
                 return WriterSpan<U, policy>(this, index, sequence.value(), nSamples);
@@ -470,7 +469,7 @@ class CircularBuffer {
             return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
-        [[nodiscard]] constexpr index_type  position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
+        [[nodiscard]] constexpr std::size_t position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
         [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer->_claimStrategy.getRemainingCapacity(); }
         [[nodiscard]] constexpr bool        isPublishRequested() const noexcept { return _isPublishRequested; }
         [[nodiscard]] constexpr std::size_t nRequestedSamplesToPublish() const noexcept { return _nRequestedSamplesToPublish; };
@@ -626,7 +625,7 @@ class CircularBuffer {
         using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
-        index_type                _readIndexCached;
+        std::size_t               _readIndexCached;
         BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
         std::size_t               _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
         std::size_t               _instanceCount{0UZ};                                        // number of ReaderSpan instances
@@ -699,7 +698,7 @@ class CircularBuffer {
             return ReaderSpan<U, policy>(this, bufferIndex(), nSamples);
         }
 
-        [[nodiscard]] constexpr index_type position() const noexcept { return _readIndexCached; }
+        [[nodiscard]] constexpr std::size_t position() const noexcept { return _readIndexCached; }
 
         [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer->_claimStrategy._publishCursor.value() - _readIndexCached; }
     }; // class Reader

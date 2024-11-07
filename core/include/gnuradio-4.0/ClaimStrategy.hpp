@@ -18,22 +18,20 @@
 namespace gr {
 
 template<typename T>
-concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::index_type sequence, const Sequence::index_type offset, const std::size_t nSlotsToClaim) {
-    { t.next(nSlotsToClaim) } -> std::same_as<Sequence::index_type>;
-    { t.tryNext(nSlotsToClaim) } -> std::same_as<std::optional<Sequence::index_type>>;
-    { t.getRemainingCapacity() } -> std::same_as<Sequence::index_type>;
+concept ClaimStrategyLike = requires(T /*const*/ t, const std::size_t sequence, const std::size_t offset, const std::size_t nSlotsToClaim) {
+    { t.next(nSlotsToClaim) } -> std::same_as<std::size_t>;
+    { t.tryNext(nSlotsToClaim) } -> std::same_as<std::optional<std::size_t>>;
+    { t.getRemainingCapacity() } -> std::same_as<std::size_t>;
     { t.publish(offset, nSlotsToClaim) } -> std::same_as<void>;
 };
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleProducerStrategy {
-    using index_type = Sequence::index_type;
-
     const std::size_t _size = SIZE;
 
 public:
     Sequence                                                _publishCursor;                      // slots are published and ready to be read until _publishCursor
-    index_type                                              _reserveCursor{kInitialCursorValue}; // slots can be reserved starting from _reserveCursor, no need for atomics since this is called by a single publisher
+    std::size_t                                             _reserveCursor{kInitialCursorValue}; // slots can be reserved starting from _reserveCursor, no need for atomics since this is called by a single publisher
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
@@ -42,7 +40,7 @@ public:
     SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
     void operator=(const SingleProducerStrategy&)          = delete;
 
-    index_type next(const std::size_t nSlotsToClaim = 1) noexcept {
+    std::size_t next(const std::size_t nSlotsToClaim = 1) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
         SpinWait spinWait;
@@ -56,7 +54,7 @@ public:
         return _reserveCursor;
     }
 
-    [[nodiscard]] std::optional<index_type> tryNext(const std::size_t nSlotsToClaim) noexcept {
+    [[nodiscard]] std::optional<std::size_t> tryNext(const std::size_t nSlotsToClaim) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
         if (getRemainingCapacity() < nSlotsToClaim) { // not enough slots in buffer
@@ -66,9 +64,9 @@ public:
         return _reserveCursor;
     }
 
-    [[nodiscard]] forceinline index_type getRemainingCapacity() const noexcept { return _size - (_reserveCursor - getMinReaderCursor()); }
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return _size - (_reserveCursor - getMinReaderCursor()); }
 
-    void publish(index_type offset, std::size_t nSlotsToClaim) {
+    void publish(std::size_t offset, std::size_t nSlotsToClaim) {
         const auto sequence = offset + nSlotsToClaim;
         _publishCursor.setValue(sequence);
         _reserveCursor = sequence;
@@ -78,7 +76,7 @@ public:
     }
 
 private:
-    [[nodiscard]] forceinline index_type getMinReaderCursor() const noexcept {
+    [[nodiscard]] forceinline std::size_t getMinReaderCursor() const noexcept {
         if (_readSequences->empty()) {
             return kInitialCursorValue;
         }
@@ -99,8 +97,6 @@ static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 requires(SIZE == std::dynamic_extent || std::has_single_bit(SIZE))
 class alignas(hardware_constructive_interference_size) MultiProducerStrategy {
-    using index_type = Sequence::index_type;
-
     AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
     const std::size_t  _size = SIZE;
     const std::size_t  _mask = SIZE - 1;
@@ -125,11 +121,11 @@ public:
     MultiProducerStrategy(const MultiProducerStrategy&&) = delete;
     void operator=(const MultiProducerStrategy&)         = delete;
 
-    [[nodiscard]] index_type next(std::size_t nSlotsToClaim = 1) {
+    [[nodiscard]] std::size_t next(std::size_t nSlotsToClaim = 1) {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        index_type currentReserveCursor;
-        index_type nextReserveCursor;
+        std::size_t currentReserveCursor;
+        std::size_t nextReserveCursor;
         SpinWait   spinWait;
         do {
             currentReserveCursor = _reserveCursor.value();
@@ -148,11 +144,11 @@ public:
         return nextReserveCursor;
     }
 
-    [[nodiscard]] std::optional<index_type> tryNext(std::size_t nSlotsToClaim = 1) noexcept {
+    [[nodiscard]] std::optional<std::size_t> tryNext(std::size_t nSlotsToClaim = 1) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        index_type currentReserveCursor;
-        index_type nextReserveCursor;
+        std::size_t currentReserveCursor;
+        std::size_t nextReserveCursor;
 
         do {
             currentReserveCursor = _reserveCursor.value();
@@ -164,17 +160,17 @@ public:
         return nextReserveCursor;
     }
 
-    [[nodiscard]] forceinline index_type getRemainingCapacity() const noexcept { return _size - (_reserveCursor.value() - getMinReaderCursor()); }
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return _size - (_reserveCursor.value() - getMinReaderCursor()); }
 
-    void publish(index_type offset, std::size_t nSlotsToClaim) {
+    void publish(std::size_t offset, std::size_t nSlotsToClaim) {
         if (nSlotsToClaim == 0) {
             return;
         }
         setSlotsStates(offset, offset + nSlotsToClaim, true);
 
         // ensure publish cursor is only advanced after all prior slots are published
-        index_type currentPublishCursor;
-        index_type nextPublishCursor;
+        std::size_t currentPublishCursor;
+        std::size_t nextPublishCursor;
         do {
             currentPublishCursor = _publishCursor.value();
             nextPublishCursor    = currentPublishCursor;
@@ -193,14 +189,14 @@ public:
     }
 
 private:
-    [[nodiscard]] forceinline index_type getMinReaderCursor() const noexcept {
+    [[nodiscard]] forceinline std::size_t getMinReaderCursor() const noexcept {
         if (_readSequences->empty()) {
             return kInitialCursorValue;
         }
         return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
     }
 
-    void setSlotsStates(index_type seqBegin, index_type seqEnd, bool value) {
+    void setSlotsStates(std::size_t seqBegin, std::size_t seqEnd, bool value) {
         assert(seqBegin <= seqEnd);
         assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
         const std::size_t beginSet  = seqBegin & _mask;
