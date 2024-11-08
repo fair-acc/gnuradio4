@@ -70,7 +70,7 @@ const boost::ut::suite BasicConceptsTests = [] {
 
         // runtime interface tests
         expect(eq(reader.available(), 0UZ));
-        expect(eq(reader.position(), std::make_signed_t<std::size_t>{kInitialCursorValue}));
+        expect(eq(reader.position(), kInitialCursorValue));
         ReaderSpanLike auto cSpan = reader.get(0UZ);
         expect(nothrow([&cSpan] { expect(eq(cSpan.size(), 0UZ)); })) << typeName << "throws" << "\n";
         expect(nothrow([&cSpan] { expect(cSpan.consume(0UZ)); }));
@@ -100,11 +100,10 @@ const boost::ut::suite SequenceTests = [] {
 
     "Sequence"_test = [] {
         using namespace gr;
-        using signed_index_type = std::make_signed_t<std::size_t>;
 #if not defined(__APPLE__)
         expect(eq(alignof(Sequence), 64UZ));
 #endif
-        expect(eq(0L, kInitialCursorValue));
+        expect(eq(0UZ, kInitialCursorValue));
         expect(nothrow([] { Sequence(); }));
         expect(nothrow([] { Sequence(2); }));
 
@@ -112,38 +111,38 @@ const boost::ut::suite SequenceTests = [] {
         expect(eq(s1.value(), kInitialCursorValue));
 
         const auto s2 = Sequence(2);
-        expect(eq(s2.value(), signed_index_type{2}));
+        expect(eq(s2.value(), 2UZ));
 
         expect(nothrow([&s1] { s1.setValue(3); }));
-        expect(eq(s1.value(), signed_index_type{3}));
+        expect(eq(s1.value(), 3UZ));
 
         expect(nothrow([&s1] { expect(s1.compareAndSet(3, 4)); }));
-        expect(nothrow([&s1] { expect(eq(s1.value(), signed_index_type{4})); }));
+        expect(nothrow([&s1] { expect(eq(s1.value(), 4UZ)); }));
         expect(nothrow([&s1] { expect(!s1.compareAndSet(3, 5)); }));
-        expect(eq(s1.value(), signed_index_type{4}));
+        expect(eq(s1.value(), 4UZ));
 
-        expect(eq(s1.incrementAndGet(), signed_index_type{5}));
-        expect(eq(s1.value(), signed_index_type{5}));
-        expect(eq(s1.addAndGet(2), signed_index_type{7}));
-        expect(eq(s1.value(), signed_index_type{7}));
+        expect(eq(s1.incrementAndGet(), 5UZ));
+        expect(eq(s1.value(), 5UZ));
+        expect(eq(s1.addAndGet(2), 7UZ));
+        expect(eq(s1.value(), 7UZ));
 
         std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> sequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
-        expect(eq(gr::detail::getMinimumSequence(*sequences), std::numeric_limits<signed_index_type>::max()));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), signed_index_type{2}));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), std::numeric_limits<std::size_t>::max()));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), 2UZ));
         sequences->emplace_back(std::make_shared<Sequence>(4));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), signed_index_type{4}));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 5), signed_index_type{4}));
-        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), signed_index_type{2}));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), 4UZ));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 5), 4UZ));
+        expect(eq(gr::detail::getMinimumSequence(*sequences, 2), 2UZ));
 
         auto cursor = std::make_shared<Sequence>(10);
         auto s3     = std::make_shared<Sequence>(1);
         expect(eq(sequences->size(), 1UZ));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), signed_index_type{4}));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), 4UZ));
         expect(nothrow([&sequences, &cursor, &s3] { gr::detail::addSequences(sequences, *cursor, {s3}); }));
         expect(eq(sequences->size(), 2UZ));
         // newly added sequences are set automatically to the cursor/write position
-        expect(eq(s3->value(), signed_index_type{10}));
-        expect(eq(gr::detail::getMinimumSequence(*sequences), signed_index_type{4}));
+        expect(eq(s3->value(), 10UZ));
+        expect(eq(gr::detail::getMinimumSequence(*sequences), 4UZ));
 
         expect(nothrow([&sequences, &cursor] { gr::detail::removeSequence(sequences, cursor); }));
         expect(eq(sequences->size(), 2UZ));

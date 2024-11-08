@@ -244,7 +244,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
                     {std::string(tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(std::chrono::system_clock::now())}, //
                     {std::string(tag::TRIGGER_OFFSET.shortKey()), 0.f}                                                                   //
                 },
-                static_cast<Tag::signed_index_type>(0));
+                0UZ);
             _emittedStartTrigger = true;
         }
 

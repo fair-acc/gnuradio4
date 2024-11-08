@@ -74,7 +74,7 @@ template<DataSetLike TDataSet>
                 std::ranges::fill(tagVector, std::numeric_limits<TValueType>::lowest());
             }
             for (const auto& [index, tag] : dataSet.timing_events[i]) {
-                if (index < 0 || index >= static_cast<Tag::signed_index_type>(tagVector.size())) {
+                if (index < 0 || index >= static_cast<std::ptrdiff_t>(tagVector.size())) {
                     continue;
                 }
                 tagVector[static_cast<std::size_t>(index)] = dataSet.signal_values[static_cast<std::size_t>(index)];
@@ -187,10 +187,7 @@ DataSet<T> waveform(WaveType waveType, size_t length, T samplingRate, T frequenc
 
         // check for zero crossing by seeing if the signs of previous and current values differ
         if ((previousValue < 0 && currentValue >= 0) || (previousValue > 0 && currentValue <= 0)) {
-            Tag tag;
-            tag.index       = static_cast<Tag::signed_index_type>(i); // Position of the zero crossing
-            tag.map["type"] = "Zero Crossing";
-            dataSet.timing_events[0].emplace_back(tag);
+            dataSet.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(i), property_map{{"type", "Zero Crossing"}});
         }
         previousValue = currentValue;
     }

@@ -206,9 +206,9 @@ struct DummyInputSpan : public DummyReaderSpan<T> {
     DummyReaderSpan<gr::Tag> rawTags{};
     bool                     isConnected = true;
     bool                     isSync      = true;
-    auto                     tags() { return std::views::empty<std::pair<Tag::signed_index_type, const property_map&>>; }
-    [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type /*untilLocalIndex*/) const { return {}; }
-    void                     consumeTags(gr::Tag::signed_index_type /*untilLocalIndex*/) {}
+    auto                     tags() { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
+    [[nodiscard]] inline Tag getMergedTag(std::size_t /*untilLocalIndex*/) const { return {}; }
+    void                     consumeTags(std::size_t /*untilLocalIndex*/) {}
 };
 static_assert(ReaderSpanLike<DummyInputSpan<int>>);
 static_assert(InputSpanLike<DummyInputSpan<int>>);
@@ -245,7 +245,7 @@ struct DummyOutputSpan : public DummyWriterSpan<T> {
     bool                     isConnected = true;
     bool                     isSync      = true;
 
-    void publishTag(property_map&, gr::Tag::signed_index_type) {}
+    void publishTag(property_map&, std::size_t) {}
 };
 static_assert(OutputSpanLike<DummyOutputSpan<int>>);
 

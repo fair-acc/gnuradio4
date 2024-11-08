@@ -311,7 +311,7 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
 
         fmt::println("##BusyLoopBlock produces data _invokeCount: {}", _invokeCount.value());
         std::ranges::copy(input.begin(), input.end(), output.begin());
-        produceCount = _produceCount.addAndGet(-1L);
+        produceCount = _produceCount.subAndGet(1L);
         return OK;
     }
 };
@@ -674,7 +674,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(monitor.in.isConnected()) << "monitor.in is connected";
         expect(monitor.out.isConnected()) << "monitor.out is connected";
 
-        expect(eq(0, scheduler.graph().progress().value())) << "initial progress definition (0)";
+        expect(eq(0UZ, scheduler.graph().progress().value())) << "initial progress definition (0)";
         std::expected<void, Error> schedulerResult;
         auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] { schedulerResult = scheduler.runAndWait(); });
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
