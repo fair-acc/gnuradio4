@@ -48,7 +48,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
             _historyBufferTags[1].index = 0;
             this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
         } else {
-            _historyBufferTags.push_back(Tag(-1, property_map()));
+            _historyBufferTags.push_back(Tag(0UZ, property_map()));
         }
     }
 

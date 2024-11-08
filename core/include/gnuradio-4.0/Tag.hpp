@@ -66,15 +66,10 @@ concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
 struct alignas(hardware_constructive_interference_size) Tag {
-    using signed_index_type = std::make_signed_t<std::size_t>;
-    signed_index_type index{0};
-    property_map      map{};
+    std::size_t  index{0UZ};
+    property_map map{};
 
     GR_MAKE_REFLECTABLE(Tag, index, map);
-
-    Tag() = default; // TODO: remove -- needed only for Clang <=15
-
-    Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
 
     bool operator==(const Tag& other) const = default;
 

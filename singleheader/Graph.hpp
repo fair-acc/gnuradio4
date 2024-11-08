@@ -11960,6 +11960,7 @@ template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
 
+#include <algorithm>
 #include <any>
 #include <complex>
 #include <set>
@@ -12100,7 +12101,7 @@ concept WriterSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
 template<class T>
 concept BufferReaderLike = requires(T /*const*/ t, const std::size_t nItems) {
     { t.get(nItems) }; // TODO: get() returns CircularBuffer::ReaderSpan
-    { t.position() } -> std::same_as<std::make_signed_t<std::size_t>>;
+    { t.position() } -> std::same_as<std::size_t>;
     { t.available() } -> std::same_as<std::size_t>;
     { t.buffer() };
     { t.nSamplesConsumed() } -> std::same_as<std::size_t>;
@@ -12320,7 +12321,7 @@ using std::hardware_destructive_interference_size;
 inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
+static constexpr const std::size_t kInitialCursorValue = 0L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
@@ -12329,37 +12330,32 @@ static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
  * around the volatile field.
  */
 class Sequence {
-public:
-    using signed_index_type = std::make_signed_t<std::size_t>;
-
-private:
-    alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> _fieldsValue{};
 
 public:
     Sequence(const Sequence&)       = delete;
     Sequence(const Sequence&&)      = delete;
     void operator=(const Sequence&) = delete;
 
-    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+    explicit Sequence(std::size_t initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
 
-    [[nodiscard]] forceinline signed_index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
-    forceinline void                            setValue(const signed_index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
+    [[nodiscard]] forceinline std::size_t value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
+    forceinline void                      setValue(const std::size_t value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
 
-    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
+    [[nodiscard]] forceinline bool compareAndSet(std::size_t expectedSequence, std::size_t nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
         return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[maybe_unused]] forceinline signed_index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
-    [[nodiscard]] forceinline signed_index_type    addAndGet(signed_index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-    void                                           wait(signed_index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
-    void                                           notify_all() noexcept { _fieldsValue.notify_all(); }
+    [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
+    [[nodiscard]] forceinline std::size_t addAndGet(std::size_t value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
+    [[nodiscard]] forceinline std::size_t subAndGet(std::size_t value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
+    void                                  wait(std::size_t oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
+    void                                  notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {
-
-using signed_index_type = Sequence::signed_index_type;
 
 /**
  * Get the minimum sequence from an array of Sequences.
@@ -12368,11 +12364,11 @@ using signed_index_type = Sequence::signed_index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
+inline std::size_t getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, std::size_t minimum = std::numeric_limits<std::size_t>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
     for (const auto& s : sequences) {
-        const signed_index_type v = s->value();
+        const std::size_t v = s->value();
         if (v < minimum) {
             minimum = v;
         }
@@ -12391,7 +12387,7 @@ inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Se
 #endif
 
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
-    signed_index_type                                       cursorSequence;
+    std::size_t                                             cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 
@@ -12513,8 +12509,8 @@ namespace gr {
  * \returns the sequence that is available which may be greater than the requested sequence.
  */
 template<typename T>
-inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
+inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::size_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::size_t>;
 };
 static_assert(!isWaitStrategy<int>);
 
@@ -12541,7 +12537,7 @@ class BlockingWaitStrategy {
     std::condition_variable_any _conditionVariable;
 
 public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    std::size_t waitFor(const std::size_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
         if (cursor.value() < sequence) {
             std::unique_lock uniqueLock(_gate);
 
@@ -12551,7 +12547,7 @@ public:
             }
         }
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -12572,8 +12568,8 @@ static_assert(WaitStrategyLike<BlockingWaitStrategy>);
  * It is best used when threads can be bound to specific CPU cores.
  */
 struct BusySpinWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        std::int64_t availableSequence;
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -12597,7 +12593,7 @@ public:
         : _retries(retries) {
     }
 
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _retries;
         const auto waitMethod = [&counter]() {
             // optional: barrier check alert
@@ -12612,7 +12608,7 @@ public:
             }
         };
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             waitMethod();
         }
@@ -12637,7 +12633,7 @@ public:
     explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
         : _timeout(timeout) {}
 
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    std::size_t waitFor(const std::size_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
         auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
 
         if (cursor.value() < sequence) {
@@ -12652,7 +12648,7 @@ public:
             }
         }
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -12676,7 +12672,7 @@ class YieldingWaitStrategy {
     const std::size_t _spinTries = 100;
 
 public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _spinTries;
         const auto waitMethod = [&counter]() {
             // optional: barrier check alert
@@ -12688,7 +12684,7 @@ public:
             }
         };
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             waitMethod();
         }
@@ -12700,7 +12696,7 @@ static_assert(WaitStrategyLike<YieldingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
 
 struct NoWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
         // wait for nothing
         return sequence;
     }
@@ -12813,8 +12809,8 @@ public:
  * Latency spikes can occur after quiet periods.
  */
 struct SpinWaitWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
-        std::int64_t availableSequence;
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
+        std::size_t availableSequence;
 
         SpinWait     spinWait;
         while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
@@ -12863,22 +12859,20 @@ public:
 namespace gr {
 
 template<typename T>
-concept ClaimStrategyLike = requires(T /*const*/ t, const Sequence::signed_index_type sequence, const Sequence::signed_index_type offset, const std::size_t nSlotsToClaim) {
-    { t.next(nSlotsToClaim) } -> std::same_as<Sequence::signed_index_type>;
-    { t.tryNext(nSlotsToClaim) } -> std::same_as<std::optional<Sequence::signed_index_type>>;
-    { t.getRemainingCapacity() } -> std::same_as<Sequence::signed_index_type>;
+concept ClaimStrategyLike = requires(T /*const*/ t, const std::size_t sequence, const std::size_t offset, const std::size_t nSlotsToClaim) {
+    { t.next(nSlotsToClaim) } -> std::same_as<std::size_t>;
+    { t.tryNext(nSlotsToClaim) } -> std::same_as<std::optional<std::size_t>>;
+    { t.getRemainingCapacity() } -> std::same_as<std::size_t>;
     { t.publish(offset, nSlotsToClaim) } -> std::same_as<void>;
 };
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(hardware_constructive_interference_size) SingleProducerStrategy {
-    using signed_index_type = Sequence::signed_index_type;
-
     const std::size_t _size = SIZE;
 
 public:
     Sequence                                                _publishCursor;                      // slots are published and ready to be read until _publishCursor
-    signed_index_type                                       _reserveCursor{kInitialCursorValue}; // slots can be reserved starting from _reserveCursor, no need for atomics since this is called by a single publisher
+    std::size_t                                             _reserveCursor{kInitialCursorValue}; // slots can be reserved starting from _reserveCursor, no need for atomics since this is called by a single publisher
     TWaitStrategy                                           _waitStrategy;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
@@ -12887,34 +12881,34 @@ public:
     SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
     void operator=(const SingleProducerStrategy&)          = delete;
 
-    signed_index_type next(const std::size_t nSlotsToClaim = 1) noexcept {
-        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+    std::size_t next(const std::size_t nSlotsToClaim = 1) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
         SpinWait spinWait;
-        while (getRemainingCapacity() < static_cast<signed_index_type>(nSlotsToClaim)) { // while not enough slots in buffer
+        while (getRemainingCapacity() < nSlotsToClaim) { // while not enough slots in buffer
             if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
                 _waitStrategy.signalAllWhenBlocking();
             }
             spinWait.spinOnce();
         }
-        _reserveCursor += static_cast<signed_index_type>(nSlotsToClaim);
+        _reserveCursor += nSlotsToClaim;
         return _reserveCursor;
     }
 
-    [[nodiscard]] std::optional<signed_index_type> tryNext(const std::size_t nSlotsToClaim) noexcept {
-        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+    [[nodiscard]] std::optional<std::size_t> tryNext(const std::size_t nSlotsToClaim) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        if (getRemainingCapacity() < static_cast<signed_index_type>(nSlotsToClaim)) { // not enough slots in buffer
+        if (getRemainingCapacity() < nSlotsToClaim) { // not enough slots in buffer
             return std::nullopt;
         }
-        _reserveCursor += static_cast<signed_index_type>(nSlotsToClaim);
+        _reserveCursor += nSlotsToClaim;
         return _reserveCursor;
     }
 
-    [[nodiscard]] forceinline signed_index_type getRemainingCapacity() const noexcept { return static_cast<signed_index_type>(_size) - (_reserveCursor - getMinReaderCursor()); }
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return _size - (_reserveCursor - getMinReaderCursor()); }
 
-    void publish(signed_index_type offset, std::size_t nSlotsToClaim) {
-        const auto sequence = offset + static_cast<signed_index_type>(nSlotsToClaim);
+    void publish(std::size_t offset, std::size_t nSlotsToClaim) {
+        const auto sequence = offset + nSlotsToClaim;
         _publishCursor.setValue(sequence);
         _reserveCursor = sequence;
         if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
@@ -12923,7 +12917,7 @@ public:
     }
 
 private:
-    [[nodiscard]] forceinline signed_index_type getMinReaderCursor() const noexcept {
+    [[nodiscard]] forceinline std::size_t getMinReaderCursor() const noexcept {
         if (_readSequences->empty()) {
             return kInitialCursorValue;
         }
@@ -12944,8 +12938,6 @@ static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 requires(SIZE == std::dynamic_extent || std::has_single_bit(SIZE))
 class alignas(hardware_constructive_interference_size) MultiProducerStrategy {
-    using signed_index_type = Sequence::signed_index_type;
-
     AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
     const std::size_t  _size = SIZE;
     const std::size_t  _mask = SIZE - 1;
@@ -12970,16 +12962,16 @@ public:
     MultiProducerStrategy(const MultiProducerStrategy&&) = delete;
     void operator=(const MultiProducerStrategy&)         = delete;
 
-    [[nodiscard]] signed_index_type next(std::size_t nSlotsToClaim = 1) {
-        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+    [[nodiscard]] std::size_t next(std::size_t nSlotsToClaim = 1) {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        signed_index_type currentReserveCursor;
-        signed_index_type nextReserveCursor;
-        SpinWait          spinWait;
+        std::size_t currentReserveCursor;
+        std::size_t nextReserveCursor;
+        SpinWait    spinWait;
         do {
             currentReserveCursor = _reserveCursor.value();
-            nextReserveCursor    = currentReserveCursor + static_cast<signed_index_type>(nSlotsToClaim);
-            if (nextReserveCursor - getMinReaderCursor() > static_cast<signed_index_type>(_size)) { // not enough slots in buffer
+            nextReserveCursor    = currentReserveCursor + nSlotsToClaim;
+            if (nextReserveCursor - getMinReaderCursor() > _size) { // not enough slots in buffer
                 if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
                     _waitStrategy.signalAllWhenBlocking();
                 }
@@ -12993,38 +12985,38 @@ public:
         return nextReserveCursor;
     }
 
-    [[nodiscard]] std::optional<signed_index_type> tryNext(std::size_t nSlotsToClaim = 1) noexcept {
-        assert((nSlotsToClaim > 0 && nSlotsToClaim <= static_cast<std::size_t>(_size)) && "nSlotsToClaim must be > 0 and <= bufferSize");
+    [[nodiscard]] std::optional<std::size_t> tryNext(std::size_t nSlotsToClaim = 1) noexcept {
+        assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        signed_index_type currentReserveCursor;
-        signed_index_type nextReserveCursor;
+        std::size_t currentReserveCursor;
+        std::size_t nextReserveCursor;
 
         do {
             currentReserveCursor = _reserveCursor.value();
-            nextReserveCursor    = currentReserveCursor + static_cast<signed_index_type>(nSlotsToClaim);
-            if (nextReserveCursor - getMinReaderCursor() > static_cast<signed_index_type>(_size)) { // not enough slots in buffer
+            nextReserveCursor    = currentReserveCursor + nSlotsToClaim;
+            if (nextReserveCursor - getMinReaderCursor() > _size) { // not enough slots in buffer
                 return std::nullopt;
             }
         } while (!_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor));
         return nextReserveCursor;
     }
 
-    [[nodiscard]] forceinline signed_index_type getRemainingCapacity() const noexcept { return static_cast<signed_index_type>(_size) - (_reserveCursor.value() - getMinReaderCursor()); }
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return _size - (_reserveCursor.value() - getMinReaderCursor()); }
 
-    void publish(signed_index_type offset, std::size_t nSlotsToClaim) {
+    void publish(std::size_t offset, std::size_t nSlotsToClaim) {
         if (nSlotsToClaim == 0) {
             return;
         }
-        setSlotsStates(offset, offset + static_cast<signed_index_type>(nSlotsToClaim), true);
+        setSlotsStates(offset, offset + nSlotsToClaim, true);
 
         // ensure publish cursor is only advanced after all prior slots are published
-        signed_index_type currentPublishCursor;
-        signed_index_type nextPublishCursor;
+        std::size_t currentPublishCursor;
+        std::size_t nextPublishCursor;
         do {
             currentPublishCursor = _publishCursor.value();
             nextPublishCursor    = currentPublishCursor;
 
-            while (_slotStates.test(static_cast<std::size_t>(nextPublishCursor) & _mask) && static_cast<std::size_t>(nextPublishCursor - currentPublishCursor) < _slotStates.size()) {
+            while (_slotStates.test(nextPublishCursor & _mask) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
                 nextPublishCursor++;
             }
         } while (!_publishCursor.compareAndSet(currentPublishCursor, nextPublishCursor));
@@ -13038,18 +13030,19 @@ public:
     }
 
 private:
-    [[nodiscard]] forceinline signed_index_type getMinReaderCursor() const noexcept {
+    [[nodiscard]] forceinline std::size_t getMinReaderCursor() const noexcept {
         if (_readSequences->empty()) {
             return kInitialCursorValue;
         }
         return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
     }
 
-    void setSlotsStates(signed_index_type seqBegin, signed_index_type seqEnd, bool value) {
-        assert(static_cast<std::size_t>(seqEnd - seqBegin) <= _size && "Begin cannot overturn end");
-        const std::size_t beginSet  = static_cast<std::size_t>(seqBegin) & _mask;
-        const std::size_t endSet    = static_cast<std::size_t>(seqEnd) & _mask;
-        const auto        diffReset = static_cast<std::size_t>(seqEnd - seqBegin);
+    void setSlotsStates(std::size_t seqBegin, std::size_t seqEnd, bool value) {
+        assert(seqBegin <= seqEnd);
+        assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
+        const std::size_t beginSet  = seqBegin & _mask;
+        const std::size_t endSet    = seqEnd & _mask;
+        const auto        diffReset = seqEnd - seqBegin;
 
         if (beginSet <= endSet && diffReset < _size) {
             _slotStates.set(beginSet, endSet, value);
@@ -13277,10 +13270,9 @@ enum class WriterSpanReservePolicy {
  */
 template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producerType = ProducerType::Single, WaitStrategyLike TWaitStrategy = SleepingWaitStrategy>
 class CircularBuffer {
-    using Allocator         = std::pmr::polymorphic_allocator<T>;
-    using BufferType        = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
-    using ClaimType         = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
-    using signed_index_type = Sequence::signed_index_type;
+    using Allocator  = std::pmr::polymorphic_allocator<T>;
+    using BufferType = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
+    using ClaimType  = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
 
     struct BufferImpl {
         Allocator                 _allocator{};
@@ -13345,9 +13337,9 @@ class CircularBuffer {
         using pointer          = typename std::span<T>::reverse_iterator;
 
         explicit WriterSpan(Writer<U>* parent) noexcept : _parent(parent) { _parent->_instanceCount++; };
-        explicit constexpr WriterSpan(Writer<U>* parent, std::size_t index, signed_index_type sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
+        explicit constexpr WriterSpan(Writer<U>* parent, std::size_t index, std::size_t sequence, std::size_t nSlotsToClaim) noexcept : _parent(parent) {
             _parent->_index        = index;
-            _parent->_offset       = sequence - static_cast<signed_index_type>(nSlotsToClaim);
+            _parent->_offset       = sequence - nSlotsToClaim;
             _parent->_internalSpan = std::span<T>(&_parent->_buffer->_data.data()[index], nSlotsToClaim);
             _parent->_instanceCount++;
         }
@@ -13385,7 +13377,7 @@ class CircularBuffer {
                     std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
                 }
                 _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
-                _parent->_offset += static_cast<signed_index_type>(_parent->_nRequestedSamplesToPublish);
+                _parent->_offset += _parent->_nRequestedSamplesToPublish;
 #ifndef NDEBUG
                 if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
@@ -13448,12 +13440,12 @@ class CircularBuffer {
 
         // doesn't have to be atomic because this writer is accessed (by design) always by the same thread.
         // These are the parameters for WriterSpan, only one WriterSpan can be reserved per writer
-        std::size_t       _nRequestedSamplesToPublish{0UZ}; // controls how many samples were already requested for publishing, multiple publish() calls are allowed
-        bool              _isPublishRequested{true};        // controls if publish() was invoked
-        std::size_t       _index{0UZ};
-        signed_index_type _offset{0};
-        std::span<T>      _internalSpan{};     // internal span is managed by Writer and is shared across all WriterSpans reserved by this Writer
-        std::size_t       _instanceCount{0UZ}; // number of WriterSpan instances
+        std::size_t  _nRequestedSamplesToPublish{0UZ}; // controls how many samples were already requested for publishing, multiple publish() calls are allowed
+        bool         _isPublishRequested{true};        // controls if publish() was invoked
+        std::size_t  _index{0UZ};
+        std::size_t  _offset{0UZ};
+        std::span<T> _internalSpan{};     // internal span is managed by Writer and is shared across all WriterSpans reserved by this Writer
+        std::size_t  _instanceCount{0UZ}; // number of WriterSpan instances
 
     public:
         Writer() = delete;
@@ -13496,9 +13488,9 @@ class CircularBuffer {
                 return WriterSpan<U, policy>(this);
             }
 
-            const std::optional<signed_index_type> sequence = _buffer->_claimStrategy.tryNext(nSamples);
+            const std::optional<std::size_t> sequence = _buffer->_claimStrategy.tryNext(nSamples);
             if (sequence.has_value()) {
-                const std::size_t index = (static_cast<std::size_t>(sequence.value()) + _buffer->_size - nSamples) % _buffer->_size;
+                const std::size_t index = (sequence.value() + _buffer->_size - nSamples) % _buffer->_size;
                 return WriterSpan<U, policy>(this, index, sequence.value(), nSamples);
             } else {
                 return WriterSpan<U, policy>(this);
@@ -13516,14 +13508,14 @@ class CircularBuffer {
             }
 
             const auto        sequence = _buffer->_claimStrategy.next(nSamples);
-            const std::size_t index    = (static_cast<std::size_t>(sequence) + _buffer->_size - nSamples) % _buffer->_size;
+            const std::size_t index    = (sequence + _buffer->_size - nSamples) % _buffer->_size;
             return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
-        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
-        [[nodiscard]] constexpr std::size_t       available() const noexcept { return static_cast<std::size_t>(_buffer->_claimStrategy.getRemainingCapacity()); }
-        [[nodiscard]] constexpr bool              isPublishRequested() const noexcept { return _isPublishRequested; }
-        [[nodiscard]] constexpr std::size_t       nRequestedSamplesToPublish() const noexcept { return _nRequestedSamplesToPublish; };
+        [[nodiscard]] constexpr std::size_t position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
+        [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer->_claimStrategy.getRemainingCapacity(); }
+        [[nodiscard]] constexpr bool        isPublishRequested() const noexcept { return _isPublishRequested; }
+        [[nodiscard]] constexpr std::size_t nRequestedSamplesToPublish() const noexcept { return _nRequestedSamplesToPublish; };
 
     private:
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
@@ -13651,7 +13643,7 @@ class CircularBuffer {
             _parent->_nSamplesFirstGet           = std::numeric_limits<std::size_t>::max();
             _parent->_nRequestedSamplesToConsume = std::numeric_limits<std::size_t>::max();
             if constexpr (strict_check) {
-                if (nSamples <= 0) {
+                if (nSamples == 0) {
                     return true;
                 }
 
@@ -13659,7 +13651,7 @@ class CircularBuffer {
                     return false;
                 }
             }
-            _parent->_readIndexCached  = _parent->_readIndex->addAndGet(static_cast<signed_index_type>(nSamples));
+            _parent->_readIndexCached  = _parent->_readIndex->addAndGet(nSamples);
             _parent->_nSamplesConsumed = nSamples;
             return true;
         }
@@ -13676,7 +13668,7 @@ class CircularBuffer {
         using BufferTypeLocal = std::shared_ptr<BufferImpl>;
 
         std::shared_ptr<Sequence> _readIndex = std::make_shared<Sequence>();
-        signed_index_type         _readIndexCached;
+        std::size_t               _readIndexCached;
         BufferTypeLocal           _buffer;                                                    // controls buffer life-cycle, the rest are cache optimisations
         std::size_t               _nSamplesFirstGet{std::numeric_limits<std::size_t>::max()}; // Maximum number of samples returned by the first call to get() (when reader is consumed). Subsequent calls to get(), without calling consume() again, will return up to _nSamplesFirstGet.
         std::size_t               _instanceCount{0UZ};                                        // number of ReaderSpan instances
@@ -13688,7 +13680,7 @@ class CircularBuffer {
 
         std::size_t bufferIndex() const noexcept {
             const auto bitmask = _buffer->_size - 1;
-            return static_cast<std::size_t>(_readIndexCached) & bitmask;
+            return _readIndexCached & bitmask;
         }
 
     public:
@@ -13749,9 +13741,9 @@ class CircularBuffer {
             return ReaderSpan<U, policy>(this, bufferIndex(), nSamples);
         }
 
-        [[nodiscard]] constexpr signed_index_type position() const noexcept { return _readIndexCached; }
+        [[nodiscard]] constexpr std::size_t position() const noexcept { return _readIndexCached; }
 
-        [[nodiscard]] constexpr std::size_t available() const noexcept { return static_cast<std::size_t>(_buffer->_claimStrategy._publishCursor.value() - _readIndexCached); }
+        [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer->_claimStrategy._publishCursor.value() - _readIndexCached; }
     }; // class Reader
     // static_assert(BufferReaderLike<Reader<T>>);
 
@@ -14449,15 +14441,10 @@ concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
 struct alignas(hardware_constructive_interference_size) Tag {
-    using signed_index_type = std::make_signed_t<std::size_t>;
-    signed_index_type index{0};
-    property_map      map{};
+    std::size_t  index{0UZ};
+    property_map map{};
 
     GR_MAKE_REFLECTABLE(Tag, index, map);
-
-    Tag() = default; // TODO: remove -- needed only for Clang <=15
-
-    Tag(signed_index_type index_, property_map map_) noexcept : index(index_), map(std::move(map_)) {} // TODO: remove -- needed only for Clang <=15
 
     bool operator==(const Tag& other) const = default;
 
@@ -14670,7 +14657,7 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
 
     // meta data
     requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<Tag>>>;
+    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, property_map>>>>;
 };
 
 template<typename T>
@@ -14698,8 +14685,8 @@ struct DataSet {
     std::vector<std::vector<T>> signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
-    std::vector<pmt_map>          meta_information{};
-    std::vector<std::vector<Tag>> timing_events{};
+    std::vector<pmt_map>                                              meta_information{};
+    std::vector<std::vector<std::pair<std::ptrdiff_t, property_map>>> timing_events{};
 
     GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges, meta_information, timing_events);
 };
@@ -15684,7 +15671,7 @@ struct Async {};
  * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` and including first sample.
  */
 template<typename T>
-concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, gr::Tag::signed_index_type n) {
+concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, std::size_t n) {
     { span.consume(0) };
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
@@ -15708,7 +15695,7 @@ concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && 
  * - Publishing Tags: Use `publishTag(tagData, tagOffset)` to publish tags. `tagOffset` is relative to the first sample.
  */
 template<typename T>
-concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& span, property_map& tagData, Tag::signed_index_type tagOffset) {
+concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output_range<T, std::remove_cvref_t<typename T::value_type>> && SpanLike<T> && requires(T& span, property_map& tagData, std::size_t tagOffset) {
     span.publish(0UZ);
     { span.isConnected } -> std::convertible_to<bool>;
     { span.isSync } -> std::convertible_to<bool>;
@@ -15849,15 +15836,15 @@ struct Port {
 
     template<SpanReleasePolicy spanReleasePolicy>
     struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
-        TagReaderSpanType      rawTags;
-        Tag::signed_index_type streamIndex;
-        bool                   isConnected = true; // true if Port is connected
-        bool                   isSync      = true; // true if  Port is Sync
+        TagReaderSpanType rawTags;
+        std::size_t       streamIndex;
+        bool              isConnected = true; // true if Port is connected
+        bool              isSync      = true; // true if  Port is Sync
 
         InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
             : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)),               //
-              rawTags(getTags(static_cast<gr::Tag::signed_index_type>(nSamples), tagReader, reader.position())), //
-              streamIndex{reader.position()}, isConnected(connected), isSync(sync) {};
+              rawTags(getTags(nSamples, tagReader, reader.position())),                                          //
+              streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
         InputSpan(const InputSpan&)            = default;
         InputSpan& operator=(const InputSpan&) = default;
@@ -15877,42 +15864,35 @@ struct Port {
         }
 
         [[nodiscard]] auto tags() {
-            return std::views::transform(rawTags, [this](auto& tag) { return std::make_pair(std::max(tag.index, 0l) - streamIndex, std::ref(tag.map)); });
+            return std::views::transform(rawTags, [this](auto& tag) {
+                const auto relIndex = tag.index >= streamIndex ? static_cast<std::ptrdiff_t>(tag.index - streamIndex) : -static_cast<std::ptrdiff_t>(streamIndex - tag.index);
+                return std::make_pair(relIndex, std::ref(tag.map));
+            });
         }
 
-        void consumeTags(gr::Tag::signed_index_type untilLocalIndex) {
+        void consumeTags(std::size_t untilLocalIndex) {
             std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
             std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
-        [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type untilLocalIndex = 0) const {
+        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 0) const {
             auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                 assert(&sourceMap != &destinationMap);
                 for (const auto& [key, value] : sourceMap) {
                     destinationMap.insert_or_assign(key, value);
                 }
             };
-            Tag result{-1, {}};
+            Tag result{0UZ, {}};
             std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
             return result;
         }
 
     private:
-        auto getTags(gr::Tag::signed_index_type nSamples, TagReaderType& reader, gr::Tag::signed_index_type _currentStreamOffset) {
-            std::size_t nTagsProcessed    = 0UZ;
-            bool        properTagDistance = false;
-            for (const Tag& tag : reader.get(reader.available())) {
-                const bool tagIsWithinRange = (tag.index != -1) && tag.index < _currentStreamOffset + nSamples;
-                if ((!properTagDistance && tag.index < 0) || tagIsWithinRange) { // 'index == -1' wildcard Tag index -> process unconditionally
-                    nTagsProcessed++;
-                    if (tagIsWithinRange) { // detected regular Tag position, ignore and stop at further wildcard Tags
-                        properTagDistance = true;
-                    }
-                } else {
-                    break; // Tag is wildcard (index == -1) after a regular or newer than the present reading position (+ offset)
-                }
-            }
-            return reader.get(nTagsProcessed);
+        auto getTags(std::size_t nSamples, TagReaderType& reader, std::size_t currentStreamOffset) {
+            const auto tags = reader.get(reader.available());
+            const auto it   = std::ranges::find_if_not(tags, [nSamples, currentStreamOffset](const auto& tag) { return tag.index < currentStreamOffset + nSamples; });
+            const auto n    = static_cast<std::size_t>(std::distance(tags.begin(), it));
+            return reader.get(n);
         }
     }; // end of InputSpan
     static_assert(ReaderSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
@@ -15923,23 +15903,23 @@ struct Port {
 
     template<SpanReleasePolicy spanReleasePolicy, WriterSpanReservePolicy spanReservePolicy>
     struct OutputSpan : public WriterSpanType<spanReleasePolicy> {
-        TagWriterSpanType      tags;
-        Tag::signed_index_type streamIndex;
-        std::size_t            tagsPublished{0UZ};
-        bool                   isConnected = true; // true if Port is connected
-        bool                   isSync      = true; // true if  Port is Sync
+        TagWriterSpanType tags;
+        std::size_t       streamIndex;
+        std::size_t       tagsPublished{0UZ};
+        bool              isConnected = true; // true if Port is connected
+        bool              isSync      = true; // true if  Port is Sync
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::Reserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template reserve<spanReleasePolicy>(nSamples)), //
               tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {};
+              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, Tag::signed_index_type streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
             : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), //
               tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
-              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {};
+              streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)            = default;
         OutputSpan& operator=(const OutputSpan&) = default;
@@ -15952,14 +15932,14 @@ struct Port {
             }
         }
 
-        inline constexpr void publishTag(property_map&& tagData, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(std::move(tagData), tagOffset); }
+        inline constexpr void publishTag(property_map&& tagData, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tagData), tagOffset); }
 
-        inline constexpr void publishTag(const property_map& tagData, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(tagData, tagOffset); }
+        inline constexpr void publishTag(const property_map& tagData, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(tagData, tagOffset); }
 
     private:
         template<PropertyMapType PropertyMap>
-        inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::signed_index_type tagOffset) noexcept {
-            const auto index = streamIndex + static_cast<gr::Tag::signed_index_type>(tagOffset);
+        inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
+            const auto index = streamIndex + tagOffset;
 
             if (tagsPublished > 0) {
                 auto& lastTag = tags[tagsPublished - 1];
@@ -16224,13 +16204,13 @@ public:
         return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+    inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
         processPublishTag(std::move(tag_data), tagOffset);
     }
 
-    inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept
+    inline constexpr void publishTag(const property_map& tag_data, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
         processPublishTag(tag_data, tagOffset);
@@ -16259,12 +16239,11 @@ public:
 
 private:
     template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tag_data, Tag::signed_index_type tagOffset) noexcept
+    inline constexpr void processPublishTag(PropertyMap&& tag_data, std::size_t tagOffset) noexcept
     requires(kIsOutput)
     {
-        const auto newTagIndex = tagOffset < 0 ? tagOffset : streamWriter().position() + tagOffset;
-
-        if (isConnected() && tagOffset >= 0 && (_cachedTag.index != newTagIndex && _cachedTag.index != -1)) { // do not cache tags that have an explicit index
+        const auto newTagIndex = streamWriter().position() + tagOffset;
+        if (isConnected() && _cachedTag.index != newTagIndex) {
             publishPendingTags();
         }
         _cachedTag.index = newTagIndex;
@@ -16277,7 +16256,7 @@ private:
                 _cachedTag.map.insert_or_assign(key, value);
             }
         }
-        if (isConnected() && (tagOffset != -1L || _cachedTag.map.contains(gr::tag::END_OF_STREAM))) { // force tag publishing for explicitly published tags or EOS
+        if (isConnected()) {
             publishPendingTags();
         }
     }
@@ -16517,41 +16496,39 @@ static_assert(PortLike<DynamicPort>);
 
 namespace detail {
 template<typename T>
-concept TagPredicate = requires(const T& t, const Tag& tag, Tag::signed_index_type readPosition) {
+concept TagPredicate = requires(const T& t, const Tag& tag, std::size_t readPosition) {
     { t(tag, readPosition) } -> std::convertible_to<bool>;
 };
-inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag& tag, Tag::signed_index_type readPosition) noexcept { return tag.index >= readPosition; };
-inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, Tag::signed_index_type readPosition) noexcept {
-    auto eosTagIter = tag.map.find(gr::tag::END_OF_STREAM);
-    if (eosTagIter != tag.map.end() && eosTagIter->second == true) {
-        if (tag.index >= readPosition || tag.index < 0) {
-            return true;
-        }
+inline constexpr TagPredicate auto defaultTagMatcher    = [](const Tag& tag, std::size_t readPosition) noexcept { return tag.index >= readPosition; };
+inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, std::size_t readPosition) noexcept {
+    if (tag.index < readPosition) {
+        return false;
     }
-    return false;
+    auto eosTagIter = tag.map.find(gr::tag::END_OF_STREAM);
+    return eosTagIter != tag.map.end() && eosTagIter->second == true;
 };
 } // namespace detail
 
-inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, Tag::signed_index_type readOffset) {
+inline constexpr std::optional<std::size_t> nSamplesToNextTagConditional(PortLike auto& port, detail::TagPredicate auto& predicate, std::size_t readOffset) {
     ReaderSpanLike auto tagData = port.tagReader().get();
     if (!port.isConnected() || tagData.empty()) [[likely]] {
         return std::nullopt; // default: no tags in sight
     }
-    const Tag::signed_index_type readPosition = port.streamReader().position();
+    const std::size_t readPosition = port.streamReader().position();
 
-    // at least one tag is present -> if tag is not on the first tag position read up to the tag position, or if the tag has a special 'index = -1'
+    // at least one tag is present -> if tag is not on the first tag position read up to the tag position
     const auto firstMatchingTag = std::ranges::find_if(tagData, [&](const auto& tag) { return predicate(tag, readPosition + readOffset); });
     std::ignore                 = tagData.consume(0UZ);
     if (firstMatchingTag != tagData.end()) {
-        return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, Tag::signed_index_type(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
+        return static_cast<std::size_t>(std::max(firstMatchingTag->index - readPosition, std::size_t(0))); // Tags in the past will have a negative distance -> deliberately map them to '0'
     } else {
         return std::nullopt;
     }
 }
 
-inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> nSamplesUntilNextTag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultTagMatcher, offset); }
 
-inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, Tag::signed_index_type offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
+inline constexpr std::optional<std::size_t> samples_to_eos_tag(PortLike auto& port, std::size_t offset = 0) { return nSamplesToNextTagConditional(port, detail::defaultEOSTagMatcher, offset); }
 
 } // namespace gr
 
@@ -19470,9 +19447,9 @@ struct DummyInputSpan : public DummyReaderSpan<T> {
     DummyReaderSpan<gr::Tag> rawTags{};
     bool                     isConnected = true;
     bool                     isSync      = true;
-    auto                     tags() { return std::views::empty<std::pair<Tag::signed_index_type, const property_map&>>; }
-    [[nodiscard]] inline Tag getMergedTag(gr::Tag::signed_index_type /*untilLocalIndex*/) const { return {}; }
-    void                     consumeTags(gr::Tag::signed_index_type /*untilLocalIndex*/) {}
+    auto                     tags() { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
+    [[nodiscard]] inline Tag getMergedTag(std::size_t /*untilLocalIndex*/) const { return {}; }
+    void                     consumeTags(std::size_t /*untilLocalIndex*/) {}
 };
 static_assert(ReaderSpanLike<DummyInputSpan<int>>);
 static_assert(InputSpanLike<DummyInputSpan<int>>);
@@ -19509,7 +19486,7 @@ struct DummyOutputSpan : public DummyWriterSpan<T> {
     bool                     isConnected = true;
     bool                     isSync      = true;
 
-    void publishTag(property_map&, gr::Tag::signed_index_type) {}
+    void publishTag(property_map&, std::size_t) {}
 };
 static_assert(OutputSpanLike<DummyOutputSpan<int>>);
 
@@ -19668,7 +19645,7 @@ using std::hardware_destructive_interference_size;
 inline constexpr std::size_t hardware_destructive_interference_size  = 64;
 inline constexpr std::size_t hardware_constructive_interference_size = 64;
 #endif
-static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
+static constexpr const std::size_t kInitialCursorValue = 0L;
 
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
@@ -19677,37 +19654,32 @@ static constexpr const std::make_signed_t<std::size_t> kInitialCursorValue = 0L;
  * around the volatile field.
  */
 class Sequence {
-public:
-    using signed_index_type = std::make_signed_t<std::size_t>;
-
-private:
-    alignas(hardware_destructive_interference_size) std::atomic<signed_index_type> _fieldsValue{};
+    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> _fieldsValue{};
 
 public:
     Sequence(const Sequence&)       = delete;
     Sequence(const Sequence&&)      = delete;
     void operator=(const Sequence&) = delete;
 
-    explicit Sequence(signed_index_type initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+    explicit Sequence(std::size_t initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
 
-    [[nodiscard]] forceinline signed_index_type value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
-    forceinline void                            setValue(const signed_index_type value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
+    [[nodiscard]] forceinline std::size_t value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
+    forceinline void                      setValue(const std::size_t value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
 
-    [[nodiscard]] forceinline bool compareAndSet(signed_index_type expectedSequence, signed_index_type nextSequence) noexcept {
+    [[nodiscard]] forceinline bool compareAndSet(std::size_t expectedSequence, std::size_t nextSequence) noexcept {
         // atomically set the value to the given updated value if the current value == the
         // expected value (true, otherwise folse).
         return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
     }
 
-    [[maybe_unused]] forceinline signed_index_type incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
-    [[nodiscard]] forceinline signed_index_type    addAndGet(signed_index_type value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-    void                                           wait(signed_index_type oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
-    void                                           notify_all() noexcept { _fieldsValue.notify_all(); }
+    [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
+    [[nodiscard]] forceinline std::size_t addAndGet(std::size_t value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
+    [[nodiscard]] forceinline std::size_t subAndGet(std::size_t value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
+    void                                  wait(std::size_t oldValue) const noexcept { atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
+    void                                  notify_all() noexcept { _fieldsValue.notify_all(); }
 };
 
 namespace detail {
-
-using signed_index_type = Sequence::signed_index_type;
 
 /**
  * Get the minimum sequence from an array of Sequences.
@@ -19716,11 +19688,11 @@ using signed_index_type = Sequence::signed_index_type;
  * \param minimum an initial default minimum.  If the array is empty this value will
  * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
-inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, signed_index_type minimum = std::numeric_limits<signed_index_type>::max()) noexcept {
+inline std::size_t getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, std::size_t minimum = std::numeric_limits<std::size_t>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
     // each Sequence lives on its own cache line. Also, this is no reasonable loop for vectorization.
     for (const auto& s : sequences) {
-        const signed_index_type v = s->value();
+        const std::size_t v = s->value();
         if (v < minimum) {
             minimum = v;
         }
@@ -19739,7 +19711,7 @@ inline signed_index_type getMinimumSequence(const std::vector<std::shared_ptr<Se
 #endif
 
 inline void addSequences(std::shared_ptr<std::vector<std::shared_ptr<Sequence>>>& sequences, const Sequence& cursor, const std::vector<std::shared_ptr<Sequence>>& sequencesToAdd) {
-    signed_index_type                                       cursorSequence;
+    std::size_t                                             cursorSequence;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> updatedSequences;
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> currentSequences;
 
@@ -19845,8 +19817,8 @@ namespace gr {
  * \returns the sequence that is available which may be greater than the requested sequence.
  */
 template<typename T>
-inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::int64_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
-    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::int64_t>;
+inline constexpr bool isWaitStrategy = requires(T /*const*/ t, const std::size_t sequence, const Sequence &cursor, std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    { t.waitFor(sequence, cursor, dependentSequences) } -> std::same_as<std::size_t>;
 };
 static_assert(!isWaitStrategy<int>);
 
@@ -19873,7 +19845,7 @@ class BlockingWaitStrategy {
     std::condition_variable_any _conditionVariable;
 
 public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    std::size_t waitFor(const std::size_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
         if (cursor.value() < sequence) {
             std::unique_lock uniqueLock(_gate);
 
@@ -19883,7 +19855,7 @@ public:
             }
         }
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -19904,8 +19876,8 @@ static_assert(WaitStrategyLike<BlockingWaitStrategy>);
  * It is best used when threads can be bound to specific CPU cores.
  */
 struct BusySpinWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
-        std::int64_t availableSequence;
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -19929,7 +19901,7 @@ public:
         : _retries(retries) {
     }
 
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _retries;
         const auto waitMethod = [&counter]() {
             // optional: barrier check alert
@@ -19944,7 +19916,7 @@ public:
             }
         };
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             waitMethod();
         }
@@ -19969,7 +19941,7 @@ public:
     explicit TimeoutBlockingWaitStrategy(Clock::duration timeout)
         : _timeout(timeout) {}
 
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
+    std::size_t waitFor(const std::size_t sequence, const Sequence &cursor, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) {
         auto timeSpan = std::chrono::duration_cast<std::chrono::microseconds>(_timeout);
 
         if (cursor.value() < sequence) {
@@ -19984,7 +19956,7 @@ public:
             }
         }
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             // optional: barrier check alert
         }
@@ -20008,7 +19980,7 @@ class YieldingWaitStrategy {
     const std::size_t _spinTries = 100;
 
 public:
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequences) const {
         auto       counter    = _spinTries;
         const auto waitMethod = [&counter]() {
             // optional: barrier check alert
@@ -20020,7 +19992,7 @@ public:
             }
         };
 
-        std::int64_t availableSequence;
+        std::size_t availableSequence;
         while ((availableSequence = detail::getMinimumSequence(dependentSequences)) < sequence) {
             waitMethod();
         }
@@ -20032,7 +20004,7 @@ static_assert(WaitStrategyLike<YieldingWaitStrategy>);
 static_assert(!hasSignalAllWhenBlocking<YieldingWaitStrategy>);
 
 struct NoWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> & /*dependentSequences*/) const {
         // wait for nothing
         return sequence;
     }
@@ -20145,8 +20117,8 @@ public:
  * Latency spikes can occur after quiet periods.
  */
 struct SpinWaitWaitStrategy {
-    std::int64_t waitFor(const std::int64_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
-        std::int64_t availableSequence;
+    std::size_t waitFor(const std::size_t sequence, const Sequence & /*cursor*/, const std::vector<std::shared_ptr<Sequence>> &dependentSequence) const {
+        std::size_t availableSequence;
 
         SpinWait     spinWait;
         while ((availableSequence = detail::getMinimumSequence(dependentSequence)) < sequence) {
@@ -23476,12 +23448,12 @@ public:
         return result;
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
+    inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
 
-    inline constexpr void publishTag(const property_map& tag_data, Tag::signed_index_type tagOffset = -1) noexcept { processPublishTag(tag_data, tagOffset); }
+    inline constexpr void publishTag(const property_map& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(tag_data, tagOffset); }
 
     template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tagData, Tag::signed_index_type tagOffset) noexcept {
+    inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
         if (_outputTags.empty()) {
             _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
         } else {
@@ -23504,12 +23476,12 @@ public:
 
     inline constexpr void publishEoS() noexcept {
         const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
-        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<Tag::signed_index_type>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
+        for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
         const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
-        for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<Tag::signed_index_type>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
+        for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<std::size_t>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }

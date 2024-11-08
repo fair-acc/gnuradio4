@@ -73,7 +73,7 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
 
     // meta data
     requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<Tag>>>;
+    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, property_map>>>>;
 };
 
 template<typename T>
@@ -101,8 +101,8 @@ struct DataSet {
     std::vector<std::vector<T>> signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
-    std::vector<pmt_map>          meta_information{};
-    std::vector<std::vector<Tag>> timing_events{};
+    std::vector<pmt_map>                                              meta_information{};
+    std::vector<std::vector<std::pair<std::ptrdiff_t, property_map>>> timing_events{};
 
     GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges, meta_information, timing_events);
 };
