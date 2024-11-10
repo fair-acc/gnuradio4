@@ -55,15 +55,6 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
     };
 };
 
-auto returnReplyMsg(gr::MsgPortIn& port) {
-    expect(eq(port.streamReader().available(), 1UZ)) << "didn't receive a reply message";
-    ReaderSpanLike auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
-    Message             msg  = span[0];
-    expect(span.consume(span.size()));
-    fmt::print("Test got a reply: {}\n", msg);
-    return msg;
-};
-
 template<typename Condition>
 bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
     auto start = std::chrono::steady_clock::now();
@@ -75,6 +66,35 @@ bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
     }
     return false;
 }
+
+auto returnReplyMsg(gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location caller = std::source_location::current()) {
+    auto available = port.streamReader().available();
+    expect(gt(available, 0UZ)) << "didn't receive a reply message, caller: " << caller.file_name() << ":" << caller.line();
+    ReaderSpanLike auto messages = port.streamReader().get<SpanReleasePolicy::ProcessAll>(available);
+    Message             result;
+
+    if (expectedEndpoint) {
+        auto it = std::ranges::find_if(messages, [endpoint = *expectedEndpoint](const auto& message) { return message.endpoint == endpoint; });
+        expect(gt(available, 0UZ)) << "didn't receive the expected reply message, caller: " << caller.file_name() << ":" << caller.line();
+    } else {
+        result = messages[0];
+    }
+
+    expect(messages.consume(messages.size()));
+    fmt::print("Test got a reply: {}\n", result);
+    return result;
+};
+
+auto awaitReplyMsg(auto& graph, std::chrono::milliseconds timeout, gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location caller = std::source_location::current()) {
+    Message msg;
+
+    awaitCondition(timeout, [&port, &graph] {
+        graph.processScheduledMessages();
+        return port.streamReader().available() > 0;
+    });
+
+    return returnReplyMsg(port, expectedEndpoint, caller);
+};
 
 const boost::ut::suite NonRunningGraphTests = [] {
     using namespace std::string_literals;
@@ -95,7 +115,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
                 {{"type", "gr::testing::Copy"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
+            const Message reply = awaitReplyMsg(testGraph, 100ms, fromGraph, graph::property::kBlockEmplaced);
 
             expect(reply.data.has_value());
             expect(eq(testGraph.blocks().size(), 1UZ));
