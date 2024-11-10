@@ -170,6 +170,8 @@ private:
                 }
             }
             return fmt::format_to(ctx.out(), " }}");
+        } else if constexpr (requires { std::visit([](const auto&) {}, arg); }) {
+            return std::visit([&](const auto& value) { return format_value(value, ctx); }, arg);
         } else if constexpr (std::same_as<std::monostate, U>) {
             return fmt::format_to(ctx.out(), "null");
         } else {
