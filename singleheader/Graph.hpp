@@ -14403,28 +14403,6 @@ inline constexpr std::size_t hardware_constructive_interference_size = 64;
 
 namespace gr {
 
-/***
- * Controls automatic propagation of stream tags on sync ports.
- *       ```
- *     ┌───────┐      ┌───────┐     ┌───────┐      ┌───────┐
- *    ┌┤       ├┐    ┌┤       ├┐   ┌┤       ├┐    ┌┤       ├┐
- *    ││       ││    ││ ────► ││   ││ ────► ││    ││       ││
- *    └┤       ├┘    └┤  \ /  ├┘   └┤       ├┘    └┤work(){├┘
- *     │       │      │   X   │     │       │      │ get();│
- *    ┌┤       ├┐    ┌┤  / \  ├┐   ┌┤       ├┐    ┌┤ pub();├┐
- *    ││       ││    ││ ────► ││   ││ ────► ││    ││}      ││
- *    └┤       ├┘    └┤       ├┘   └┤       ├┘    └┤       ├┘
- *     └───────┘      └───────┘     └───────┘      └───────┘
- *       `DONT`      `ALL_TO_ALL   `ONE_TO_ONE`   `TPP_CUSTOM`
- * ```
- */
-enum class TagPropagationPolicy {
-    TPP_DONT       = 0, /*!< Scheduler doesn't propagate tags from in- to output. The block itself is free to insert tags. */
-    TPP_ALL_TO_ALL = 1, /*!< Propagate tags from all in- to all outputs. The scheduler takes care of that. */
-    TPP_ONE_TO_ONE = 2, /*!< Propagate tags from n. input to n. output. Requires same number of in- and outputs */
-    TPP_CUSTOM     = 3  /*!< Like TPP_DONT, but signals the block it should implement application-specific forwarding behaviour. */
-};
-
 using property_map = pmtv::map_t;
 
 template<typename T>
@@ -15032,6 +15010,23 @@ template<bool UseIoThread = true> // TODO: replace bool by an enum or tag type: 
 struct BlockingIO {
     [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
 };
+
+/**
+ * @brief Disable default tag forwarding.
+ *
+ * There are two types of tag forwarding: (1) default All-To-All, and (2) user-implemented.
+ *
+ * By default, tag forwarding operates as All-To-All. Before tags on input ports are forwarded, they are merged.
+ * If a block has multiple ports and tags on these ports contain maps with identical keys, only one value for each key
+ * will be retained in the merged tag. This may lead to potential information loss, as it’s not guaranteed which
+ * value will be kept.
+ *
+ * This default behavior is generally sufficient. However, if it’s not suitable for your use case, you can disable it
+ * by adding the `NoDefaultTagForwarding` attribute to the template parameters. In such cases, the block should implement
+ * custom tag forwarding in the `processBulk` function. The `InputSpanLike` and `OutputSpanLike` APIs are available to simplify
+ * with custom tag forwarding.
+ */
+struct NoDefaultTagForwarding {};
 
 /**
  * @brief Annotates block, indicating to perform resampling based on the provided `inputChunkSize` and `outputChunkSize`.
@@ -15668,7 +15663,7 @@ struct Async {};
  *   - Using `tags()`: Returns a `range::view` of input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
  *   - Using `rawTags`: Provides direct access to the underlying `ReaderSpan<Tag>` for advanced manipulation.
  * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
- * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` and including first sample.
+ * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` (exclusively).
  */
 template<typename T>
 concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, std::size_t n) {
@@ -15856,10 +15851,12 @@ struct Port {
                 if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
                 }
-                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) || this->empty()) {
+                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) //
+                    || ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessNone                                       //
+                    || this->empty()) {
                     return; // no samples to be consumed -> do not consume any tags
                 }
-                consumeTags(0); // consume all tags including the one on the first sample
+                consumeTags(1); // consume all tags including the one on the first sample
             }
         }
 
@@ -15871,11 +15868,11 @@ struct Port {
         }
 
         void consumeTags(std::size_t untilLocalIndex) {
-            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
+            std::size_t tagsToConsume = static_cast<std::size_t>(std::ranges::count_if(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index < streamIndex + untilLocalIndex; }), [](auto /*v*/) { return true; }));
             std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
-        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 0) const {
+        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 1) const {
             auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                 assert(&sourceMap != &destinationMap);
                 for (const auto& [key, value] : sourceMap) {
@@ -15883,7 +15880,7 @@ struct Port {
                 }
             };
             Tag result{0UZ, {}};
-            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index <= streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
+            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index < streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
             return result;
         }
 
@@ -22992,7 +22989,9 @@ public:
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
 
-    constexpr static bool            blockingIO    = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
+    constexpr static bool blockingIO             = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
+    constexpr static bool noDefaultTagForwarding = std::disjunction_v<std::is_same<NoDefaultTagForwarding, Arguments>...>;
+
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
     template<typename T>
@@ -23012,8 +23011,6 @@ public:
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
     alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{false};
-
-    constexpr static TagPropagationPolicy tag_policy = TagPropagationPolicy::TPP_ALL_TO_ALL;
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
     using ResamplingLimit = Limits<1UL, std::numeric_limits<ResamplingValue>::max()>;
@@ -23174,7 +23171,7 @@ public:
         // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
             if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
-                if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
+                if constexpr (!noDefaultTagForwarding) {
                     publishTag(applyResult.forwardParameters, 0);
                 }
                 notifyListeners(block::property::kSetting, settings().get());
@@ -23332,9 +23329,8 @@ public:
     }
 
     constexpr void forwardTags(auto& outputSpanTuple) noexcept {
-        if (inputTagsPresent()) {
-            if constexpr (Derived::tag_policy == TagPropagationPolicy::TPP_ALL_TO_ALL) {
-                // publishTag(mergedInputTag().map, 0);
+        if constexpr (!noDefaultTagForwarding) {
+            if (inputTagsPresent()) {
                 for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, outputSpanTuple);
             }
         }
@@ -23366,9 +23362,9 @@ public:
                     }
                 };
                 if constexpr (InputSpanLike<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
-                    mergeSrcMapInto(inputSpanOrVector.getMergedTag(0).map, _mergedInputTag.map);
+                    mergeSrcMapInto(inputSpanOrVector.getMergedTag(1).map, _mergedInputTag.map);
                 } else {
-                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(0).map, _mergedInputTag.map); });
+                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(1).map, _mergedInputTag.map); });
                 }
             },
             inputSpans);
@@ -24128,10 +24124,9 @@ protected:
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
 
-            // See https://github.com/fair-acc/gnuradio4/issues/444
             for_each_reader_span(
                 [&processedIn](auto& in) {
-                    if (in.isConsumeRequested() && in.isConnected) {
+                    if (in.isConsumeRequested() && in.isConnected && in.isSync) {
                         processedIn = std::min(processedIn, in.nRequestedSamplesToConsume());
                     }
                 },
@@ -24139,7 +24134,7 @@ protected:
 
             for_each_writer_span(
                 [&processedOut](auto& out) {
-                    if (out.isPublishRequested() && out.isConnected) {
+                    if (out.isPublishRequested() && out.isConnected && out.isSync) {
                         processedOut = std::min(processedOut, out.nRequestedSamplesToPublish());
                     }
                 },
@@ -24192,7 +24187,7 @@ protected:
             processedOut = 0UZ;
         }
 
-        if (processedIn > 0 && processedOut > 0) {
+        if (processedOut > 0) {
             copyCachedOutputTags(outputSpans);
 
             if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
