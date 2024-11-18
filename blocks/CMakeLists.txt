@@ -1,4 +1,5 @@
 add_subdirectory(basic)
+add_subdirectory(electrical)
 add_subdirectory(fileio)
 add_subdirectory(filter)
 add_subdirectory(fourier)
