@@ -114,7 +114,7 @@ namespace detail {
 template<typename T, std::size_t bufferSize = std::dynamic_extent, typename TBaseType = meta::fundamental_base_value_type_t<T>>
 struct Section;
 
-template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
+template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::unseq>
 [[nodiscard]] inline constexpr T computeFilter(const T& input, Section<T, bufferSize>& section) noexcept {
     const auto& a             = section.a;
     const auto& b             = section.b;
@@ -158,7 +158,7 @@ template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_
     }
 }
 
-template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
+template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::unseq>
 inline constexpr std::vector<T> computeImpulseResponse(Section<T, bufferSize>& section, std::size_t length) {
     std::vector<T> impulseResponse(length, T(0));
     T              input = T(1); // impulse response: first input is 1
@@ -218,7 +218,7 @@ struct Section : public FilterCoefficients<TBaseType> {
  * Filter<double> myFilter(filterSections);
  * double outputSample = myFilter.processOne(inputSample);
  */
-template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<meta::fundamental_base_value_type_t<T>> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
+template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<meta::fundamental_base_value_type_t<T>> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::unseq>
 struct Filter;
 
 template<typename T, std::size_t bufferSize, Form form, auto execPolicy>
@@ -227,7 +227,8 @@ struct Filter<T, bufferSize, form, execPolicy> {
     using TBaseType = meta::fundamental_base_value_type_t<T>;
     alignas(64UZ) std::vector<detail::Section<T, bufferSize>> _sectionsMeanValue;
 
-public:
+    constexpr Filter() noexcept { _sectionsMeanValue.emplace_back(FilterCoefficients<TBaseType>{.b = {1}, .a = {1}}); }
+
     template<typename... TFilterCoefficients>
     explicit Filter(TFilterCoefficients&&... filterSections) noexcept {
         std::vector<FilterCoefficients<TBaseType>> filterSections_{std::forward<TFilterCoefficients>(filterSections)...};
@@ -298,7 +299,8 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
         return totalUncertainty;
     }
 
-public:
+    constexpr Filter() noexcept { _sectionsMeanValue.emplace_back(FilterCoefficients<TBaseType>{.b = {1}, .a = {1}}); }
+
     template<typename... TFilterCoefficients>
     explicit Filter(TFilterCoefficients&&... filterSections) noexcept {
         std::vector<FilterCoefficients<TBaseType>> filterSections_{std::forward<TFilterCoefficients>(filterSections)...};
@@ -322,15 +324,20 @@ public:
     }
 };
 
-template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::seq>
+template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::unseq>
 struct ErrorPropagatingFilter {
     using TBaseType = meta::fundamental_base_value_type_t<T>;
 
     Filter<T, bufferSize, form, execPolicy>         filterMean;
     Filter<TBaseType, bufferSize, form, execPolicy> filterSquared;
 
+    constexpr ErrorPropagatingFilter() noexcept {
+        filterMean    = Filter<T, bufferSize, form, execPolicy>(FilterCoefficients<TBaseType>{.b = {1}, .a = {1}});
+        filterSquared = Filter<TBaseType, bufferSize, form, execPolicy>(FilterCoefficients<TBaseType>{.b = {1}, .a = {1}});
+    }
+
     template<typename... TFilterCoefficients>
-    explicit ErrorPropagatingFilter(TFilterCoefficients&&... filterSections) : filterMean(std::forward<TFilterCoefficients>(filterSections)...), filterSquared(std::forward<TFilterCoefficients>(filterSections)...) {}
+    explicit ErrorPropagatingFilter(TFilterCoefficients&&... filterSections) : filterMean(filterSections...), filterSquared(filterSections...) {}
 
     constexpr void reset(T defaultValue = T()) {
         filterMean.reset(defaultValue);

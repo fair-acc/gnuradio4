@@ -3,8 +3,12 @@
 #include <fmt/format.h>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
+#include <gnuradio-4.0/testing/NullSources.hpp>
 
 template<typename T, typename Range>
 requires std::floating_point<T>
@@ -22,7 +26,7 @@ constexpr size_t estimate_settling_time(const Range& step_response, std::size_t 
 
     // If no such sample is found, return an error
     if (it == end) {
-        throw std::runtime_error("No settling found within the given threshold.");
+        throw gr::exception("No settling found within the given threshold.");
     }
 
     // Check if all subsequent samples stay within the acceptable range
@@ -80,14 +84,12 @@ const boost::ut::suite SequenceTests = [] {
         expect(eq(iir_settling_time1, 5u)) << "IIR (I) settling time";
         expect(eq(iir_settling_time2, 5u)) << "IIR (II) settling time";
 
-        //        fmt::print("FIR      filter settling time: {} ms\n", fir_settling_time);
-        //        fmt::print("IIR (I)  filter settling time: {} ms\n", iir_settling_time1);
-        //        fmt::print("IIR (II) filter settling time: {} ms\n", iir_settling_time2);
+        fmt::println("FIR      filter settling time: {} ms", fir_settling_time);
+        fmt::println("IIR (I)  filter settling time: {} ms", iir_settling_time1);
+        fmt::println("IIR (II) filter settling time: {} ms", iir_settling_time2);
     };
 
     "IIR equality tests"_test = [] {
-        //        std::vector<double>              iir_coeffs_b{ 0.55, 0 };
-        //        std::vector<double>              iir_coeffs_a{ 1, -0.45 };
         std::vector<double> iir_coeffs_b{0.020083365564211, 0.040166731128423, 0.020083365564211};
         std::vector<double> iir_coeffs_a{1.0, -1.561018075800718, 0.641351538057563};
 
@@ -120,6 +122,169 @@ const boost::ut::suite SequenceTests = [] {
                 i, input, form_I, form_II, form_I_T, form_II_T);
 #endif
         }
+    };
+};
+
+const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
+    using namespace boost::ut;
+    using namespace gr::filter;
+    using namespace std::string_literals;
+
+    constexpr static auto maxOp = []<typename T>(const T a, const T b) -> bool { return std::abs(gr::value(a)) < std::abs(gr::value(b)); };
+
+    constexpr static float       sampleRate     = 1000.0;
+    constexpr static float       f_low          = 100.0;
+    constexpr static std::size_t filterOrder    = 4;
+    constexpr static std::size_t numSamples     = 1000;
+    constexpr static std::size_t decimationRate = 5;
+
+    "BasicFilter - Low-pass Filter Test"_test =
+        []<typename TTestParameter>() {
+            using T         = typename TTestParameter::first_type;
+            using ValueType = meta::fundamental_base_value_type_t<T>;
+            const std::string filterType{TTestParameter::second_type::value.c_str()};
+
+            BasicFilter<T> filter;
+            filter.filter_type       = filterType;
+            filter.filter_response   = "LOWPASS";
+            filter.filter_order      = filterOrder;
+            filter.f_low             = f_low;
+            filter.sample_rate       = sampleRate;
+            filter.iir_design_method = "CHEBYSHEV1";
+            filter.fir_design_method = "Hamming";
+            filter.designFilter(); // triggers filter re-computation and setting of internal enums
+
+            expect(eq(filterType, magic_enum::enum_name(filter._filter_type))) << "filter type mismatch";
+            expect(eq(filter.filter_response, magic_enum::enum_name(filter._filter_response))) << "filter response type mismatch";
+            expect(eq(filter.iir_design_method, magic_enum::enum_name(filter._iir_design_method))) << "filter IIR response type mismatch";
+            expect(eq(filter.fir_design_method, magic_enum::enum_name(filter._fir_design_method))) << "filter FIR response type mismatch";
+
+            "verify in-band signal passes through"_test = [&filter] {
+                std::vector<T> outputSignal;
+                outputSignal.reserve(numSamples);
+                T phase = 0;
+                for (std::size_t i = 0UZ; i < 2 * numSamples; i++) {
+                    // generate a sine wave signal with a frequency below the cutoff
+                    phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(50) / static_cast<ValueType>(sampleRate);
+                    if (i < numSamples) { // ignore initial transient
+                        std::ignore = filter.processOne(gr::math::sin(phase));
+                    } else {
+                        outputSignal.push_back(filter.processOne(gr::math::sin(phase)));
+                    }
+                }
+
+                ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
+                expect(ge(maxOutput, ValueType{.9f})) << fmt::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
+            };
+
+            "verify out-of-band signal is attenuated"_test = [&filter] {
+                std::vector<T> outputSignal;
+                outputSignal.reserve(numSamples);
+                T phase = 0;
+                for (std::size_t i = 0UZ; i < 2 * numSamples; i++) {
+                    // generate a sine wave signal with a frequency below the cutoff
+                    phase += T{2} * std::numbers::pi_v<ValueType> * static_cast<ValueType>(300) / static_cast<ValueType>(sampleRate);
+                    if (i < numSamples) { // ignore initial transient
+                        std::ignore = filter.processOne(gr::math::sin(phase));
+                    } else {
+                        outputSignal.push_back(filter.processOne(gr::math::sin(phase)));
+                    }
+                }
+
+                ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
+                expect(le(maxOutput, ValueType{.2f})) << fmt::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
+            };
+        } |
+        std::tuple<std::pair<float, meta::constexpr_string<"FIR">>,           //
+            std::pair<double, meta::constexpr_string<"FIR">>,                 //
+            std::pair<UncertainValue<float>, meta::constexpr_string<"FIR">>,  //
+            std::pair<UncertainValue<double>, meta::constexpr_string<"FIR">>, //
+            std::pair<float, meta::constexpr_string<"IIR">>,                  //
+            std::pair<double, meta::constexpr_string<"IIR">>,                 //
+            std::pair<UncertainValue<float>, meta::constexpr_string<"IIR">>,  //
+            std::pair<UncertainValue<double>, meta::constexpr_string<"IIR">>>{};
+
+    "BasicDecimatingFilter - Low-pass Filter Test"_test = [](const std::string& filterType) {
+        using T = double;
+
+        // Instantiate the BasicDecimatingFilter with the desired decimation rate
+        BasicDecimatingFilter<T> filter;
+        filter.filter_type       = filterType;
+        filter.filter_response   = "LOWPASS";
+        filter.filter_order      = filterOrder;
+        filter.f_low             = f_low;
+        filter.sample_rate       = sampleRate;
+        filter.iir_design_method = "CHEBYSHEV1";
+        filter.fir_design_method = "Hamming";
+        filter.decimate          = decimationRate;
+        filter.designFilter(); // triggers filter re-computation and setting of internal enums
+
+        expect(eq(filter.input_chunk_size, decimationRate)) << "decimationRate type mismatch";
+        expect(eq(filterType, magic_enum::enum_name(filter._filter_type))) << "filter type mismatch";
+        expect(eq(filter.filter_response, magic_enum::enum_name(filter._filter_response))) << "filter response type mismatch";
+        expect(eq(filter.iir_design_method, magic_enum::enum_name(filter._iir_design_method))) << "filter IIR response type mismatch";
+        expect(eq(filter.fir_design_method, magic_enum::enum_name(filter._fir_design_method))) << "filter FIR response type mismatch";
+
+        "verify in-band signal passes through"_test = [&filter] {
+            std::vector<T> inputSignal(numSamples);
+            std::vector<T> outputSignal(numSamples / decimationRate);
+
+            T    phase          = 0;
+            auto generateSample = [&phase]() {
+                // generate a sine wave signal with a frequency below the cutoff
+                phase += 2 * std::numbers::pi_v<T> * static_cast<T>(50) / static_cast<T>(sampleRate);
+                return std::sin(phase);
+            };
+            std::ranges::generate(inputSignal, generateSample);
+            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "first processing failed";
+            std::ranges::generate(inputSignal, generateSample);
+            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "second processing failed";
+
+            double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
+            expect(ge(maxOutput, T{0.9})) << fmt::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
+        };
+
+        "verify out-of-band signal is attenuated"_test = [&filter] {
+            std::vector<T> inputSignal(numSamples);
+            std::vector<T> outputSignal(numSamples / decimationRate);
+
+            T    phase          = 0;
+            auto generateSample = [&phase]() {
+                // generate a sine wave signal with a frequency above the cutoff
+                phase += 2 * std::numbers::pi_v<T> * T(300) / T(sampleRate);
+                return std::sin(phase);
+            };
+            std::ranges::generate(inputSignal, generateSample);
+            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "first processing failed";
+            std::ranges::generate(inputSignal, generateSample);
+            expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "second processing failed";
+
+            double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
+            expect(le(maxOutput, T{0.2})) << fmt::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
+        };
+    } | std::vector<std::string>({"FIR", "IIR"});
+
+    "Decimator - Low-pass Filter Test"_test = [] {
+        using namespace gr::testing;
+        using T = int;
+
+        constexpr gr::Size_t decimationFactor = 10;
+
+        gr::Graph flow;
+        auto&     source    = flow.emplaceBlock<CountingSource<T>>({{"n_samples_max", 10 * decimationFactor}});
+        auto&     decimator = flow.emplaceBlock<gr::filter::Decimator<T>>({{"decim", decimationFactor}});
+        auto&     sink      = flow.emplaceBlock<CountingSink<T>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(decimator)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(sink)));
+
+        auto sched = gr::scheduler::Simple<>(std::move(flow));
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(decimator.decim, decimationFactor));
+        expect(eq(decimator.output_chunk_size, static_cast<gr::Size_t>(1)));
+        expect(eq(decimator.input_chunk_size, decimationFactor));
+
+        expect(eq(sink.count, static_cast<gr::Size_t>(10)));
     };
 };
 
