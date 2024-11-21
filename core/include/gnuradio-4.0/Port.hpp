@@ -468,12 +468,19 @@ struct Port {
                 if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
                 }
-                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) //
-                    || ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessNone                                       //
-                    || this->empty()) {
-                    return; // no samples to be consumed -> do not consume any tags
+
+                if (this->empty() //
+                    || (ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0)) {
+                    return;
                 }
-                consumeTags(1); // consume all tags including the one on the first sample
+
+                if (ReaderSpanType<spanReleasePolicy>::isConsumeRequested()) {
+                    consumeTags(ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume());
+                } else {
+                    if (ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                        consumeTags(ReaderSpanType<spanReleasePolicy>::size());
+                    }
+                }
             }
         }
 
