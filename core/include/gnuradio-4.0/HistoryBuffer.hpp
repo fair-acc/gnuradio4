@@ -102,7 +102,9 @@ public:
      */
     template<typename Iter>
     constexpr void push_back_bulk(Iter cbegin, Iter cend) noexcept {
-        for (auto it = cbegin; it != cend; ++it) {
+        const auto nSamplesToCopy = std::distance(cbegin, cend);
+        Iter       optimizedBegin = static_cast<std::size_t>(nSamplesToCopy) > _capacity ? std::prev(cend, static_cast<std::ptrdiff_t>(_capacity)) : cbegin;
+        for (auto it = optimizedBegin; it != cend; ++it) {
             push_back(*it);
         }
     }
@@ -112,9 +114,7 @@ public:
      */
     template<typename Range>
     constexpr void push_back_bulk(const Range& range) noexcept {
-        for (const auto& item : range) {
-            push_back(item);
-        }
+        push_back_bulk(range.cbegin(), range.cend());
     }
 
     /**
