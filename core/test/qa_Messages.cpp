@@ -473,8 +473,6 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "get all contexts - w/o explicit serviceName"_test = [&] {
-                expect(eq(unitTestBlock.settings().getStoredAll().size(), 3UZ));
-
                 sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSettingsContexts /* endpoint */, {} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
@@ -492,18 +490,24 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kSettingsContexts)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("contexts"));
+                expect(reply.data.value().contains("times"));
                 auto contexts = std::get<std::vector<std::string>>(reply.data.value().at("contexts"));
                 auto times    = std::get<std::vector<std::uint64_t>>(reply.data.value().at("times"));
                 expect(eq(contexts.size(), 3UZ));
                 expect(eq(times.size(), 3UZ));
                 expect(eq(contexts, std::vector<std::string>{"", "new_context", "test_context"}));
                 // We do not check the default context as it's time is now()
-                expect(eq(times[1], 2UZ));
-                expect(eq(times[2], 1UZ));
+                expect(eq(times[1], allStored.at("new_context")[0].first.time)); // We need internal time since wasm change our time
+                expect(eq(times[2], allStored.at("test_context")[0].first.time));
             };
 
             "remove new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Disconnect>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "new_context"}, {"time", 2UZ}} /* data  */);
+                //  We need internal time since wasm change our time
+                const std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                expect(eq(allStored.size(), 3UZ));
+                const std::uint64_t internalTimeForWasm = allStored.at("new_context")[0].first.time;
+
+                sendMessage<Disconnect>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "new_context"}, {"time", internalTimeForWasm}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
