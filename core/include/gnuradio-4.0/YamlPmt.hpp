@@ -956,6 +956,9 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
     pmtv::map_t map;
 
     while (!ctx.atEndOfDocument()) {
+        if (ctx.startsWith("---")) {
+            return std::unexpected(ctx.makeError("Parser limitation: Multiple documents not supported"));
+        }
         ctx.consumeSpaces();
         if (ctx.atEndOfLine() || ctx.startsWith("#")) {
             // skip empty lines and comments
@@ -1123,6 +1126,7 @@ inline std::string serialize(const pmtv::map_t& map) {
 inline std::expected<pmtv::map_t, ParseError> deserialize(std::string_view yaml_str) {
     auto                 lines = detail::split(yaml_str, "\n");
     detail::ParseContext ctx{.lines = lines};
+    ctx.consumeWhitespaceAndComments();
     ctx.consumeIfStartsWith("---");
     return detail::parseMap(ctx, -1);
 }

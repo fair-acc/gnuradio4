@@ -628,8 +628,14 @@ unicode: !!str |-
 )";
         expect(eq(formatResult(yaml::deserialize(unicode_multiline)), "Error in 3:6: Parser limitation: Unicode escape sequences are not supported"sv));
 
+        constexpr std::string_view multiple_documents = R"(
+---
+value: 42
+---
+value: 43
+)";
+        expect(eq(formatResult(yaml::deserialize(multiple_documents)), "Error in 4:1: Parser limitation: Multiple documents not supported"sv));
     };
-
 #pragma GCC diagnostic pop // Reenable -Wuseless-cast
 };
 
