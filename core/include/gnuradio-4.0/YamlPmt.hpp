@@ -55,6 +55,8 @@ inline std::string escapeString(std::string_view str, bool escapeForQuotedString
             result.append("\\t");
         } else if (c == '\r' && escapeForQuotedString) {
             result.append("\\r");
+        } else if (c == '\b') {
+            result.append("\\b");
         } else if (std::iscntrl(c) && c != '\n') {
             result.append(fmt::format("\\x{:02x}", static_cast<unsigned char>(c)));
         } else {
@@ -371,15 +373,22 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_multiline(
             case '0': result.push_back('\0'); break;
             case 'x': {
                 if (i + 2 >= str.size()) {
-                    return std::unexpected(ValueParseError{i, "Invalid escape sequence"});
+                    result.push_back('\\');
+                    result.push_back(str[i]);
+                    break;
                 }
                 const auto byte = parseBytesFromHex(str.substr(i + 1, 2));
                 if (!byte) {
-                    return std::unexpected(ValueParseError{i, "Invalid escape sequence"});
+                    result.push_back('\\');
+                    result.push_back(str[i]);
+                    break;
                 }
                 result.append(*byte);
                 i += 2;
                 break;
+            }
+            case 'u': {
+                return std::unexpected(ValueParseError{i, "Parser limitation: Unicode escape sequences are not supported"});
             }
             default:
                 result.push_back('\\');
@@ -410,11 +419,15 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_quoted(std
             case '0': result.push_back('\0'); break;
             case 'x': {
                 if (i + 2 >= str.size()) {
-                    return std::unexpected(ValueParseError{i, "Invalid escape sequence"});
+                    result.push_back('\\');
+                    result.push_back(str[i]);
+                    break;
                 }
                 const auto byte = parseBytesFromHex(str.substr(i + 1, 2));
                 if (!byte) {
-                    return std::unexpected(ValueParseError{i, "Invalid escape sequence"});
+                    result.push_back('\\');
+                    result.push_back(str[i]);
+                    break;
                 }
                 result.append(*byte);
                 i += 2;

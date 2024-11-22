@@ -201,6 +201,7 @@ multiline_with_empty: !!str |
   Third line
 unicode: !!str "Hello 世界 🌍"
 escapes: !!str  "Quote\"Backslash\\Not a comment#Tab\tNewline\nBackspace\b"
+invalid_escapes: !!str "Invalid escapes \q\xZZ\x"
 single_quoted: !!str '"quoted"'
 special_chars: !!str "!@#$%^&*()"
 unprintable_chars: !!str "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
@@ -217,6 +218,7 @@ unprintable_chars: !!str "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x
         expected["multiline_maplike"]    = "key: First line\nkey2: Second line"s;
         expected["multiline_with_empty"] = "First line\n\nThird line\n"s;
         expected["unicode"]              = "Hello 世界 🌍"s;
+        expected["invalid_escapes"]      = "Invalid escapes \\q\\xZZ\\x"s;
         expected["escapes"]              = "Quote\"Backslash\\Not a comment#Tab\tNewline\nBackspace\b"s;
         expected["single_quoted"]        = "\"quoted\""s;
         expected["special_chars"]        = "!@#$%^&*()"s;
@@ -609,21 +611,20 @@ value: 42 # Comment
 key#Comment: foo
 )";
         expect(eq(formatResult(yaml::deserialize(invalidKeyComment)), "Error in 3:1: Could not find key/value separator ':'"sv));
-
-        expect(eq(formatResult(yaml::deserialize("value: !!str \\xZZ")), "Error in 1:15: Invalid escape sequence"sv));
-
-        constexpr std::string_view invalidEscape2 = R"(value: !!str "\x
-)";
-        expect(eq(formatResult(yaml::deserialize(invalidEscape2)), "Error in 1:16: Invalid escape sequence"sv));
     };
 
     "Unsupported YAML"_test = [] {
         constexpr std::string_view unicode_escapes = R"(
 unicode: !!str "\u1234"
 )";
-        const auto                 result          = yaml::deserialize(unicode_escapes);
-        expect(!result.has_value());
-        expect(eq(formatResult(result), "Error in 2:18: Parser limitation: Unicode escape sequences are not supported"sv));
+        expect(eq(formatResult(yaml::deserialize(unicode_escapes)), "Error in 2:18: Parser limitation: Unicode escape sequences are not supported"sv));
+
+        constexpr std::string_view unicode_multiline = R"(
+unicode: !!str |-
+    \u1234
+)";
+        expect(eq(formatResult(yaml::deserialize(unicode_multiline)), "Error in 3:6: Parser limitation: Unicode escape sequences are not supported"sv));
+
     };
 
 #pragma GCC diagnostic pop // Reenable -Wuseless-cast
