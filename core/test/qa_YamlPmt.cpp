@@ -419,6 +419,21 @@ complexVector: !!complex64
   - (3.0, -3.0)
 emptyVector: !!str []
 emptyPmtVector: []
+flowDouble: !!float64 [1, 2, 3]
+flowString: !!str ["Hello, ", "World", "Multiple\nlines"]
+flowMultiline: !!str [ "Hello, "    , #]
+  "][", # Comment ,
+  "World"  ,
+  "Multiple\nlines"
+]
+nestedVector:
+  - !!str
+    - 1
+    - 2
+  -
+    - 3
+    - 4
+nestedFlow: [ !!str [1, 2], [3, 4] ]
 )";
 
         pmtv::map_t expected;
@@ -432,8 +447,44 @@ emptyPmtVector: []
         expected["complexVector"]              = std::vector<std::complex<double>>{{1.0, -1.0}, {2.0, -2.0}, {3.0, -3.0}};
         expected["emptyVector"]                = std::vector<std::string>{};
         expected["emptyPmtVector"]             = std::vector<pmtv::pmt>{};
+        expected["flowDouble"]                 = std::vector<double>{1.0, 2.0, 3.0};
+        expected["flowString"]                 = std::vector<std::string>{"Hello, ", "World", "Multiple\nlines"};
+        expected["flowMultiline"]              = std::vector<std::string>{"Hello, ", "][", "World", "Multiple\nlines"};
+        expected["nestedVector"]               = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
+        expected["nestedFlow"]                 = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
 
         testYAML(src1, expected);
+    };
+
+    "Maps"_test = [] {
+        constexpr std::string_view src = R"yaml(
+simple:
+    key1: !!int8 42
+    key2: !!int8 43
+empty: {}
+nested:
+    key1:
+        key2: !!int8 42
+        key3: !!int8 43
+    key4:
+        key5: !!int8 44
+        key6: !!int8 45
+flow: {key1: !!int8 42, key2: !!int8 43}
+flow_multiline: {key1: !!int8 42,
+                 key2: !!int8 43}
+flow_nested: {key1: {key2: !!int8 42, key3: !!int8 43}, key4: {key5: !!int8 44, key6: !!int8 45}}
+flow_braces: {"}{": !!int8 42}
+)yaml";
+
+        pmtv::map_t expected;
+        expected["simple"]         = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["empty"]          = pmtv::map_t{};
+        expected["nested"]         = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
+        expected["flow"]           = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["flow_multiline"] = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["flow_nested"]    = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
+        expected["flow_braces"]    = pmtv::map_t{{"}{", static_cast<int8_t>(42)}};
+        testYAML(src, expected);
     };
 
     "Complex"_test = [] {
