@@ -133,8 +133,9 @@ void testYAML(std::string_view src, const pmtv::map_t expected) {
 }
 
 const boost::ut::suite YamlPmtTests = [] {
-#pragma GCC diagnostic push
+#ifndef __clang__
 #pragma GCC diagnostic ignored "-Wuseless-cast" // we want explicit casts for testing
+#endif
     using namespace boost::ut;
     using namespace pmtv;
     using namespace std::string_literals;
@@ -581,9 +582,8 @@ complex: !!complex64 (foo, bar)
     };
 
     "Errors"_test = [] {
-        constexpr std::string_view src1 = R"(value: !!float64 string
-)";
-        expect(eq(formatResult(yaml::deserialize(src1)), "Error in 1:18: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize("value: !!float64 string")), "Error in 1:18: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize("value: !!int8 128")), "Error in 1:15: Invalid value for type"sv));
 
         constexpr std::string_view mapListMix = R"(
 value:
@@ -677,7 +677,6 @@ value: 43
 )";
         expect(eq(formatResult(yaml::deserialize(multiple_documents)), "Error in 4:1: Parser limitation: Multiple documents not supported"sv));
     };
-#pragma GCC diagnostic pop // Reenable -Wuseless-cast
 };
 
 int main() { /* tests are statically executed */ }

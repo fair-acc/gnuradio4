@@ -462,39 +462,45 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
             return false;
         }
         return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
-    } else if constexpr (std::is_arithmetic_v<T>) {
-        if constexpr (std::is_floating_point_v<T>) {
-            if (sv == ".inf" || sv == ".Inf" || sv == ".INF") {
-                return std::numeric_limits<T>::infinity();
-            } else if (sv == "-.inf" || sv == "-.Inf" || sv == "-.INF") {
-                return -std::numeric_limits<T>::infinity();
-            } else if (sv == ".nan" || sv == ".NaN" || sv == ".NAN") {
-                return std::numeric_limits<T>::quiet_NaN();
+    } else if constexpr (std::is_floating_point_v<T>) {
+        if (sv == ".inf" || sv == ".Inf" || sv == ".INF") {
+            return std::numeric_limits<T>::infinity();
+        } else if (sv == "-.inf" || sv == "-.Inf" || sv == "-.INF") {
+            return -std::numeric_limits<T>::infinity();
+        } else if (sv == ".nan" || sv == ".NaN" || sv == ".NAN") {
+            return std::numeric_limits<T>::quiet_NaN();
+        }
+        try {
+            if constexpr (std::is_same_v<T, float>) {
+                return std::stof(sv.data());
+            } else {
+                return std::stod(sv.data());
             }
+        } catch (...) {
+            return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
+        }
+    } else if constexpr (std::is_integral_v<T>) {
+        if (sv.contains(".")) {
+            // from_chars() accepts "123.456", but we reject it
+            return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
         }
 
-        if constexpr (std::is_integral_v<T>) {
-            if (sv.contains(".")) {
-                // from_chars() accepts "123.456", but we reject it
+        auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
+            T value;
+            const auto [_, ec] = std::from_chars(s.begin(), s.end(), value, base);
+            if (ec != std::errc{}) {
                 return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
             }
-
-            auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
-                T value;
-                const auto [_, ec] = std::from_chars(s.begin(), s.end(), value, base);
-                if (ec != std::errc{}) {
-                    return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
-                }
-                return value;
-            };
-            if (sv.starts_with("0x")) {
-                return parseWithBase(sv.substr(2), 16);
-            } else if (sv.starts_with("0o")) {
-                return parseWithBase(sv.substr(2), 8);
-            } else if (sv.starts_with("0b")) {
-                return parseWithBase(sv.substr(2), 2);
-            }
+            return value;
+        };
+        if (sv.starts_with("0x")) {
+            return parseWithBase(sv.substr(2), 16);
+        } else if (sv.starts_with("0o")) {
+            return parseWithBase(sv.substr(2), 8);
+        } else if (sv.starts_with("0b")) {
+            return parseWithBase(sv.substr(2), 2);
         }
+
         T value;
         const auto [_, ec] = std::from_chars(sv.begin(), sv.end(), value);
         if (ec != std::errc{}) {
