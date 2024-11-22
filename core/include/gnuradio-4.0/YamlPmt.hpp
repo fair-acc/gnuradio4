@@ -589,8 +589,8 @@ inline size_t findClosingQuote(std::string_view sv, char quoteChar) {
 }
 
 inline std::pair<std::size_t, std::size_t> findString(std::string_view sv, std::string_view extraDelimiters = {}) {
-    if (sv.size() < 2) {
-        return {0, sv.size()};
+    if (sv.empty()) {
+        return {0, 0};
     }
     const char firstChar = sv.front();
     const auto quoted    = firstChar == '"' || firstChar == '\'';
@@ -612,12 +612,15 @@ inline std::pair<std::size_t, std::size_t> findString(std::string_view sv, std::
     if (closePos != std::string_view::npos) {
         return {1, closePos - 1};
     }
-    return {1, sv.size() - 1}; // Unterminated quote
+    return {std::string_view::npos, std::string_view::npos}; // Unterminated quote
 }
 
 template<typename Fnc>
 inline std::expected<pmtv::pmt, ParseError> parseNextString(ParseContext& ctx, std::string_view extraDelimiters, Fnc fnc) {
     auto [offset, length] = findString(ctx.remainingLine(), extraDelimiters);
+    if (offset == std::string_view::npos) {
+        return std::unexpected(ctx.makeError("Unterminated quote"));
+    }
     ctx.consume(offset);
     const auto fncResult = fnc(offset, ctx.remainingLine().substr(0, length));
     if (!fncResult) {
@@ -679,7 +682,7 @@ inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::
         const auto trailingNewline = !ctx.consumeIfStartsWith('-');
 
         ctx.consumeSpaces();
-        const auto& [_, length] = findString(ctx.remainingLine());
+        const auto& [offset, length] = findString(ctx.remainingLine());
         if (length > 0) {
             return std::unexpected(ctx.makeError("Unexpected characters after multi-line indicator"));
         }
@@ -806,6 +809,9 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
     }
 
     const auto& [quoteOffset, length] = findString(ctx.remainingLine(), extraDelimiters);
+    if (quoteOffset == std::string_view::npos) {
+        return std::unexpected(ctx.makeError("Unterminated quote"));
+    }
     if (quoteOffset > 0) {
         // quoted
         auto maybeKey = resolveYamlEscapes_quoted(ctx.remainingLine().substr(quoteOffset, length));

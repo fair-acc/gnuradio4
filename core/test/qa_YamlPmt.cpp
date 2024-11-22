@@ -593,6 +593,9 @@ complex: !!complex64 (foo, bar)
 )";
         expect(eq(formatResult(yaml::deserialize(unknownTag)), "Error in 1:8: Unsupported type"sv));
 
+        expect(eq(formatResult(yaml::deserialize("value: \"Hello")), "Error in 1:8: Unterminated quote"sv));
+        expect(eq(formatResult(yaml::deserialize("\"value: Hello")), "Error in 1:1: Unterminated quote"sv));
+
         constexpr std::string_view extraCharacters = R"(
 value2: !!str "string"#comment
 value: !!str "a string" extra
