@@ -166,7 +166,7 @@ multiline1: !!str |
   First line
   Second line
   Third line with trailing newline
-  Null byte (\x00)
+  Null bytes (\x00\0)
   This is a quoted backslash "\"
 multiline2: !!str >
   This is a long
@@ -187,6 +187,8 @@ multiline4: !!str >-
   be folded into
   a single line without
   trailing newline
+
+
 multiline_listlike: !!str |-
   - First line
   - Second line
@@ -198,7 +200,7 @@ multiline_with_empty: !!str |
 
   Third line
 unicode: !!str "Hello 世界 🌍"
-escapes: !!str  "Quote\"Backslash\\Not a comment#Tab\tNewline\n"
+escapes: !!str  "Quote\"Backslash\\Not a comment#Tab\tNewline\nBackspace\b"
 single_quoted: !!str '"quoted"'
 special_chars: !!str "!@#$%^&*()"
 unprintable_chars: !!str "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
@@ -207,7 +209,7 @@ unprintable_chars: !!str "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x
         pmtv::map_t expected;
         expected["empty"]                = ""s;
         expected["spaces_only"]          = "   "s;
-        expected["multiline1"]           = "First line\nSecond line\nThird line with trailing newline\nNull byte (\x00)\nThis is a quoted backslash \"\\\"\n"s;
+        expected["multiline1"]           = "First line\nSecond line\nThird line with trailing newline\nNull bytes (\x00\x00)\nThis is a quoted backslash \"\\\"\n"s;
         expected["multiline2"]           = "This is a long paragraph that will be folded into a single line with trailing newlines This is a quoted backslash \"\\\"\n\n"s;
         expected["multiline3"]           = "First line\nSecond line\nThird line without trailing newline"s;
         expected["multiline4"]           = "This is a long paragraph that will be folded into a single line without trailing newline"s;
@@ -215,10 +217,11 @@ unprintable_chars: !!str "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x
         expected["multiline_maplike"]    = "key: First line\nkey2: Second line"s;
         expected["multiline_with_empty"] = "First line\n\nThird line\n"s;
         expected["unicode"]              = "Hello 世界 🌍"s;
-        expected["escapes"]              = "Quote\"Backslash\\Not a comment#Tab\tNewline\n"s;
+        expected["escapes"]              = "Quote\"Backslash\\Not a comment#Tab\tNewline\nBackspace\b"s;
         expected["single_quoted"]        = "\"quoted\""s;
         expected["special_chars"]        = "!@#$%^&*()"s;
         expected["unprintable_chars"]    = "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"s;
+
         testYAML(src, expected);
     };
 
@@ -484,6 +487,7 @@ flow_braces: {"}{": !!int8 42}
         expected["flow_multiline"] = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
         expected["flow_nested"]    = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
         expected["flow_braces"]    = pmtv::map_t{{"}{", static_cast<int8_t>(42)}};
+
         testYAML(src, expected);
     };
 
@@ -536,7 +540,9 @@ Key with spaces: !!int8 42
     "Empty"_test = [] {
         testYAML({}, pmtv::map_t{});
         testYAML("  ", pmtv::map_t{});
+        testYAML("---", pmtv::map_t{});
         testYAML("\n", pmtv::map_t{});
+        testYAML("{}", pmtv::map_t{});
         testYAML("# Empty\n", pmtv::map_t{});
         testYAML("\n# Empty\n", pmtv::map_t{});
     };
@@ -554,15 +560,19 @@ complex: !!complex64 (1.01.0)
 complex: !!complex64 Hello
 )";
 
-        const auto r1 = yaml::deserialize(src1);
-        const auto r2 = yaml::deserialize(src2);
-        const auto r3 = yaml::deserialize(src3);
-        expect(!r1.has_value());
-        expect(eq(formatResult(r1), "Error in 2:22: Invalid value for type"sv));
-        expect(!r2.has_value());
-        expect(eq(formatResult(r2), "Error in 2:22: Invalid value for type"sv));
-        expect(!r3.has_value());
-        expect(eq(formatResult(r3), "Error in 2:22: Invalid value for type"sv));
+        constexpr std::string_view src4 = R"(
+complex: !!complex64 (1.0, -1.0, 2.0)
+})";
+
+        constexpr std::string_view src5 = R"(
+complex: !!complex64 (foo, bar)
+)";
+
+        expect(eq(formatResult(yaml::deserialize(src1)), "Error in 2:22: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize(src2)), "Error in 2:22: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize(src3)), "Error in 2:22: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize(src4)), "Error in 2:22: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize(src5)), "Error in 2:22: Invalid value for type"sv));
     };
 
     "Errors"_test = [] {
@@ -600,9 +610,20 @@ key#Comment: foo
 )";
         expect(eq(formatResult(yaml::deserialize(invalidKeyComment)), "Error in 3:1: Could not find key/value separator ':'"sv));
 
-        constexpr std::string_view invalidEscape = R"(value: !!str "\x"
+        expect(eq(formatResult(yaml::deserialize("value: !!str \\xZZ")), "Error in 1:15: Invalid escape sequence"sv));
+
+        constexpr std::string_view invalidEscape2 = R"(value: !!str "\x
 )";
-        expect(eq(formatResult(yaml::deserialize(invalidEscape)), "Error in 1:16: Invalid escape sequence"sv));
+        expect(eq(formatResult(yaml::deserialize(invalidEscape2)), "Error in 1:16: Invalid escape sequence"sv));
+    };
+
+    "Unsupported YAML"_test = [] {
+        constexpr std::string_view unicode_escapes = R"(
+unicode: !!str "\u1234"
+)";
+        const auto                 result          = yaml::deserialize(unicode_escapes);
+        expect(!result.has_value());
+        expect(eq(formatResult(result), "Error in 2:18: Parser limitation: Unicode escape sequences are not supported"sv));
     };
 
 #pragma GCC diagnostic pop // Reenable -Wuseless-cast

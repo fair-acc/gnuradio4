@@ -402,6 +402,7 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_quoted(std
             ++i;
             switch (str[i]) {
             case '\\': result.push_back('\\'); break;
+            case 'b': result.push_back('\b'); break;
             case 'n': result.push_back('\n'); break;
             case 't': result.push_back('\t'); break;
             case 'r': result.push_back('\r'); break;
@@ -418,6 +419,9 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_quoted(std
                 result.append(*byte);
                 i += 2;
                 break;
+            }
+            case 'u': {
+                return std::unexpected(ValueParseError{i, "Parser limitation: Unicode escape sequences are not supported"});
             }
             default:
                 result.push_back('\\');
@@ -924,12 +928,10 @@ inline auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentInd
 }
 
 inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
-    if (!ctx.documentStart()) {
-        if (ctx.consumeIfStartsWith("{")) {
-            auto map = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
-            ctx.skipToNextLine();
-            return map;
-        }
+    if (ctx.consumeIfStartsWith("{")) {
+        auto map = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
+        ctx.skipToNextLine();
+        return map;
     }
 
     pmtv::map_t map;
@@ -1102,6 +1104,7 @@ inline std::string serialize(const pmtv::map_t& map) {
 inline std::expected<pmtv::map_t, ParseError> deserialize(std::string_view yaml_str) {
     auto                 lines = detail::split(yaml_str, "\n");
     detail::ParseContext ctx{.lines = lines};
+    ctx.consumeIfStartsWith("---");
     return detail::parseMap(ctx, -1);
 }
 
