@@ -293,6 +293,8 @@ struct ParseContext {
 
     ParseError makeError(std::string message) const { return {.line = lineIdx + 1, .column = columnIdx + 1, .message = std::move(message)}; }
 
+    ParseError makeErrorAtColumn(std::string message, std::size_t colIdx) const { return {.line = lineIdx + 1, .column = colIdx + 1, .message = std::move(message)}; }
+
     ParseError makeError(ValueParseError error) const { return {.line = lineIdx + 1, .column = columnIdx + 1 + error.offset, .message = std::move(error.message)}; }
 };
 
@@ -793,10 +795,7 @@ inline ValueType peekToFindValueType(ParseContext ctx, int previousIndent) {
         if (ctx.startsWith("-")) {
             return ValueType::List;
         }
-        if (ctx.remainingLine().find(':') != std::string_view::npos) {
-            return ValueType::Map;
-        }
-        return ValueType::Scalar;
+        return ValueType::Map;
     }
     return ValueType::Scalar;
 }
@@ -805,7 +804,7 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
     ctx.consumeSpaces();
 
     if (ctx.startsWith("-")) {
-        return std::unexpected(ctx.makeError("Unexpected list item in map."));
+        return std::unexpected(ctx.makeError("Unexpected list item in map"));
     }
 
     const auto& [quoteOffset, length] = findString(ctx.remainingLine(), extraDelimiters);
@@ -981,6 +980,7 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
         auto key = maybeKey.value();
 
         ctx.consumeSpaces();
+        auto       tagPos   = ctx.columnIdx;
         const auto maybeTag = parseTag(ctx);
         if (!maybeTag.has_value()) {
             return std::unexpected(maybeTag.error());
@@ -1001,7 +1001,7 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
         }
         case ValueType::Map: {
             if (!typeTag.empty()) {
-                return std::unexpected(ctx.makeError("Cannot have type tag for map entry"));
+                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for map entry", tagPos));
             }
             auto parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
@@ -1057,6 +1057,7 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
 
         ctx.consumeSpaces();
 
+        const auto tagPos        = ctx.columnIdx;
         const auto maybeLocalTag = parseTag(ctx);
         if (!maybeLocalTag.has_value()) {
             return std::unexpected(maybeLocalTag.error());
@@ -1074,7 +1075,7 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
         switch (peekedType) {
         case ValueType::List: {
             if (!typeTag.empty()) {
-                return std::unexpected(ctx.makeError("Cannot have type tag for list containing lists"));
+                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for list containing lists", tagPos));
             }
             auto parsedValue = parseList(ctx, tag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
@@ -1085,7 +1086,7 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
         }
         case ValueType::Map: {
             if (!typeTag.empty()) {
-                return std::unexpected(ctx.makeError("Cannot have type tag for maps"));
+                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", tagPos));
             }
             auto parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {

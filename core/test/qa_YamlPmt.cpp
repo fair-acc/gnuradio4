@@ -399,6 +399,8 @@ boolVector: !!bool
   - false
   - true
 pmtVectorWithBools:
+# Comment
+
   - !!bool true
   - !!bool false
   - !!bool true
@@ -479,6 +481,7 @@ flow_multiline: {key1: !!int8 42,
                  key2: !!int8 43}
 flow_nested: {key1: {key2: !!int8 42, key3: !!int8 43}, key4: {key5: !!int8 44, key6: !!int8 45}}
 flow_braces: {"}{": !!int8 42}
+last: # End of document, null value
 )yaml";
 
         pmtv::map_t expected;
@@ -489,7 +492,7 @@ flow_braces: {"}{": !!int8 42}
         expected["flow_multiline"] = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
         expected["flow_nested"]    = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
         expected["flow_braces"]    = pmtv::map_t{{"}{", static_cast<int8_t>(42)}};
-
+        expected["last"]           = std::monostate{};
         testYAML(src, expected);
     };
 
@@ -578,9 +581,16 @@ complex: !!complex64 (foo, bar)
     };
 
     "Errors"_test = [] {
-        constexpr std::string_view src1 = R"(value: !!float64 "a string"
+        constexpr std::string_view src1 = R"(value: !!float64 string
 )";
-        expect(eq(formatResult(yaml::deserialize(src1)), "Error in 1:19: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize(src1)), "Error in 1:18: Invalid value for type"sv));
+
+        constexpr std::string_view mapListMix = R"(
+value:
+    key: value
+    - value
+)";
+        expect(eq(formatResult(yaml::deserialize(mapListMix)), "Error in 4:5: Unexpected list item in map"sv));
 
         constexpr std::string_view atEnd = "value: !!"sv;
         expect(eq(formatResult(yaml::deserialize(atEnd)), "Error in 1:8: Unsupported type"sv));
@@ -589,12 +599,43 @@ complex: !!complex64 (foo, bar)
 )";
         expect(eq(formatResult(yaml::deserialize(emptyTag)), "Error in 1:8: Unsupported type"sv));
 
-        constexpr std::string_view unknownTag = R"(value: !!unknown "a string"
+        expect(eq(formatResult(yaml::deserialize("value: !!unknown a string")), "Error in 1:8: Unsupported type"sv));
+
+        constexpr std::string_view emptyTagInList = R"(
+value:
+    - !! "a string"
 )";
-        expect(eq(formatResult(yaml::deserialize(unknownTag)), "Error in 1:8: Unsupported type"sv));
+        expect(eq(formatResult(yaml::deserialize(emptyTagInList)), "Error in 3:7: Unsupported type"sv));
+
+        expect(eq(formatResult(yaml::deserialize("value: !!unknown a string")), "Error in 1:8: Unsupported type"sv));
 
         expect(eq(formatResult(yaml::deserialize("value: \"Hello")), "Error in 1:8: Unterminated quote"sv));
         expect(eq(formatResult(yaml::deserialize("\"value: Hello")), "Error in 1:1: Unterminated quote"sv));
+
+        constexpr std::string_view taggedMapBlock = R"(
+value: !!str
+    key: value
+)";
+        expect(eq(formatResult(yaml::deserialize(taggedMapBlock)), "Error in 2:8: Cannot have type tag for map entry"sv));
+
+        constexpr std::string_view taggedMapFlow = R"(
+key: !!str { key: value }
+)";
+        expect(eq(formatResult(yaml::deserialize(taggedMapFlow)), "Error in 2:6: Cannot have type tag for map entry"sv));
+
+        constexpr std::string_view taggedListInTaggedList = R"(
+value: !!str
+    - !!str
+      - value
+    )";
+        expect(eq(formatResult(yaml::deserialize(taggedListInTaggedList)), "Error in 3:12: Cannot have type tag for both list and list item"sv));
+
+        constexpr std::string_view taggedListInTaggedList2 = R"(
+value: !!str
+    -
+      - value
+    )";
+        expect(eq(formatResult(yaml::deserialize(taggedListInTaggedList2)), "Error in 3:6: Cannot have type tag for list containing lists"sv));
 
         constexpr std::string_view extraCharacters = R"(
 value2: !!str "string"#comment
