@@ -176,6 +176,7 @@ multiline2: !!str >
   a single line
   with trailing newlines
   This is a quoted backslash "\"
+  These are some invalid escapes \q\xZZ\x
 
 multiline3: !!str |-
   First line
@@ -205,14 +206,14 @@ escapes: !!str  "Quote\"Backslash\\Not a comment#Tab\tNewline\nBackspace\b"
 invalid_escapes: !!str "Invalid escapes \q\xZZ\x"
 single_quoted: !!str '"quoted"'
 special_chars: !!str "!@#$%^&*()"
-unprintable_chars: !!str "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
+unprintable_chars: !!str "\0\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
 )yaml";
 
         pmtv::map_t expected;
         expected["empty"]                = ""s;
         expected["spaces_only"]          = "   "s;
         expected["multiline1"]           = "First line\nSecond line\nThird line with trailing newline\nNull bytes (\x00\x00)\nThis is a quoted backslash \"\\\"\n"s;
-        expected["multiline2"]           = "This is a long paragraph that will be folded into a single line with trailing newlines This is a quoted backslash \"\\\"\n\n"s;
+        expected["multiline2"]           = "This is a long paragraph that will be folded into a single line with trailing newlines This is a quoted backslash \"\\\" These are some invalid escapes \\q\\xZZ\\x\n\n"s;
         expected["multiline3"]           = "First line\nSecond line\nThird line without trailing newline"s;
         expected["multiline4"]           = "This is a long paragraph that will be folded into a single line without trailing newline"s;
         expected["multiline_listlike"]   = "- First line\n- Second line"s;
@@ -223,7 +224,7 @@ unprintable_chars: !!str "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x
         expected["escapes"]              = "Quote\"Backslash\\Not a comment#Tab\tNewline\nBackspace\b"s;
         expected["single_quoted"]        = "\"quoted\""s;
         expected["special_chars"]        = "!@#$%^&*()"s;
-        expected["unprintable_chars"]    = "\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"s;
+        expected["unprintable_chars"]    = "\x00\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"s;
 
         testYAML(src, expected);
     };
@@ -573,16 +574,23 @@ complex: !!complex64 (1.0, -1.0, 2.0)
         constexpr std::string_view src5 = R"(
 complex: !!complex64 (foo, bar)
 )";
+        constexpr std::string_view src6 = R"(
+complex: !!complex64 (1.0, bar)
+)";
 
         expect(eq(formatResult(yaml::deserialize(src1)), "Error in 2:22: Invalid value for type"sv));
         expect(eq(formatResult(yaml::deserialize(src2)), "Error in 2:22: Invalid value for type"sv));
         expect(eq(formatResult(yaml::deserialize(src3)), "Error in 2:22: Invalid value for type"sv));
         expect(eq(formatResult(yaml::deserialize(src4)), "Error in 2:22: Invalid value for type"sv));
         expect(eq(formatResult(yaml::deserialize(src5)), "Error in 2:22: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize(src6)), "Error in 2:22: Invalid value for type"sv));
     };
 
     "Errors"_test = [] {
         expect(eq(formatResult(yaml::deserialize("value: !!float64 string")), "Error in 1:18: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize("value: !!int64 0xGG")), "Error in 1:16: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize("value: !!int64 0o99")), "Error in 1:16: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize("value: !!int64 0b1234")), "Error in 1:16: Invalid value for type"sv));
         expect(eq(formatResult(yaml::deserialize("value: !!int8 128")), "Error in 1:15: Invalid value for type"sv));
 
         constexpr std::string_view mapListMix = R"(
@@ -608,20 +616,57 @@ value:
         expect(eq(formatResult(yaml::deserialize(emptyTagInList)), "Error in 3:7: Unsupported type"sv));
 
         expect(eq(formatResult(yaml::deserialize("value: !!unknown a string")), "Error in 1:8: Unsupported type"sv));
-
         expect(eq(formatResult(yaml::deserialize("value: \"Hello")), "Error in 1:8: Unterminated quote"sv));
         expect(eq(formatResult(yaml::deserialize("\"value: Hello")), "Error in 1:1: Unterminated quote"sv));
+        expect(eq(formatResult(yaml::deserialize("{")), "Error in 2:1: Unexpected end of document"sv));
+        expect(eq(formatResult(yaml::deserialize("key: {\nfoo: bar}")), "Error in 2:1: Flow sequence insufficiently indented"sv));
+        expect(eq(formatResult(yaml::deserialize("key: !!str [foo, !!str bar]")), "Error in 1:24: Cannot have type tag for both list and list item"sv));
+        expect(eq(formatResult(yaml::deserialize("key: !!unknown [foo, bar]")), "Error in 1:6: Unsupported type"sv));
+        expect(eq(formatResult(yaml::deserialize("{ key: !!unknown foo }")), "Error in 1:8: Unsupported type"sv));
+        expect(eq(formatResult(yaml::deserialize("{ , }")), "Error in 1:3: Could not find key/value separator ':'"sv));
+        expect(eq(formatResult(yaml::deserialize("key: !!int64 [foo, bar]")), "Error in 1:15: Invalid value for type"sv));
+        expect(eq(formatResult(yaml::deserialize("key: [foo\nbar]")), "Error in 2:1: Expected ',' or ']'"sv));
+        expect(eq(formatResult(yaml::deserialize("key: {key: foo\nbar}")), "Error in 2:1: Expected ',' or '}'"sv));
+        expect(eq(formatResult(yaml::deserialize("key:\n  - foo\n  bar")), "Error in 3:3: Expected list item"sv));
+
+        constexpr std::string_view taggedListInList = R"(
+value: !!str
+    -
+        - value
+)";
+        expect(eq(formatResult(yaml::deserialize(taggedListInList)), "Error in 3:6: Cannot have type tag for list containing lists"sv));
+
+        constexpr std::string_view taggedMapInList = R"(
+value:
+    - !!str
+        key: value
+)";
+
+        expect(eq(formatResult(yaml::deserialize(taggedMapInList)), "Error in 3:7: Cannot have type tag for maps"sv));
+
+        constexpr std::string_view invalidMapInList = R"(
+value:
+    - { key: value
+)";
+
+        expect(eq(formatResult(yaml::deserialize(invalidMapInList)), "Error in 4:1: Expected ',' or '}'"sv));
+
+        constexpr std::string_view invalidScalarInList = R"(
+value:
+    - !!int64 value
+)";
+        expect(eq(formatResult(yaml::deserialize(invalidScalarInList)), "Error in 3:15: Invalid value for type"sv));
 
         constexpr std::string_view taggedMapBlock = R"(
 value: !!str
     key: value
 )";
-        expect(eq(formatResult(yaml::deserialize(taggedMapBlock)), "Error in 2:8: Cannot have type tag for map entry"sv));
+        expect(eq(formatResult(yaml::deserialize(taggedMapBlock)), "Error in 2:8: Cannot have type tag for maps"sv));
 
         constexpr std::string_view taggedMapFlow = R"(
 key: !!str { key: value }
 )";
-        expect(eq(formatResult(yaml::deserialize(taggedMapFlow)), "Error in 2:6: Cannot have type tag for map entry"sv));
+        expect(eq(formatResult(yaml::deserialize(taggedMapFlow)), "Error in 2:6: Cannot have type tag for maps"sv));
 
         constexpr std::string_view taggedListInTaggedList = R"(
 value: !!str

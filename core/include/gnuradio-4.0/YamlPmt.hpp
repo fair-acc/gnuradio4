@@ -487,8 +487,8 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
 
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
             T value;
-            const auto [_, ec] = std::from_chars(s.begin(), s.end(), value, base);
-            if (ec != std::errc{}) {
+            const auto [ptr, ec] = std::from_chars(s.begin(), s.end(), value, base);
+            if (ec != std::errc{} || ptr != s.end()) {
                 return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
             }
             return value;
@@ -502,8 +502,8 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         }
 
         T value;
-        const auto [_, ec] = std::from_chars(sv.begin(), sv.end(), value);
-        if (ec != std::errc{}) {
+        const auto [ptr, ec] = std::from_chars(sv.begin(), sv.end(), value);
+        if (ec != std::errc{} || ptr != sv.end()) {
             return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
         }
         return value;
@@ -795,7 +795,7 @@ inline ValueType peekToFindValueType(ParseContext ctx, int previousIndent) {
             continue;
         }
         if (previousIndent >= 0 && indent <= static_cast<std::size_t>(previousIndent)) {
-            return ValueType::Scalar;
+            break;
         }
         ctx.consumeSpaces();
         if (ctx.startsWith("-")) {
@@ -1007,7 +1007,7 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
         }
         case ValueType::Map: {
             if (!typeTag.empty()) {
-                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for map entry", tagPos));
+                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", tagPos));
             }
             auto parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
@@ -1091,7 +1091,7 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
             break;
         }
         case ValueType::Map: {
-            if (!typeTag.empty()) {
+            if (!localTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", tagPos));
             }
             auto parsedValue = parseMap(ctx, static_cast<int>(line_indent));
