@@ -15839,12 +15839,19 @@ struct Port {
                 if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;
                 }
-                if ((ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0) //
-                    || ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessNone                                       //
-                    || this->empty()) {
-                    return; // no samples to be consumed -> do not consume any tags
+
+                if (this->empty() //
+                    || (ReaderSpanType<spanReleasePolicy>::isConsumeRequested() && ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume() == 0)) {
+                    return;
                 }
-                consumeTags(1); // consume all tags including the one on the first sample
+
+                if (ReaderSpanType<spanReleasePolicy>::isConsumeRequested()) {
+                    consumeTags(ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume());
+                } else {
+                    if (ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                        consumeTags(ReaderSpanType<spanReleasePolicy>::size());
+                    }
+                }
             }
         }
 
@@ -23234,7 +23241,7 @@ public:
 
     [[nodiscard]] constexpr bool inputTagsPresent() const noexcept { return !_mergedInputTag.map.empty(); };
 
-    [[nodiscard]] Tag mergedInputTag() const noexcept { return _mergedInputTag; }
+    [[nodiscard]] constexpr const Tag& mergedInputTag() const noexcept { return _mergedInputTag; }
 
     [[nodiscard]] constexpr const SettingsBase& settings() const noexcept { return _settings; }
 
@@ -23375,15 +23382,15 @@ public:
         }
     }
 
-    constexpr void forwardTags(auto& outputSpanTuple) noexcept {
+    constexpr void publishMergedInputTag(auto& outputSpanTuple) noexcept {
         if constexpr (!noDefaultTagForwarding) {
             if (inputTagsPresent()) {
-                for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(mergedInputTag().map, 0); }, outputSpanTuple);
+                for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(_mergedInputTag.map, 0); }, outputSpanTuple);
             }
         }
     }
 
-    constexpr void copyCachedOutputTags(auto& outputSpanTuple) noexcept {
+    constexpr void publishCachedOutputTags(auto& outputSpanTuple) noexcept {
         if (_outputTags.empty()) {
             return;
         }
@@ -23394,33 +23401,21 @@ public:
     }
 
     /**
-     * Collects tags from each input port, merges them into a single map, applies settings and if requested propagates
-     * them to the output ports.
-     * @param untilOffset defaults to 0, if bigger merges all tags from samples 0...untilOffset for each port before merging
-     *                    them
+     * Merge tags from all sync ports into one merged tag, apply auto-update parameters
      */
-    constexpr void updateInputAndOutputTags(auto& inputSpans, std::size_t /*untilOffset*/ = 0UZ) noexcept {
-        gr::meta::tuple_for_each(
-            [this](const auto& inputSpanOrVector) noexcept {
-                auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
-                    assert(&sourceMap != &destinationMap);
-                    for (const auto& [key, value] : sourceMap) {
-                        destinationMap.insert_or_assign(key, value);
+    constexpr void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
+        for_each_reader_span(
+            [this, untilLocalIndex](auto& in) {
+                if (in.isSync) {
+                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndex).map) {
+                        _mergedInputTag.map.insert_or_assign(key, value);
                     }
-                };
-                if constexpr (InputSpanLike<std::remove_cvref_t<decltype(inputSpanOrVector)>>) {
-                    mergeSrcMapInto(inputSpanOrVector.getMergedTag(1).map, _mergedInputTag.map);
-                } else {
-                    std::ranges::for_each(inputSpanOrVector, [this, &mergeSrcMapInto](auto& inputSpan) { mergeSrcMapInto(inputSpan.getMergedTag(1).map, _mergedInputTag.map); });
                 }
             },
             inputSpans);
 
-        if (!mergedInputTag().map.empty()) {
-            settings().autoUpdate(mergedInputTag()); // apply tags as new settings if matching
-            if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
-                requestStop();
-            }
+        if (inputTagsPresent()) {
+            settings().autoUpdate(_mergedInputTag); // apply tags as new settings if matching
         }
     }
 
@@ -23477,18 +23472,6 @@ public:
                 }
             },
             ports);
-    }
-
-    constexpr static bool containsEmptyOutputSpans(auto& outputTuple) noexcept {
-        bool result = false;
-        for_each_writer_span(
-            [&result](auto& out) {
-                if (out.empty()) {
-                    result = true;
-                }
-            },
-            outputTuple);
-        return result;
     }
 
     inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
@@ -24288,7 +24271,7 @@ protected:
 
         if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
             auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
-            updateInputAndOutputTags(inputSpans, inputSkipBefore);                                    // apply all tags in the skipped data range
+            updateMergedInputTagAndApplySettings(inputSpans, inputSkipBefore);                        // apply all tags in the skipped data range
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
@@ -24314,15 +24297,12 @@ protected:
         auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
-        if (containsEmptyOutputSpans(outputSpans)) {
-            return {requestedWork, 0UZ, INSUFFICIENT_OUTPUT_ITEMS};
-        }
-
-        updateInputAndOutputTags(inputSpans);
+        updateMergedInputTagAndApplySettings(inputSpans);
         applyChangedSettings();
 
-        copyCachedOutputTags(outputSpans);
-        forwardTags(outputSpans); // Request to publish forward Tags. Actual publishing occurs when outputSpans go out of scope. If processedIn == 0 || processedOut == 0, the Tags will not be published.
+        // Actual publishing occurs when outputSpans go out of scope. If processedOut == 0, the Tags will not be published.
+        publishCachedOutputTags(outputSpans);
+        publishMergedInputTag(outputSpans);
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
@@ -24391,11 +24371,7 @@ protected:
         }
 
         if (processedOut > 0) {
-            copyCachedOutputTags(outputSpans);
-
-            if (mergedInputTag().map.contains(gr::tag::END_OF_STREAM)) {
-                requestStop();
-            }
+            publishCachedOutputTags(outputSpans);
             _mergedInputTag.map.clear(); // clear temporary cached input tags after processing - won't be needed after this
         } else {
             // if no data is published or consumed => do not publish any tags
