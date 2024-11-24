@@ -73,11 +73,11 @@ enum class TypeTagMode { None, Auto };
 template<TypeTagMode tagMode = TypeTagMode::Auto>
 inline void serialize(std::ostream& os, const pmtv::pmt& value, int level = 0);
 
-inline void serializeString(std::ostream& os, std::string_view value, int level, bool is_multiline = false, bool use_folded = false) noexcept {
-    if (is_multiline) {
-        const auto ends_with_newline = value.ends_with('\n');
-        os << (use_folded ? ">" : "|");
-        if (!ends_with_newline) {
+inline void serializeString(std::ostream& os, std::string_view value, int level, bool useMultiline = false) noexcept {
+    if (useMultiline) {
+        const auto endsWithNewline = value.ends_with('\n');
+        os << "|";
+        if (!endsWithNewline) {
             os << "-";
         }
         os << "\n";
@@ -165,8 +165,7 @@ inline void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
             } else if constexpr (std::is_same_v<T, std::string>) {
                 // Use multiline for strings containing newlines and printable characters only
                 bool multiline  = value.contains('\n') && std::ranges::all_of(value, [](char c) { return std::isprint(c) || c == '\n'; });
-                bool use_folded = value.contains("  "); // Use folded if indented lines are detected
-                serializeString(os, value, level, multiline, use_folded);
+                serializeString(os, value, level, multiline);
             } else if constexpr (std::same_as<T, pmtv::map_t>) {
                 // flow-style formatting
                 if (value.empty()) {

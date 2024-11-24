@@ -163,6 +163,8 @@ null:  # Comment
         constexpr std::string_view src = R"yaml(
 empty: !!str ""
 spaces_only: !!str "   "
+value_with_colon: "value: with colon"
+value_with_colon2: "value:\n  with colon"
 multiline1: !!str |
   First line
   Second line
@@ -212,6 +214,8 @@ unprintable_chars: !!str "\0\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C
         pmtv::map_t expected;
         expected["empty"]                = ""s;
         expected["spaces_only"]          = "   "s;
+        expected["value_with_colon"]     = "value: with colon"s;
+        expected["value_with_colon2"]    = "value:\n  with colon"s;
         expected["multiline1"]           = "First line\nSecond line\nThird line with trailing newline\nNull bytes (\x00\x00)\nThis is a quoted backslash \"\\\"\n"s;
         expected["multiline2"]           = "This is a long paragraph that will be folded into a single line with trailing newlines This is a quoted backslash \"\\\" These are some invalid escapes \\q\\xZZ\\x\n\n"s;
         expected["multiline3"]           = "First line\nSecond line\nThird line without trailing newline"s;
