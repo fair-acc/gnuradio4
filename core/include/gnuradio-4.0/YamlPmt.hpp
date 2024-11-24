@@ -785,16 +785,8 @@ inline ValueType peekToFindValueType(ParseContext ctx, int previousIndent) {
     }
     ctx.skipToNextLine();
     while (!ctx.atEndOfDocument()) {
-        if (ctx.startsWith("#")) {
-            ctx.skipToNextLine();
-            continue;
-        }
-        const auto indent = ctx.currentIndent();
-        if (indent == std::string_view::npos) {
-            ctx.skipToNextLine();
-            continue;
-        }
-        if (previousIndent >= 0 && indent <= static_cast<std::size_t>(previousIndent)) {
+        ctx.consumeWhitespaceAndComments();
+        if (ctx.atEndOfDocument() || (previousIndent >= 0 && ctx.currentIndent() <= static_cast<std::size_t>(previousIndent))) {
             break;
         }
         ctx.consumeSpaces();

@@ -253,6 +253,9 @@ null_value6: Null
 null_value7: NULL
 null_value8:
 not_null: NuLl
+null_at_end:
+# Comment, then empty line
+
 )yaml";
 
         pmtv::map_t expected;
@@ -265,6 +268,7 @@ not_null: NuLl
         expected["null_value7"] = std::monostate{};
         expected["null_value8"] = std::monostate{};
         expected["not_null"]    = "NuLl";
+        expected["null_at_end"] = std::monostate{};
         testYAML(src, expected);
     };
 
