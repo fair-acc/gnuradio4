@@ -23733,7 +23733,8 @@ protected:
         assert(propertyName == block::property::kActiveContext);
 
         if (message.cmd == Get) {
-            message.data = {{"context", settings().activeContext().context}};
+            const auto& ctx = settings().activeContext();
+            message.data    = {{"context", ctx.context}, {"time", ctx.time}};
             return message;
         }
 
