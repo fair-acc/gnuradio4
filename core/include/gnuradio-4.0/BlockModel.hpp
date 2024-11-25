@@ -465,6 +465,7 @@ public:
 
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
 
+    // For blocks that contain nested blocks (Graphs, Schedulers)
     [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept override {
         if constexpr (requires { blockRef().blocks(); }) {
             return blockRef().blocks();
@@ -473,6 +474,7 @@ public:
         }
     }
 
+    // For blocks that contain nested blocks (Graphs, Schedulers)
     [[nodiscard]] std::span<Edge> edges() noexcept override {
         if constexpr (requires { blockRef().edges(); }) {
             return blockRef().edges();
