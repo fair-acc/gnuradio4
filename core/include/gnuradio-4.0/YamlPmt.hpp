@@ -816,10 +816,9 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
         }
         ctx.consume(2 * quoteOffset + length);
         ctx.consumeSpaces();
-        if (!ctx.atEndOfLine() && ctx.front() != ':') {
+        if (!ctx.consumeIfStartsWith(':')) {
             return std::unexpected(ctx.makeError("Could not find key/value separator ':'"));
         }
-        ctx.consume(1);
         return *maybeKey;
     }
 
