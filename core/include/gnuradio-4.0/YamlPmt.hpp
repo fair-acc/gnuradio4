@@ -26,8 +26,8 @@ struct ParseError {
     std::size_t line;
     std::size_t column;
     std::string message;
-    std::string context;
 };
+
 namespace detail {
 
 template<typename T>
@@ -1106,8 +1106,6 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
     if (typeTag.empty()) {
         return list;
     }
-    // TODO maybe avoid the conversion from pmtv::pmt back type_tag's T and make this whole function a template,
-    // but check for code size increase
     return applyTag<pmtv::pmt, ConvertList>(typeTag, list);
 }
 
