@@ -89,11 +89,11 @@ gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string tri
     return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
 };
 
-gr::Tag genDropTag(std::size_t index, std::uint64_t nSamplesDropped) { //
+gr::Tag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
     return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}}};
 };
 
-gr::Tag genDropSyncTag(std::size_t index, std::uint64_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
+gr::Tag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
     return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
 };
 
