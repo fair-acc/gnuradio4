@@ -82,15 +82,19 @@ struct fmt::formatter<std::complex<T>> {
 // simplified formatter for UncertainValue
 template<gr::arithmetic_or_complex_like T>
 struct fmt::formatter<gr::UncertainValue<T>> {
-    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+    formatter<T> value_formatter;
+
+    constexpr auto parse(format_parse_context& ctx) { return value_formatter.parse(ctx); }
 
     template<typename FormatContext>
-    constexpr auto format(const gr::UncertainValue<T>& value, FormatContext& ctx) const noexcept {
-        if constexpr (gr::meta::complex_like<T>) {
-            return fmt::format_to(ctx.out(), "({} ± {})", value.value, value.uncertainty);
-        } else {
-            return fmt::format_to(ctx.out(), "({:G} ± {:G})", value.value, value.uncertainty);
-        }
+    auto format(const gr::UncertainValue<T>& uv, FormatContext& ctx) const {
+        auto out = ctx.out();
+        out      = fmt::format_to(out, "(");
+        out      = value_formatter.format(uv.value, ctx);
+        out      = fmt::format_to(out, " ± ");
+        out      = value_formatter.format(uv.uncertainty, ctx);
+        out      = fmt::format_to(out, ")");
+        return out;
     }
 };
 
