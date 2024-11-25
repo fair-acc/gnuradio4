@@ -448,6 +448,7 @@ if(ENABLE_TESTING AND (UNIX OR APPLE))
       qa_Scheduler
       qa_thread_pool
       qa_thread_affinity
+      qa_YamlPmt
       EXCLUDE
       "$CMAKE_BUILD_DIR/*")
     setup_target_for_coverage_gcovr_html(
@@ -469,6 +470,7 @@ if(ENABLE_TESTING AND (UNIX OR APPLE))
       qa_Scheduler
       qa_thread_pool
       qa_thread_affinity
+      qa_YamlPmt
       EXCLUDE
       "$CMAKE_BUILD_DIR/*")
   endif()
