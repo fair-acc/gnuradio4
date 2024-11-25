@@ -479,11 +479,6 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
             return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
         }
     } else if constexpr (std::is_integral_v<T>) {
-        if (sv.contains(".")) {
-            // from_chars() accepts "123.456", but we reject it
-            return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
-        }
-
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
             T value;
             const auto [ptr, ec] = std::from_chars(s.begin(), s.end(), value, base);
@@ -499,13 +494,7 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         } else if (sv.starts_with("0b")) {
             return parseWithBase(sv.substr(2), 2);
         }
-
-        T value;
-        const auto [ptr, ec] = std::from_chars(sv.begin(), sv.end(), value);
-        if (ec != std::errc{} || ptr != sv.end()) {
-            return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
-        }
-        return value;
+        return parseWithBase(sv, 10);
     } else if constexpr (is_complex_v<T>) {
         auto trim = [](std::string_view s) {
             while (!s.empty() && std::isspace(s.front())) {
