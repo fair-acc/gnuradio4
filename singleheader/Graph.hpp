@@ -13407,9 +13407,9 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _parent->_internalSpan.size(); };
         [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); };
         [[nodiscard]] constexpr bool             empty() const noexcept { return _parent->_internalSpan.empty(); }
-        [[nodiscard]] constexpr iterator         cbegin() const noexcept { return _parent->_internalSpan.cbegin(); }
+        [[nodiscard]] constexpr iterator         cbegin() const noexcept { return _parent->_internalSpan.begin(); }
         [[nodiscard]] constexpr iterator         begin() const noexcept { return _parent->_internalSpan.begin(); }
-        [[nodiscard]] constexpr iterator         cend() const noexcept { return _parent->_internalSpan.cend(); }
+        [[nodiscard]] constexpr iterator         cend() const noexcept { return _parent->_internalSpan.end(); }
         [[nodiscard]] constexpr iterator         end() const noexcept { return _parent->_internalSpan.end(); }
         [[nodiscard]] constexpr reverse_iterator rbegin() const noexcept { return _parent->_internalSpan.rbegin(); }
         [[nodiscard]] constexpr reverse_iterator rend() const noexcept { return _parent->_internalSpan.rend(); }
@@ -13598,9 +13598,9 @@ class CircularBuffer {
         [[nodiscard]] constexpr std::size_t      size() const noexcept { return _internalSpan.size(); }
         [[nodiscard]] constexpr std::size_t      size_bytes() const noexcept { return size() * sizeof(T); }
         [[nodiscard]] constexpr bool             empty() const noexcept { return _internalSpan.empty(); }
-        [[nodiscard]] constexpr iterator         cbegin() const noexcept { return _internalSpan.cbegin(); }
+        [[nodiscard]] constexpr iterator         cbegin() const noexcept { return _internalSpan.begin(); }
         [[nodiscard]] constexpr iterator         begin() const noexcept { return _internalSpan.begin(); }
-        [[nodiscard]] constexpr iterator         cend() const noexcept { return _internalSpan.cend(); }
+        [[nodiscard]] constexpr iterator         cend() const noexcept { return _internalSpan.end(); }
         [[nodiscard]] constexpr iterator         end() const noexcept { return _internalSpan.end(); }
         [[nodiscard]] constexpr const T&         front() const noexcept { return _internalSpan.front(); }
         [[nodiscard]] constexpr const T&         back() const noexcept { return _internalSpan.back(); }
