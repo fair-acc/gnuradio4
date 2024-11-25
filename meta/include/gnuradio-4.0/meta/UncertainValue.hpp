@@ -62,6 +62,18 @@ struct UncertainValue {
 template<typename T>
 UncertainValue(T, T) -> UncertainValue<T>;
 
+template<arithmetic_or_complex_like T, arithmetic_or_complex_like U>
+requires std::convertible_to<U, T>
+auto operator<=>(const UncertainValue<T>& lhs, U rhs) {
+    return lhs.value <=> static_cast<T>(rhs);
+}
+
+template<arithmetic_or_complex_like T, arithmetic_or_complex_like U>
+requires std::convertible_to<U, T>
+auto operator<=>(U lhs, const UncertainValue<T>& rhs) {
+    return static_cast<T>(lhs) <=> rhs.value;
+}
+
 template<typename T>
 concept UncertainValueLike = gr::meta::is_instantiation_of<T, UncertainValue>;
 
@@ -226,7 +238,7 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
             return UncertainValue<ResultType>{lhs.value / rhs.value, newUncertainty};
         } else {
             // both ValueType[T,U] are arithmetic uncertainties
-            ResultType combinedUncertainty = std::hypot(lhs.uncertainty / rhs.value, rhs.uncertainty * lhs.value / std::pow(rhs.value, 2));
+            ResultType combinedUncertainty = std::hypot(lhs.uncertainty / rhs.value, rhs.uncertainty * lhs.value / (rhs.value * rhs.value));
             return UncertainValue<ResultType>{lhs.value / rhs.value, combinedUncertainty};
         }
     } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
