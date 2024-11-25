@@ -164,7 +164,7 @@ inline void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
                 os << "(" << value.real() << "," << value.imag() << ")\n";
             } else if constexpr (std::is_same_v<T, std::string>) {
                 // Use multiline for strings containing newlines and printable characters only
-                bool multiline  = value.contains('\n') && std::ranges::all_of(value, [](char c) { return std::isprint(c) || c == '\n'; });
+                bool multiline = value.contains('\n') && std::ranges::all_of(value, [](char c) { return std::isprint(c) || c == '\n'; });
                 serializeString(os, value, level, multiline);
             } else if constexpr (std::same_as<T, pmtv::map_t>) {
                 // flow-style formatting
