@@ -208,6 +208,8 @@ public:
 
         return handler->createBlock(name, type, params);
     }
+
+    bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block) || handlerForName(block) != nullptr; }
 };
 #else
 // PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
@@ -221,7 +223,10 @@ public:
 
     BlockRegistry& registry() { return *_registry; }
 
-    auto knownBlocks() const { return _registry->knownBlocks(); }
+    auto knownBlocks() const {
+        std::vector<std::string_view> knownBlocks = _registry->knownBlocks();
+        return std::vector<std::string>(knownBlocks.begin(), knownBlocks.end());
+    }
 
     std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
         if (_registry->isBlockKnown(block)) {
@@ -232,6 +237,8 @@ public:
     }
 
     std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) { return _registry->createBlock(name, type, params); }
+
+    bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block); }
 };
 #endif
 
