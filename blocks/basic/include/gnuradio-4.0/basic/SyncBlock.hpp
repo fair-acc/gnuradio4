@@ -186,7 +186,7 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, NoDefaultTagForwarding, SyncBl
                 publishInputTags(ins[i], outs[i], nSamplesToDrop, nSamplesToPublish);
                 _nDroppedSamples[i] = 0UZ;
 
-                ins[i].consume(nSamplesToConsume);
+                std::ignore = ins[i].consume(nSamplesToConsume);
                 ins[i].consumeTags(nSamplesToConsume);
                 outs[i].publish(nSamplesToPublish);
             }
@@ -204,7 +204,7 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, NoDefaultTagForwarding, SyncBl
 
                     _nDroppedSamples[i] = 0UZ;
 
-                    ins[i].consume(nSamplesToCopy);
+                    std::ignore = ins[i].consume(nSamplesToCopy);
                     ins[i].consumeTags(nSamplesToCopy);
                     outs[i].publish(nSamplesToCopy);
                 }
@@ -212,7 +212,7 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, NoDefaultTagForwarding, SyncBl
                 for (std::size_t i = 0; i < nPorts; i++) {
                     const std::size_t nSamplesToDrop = ins[i].size() < static_cast<std::size_t>(max_history_size) ? 0UZ : ins[i].size() - static_cast<std::size_t>(max_history_size);
                     if (nSamplesToDrop != 0UZ) {
-                        ins[i].consume(nSamplesToDrop);
+                        std::ignore = ins[i].consume(nSamplesToDrop);
                         ins[i].consumeTags(nSamplesToDrop);
 
                         _nDroppedSamples[i] += nSamplesToDrop;
@@ -224,7 +224,7 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, NoDefaultTagForwarding, SyncBl
         }
         for (std::size_t i = 0; i < nPorts; i++) {
             if (!ins[i].isConsumeRequested()) {
-                ins[i].consume(0UZ);
+                std::ignore = ins[i].consume(0UZ);
                 ins[i].consumeTags(0UZ);
                 outs[i].publish(0UZ);
             }

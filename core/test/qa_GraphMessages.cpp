@@ -275,6 +275,59 @@ const boost::ut::suite NonRunningGraphTests = [] {
             expect(!reply.data.has_value());
         };
     };
+
+    "BlockRegistry tests"_test = [] {
+        gr::MsgPortOut toGraph;
+        gr::Graph      testGraph;
+        gr::MsgPortIn  fromGraph;
+
+        expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
+
+        "Get available block types"_test = [&] {
+            sendMessage<Get>(toGraph, "" /* serviceName */, graph::property::kRegistryBlockTypes /* endpoint */, {} /* data */);
+            expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
+
+            const Message reply = awaitReplyMsg(testGraph, 100ms, fromGraph);
+
+            if (reply.data.has_value()) {
+                const auto& dataMap    = reply.data.value();
+                auto        foundTypes = dataMap.find("types");
+                if (foundTypes != dataMap.end() || !std::holds_alternative<property_map>(foundTypes->second)) {
+                    PluginLoader& loader             = gr::globalPluginLoader();
+                    const auto    expectedBlockTypes = loader.knownBlocks();
+                    const auto&   blockTypes         = std::get<property_map>(foundTypes->second);
+                    expect(eq(expectedBlockTypes.size(), blockTypes.size()));
+
+                    for (const auto& expectedBlockType : expectedBlockTypes) {
+                        auto foundBlockType = blockTypes.find(expectedBlockType);
+                        if (foundBlockType != blockTypes.end() && std::holds_alternative<property_map>(foundBlockType->second)) {
+                            const property_map& blockMap = std::get<property_map>(foundBlockType->second);
+
+                            if (std::holds_alternative<std::vector<std::string>>(blockMap.at("parametrizations"))) {
+                                const std::vector<std::string>      blockParams         = std::get<std::vector<std::string>>(blockMap.at("parametrizations"));
+                                const std::vector<std::string_view> expectedBlockParams = loader.knownBlockParameterizations(expectedBlockType);
+
+                                if (blockParams.size() == expectedBlockParams.size()) {
+                                    expect(std::ranges::equal(expectedBlockParams, blockParams));
+                                } else {
+                                    expect(false) << std::format("different number of parametrizations for block `{}`: {} vs. {}", foundBlockType->first, blockParams.size(), expectedBlockParams.size());
+                                }
+                            } else {
+                                expect(false) << std::format("block type ({}) parametrizations is not a std::vector<std::string>", foundBlockType->first);
+                            }
+                        } else {
+                            expect(false) << std::format("block type ({}) not found or pmt type is not correct", foundBlockType->first);
+                        }
+                    }
+                } else {
+                    expect(false) << "`types` key not found or data type is not a `property_map`";
+                }
+            } else {
+                expect(false) << fmt::format("data has no value - error: {}", reply.data.error());
+            }
+        };
+    };
 };
 
 const boost::ut::suite RunningGraphTests = [] {
