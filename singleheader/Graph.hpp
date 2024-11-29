@@ -25930,6 +25930,8 @@ public:
 
         return handler->createBlock(name, type, params);
     }
+
+    bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block) || handlerForName(block) != nullptr; }
 };
 #else
 // PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
@@ -25943,7 +25945,10 @@ public:
 
     BlockRegistry& registry() { return *_registry; }
 
-    auto knownBlocks() const { return _registry->knownBlocks(); }
+    auto knownBlocks() const {
+        std::vector<std::string_view> knownBlocks = _registry->knownBlocks();
+        return std::vector<std::string>(knownBlocks.begin(), knownBlocks.end());
+    }
 
     std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
         if (_registry->isBlockKnown(block)) {
@@ -25954,6 +25959,8 @@ public:
     }
 
     std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) { return _registry->createBlock(name, type, params); }
+
+    bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block); }
 };
 #endif
 
@@ -26047,6 +26054,8 @@ inline static const char* kEdgeRemoved  = "EdgeRemoved";
 
 inline static const char* kGraphInspect   = "GraphInspect";
 inline static const char* kGraphInspected = "GraphInspected";
+
+inline static const char* kRegistryBlockTypes = "RegistryBlockTypes";
 } // namespace graph::property
 
 class Graph : public gr::Block<Graph> {
@@ -26177,13 +26186,14 @@ public:
 
     Graph(property_map settings = {}) : gr::Block<Graph>(std::move(settings)) {
         _blocks.reserve(100); // TODO: remove
-        propertyCallbacks[graph::property::kEmplaceBlock] = &Graph::propertyCallbackEmplaceBlock;
-        propertyCallbacks[graph::property::kRemoveBlock]  = &Graph::propertyCallbackRemoveBlock;
-        propertyCallbacks[graph::property::kInspectBlock] = &Graph::propertyCallbackInspectBlock;
-        propertyCallbacks[graph::property::kReplaceBlock] = &Graph::propertyCallbackReplaceBlock;
-        propertyCallbacks[graph::property::kEmplaceEdge]  = &Graph::propertyCallbackEmplaceEdge;
-        propertyCallbacks[graph::property::kRemoveEdge]   = &Graph::propertyCallbackRemoveEdge;
-        propertyCallbacks[graph::property::kGraphInspect] = &Graph::propertyCallbackGraphInspect;
+        propertyCallbacks[graph::property::kEmplaceBlock]       = &Graph::propertyCallbackEmplaceBlock;
+        propertyCallbacks[graph::property::kRemoveBlock]        = &Graph::propertyCallbackRemoveBlock;
+        propertyCallbacks[graph::property::kInspectBlock]       = &Graph::propertyCallbackInspectBlock;
+        propertyCallbacks[graph::property::kReplaceBlock]       = &Graph::propertyCallbackReplaceBlock;
+        propertyCallbacks[graph::property::kEmplaceEdge]        = &Graph::propertyCallbackEmplaceEdge;
+        propertyCallbacks[graph::property::kRemoveEdge]         = &Graph::propertyCallbackRemoveEdge;
+        propertyCallbacks[graph::property::kGraphInspect]       = &Graph::propertyCallbackGraphInspect;
+        propertyCallbacks[graph::property::kRegistryBlockTypes] = &Graph::propertyCallbackRegistryBlockTypes;
     }
     Graph(Graph&)            = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
@@ -26339,7 +26349,8 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view /*propertyName*/, Message message) {
+    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kEmplaceBlock);
         using namespace std::string_literals;
         const auto&         data       = message.data.value();
         const std::string&  type       = std::get<std::string>(data.at("type"s));
@@ -26358,7 +26369,8 @@ public:
         return {};
     }
 
-    std::optional<Message> propertyCallbackInspectBlock(std::string_view /*propertyName*/, Message message) {
+    std::optional<Message> propertyCallbackInspectBlock(std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kInspectBlock);
         using namespace std::string_literals;
         const auto&        data       = message.data.value();
         const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
@@ -26375,7 +26387,8 @@ public:
         return {reply};
     }
 
-    std::optional<Message> propertyCallbackRemoveBlock(std::string_view /*propertyName*/, Message message) {
+    std::optional<Message> propertyCallbackRemoveBlock(std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kRemoveBlock);
         using namespace std::string_literals;
         const auto&        data       = message.data.value();
         const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
@@ -26391,7 +26404,8 @@ public:
         return {message};
     }
 
-    std::optional<Message> propertyCallbackReplaceBlock(std::string_view /*propertyName*/, Message message) {
+    std::optional<Message> propertyCallbackReplaceBlock(std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kReplaceBlock);
         using namespace std::string_literals;
         const auto&         data       = message.data.value();
         const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
@@ -26439,7 +26453,8 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view /*propertyName*/, Message message) {
+    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kEmplaceEdge);
         using namespace std::string_literals;
         const auto&                         data             = message.data.value();
         const std::string&                  sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
@@ -26479,7 +26494,8 @@ public:
         return message;
     }
 
-    std::optional<Message> propertyCallbackRemoveEdge(std::string_view /*propertyName*/, Message message) {
+    std::optional<Message> propertyCallbackRemoveEdge(std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kRemoveEdge);
         using namespace std::string_literals;
         const auto&        data        = message.data.value();
         const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
@@ -26500,7 +26516,7 @@ public:
     }
 
     std::optional<Message> propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
-
+        assert(propertyName == graph::property::kGraphInspect);
         message.data = [&] {
             property_map result;
             result["name"s]          = std::string(name);
@@ -26524,6 +26540,20 @@ public:
         }();
 
         message.endpoint = graph::property::kGraphInspected;
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackRegistryBlockTypes(std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kRegistryBlockTypes);
+        PluginLoader&                   loader      = gr::globalPluginLoader();
+        const std::vector<std::string>& knownBlocks = loader.knownBlocks();
+
+        property_map result{};
+        for (const auto& blockType : knownBlocks) {
+            std::vector<std::string_view> knownBlockParams = loader.knownBlockParameterizations(blockType);
+            result[blockType]                              = property_map{{"parametrizations", std::vector<std::string>(knownBlockParams.begin(), knownBlockParams.end())}};
+        }
+        message.data = property_map{{"types", std::move(result)}};
         return message;
     }
 
