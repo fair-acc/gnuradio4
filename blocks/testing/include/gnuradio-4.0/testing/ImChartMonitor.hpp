@@ -71,9 +71,9 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
             std::vector<T> reversedY(_historyBufferY.rbegin(), _historyBufferY.rend());
             std::vector<T> reversedTag(_historyBufferX.size());
             if constexpr (std::is_floating_point_v<T>) {
-                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.index < 0 ? std::numeric_limits<T>::quiet_NaN() : yValue; });
+                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.map.empty() ? std::numeric_limits<T>::quiet_NaN() : yValue; });
             } else {
-                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.index < 0 ? std::numeric_limits<T>::lowest() : yValue; });
+                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.map.empty() ? std::numeric_limits<T>::lowest() : yValue; });
             }
 
             auto adjustRange = [](T min, T max) {
