@@ -454,6 +454,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("context"));
+                expect(reply.data.value().contains("time"));
                 expect(eq("new_context"s, std::get<std::string>(reply.data.value().at("context"))));
             };
 
@@ -469,6 +470,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("context"));
+                expect(reply.data.value().contains("time"));
                 expect(eq("new_context"s, std::get<std::string>(reply.data.value().at("context"))));
             };
 
@@ -510,8 +512,9 @@ const boost::ut::suite MessagesTests = [] {
                 sendMessage<Disconnect>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "new_context"}, {"time", internalTimeForWasm}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
-                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
-                std::string activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
+                expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
+                const Message reply         = returnReplyMsg(fromBlock);
+                std::string   activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
                 expect(eq(""s, activeContext));
             };
 

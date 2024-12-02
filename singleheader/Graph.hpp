@@ -23734,12 +23734,6 @@ protected:
         using enum gr::message::Command;
         assert(propertyName == block::property::kActiveContext);
 
-        if (message.cmd == Get) {
-            const auto& ctx = settings().activeContext();
-            message.data    = {{"context", ctx.context}, {"time", ctx.time}};
-            return message;
-        }
-
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
                 throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
@@ -23773,8 +23767,11 @@ protected:
             if (!ctx.has_value()) {
                 throw gr::exception(fmt::format("propertyCallbackActiveContext - failed to activate context {}, msg: {}", contextStr, message));
             }
+        }
 
-            message.data = {{"context", ctx.value().context}};
+        if (message.cmd == Get || message.cmd == Set) {
+            const auto& ctx = settings().activeContext();
+            message.data    = {{"context", ctx.context}, {"time", ctx.time}};
             return message;
         }
 
@@ -23853,7 +23850,7 @@ protected:
             if (!settings().removeContext(ctx)) {
                 throw gr::exception(fmt::format("propertyCallbackSettingsCtx - could not delete context {}, msg: {}", ctx.context, message));
             }
-            return std::nullopt;
+            return message;
         }
 
         throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
