@@ -178,6 +178,7 @@ empty: !!str ""
 spaces_only: !!str "   "
 value_with_colon: "value: with colon"
 value_with_colon2: "value:\n  with colon"
+value_with_colon3: std::ranges
 multiline1: !!str |
   First line
   Second line
@@ -229,6 +230,7 @@ unprintable_chars: !!str "\0\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C
         expected["spaces_only"]          = "   "s;
         expected["value_with_colon"]     = "value: with colon"s;
         expected["value_with_colon2"]    = "value:\n  with colon"s;
+        expected["value_with_colon3"]    = "std::ranges"s;
         expected["multiline1"]           = "First line\nSecond line\nThird line with trailing newline\nNull bytes (\x00\x00)\nThis is a quoted backslash \"\\\"\n"s;
         expected["multiline2"]           = "This is a long paragraph that will be folded into a single line with trailing newlines This is a quoted backslash \"\\\" These are some invalid escapes \\q\\xZZ\\x\n\n"s;
         expected["multiline3"]           = "First line\nSecond line\nThird line without trailing newline"s;
@@ -724,6 +726,7 @@ Key with spaces: !!int8 42
 "key with CR \r": !!int8 48
 "key with backslash \\": !!int8 49
 "key with quote \"": !!int8 50
+key::with::colons: !!int8 51
 )yaml";
 
         pmtv::map_t expected;
@@ -737,6 +740,7 @@ Key with spaces: !!int8 42
         expected["key with CR \r"]           = static_cast<int8_t>(48);
         expected["key with backslash \\"]    = static_cast<int8_t>(49);
         expected["key with quote \""]        = static_cast<int8_t>(50);
+        expected["key::with::colons"]        = static_cast<int8_t>(51);
 
         testYAML(src, expected);
     };
