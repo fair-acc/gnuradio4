@@ -223,6 +223,16 @@ struct ParseContext {
         return lines[lineIdx].substr(columnIdx).starts_with(sv);
     }
 
+    bool startsWithToken(std::string_view sv) const {
+        if (atEndOfLine()) {
+            return false;
+        }
+        if (columnIdx + sv.size() < lines[lineIdx].size() && !std::isspace(lines[lineIdx][columnIdx + sv.size()])) {
+            return false;
+        }
+        return lines[lineIdx].substr(columnIdx).starts_with(sv);
+    }
+
     bool startsWith(char c) const {
         if (atEndOfLine()) {
             return false;
@@ -241,6 +251,14 @@ struct ParseContext {
     bool consumeIfStartsWith(char c) {
         if (startsWith(c)) {
             consume(1);
+            return true;
+        }
+        return false;
+    }
+
+    bool consumeIfStartsWithToken(std::string_view sv) {
+        if (startsWithToken(sv)) {
+            consume(sv.size());
             return true;
         }
         return false;
@@ -786,14 +804,26 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
         }
         ctx.consume(2 * quoteOffset + length);
         ctx.consumeSpaces();
-        if (!ctx.consumeIfStartsWith(':')) {
+        if (!ctx.consumeIfStartsWithToken(":")) {
             return std::unexpected(ctx.makeError("Could not find key/value separator ':'"));
         }
         return *maybeKey;
     }
 
     // not quoted
-    auto colonPos   = ctx.remainingLine().find(':');
+    auto colonPos = [](auto sv) {
+        for (auto pos = 0UZ; pos < sv.size(); ++pos) {
+            pos = sv.find(':', pos);
+            if (pos == std::string_view::npos) {
+                return pos;
+            }
+            if (pos == sv.size() - 1 || std::isspace(sv[pos + 1])) {
+                return pos;
+            }
+        }
+        return std::string_view::npos;
+    }(ctx.remainingLine());
+
     auto commentPos = ctx.remainingLine().find('#');
     if (colonPos == std::string_view::npos || (commentPos != std::string_view::npos && commentPos < colonPos)) {
         return std::unexpected(ctx.makeError("Could not find key/value separator ':'"));
