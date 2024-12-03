@@ -276,10 +276,10 @@ struct SettingsBase {
     virtual void updateActiveParameters() noexcept = 0;
 
     /**
-     * @brief Loads parameters from a YAML node into a property map by matching YAML keys to TBlock's writable data members.
+     * @brief Loads parameters from a property_map by matching pmt keys to TBlock's writable data members.
      * Handles type conversion and special cases, such as std::vector<bool>.
      */
-    virtual void loadParametersFromYAML(YAML::Node& parameters, SettingsCtx ctx = {}) = 0;
+    virtual void loadParametersFromPropertyMap(const property_map& parameters, SettingsCtx ctx = {}) = 0;
 
 }; // struct SettingsBase
 
@@ -847,52 +847,45 @@ public:
         }
     }
 
-    NO_INLINE void loadParametersFromYAML(YAML::Node& parameters, SettingsCtx ctx = {}) override {
-        // Once PMT supports loading and saving YAML files, this function should accept a property_map, similar to how Settings::set() operates.
+    NO_INLINE void loadParametersFromPropertyMap(const property_map& parameters, SettingsCtx ctx = {}) override {
         property_map newProperties;
 
-        if (parameters && parameters.IsMap()) {
-            for (const auto& kv : parameters) {
-                const auto&       key      = kv.first.template as<std::string>();
-                const YAML::Node& grcValue = kv.second;
-                bool              isSet    = false;
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                        if (!isSet && fieldName == key) {
+        for (const auto& [key, value] : parameters) {
+            bool isSet = false;
+            refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                using MemberType = refl::data_member_type<TBlock, kIdx>;
+                using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
+                    if (!isSet && fieldName == key) {
 #if (defined __clang__) && (!defined __EMSCRIPTEN__)
-                            if constexpr (std::is_same_v<Type, std::vector<bool>>) {
-                                // gcc-stdlibc++/clang-libc++ have different implementations for std::vector<bool>, see https://en.cppreference.com/w/cpp/container/vector_bool for details
-                                const auto&       intVector = grcValue.template as<std::vector<int>>(); // need intermediary vector
-                                std::vector<bool> boolVector(intVector.size());
-                                std::ranges::transform(intVector, boolVector.begin(), [](int intValue) { return static_cast<bool>(intValue); });
-                                newProperties[key] = boolVector;
-                                isSet              = true;
-                                return;
-                            }
+                        if constexpr (std::is_same_v<Type, std::vector<bool>>) {
+                            // gcc-stdlibc++/clang-libc++ have different implementations for std::vector<bool>, see https://en.cppreference.com/w/cpp/container/vector_bool for details
+                            const auto&       intVector = value.template as<std::vector<int>>(); // need intermediary vector
+                            std::vector<bool> boolVector(intVector.size());
+                            std::ranges::transform(intVector, boolVector.begin(), [](int intValue) { return static_cast<bool>(intValue); });
+                            newProperties[key] = boolVector;
+                            isSet              = true;
+                            return;
+                        }
 #endif
-                            if constexpr (!std::is_same_v<property_map, Type>) {
-                                newProperties[key] = grcValue.template as<Type>();
-                                isSet              = true;
-                            }
+                        if constexpr (!std::is_same_v<property_map, Type>) {
+                            newProperties[key] = value;
+                            isSet              = true;
                         }
                     }
-                });
+                }
+            });
 
-                if (!isSet) {
-                    if (ctx.context == "") { // store meta_information only for default
-                        if (grcValue.IsScalar()) {
-                            _block->meta_information[key] = grcValue.template as<std::string>();
-                        }
-                    }
+            if (!isSet) {
+                if (ctx.context == "") { // store meta_information only for default
+                    _block->meta_information[key] = value;
                 }
             }
         }
 
         if (const property_map failed = set(newProperties, ctx); !failed.empty()) {
-            throw gr::exception(fmt::format("settings from YAML could not be loaded: {}", failed));
+            throw gr::exception(fmt::format("settings from property_map could not be loaded: {}", failed));
         }
     }
 

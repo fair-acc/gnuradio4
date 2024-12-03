@@ -1,3 +1,5 @@
+#pragma once
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -213,6 +215,8 @@ struct ParseContext {
     std::span<const std::string_view> lines;
     std::size_t                       lineIdx   = 0;
     std::size_t                       columnIdx = 0;
+
+    std::string_view currentLine() { return lineIdx < lines.size() ? lines[lineIdx] : std::string_view{}; }
 
     bool documentStart() const { return lineIdx == 0 && columnIdx == 0; }
 

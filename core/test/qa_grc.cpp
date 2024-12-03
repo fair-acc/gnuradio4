@@ -8,6 +8,7 @@
 
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/YamlPmt.hpp>
 #include <gnuradio-4.0/basic/common_blocks.hpp>
 
 #include <boost/ut.hpp>
@@ -142,12 +143,21 @@ connections:
   - [ArraySource<double>, [1, 1], ArraySink<double>, [0, 1]]
 )";
 
+std::string ymlDecodeEncode(std::string_view yml) {
+    const auto yaml = pmtv::yaml::deserialize(yml);
+    if (!yaml) {
+        throw gr::exception(fmt::format("Could not parse yaml: {}:{} content:\n{}", yaml.error().message, yaml.error().line, yml));
+    }
+
+    return pmtv::yaml::serialize(yaml.value());
+}
+
 const boost::ut::suite GrcTests = [] {
     "Basic graph loading and storing"_test = [] {
         try {
             using namespace gr;
             const auto context       = getContext();
-            const auto graphSrc      = std::string(testGrc);
+            const auto graphSrc      = ymlDecodeEncode(testGrc);
             auto       graph         = gr::loadGrc(context->loader, graphSrc);
             auto       graphSavedSrc = gr::saveGrc(graph);
             expect(checkAndPrintMissingLines(graphSrc, graphSavedSrc));
@@ -167,7 +177,7 @@ blocks:
   - name: main_source
     id: good::fixed_source
     parameters:
-      event_count: 100
+      event_count: !!uint64 100
       unknown_property: 42
   - name: multiplier
     id: good::multiply
@@ -185,7 +195,7 @@ connections:
 )";
 
             const auto context       = getContext();
-            const auto graphSrc      = std::string(pluginsTestGrc);
+            const auto graphSrc      = ymlDecodeEncode(pluginsTestGrc);
             auto       graph         = gr::loadGrc(context->loader, graphSrc);
             auto       graphSavedSrc = gr::saveGrc(graph);
 
@@ -204,11 +214,10 @@ connections:
         // Test if we get the same graph when saving it and loading the saved
         // data into another graph
         using namespace gr;
-        const auto graphSrc = std::string(testGrc);
 
         try {
             const auto context       = getContext();
-            auto       graph1        = gr::loadGrc(context->loader, graphSrc);
+            auto       graph1        = gr::loadGrc(context->loader, testGrc);
             auto       graphSavedSrc = gr::saveGrc(graph1);
             auto       graph2        = gr::loadGrc(context->loader, graphSavedSrc);
             expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
