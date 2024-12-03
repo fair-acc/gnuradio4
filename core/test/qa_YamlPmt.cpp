@@ -119,6 +119,7 @@ void testYAML(std::string_view src, const pmtv::map_t expected) {
     } else {
         fmt::println(std::cerr, "Unexpected: {}", formatResult(deserializedMap));
         expect(false);
+        return;
     }
 
     // Then test that serializing and deserializing the map again results in the same map
@@ -141,7 +142,7 @@ const boost::ut::suite YamlPmtTests = [] {
     using namespace std::string_literals;
     using namespace std::string_view_literals;
 
-    "Comments"_test = [] {
+    "Comments and Whitespace"_test = [] {
         constexpr std::string_view src1 = R"(# Comment
 double: !!float64 42 # Comment
 string: "#Hello" # Comment
@@ -149,12 +150,24 @@ null:  # Comment
 #Comment: 43
 # string: | # Comment
 # Hello
+number:
+  42
+list:
+  []
+list2: [ 42
+]
+map:
+  {}
 )";
 
         pmtv::map_t expected;
         expected["double"] = 42.0;
         expected["string"] = "#Hello";
         expected["null"]   = std::monostate{};
+        expected["number"] = static_cast<int64_t>(42);
+        expected["list"]   = std::vector<pmtv::pmt>{};
+        expected["list2"]  = std::vector<pmtv::pmt>{static_cast<int64_t>(42)};
+        expected["map"]    = pmtv::map_t{};
 
         testYAML(src1, expected);
     };
@@ -458,6 +471,8 @@ nullVector: !!null
   - null
 emptyVector: !!str []
 emptyPmtVector: []
+emptyAfterNewline:
+  []
 flowDouble: !!float64 [1, 2, 3]
 flowString: !!str ["Hello, ", "World", "Multiple\nlines"]
 flowMultiline: !!str [ "Hello, "    , #]
@@ -478,6 +493,14 @@ nestedVector2:
     - !!str [3, 4]
     - { key: !!str [5, 6] }
 nestedFlow: [ !!str [1, 2], [3, 4] ]
+vectorWithBlockMap:
+  - name: ArraySink<double>
+    id: ArraySink
+    parameters:
+      name: Block
+vectorWithColons:
+  - "key: value"
+  - "key2: value2"
 )";
 
         pmtv::map_t expected;
@@ -492,12 +515,15 @@ nestedFlow: [ !!str [1, 2], [3, 4] ]
         expected["nullVector"]                 = std::monostate{};
         expected["emptyVector"]                = std::vector<std::string>{};
         expected["emptyPmtVector"]             = std::vector<pmtv::pmt>{};
+        expected["emptyAfterNewline"]          = std::vector<pmtv::pmt>{};
         expected["flowDouble"]                 = std::vector<double>{1.0, 2.0, 3.0};
         expected["flowString"]                 = std::vector<std::string>{"Hello, ", "World", "Multiple\nlines"};
         expected["flowMultiline"]              = std::vector<std::string>{"Hello, ", "][", "World", "Multiple\nlines"};
         expected["nestedVector"]               = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
         expected["nestedFlow"]                 = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
         expected["nestedVector2"]              = std::vector<pmtv::pmt>{static_cast<int64_t>(42), std::vector<std::string>{"1", "2"}, std::vector<std::string>{"3", "4"}, pmtv::map_t{{"key", std::vector<std::string>{"5", "6"}}}};
+        expected["vectorWithBlockMap"]         = std::vector<pmtv::pmt>{pmtv::map_t{{"name", "ArraySink<double>"}, {"id", "ArraySink"}, {"parameters", pmtv::map_t{{"name", "Block"}}}}};
+        expected["vectorWithColons"]           = std::vector<pmtv::pmt>{"key: value", "key2: value2"};
 
         testYAML(src1, expected);
 
@@ -621,6 +647,43 @@ value: 42 # Comment
 key#Comment: foo
 )";
         expect(eq(formatResult(yaml::deserialize(invalidKeyComment)), "Error in 3:1: Could not find key/value separator ':'"sv));
+    };
+
+    "GRC"_test = [] {
+        constexpr std::string_view src = R"(
+blocks:
+  - name: ArraySink<double>
+    id: ArraySink
+    parameters:
+      name: ArraySink<double>
+  - name: ArraySource<double>
+    id: ArraySource
+    parameters:
+      name: ArraySource<double>
+connections:
+  - [ArraySource<double>, [0, 0], ArraySink<double>, [1, 1]]
+  - [ArraySource<double>, [0, 1], ArraySink<double>, [1, 0]]
+  - [ArraySource<double>, [1, 0], ArraySink<double>, [0, 0]]
+  - [ArraySource<double>, [1, 1], ArraySink<double>, [0, 1]]
+)";
+
+        pmtv::map_t expected;
+        pmtv::map_t block1;
+        block1["name"]       = "ArraySink<double>";
+        block1["id"]         = "ArraySink";
+        block1["parameters"] = pmtv::map_t{{"name", "ArraySink<double>"}};
+        pmtv::map_t block2;
+        block2["name"]       = "ArraySource<double>";
+        block2["id"]         = "ArraySource";
+        block2["parameters"] = pmtv::map_t{{"name", "ArraySource<double>"}};
+        expected["blocks"]   = std::vector<pmtv::pmt>{block1, block2};
+        const auto zero      = pmtv::pmt{static_cast<int64_t>(0)};
+        const auto one       = pmtv::pmt{static_cast<int64_t>(1)};
+        using PmtVec         = std::vector<pmtv::pmt>;
+
+        expected["connections"] = std::vector<pmtv::pmt>{PmtVec{"ArraySource<double>", std::vector{zero, zero}, "ArraySink<double>", std::vector{one, one}}, PmtVec{"ArraySource<double>", std::vector{zero, one}, "ArraySink<double>", std::vector{one, zero}}, PmtVec{"ArraySource<double>", std::vector{one, zero}, "ArraySink<double>", std::vector{zero, zero}}, PmtVec{"ArraySource<double>", std::vector{one, one}, "ArraySink<double>", std::vector{zero, one}}};
+
+        testYAML(src, expected);
     };
 
     "Complex"_test = [] {

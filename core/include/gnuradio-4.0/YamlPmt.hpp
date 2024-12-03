@@ -288,7 +288,7 @@ struct ParseContext {
 
     bool atEndOfDocument() const { return lineIdx == lines.size(); }
 
-    std::size_t currentIndent() const { return lines[lineIdx].find_first_not_of(' '); }
+    std::size_t currentIndent(std::string_view indentChars = " ") const { return lines[lineIdx].find_first_not_of(indentChars); }
 
     ParseError makeError(std::string message) const { return {.line = lineIdx + 1, .column = columnIdx + 1, .message = std::move(message)}; }
 
@@ -667,9 +667,16 @@ inline std::expected<pmtv::pmt, ParseError> parsePlainScalar(ParseContext& ctx, 
 }
 
 inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::string_view typeTag, int currentIndentLevel) {
-    // remove leading spaces
-    ctx.consumeSpaces();
+    const auto initialLine = ctx.lineIdx;
+    ctx.consumeWhitespaceAndComments();
 
+    if (ctx.atEndOfDocument()) {
+        return std::monostate{};
+    }
+    const auto skippedLines = ctx.lineIdx > initialLine;
+    if (skippedLines && currentIndentLevel >= 0 && ctx.currentIndent() <= static_cast<std::size_t>(currentIndentLevel)) {
+        return std::monostate{};
+    }
     // handle multi-line indicators '|', '|-', '>', '>-'
     if ((typeTag == "!!str" || typeTag.empty()) && (!ctx.atEndOfLine() && (ctx.front() == '|' || ctx.front() == '>'))) {
         char indicator = ctx.front();
@@ -760,32 +767,6 @@ inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::
 
 enum class ValueType { List, Map, Scalar };
 
-inline ValueType peekToFindValueType(ParseContext ctx, int previousIndent) {
-    ctx.consumeSpaces();
-    if (ctx.startsWith("[")) {
-        return ValueType::List;
-    }
-    if (ctx.startsWith("{")) {
-        return ValueType::Map;
-    }
-    if (!ctx.atEndOfLine()) {
-        return ValueType::Scalar;
-    }
-    ctx.skipToNextLine();
-    while (!ctx.atEndOfDocument()) {
-        ctx.consumeWhitespaceAndComments();
-        if (ctx.atEndOfDocument() || (previousIndent >= 0 && ctx.currentIndent() <= static_cast<std::size_t>(previousIndent))) {
-            break;
-        }
-        ctx.consumeSpaces();
-        if (ctx.startsWith("-")) {
-            return ValueType::List;
-        }
-        return ValueType::Map;
-    }
-    return ValueType::Scalar;
-}
-
 inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::string_view extraDelimiters = {}) {
     ctx.consumeSpaces();
 
@@ -821,6 +802,30 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
     ctx.consume(colonPos + 1);
 
     return key;
+}
+
+inline ValueType peekToFindValueType(ParseContext ctx, int previousIndent) {
+    const auto initialLine = ctx.lineIdx;
+    ctx.consumeWhitespaceAndComments();
+
+    if (ctx.atEndOfDocument()) {
+        return ValueType::Scalar;
+    }
+
+    const auto skippedLines = ctx.lineIdx > initialLine;
+    if (skippedLines && previousIndent >= 0 && ctx.currentIndent() <= static_cast<std::size_t>(previousIndent)) {
+        return ValueType::Scalar;
+    }
+    if (ctx.startsWith("[") || (ctx.startsWith("- ") || ctx.remainingLine() == "-")) {
+        return ValueType::List;
+    }
+
+    if (ctx.startsWith("{")) {
+        return ValueType::Map;
+    }
+
+    const auto key = parseKey(ctx);
+    return key.has_value() ? ValueType::Map : ValueType::Scalar;
 }
 
 template<typename T>
@@ -931,6 +936,7 @@ inline auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentInd
 }
 
 inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
+    ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("{")) {
         auto map = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
         ctx.skipToNextLine();
@@ -938,24 +944,22 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
     }
 
     pmtv::map_t map;
+    bool        firstLine = true;
 
     while (!ctx.atEndOfDocument()) {
         if (ctx.startsWith("---")) {
             return std::unexpected(ctx.makeError("Parser limitation: Multiple documents not supported"));
         }
-        ctx.consumeSpaces();
-        if (ctx.atEndOfLine() || ctx.startsWith("#")) {
-            // skip empty lines and comments
-            ctx.skipToNextLine();
-            continue;
-        }
+        ctx.consumeWhitespaceAndComments();
 
-        const auto line_indent = ctx.currentIndent();
+        const auto line_indent = firstLine ? ctx.currentIndent(" -") : ctx.currentIndent(); // Ignore "-" if map is in a list
 
         if (parentIndentLevel >= 0 && line_indent <= static_cast<std::size_t>(parentIndentLevel)) {
             // indentation decreased; end of current map
             break;
         }
+
+        firstLine = false;
 
         const auto maybeKey = parseKey(ctx);
         if (!maybeKey.has_value()) {
@@ -1009,6 +1013,7 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
 }
 
 inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
+    ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("[")) {
         auto l = parseFlow<FlowType::List>(ctx, typeTag, parentIndentLevel);
         ctx.skipToNextLine();
@@ -1017,15 +1022,8 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
 
     std::vector<pmtv::pmt> list;
 
-    ctx.skipToNextLine();
-
     while (!ctx.atEndOfDocument()) {
-        ctx.consumeSpaces();
-        if (ctx.atEndOfLine() || ctx.startsWith("#")) {
-            // skip empty lines and comments
-            ctx.skipToNextLine();
-            continue;
-        }
+        ctx.consumeWhitespaceAndComments();
 
         const std::size_t line_indent = ctx.currentIndent();
         if (parentIndentLevel >= 0 && line_indent <= static_cast<size_t>(parentIndentLevel)) {
@@ -1033,16 +1031,15 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
             break;
         }
 
-        ctx.consumeSpaces();
-
-        if (!ctx.consumeIfStartsWith('-')) {
+        if (!ctx.consumeIfStartsWith("-")) {
             // not a list item
             return std::unexpected(ctx.makeError("Expected list item"));
         }
 
         ctx.consumeSpaces();
 
-        const auto tagPos        = ctx.columnIdx;
+        const auto itemIndent = ctx.columnIdx;
+
         const auto maybeLocalTag = parseTag(ctx);
         if (!maybeLocalTag.has_value()) {
             return std::unexpected(maybeLocalTag.error());
@@ -1060,7 +1057,7 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
         switch (peekedType) {
         case ValueType::List: {
             if (!typeTag.empty()) {
-                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for list containing lists", tagPos));
+                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for list containing lists", itemIndent));
             }
             auto parsedValue = parseList(ctx, tag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
@@ -1071,7 +1068,7 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
         }
         case ValueType::Map: {
             if (!localTag.empty()) {
-                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", tagPos));
+                return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", itemIndent));
             }
             auto parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
