@@ -2081,10 +2081,10 @@ inline int registerBlock(auto& registerInstance) {
     return 0;
 }
 
-template<typename TBlock0, typename... More>
+template<typename TBlock0, typename TBlock1, typename... More>
 inline int registerBlock(auto& registerInstance) {
     registerBlock<TBlock0>(registerInstance);
-    return registerBlock<More...>(registerInstance);
+    return registerBlock<TBlock1, More...>(registerInstance);
 }
 
 /**
