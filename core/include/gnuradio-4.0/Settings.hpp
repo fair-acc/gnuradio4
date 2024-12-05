@@ -31,8 +31,6 @@
 #define NO_INLINE
 #endif
 
-#include "YamlUtils.hpp"
-
 namespace gr {
 
 namespace settings {

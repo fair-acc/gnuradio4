@@ -7,7 +7,6 @@
 
 #include "Graph.hpp"
 #include "PluginLoader.hpp"
-#include "YamlUtils.hpp"
 
 namespace gr {
 
@@ -90,11 +89,11 @@ inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc) {
                 }
                 const auto index    = std::get<std::int64_t>(portFields->at(0));
                 const auto subIndex = std::get<std::int64_t>(portFields->at(1));
-                return result{node, {index, subIndex}};
+                return result{node, {static_cast<std::size_t>(index), static_cast<std::size_t>(subIndex)}};
 
             } else {
                 const auto index = std::get<std::int64_t>(portField);
-                return result{node, {index}};
+                return result{node, {static_cast<std::size_t>(index)}};
             }
         };
 

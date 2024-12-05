@@ -1,4 +1,6 @@
-add_library(gnuradio-core INTERFACE
+add_library(
+  gnuradio-core
+  INTERFACE
   include/gnuradio-4.0/Settings.hpp
   include/gnuradio-4.0/annotated.hpp
   include/gnuradio-4.0/AtomicBitset.hpp
@@ -28,9 +30,7 @@ add_library(gnuradio-core INTERFACE
   include/gnuradio-4.0/Tag.hpp
   include/gnuradio-4.0/TriggerMatcher.hpp
   include/gnuradio-4.0/WaitStrategy.hpp
-  include/gnuradio-4.0/YamlPmt.hpp
-  include/gnuradio-4.0/YamlUtils.hpp
-)
+  include/gnuradio-4.0/YamlPmt.hpp)
 target_include_directories(
   gnuradio-core
   INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
@@ -41,9 +41,9 @@ target_link_libraries(
   gnuradio-core
   INTERFACE gnuradio-options
             gnuradio-meta
-            magic_enum pmtv
-            vir
-            yaml-cpp::yaml-cpp)
+            magic_enum
+            pmtv
+            vir)
 
 # configure a header file to pass the CMake settings to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cmake/config.hpp.in"
@@ -58,7 +58,7 @@ install(
 
 add_subdirectory(src)
 
-if (ENABLE_TESTING)
+if(ENABLE_TESTING)
   add_subdirectory(test)
   add_subdirectory(benchmarks)
-endif ()
+endif()
