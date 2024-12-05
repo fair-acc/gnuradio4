@@ -252,6 +252,7 @@ For every pair of interleaved input items (real, imag), we produce one complex o
 
 /*
  TODO: temporarily disabled due to excessive compile-times on CI
+
 namespace gr::blocks::type::converter {
 using TSupportedTypes    = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>; // N.B. 10 base types
 using TComplexTypes      = std::tuple<std::complex<float>, std::complex<double>>;                                               // N.B. 2 (valid) complex types
@@ -276,5 +277,4 @@ const inline auto registerConverterBlocks =
 // clang-format on
 } // namespace gr::blocks::type::converter
 */
-
 #endif // CONVERTERBLOCKS_HPP

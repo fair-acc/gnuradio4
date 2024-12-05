@@ -53,7 +53,7 @@ const boost::ut::suite uncertainValueFormatter = [] {
     using UncertainDouble  = gr::UncertainValue<double>;
     using UncertainComplex = gr::UncertainValue<std::complex<double>>;
 
-    "fmt::formatter<gr::meta::UncertainValue<T>>"_test = [] {
+    "fmt::formatter<gr::UncertainValue<T>>"_test = [] {
         // Test with UncertainValue<double>
         expect(eq("(1.23 ± 0.45)"s, fmt::format("{}", UncertainDouble{1.23, 0.45})));
         expect(eq("(3.14 ± 0.01)"s, fmt::format("{}", UncertainDouble{3.14, 0.01})));
@@ -63,6 +63,11 @@ const boost::ut::suite uncertainValueFormatter = [] {
         expect(eq("((1+2i) ± (0.1+0.2i))"s, fmt::format("{}", UncertainComplex{{1, 2}, {0.1, 0.2}})));
         expect(eq("((3.14+1.59i) ± (0.01+0.02i))"s, fmt::format("{}", UncertainComplex{{3.14, 1.59}, {0.01, 0.02}})));
         expect(eq("(0 ± 0)"s, fmt::format("{}", UncertainComplex{{0, 0}, {0, 0}})));
+
+        // Test with UncertainValue<double> and float number formatting
+        expect(eq("(1.230 ± 0.450)"s, fmt::format("{:1.3f}", UncertainDouble{1.23, 0.45})));
+        expect(eq("(3.140 ± 0.010)"s, fmt::format("{:1.3f}", UncertainDouble{3.14, 0.01})));
+        expect(eq("(0.000 ± 0.000)"s, fmt::format("{:1.3f}", UncertainDouble{0, 0})));
     };
 };
 
