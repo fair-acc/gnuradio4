@@ -177,7 +177,7 @@ blocks:
   - name: main_source
     id: good::fixed_source
     parameters:
-      event_count: !!uint64 100
+      event_count: !!uint32 100
       unknown_property: 42
   - name: multiplier
     id: good::multiply
@@ -186,7 +186,7 @@ blocks:
   - name: sink
     id: good::cout_sink
     parameters:
-      total_count: 100
+      total_count: !!uint32 100
       unknown_property: 42
 connections:
   - [main_source, 0, multiplier, 0]
