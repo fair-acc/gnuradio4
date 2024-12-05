@@ -856,17 +856,6 @@ public:
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {
                     const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
                     if (!isSet && fieldName == key) {
-#if (defined __clang__) && (!defined __EMSCRIPTEN__)
-                        if constexpr (std::is_same_v<Type, std::vector<bool>>) {
-                            // gcc-stdlibc++/clang-libc++ have different implementations for std::vector<bool>, see https://en.cppreference.com/w/cpp/container/vector_bool for details
-                            const auto&       intVector = value.template as<std::vector<int>>(); // need intermediary vector
-                            std::vector<bool> boolVector(intVector.size());
-                            std::ranges::transform(intVector, boolVector.begin(), [](int intValue) { return static_cast<bool>(intValue); });
-                            newProperties[key] = boolVector;
-                            isSet              = true;
-                            return;
-                        }
-#endif
                         if constexpr (!std::is_same_v<property_map, Type>) {
                             newProperties[key] = value;
                             isSet              = true;
