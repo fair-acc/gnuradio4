@@ -39,7 +39,7 @@ public:
 template<typename T>
 class builtin_counter : public gr::Block<builtin_counter<T>> {
 public:
-    static std::size_t s_event_count;
+    static gr::Size_t s_event_count;
 
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
@@ -53,7 +53,7 @@ public:
 };
 
 template<typename T>
-std::size_t builtin_counter<T>::s_event_count = 0;
+gr::Size_t builtin_counter<T>::s_event_count = 0;
 
 template<typename T>
 struct MultiAdder : public gr::Block<MultiAdder<T>> {

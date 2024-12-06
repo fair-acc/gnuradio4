@@ -21222,137 +21222,6 @@ static_assert(ThreadPool<BasicThreadPool>);
 #define NO_INLINE
 #endif
 
-// #include "YamlUtils.hpp"
-#ifndef GNURADIO_YAML_UTILS_H
-#define GNURADIO_YAML_UTILS_H
-
-#include <charconv>
-
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wold-style-cast"
-#pragma GCC diagnostic ignored "-Wshadow"
-#endif
-#include <yaml-cpp/yaml.h>
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-
-namespace YAML {
-// YAML custom converter for complex numbers
-template<typename T>
-requires std::same_as<T, double> || std::same_as<T, float>
-struct convert<std::complex<T>> {
-    static Node encode(const std::complex<T>& rhs) {
-        Node node;
-        node.push_back(rhs.real());
-        node.push_back(rhs.imag());
-        return node;
-    }
-
-    static bool decode(const Node& node, std::complex<T>& rhs) {
-        if (!node.IsSequence() || node.size() != 2) {
-            return false;
-        }
-        rhs = std::complex<T>(node[0].as<T>(), node[1].as<T>());
-        return true;
-    }
-};
-} // namespace YAML
-
-namespace gr {
-
-namespace detail {
-
-template<typename T>
-inline auto toYamlString(const T& value) {
-    if constexpr (std::is_same_v<std::string, std::remove_cvref_t<T>>) {
-        return value;
-    } else if constexpr (std::is_same_v<bool, std::remove_cvref_t<T>>) {
-        return value ? "true" : "false";
-    } else if constexpr (requires { std::to_string(value); }) {
-        return std::to_string(value);
-    } else {
-        return "";
-    }
-}
-
-struct YamlSeq {
-    YAML::Emitter& out;
-
-    YamlSeq(YAML::Emitter& out_) : out(out_) { out << YAML::BeginSeq; }
-
-    ~YamlSeq() { out << YAML::EndSeq; }
-
-    template<typename F>
-    requires std::is_invocable_v<F>
-    void writeFn(const char* /*key*/, F&& fun) {
-        fun();
-    }
-};
-
-struct YamlMap {
-    YAML::Emitter& out;
-
-    YamlMap(YAML::Emitter& out_) : out(out_) { out << YAML::BeginMap; }
-
-    ~YamlMap() { out << YAML::EndMap; }
-
-    template<typename T>
-    void write(const std::string_view& key, const std::vector<T>& value) {
-        out << YAML::Key << key.data();
-        YamlSeq seq(out);
-        for (const auto& elem : value) {
-            if constexpr (std::same_as<T, std::complex<double>> || std::same_as<T, std::complex<float>>) {
-                writeComplexValue(out, elem);
-            } else {
-                out << YAML::Value << toYamlString(elem);
-            }
-        }
-    }
-
-    template<typename T>
-    void write(const std::string_view& key, const T& value) {
-        out << YAML::Key << key.data();
-        if constexpr (std::same_as<T, std::complex<double>> || std::same_as<T, std::complex<float>>) {
-            writeComplexValue(out, value);
-        } else {
-            out << YAML::Value << toYamlString(value);
-        }
-    }
-
-    template<typename F>
-    void writeFn(const std::string_view& key, F&& fun) {
-        out << YAML::Key << key.data();
-        out << YAML::Value;
-        fun();
-    }
-
-private:
-    template<typename T>
-    requires std::same_as<T, std::complex<double>> || std::same_as<T, std::complex<float>>
-    void writeComplexValue(YAML::Emitter& outEmitter, const T& value) {
-        YamlSeq seq(outEmitter);
-        outEmitter << YAML::Value << toYamlString(value.real());
-        outEmitter << YAML::Value << toYamlString(value.imag());
-    }
-};
-
-inline std::size_t parseIndex(std::string_view str) {
-    std::size_t index{};
-    auto [_, src_ec] = std::from_chars(str.begin(), str.end(), index);
-    if (src_ec != std::errc()) {
-        throw fmt::format("Unable to parse the index");
-    }
-    return index;
-}
-
-} // namespace detail
-} // namespace gr
-
-#endif // include guard
-
-
 namespace gr {
 
 namespace settings {
@@ -21596,10 +21465,10 @@ struct SettingsBase {
     virtual void updateActiveParameters() noexcept = 0;
 
     /**
-     * @brief Loads parameters from a YAML node into a property map by matching YAML keys to TBlock's writable data members.
+     * @brief Loads parameters from a property_map by matching pmt keys to TBlock's writable data members.
      * Handles type conversion and special cases, such as std::vector<bool>.
      */
-    virtual void loadParametersFromYAML(YAML::Node& parameters, SettingsCtx ctx = {}) = 0;
+    virtual void loadParametersFromPropertyMap(const property_map& parameters, SettingsCtx ctx = {}) = 0;
 
 }; // struct SettingsBase
 
@@ -22167,52 +22036,34 @@ public:
         }
     }
 
-    NO_INLINE void loadParametersFromYAML(YAML::Node& parameters, SettingsCtx ctx = {}) override {
-        // Once PMT supports loading and saving YAML files, this function should accept a property_map, similar to how Settings::set() operates.
+    NO_INLINE void loadParametersFromPropertyMap(const property_map& parameters, SettingsCtx ctx = {}) override {
         property_map newProperties;
 
-        if (parameters && parameters.IsMap()) {
-            for (const auto& kv : parameters) {
-                const auto&       key      = kv.first.template as<std::string>();
-                const YAML::Node& grcValue = kv.second;
-                bool              isSet    = false;
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                        if (!isSet && fieldName == key) {
-#if (defined __clang__) && (!defined __EMSCRIPTEN__)
-                            if constexpr (std::is_same_v<Type, std::vector<bool>>) {
-                                // gcc-stdlibc++/clang-libc++ have different implementations for std::vector<bool>, see https://en.cppreference.com/w/cpp/container/vector_bool for details
-                                const auto&       intVector = grcValue.template as<std::vector<int>>(); // need intermediary vector
-                                std::vector<bool> boolVector(intVector.size());
-                                std::ranges::transform(intVector, boolVector.begin(), [](int intValue) { return static_cast<bool>(intValue); });
-                                newProperties[key] = boolVector;
-                                isSet              = true;
-                                return;
-                            }
-#endif
-                            if constexpr (!std::is_same_v<property_map, Type>) {
-                                newProperties[key] = grcValue.template as<Type>();
-                                isSet              = true;
-                            }
+        for (const auto& [key, value] : parameters) {
+            bool isSet = false;
+            refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                using MemberType = refl::data_member_type<TBlock, kIdx>;
+                using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                    const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
+                    if (!isSet && fieldName == key) {
+                        if constexpr (!std::is_same_v<property_map, Type>) {
+                            newProperties[key] = value;
+                            isSet              = true;
                         }
                     }
-                });
+                }
+            });
 
-                if (!isSet) {
-                    if (ctx.context == "") { // store meta_information only for default
-                        if (grcValue.IsScalar()) {
-                            _block->meta_information[key] = grcValue.template as<std::string>();
-                        }
-                    }
+            if (!isSet) {
+                if (ctx.context == "") { // store meta_information only for default
+                    _block->meta_information[key] = value;
                 }
             }
         }
 
         if (const property_map failed = set(newProperties, ctx); !failed.empty()) {
-            throw gr::exception(fmt::format("settings from YAML could not be loaded: {}", failed));
+            throw gr::exception(fmt::format("settings from property_map could not be loaded: {}", failed));
         }
     }
 

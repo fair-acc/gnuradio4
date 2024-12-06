@@ -1002,8 +1002,8 @@ blocks:
   - name: source
     id: gr::setting_test::Source
     parameters:
-      n_samples_max: 100
-      sample_rate: 123456
+      n_samples_max: !!uint32 100
+      sample_rate: !!float32 123456
   - name: test_block
     id: gr::setting_test::TestBlock
   - name: sink
