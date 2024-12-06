@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <expected>
+#include <iomanip>
 #include <iostream>
 #include <optional>
 #include <span>

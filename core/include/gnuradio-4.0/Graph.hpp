@@ -347,7 +347,7 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackEmplaceBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kEmplaceBlock);
         using namespace std::string_literals;
         const auto&         data       = message.data.value();
@@ -367,7 +367,7 @@ public:
         return {};
     }
 
-    std::optional<Message> propertyCallbackInspectBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kInspectBlock);
         using namespace std::string_literals;
         const auto&        data       = message.data.value();
@@ -385,7 +385,7 @@ public:
         return {reply};
     }
 
-    std::optional<Message> propertyCallbackRemoveBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kRemoveBlock);
         using namespace std::string_literals;
         const auto&        data       = message.data.value();
@@ -402,7 +402,7 @@ public:
         return {message};
     }
 
-    std::optional<Message> propertyCallbackReplaceBlock(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kReplaceBlock);
         using namespace std::string_literals;
         const auto&         data       = message.data.value();
@@ -451,7 +451,7 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackEmplaceEdge(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackEmplaceEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kEmplaceEdge);
         using namespace std::string_literals;
         const auto&                         data             = message.data.value();
@@ -492,7 +492,7 @@ public:
         return message;
     }
 
-    std::optional<Message> propertyCallbackRemoveEdge(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kRemoveEdge);
         using namespace std::string_literals;
         const auto&        data        = message.data.value();
@@ -541,7 +541,7 @@ public:
         return message;
     }
 
-    std::optional<Message> propertyCallbackRegistryBlockTypes(std::string_view propertyName, Message message) {
+    std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kRegistryBlockTypes);
         PluginLoader&                   loader      = gr::globalPluginLoader();
         const std::vector<std::string>& knownBlocks = loader.knownBlocks();
@@ -903,10 +903,10 @@ public:
             auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
-                return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
+                return std::make_tuple(std::move(std::get < OutId ^ 1 > (left_out)), std::move(right_out));
 
             } else if constexpr (traits::block::stream_output_port_types<Left>::size == 2) {
-                return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
+                return std::tuple_cat(std::make_tuple(std::move(std::get < OutId ^ 1 > (left_out))), std::move(right_out));
 
             } else if constexpr (traits::block::stream_output_port_types<Right>::size == 1) {
                 return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) { return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out)); }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>());
