@@ -10,7 +10,6 @@ function(setup_test_no_asan TEST_NAME)
     PRIVATE gnuradio-options
             gnuradio-core
             fmt
-            yaml-cpp::yaml-cpp
             fftw
             gr-basic
             gr-fileio

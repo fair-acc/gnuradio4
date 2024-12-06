@@ -251,13 +251,6 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-  yaml-cpp
-  GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-  GIT_TAG 0.8.0
-  PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/yaml-cpp/0001-Avoid-static-reference-to-temporary.patch
-  UPDATE_DISCONNECTED 1)
-
-FetchContent_Declare(
   vir-simd
   GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
   GIT_TAG v0.4.0)
@@ -271,7 +264,6 @@ FetchContent_MakeAvailable(
   fmt
   pmt
   ut
-  yaml-cpp
   vir-simd
   cpp-httplib)
 
