@@ -61,6 +61,10 @@ jobs:
     name: "${{ matrix.compiler.cc }} | ${{ matrix.cmake-build-type }}"
     needs: buildAndPublishDocker
     runs-on: "ubuntu-latest"
+    concurrency:
+      # Cancel running builds inside work (PR) branches
+      group: "${{ github.head_ref }}-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}"
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
     strategy:
