@@ -3,7 +3,7 @@
 # https://github.com/lefticus/cppbestpractices/blob/master/02-Use_the_Tools_Available.md
 
 function(set_project_warnings project_name)
-  option(WARNINGS_AS_ERRORS "Treat compiler warnings as errors" FALSE) #TODO: re-enable as soon as the refl-cpp macro issue is fixed https://github.com/veselink1/refl-cpp/issues/63
+  option(WARNINGS_AS_ERRORS "Treat compiler warnings as errors" FALSE)
 
   set(MSVC_WARNINGS
       /W4 # Baseline reasonable warnings

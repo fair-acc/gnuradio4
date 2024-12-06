@@ -9,6 +9,9 @@
 #include <set>
 #include <variant>
 
+#include <pmtv/base64/base64.h>
+#include <pmtv/pmt.hpp>
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
@@ -98,10 +101,60 @@ struct ApplyStagedParametersResult {
 
 namespace detail {
 template<class T>
-inline constexpr void hash_combine(std::size_t& seed, const T& v) noexcept {
+inline constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
     std::hash<T> hasher;
-    seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    seed ^= hasher(v) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
+    return seed;
 }
+
+std::size_t computeHash(const pmtv::pmt_var_t& value);
+
+struct PmtHashVisitor {
+    template<typename T>
+    constexpr std::size_t operator()(const T& value) const {
+        if constexpr (std::is_same_v<T, std::monostate>) {
+            return 0x9e3779b9UZ; // arbitrary constant seed
+        } else if constexpr (pmtv::Scalar<T>) {
+            if constexpr (gr::meta::complex_like<T>) {
+                using value_t           = typename T::value_type;
+                std::size_t        seed = std::hash<value_t>()(value.real());
+                std::hash<value_t> hasher;
+                seed ^= hasher(value.imag()) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
+                return seed;
+            } else {
+                return std::hash<T>()(value);
+            }
+        } else if constexpr (pmtv::String<T>) {
+            return std::hash<std::string>()(value);
+        } else if constexpr (gr::meta::vector_type<T>) {
+            using value_t    = typename T::value_type;
+            std::size_t seed = 0UZ;
+            for (const auto& elem : value) {
+                if constexpr (pmtv::IsPmt<value_t>) {
+                    seed = detail::hash_combine(seed, std::visit(*this, elem));
+                } else {
+                    seed = detail::hash_combine(seed, (*this)(static_cast<value_t>(elem)));
+                }
+            }
+            return seed;
+        } else if constexpr (pmtv::PmtMap<T>) {
+            std::size_t seed = 0UZ;
+            for (const auto& [key, val] : value) {
+                // static_assert(pmtv::IsPmt<decltype(val)>, "val must be a std::variant");
+                std::size_t kv_seed = std::hash<std::string>()(key);
+                seed                = detail::hash_combine(kv_seed, computeHash(val));
+                seed                = detail::hash_combine(seed, kv_seed);
+            }
+            return seed;
+        } else {
+            static_assert(gr::meta::always_false<T>, "Unhandled type in PmtHashVisitor.");
+            return 0; // unreachable
+        }
+    }
+};
+
+inline std::size_t computeHash(const pmtv::pmt& value) { return std::visit(PmtHashVisitor{}, value); }
+
 } // namespace detail
 
 struct SettingsCtx {
@@ -119,14 +172,7 @@ struct SettingsCtx {
         return settings::comparePmt(context, other.context);
     }
 
-    [[nodiscard]] std::size_t hash() const noexcept {
-        std::size_t seed = 0;
-        if (time != 0ULL) {
-            detail::hash_combine(seed, time);
-        }
-        detail::hash_combine(seed, pmtv::to_base64(context));
-        return seed;
-    }
+    [[nodiscard]] std::size_t hash() const noexcept { return detail::hash_combine(std::hash<std::uint64_t>()(time), detail::computeHash(context)); }
 };
 
 /**
