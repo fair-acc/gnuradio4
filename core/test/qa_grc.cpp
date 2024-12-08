@@ -188,21 +188,81 @@ blocks:
     parameters:
       total_count: !!uint32 100
       unknown_property: 42
+
 connections:
   - [main_source, 0, multiplier, 0]
   - [multiplier, 0, counter, 0]
   - [counter, 0, sink, 0]
 )";
 
-            const auto context       = getContext();
-            const auto graphSrc      = ymlDecodeEncode(pluginsTestGrc);
-            auto       graph         = gr::loadGrc(context->loader, graphSrc);
-            auto       graphSavedSrc = gr::saveGrc(graph);
+            const auto context  = getContext();
+            const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            expect(eq(graph.blocks().size(), 4UZ));
+
+            auto graphSavedSrc = gr::saveGrc(graph);
 
             expect(checkAndPrintMissingLines(graphSrc, graphSavedSrc));
 
             gr::scheduler::Simple scheduler(std::move(graph));
             expect(scheduler.runAndWait().has_value());
+        } catch (const std::string& e) {
+            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            expect(false);
+        }
+    };
+
+    "Basic graph and subgraph loading and storing using plugins"_test = [] {
+        try {
+            using namespace gr;
+
+            constexpr std::string_view pluginsTestGrc = R"(
+blocks:
+  - name: main_source
+    id: good::fixed_source
+    parameters:
+      event_count: !!uint32 100
+      unknown_property: 42
+  - name: multiplier
+    id: good::multiply
+  - name: counter
+    id: builtin_counter
+  - name: sink
+    id: good::cout_sink
+    parameters:
+      total_count: !!uint32 100
+      unknown_property: 42
+  - name: chained_multiplier
+    id: SUBGRAPH
+    graph:
+      blocks:
+        - name: multiplier1
+          id: good::multiply
+        - name: multiplier2
+          id: good::multiply
+      connections:
+        - [multiplier1, 0, multiplier2, 0]
+      exported_ports:
+        - [multiplier1, INPUT, in]
+        - [multiplier2, OUTPUT, out]
+
+connections:
+  - [main_source, 0, multiplier, 0]
+  - [multiplier, 0, chained_multiplier, 0]
+  - [chained_multiplier, 0, counter, 0]
+  - [counter, 0, sink, 0]
+)";
+
+            const auto context  = getContext();
+            const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            expect(eq(graph.blocks().size(), 5UZ));
+
+            auto graphSavedSrc = gr::saveGrc(graph);
+
+            expect(checkAndPrintMissingLines(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
             fmt::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);

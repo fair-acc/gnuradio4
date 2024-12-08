@@ -327,7 +327,7 @@ enum class Category {
  *     }
  *
  *     void start() override {
- *         propertyCallbacks.emplace(kMyCustomProperty, &MyBlock::propertyCallbackMyCustom);
+ *         propertyCallbacks.emplace(kMyCustomProperty, std::mem_fn(&MyBlock::propertyCallbackMyCustom));
  *     }
  * };
  * @endcode
@@ -428,18 +428,18 @@ public:
     MsgPortInBuiltin  msgIn;
     MsgPortOutBuiltin msgOut;
 
-    using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
+    using PropertyCallback = std::function<std::optional<Message>(Derived&, std::string_view, Message)>;
     std::map<std::string, PropertyCallback> propertyCallbacks{
-        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},               //
-        {block::property::kEcho, &Block::propertyCallbackEcho},                         //
-        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState},     //
-        {block::property::kSetting, &Block::propertyCallbackSettings},                  //
-        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},      //
-        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},       //
-        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},       //
-        {block::property::kActiveContext, &Block::propertyCallbackActiveContext},       //
-        {block::property::kSettingsCtx, &Block::propertyCallbackSettingsCtx},           //
-        {block::property::kSettingsContexts, &Block::propertyCallbackSettingsContexts}, //
+        {block::property::kHeartbeat, std::mem_fn(&Block::propertyCallbackHeartbeat)},               //
+        {block::property::kEcho, std::mem_fn(&Block::propertyCallbackEcho)},                         //
+        {block::property::kLifeCycleState, std::mem_fn(&Block::propertyCallbackLifecycleState)},     //
+        {block::property::kSetting, std::mem_fn(&Block::propertyCallbackSettings)},                  //
+        {block::property::kStagedSetting, std::mem_fn(&Block::propertyCallbackStagedSettings)},      //
+        {block::property::kStoreDefaults, std::mem_fn(&Block::propertyCallbackStoreDefaults)},       //
+        {block::property::kResetDefaults, std::mem_fn(&Block::propertyCallbackResetDefaults)},       //
+        {block::property::kActiveContext, std::mem_fn(&Block::propertyCallbackActiveContext)},       //
+        {block::property::kSettingsCtx, std::mem_fn(&Block::propertyCallbackSettingsCtx)},           //
+        {block::property::kSettingsContexts, std::mem_fn(&Block::propertyCallbackSettingsContexts)}, //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -1358,17 +1358,20 @@ protected:
     }
 
     std::size_t getMergedBlockLimit() {
-        if constexpr (requires(const Derived& d) {
-                          { available_samples(d) } -> std::same_as<std::size_t>;
-                      }) {
+        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+            return 0;
+        } else if constexpr (requires(const Derived& d) {
+                                 { available_samples(d) } -> std::same_as<std::size_t>;
+                             }) {
             return available_samples(self());
         } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0 && traits::block::stream_output_port_types<Derived>::size == 0) { // allow blocks that have neither input nor output ports (by merging source to sink block) -> use internal buffer size
             constexpr gr::Size_t chunkSize = Derived::merged_work_chunk_size();
             static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
                                                                              "friend function `available_samples(const BlockType&)` must be defined.");
             return chunkSize;
+        } else {
+            return std::numeric_limits<std::size_t>::max();
         }
-        return std::numeric_limits<std::size_t>::max();
     }
 
     template<typename TIn, typename TOut>
@@ -1670,7 +1673,11 @@ protected:
                 }
             }
         } else { // block does not define any valid processing function
-            static_assert(meta::always_false<traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
+            if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+                return {requestedWork, 0UZ, OK};
+            } else {
+                static_assert(meta::always_false<traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
+            }
         }
 
         // sanitise input/output samples based on explicit user-defined processBulk(...) return status
@@ -1852,7 +1859,7 @@ public:
 
             std::optional<Message> retMessage;
             try {
-                retMessage = (self().*callback)(message.endpoint, message); // N.B. life-time: message is copied
+                retMessage = callback(self(), message.endpoint, message); // N.B. life-time: message is copied
             } catch (const gr::exception& e) {
                 retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(e));

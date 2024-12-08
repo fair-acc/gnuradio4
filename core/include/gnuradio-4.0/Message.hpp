@@ -134,6 +134,7 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     }
     WriterSpanLike auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
     msgSpan[0]                  = std::move(message);
+    msgSpan.publish(1UZ);
 }
 } // namespace detail
 

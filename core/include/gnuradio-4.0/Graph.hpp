@@ -54,7 +54,144 @@ inline static const char* kGraphInspect   = "GraphInspect";
 inline static const char* kGraphInspected = "GraphInspected";
 
 inline static const char* kRegistryBlockTypes = "RegistryBlockTypes";
+
+inline static const char* kSubgraphExportPort   = "SubgraphExportPort";
+inline static const char* kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
+
+template<typename TSubGraph>
+class GraphWrapper : public BlockWrapper<TSubGraph> {
+private:
+    std::unordered_multimap<std::string, std::string> _exportedInputPortsForBlock;
+    std::unordered_multimap<std::string, std::string> _exportedOutputPortsForBlock;
+
+public:
+    GraphWrapper() {
+        // We need to make sure nobody touches our dynamic ports
+        // as this class will handle them
+        this->_dynamicPortsLoader = [] {};
+
+        this->_block.propertyCallbacks[graph::property::kSubgraphExportPort] = [this](auto& self, std::string_view property, Message message) -> std::optional<Message> {
+            const auto&        data            = message.data.value();
+            const std::string& uniqueBlockName = std::get<std::string>(data.at("uniqueBlockName"s));
+            auto               portDirection   = std::get<std::string>(data.at("portDirection"s)) == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;
+            const std::string& portName        = std::get<std::string>(data.at("portName"s));
+            const bool         exportFlag      = std::get<bool>(data.at("exportFlag"s));
+
+            exportPort(exportFlag, uniqueBlockName, portDirection, portName);
+
+            message.endpoint = graph::property::kSubgraphExportedPort;
+            return message;
+        };
+    }
+
+    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
+        auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
+        if (infoFound == exportFlag) {
+            throw Error(fmt::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
+        }
+
+        auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName);
+        auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
+        auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
+        if (exportFlag) {
+            bookkeepingCollection.emplace(uniqueBlockName, portName);
+            portCollection.push_back(port.weakRef());
+        } else {
+            bookkeepingCollection.erase(infoIt);
+            // TODO: Add support for exporting port collections
+            auto portIt = std::ranges::find_if(portCollection, [needleName = port.name](const auto& portOrCollection) {
+                return std::visit(meta::overloaded{
+                                      //
+                                      [&](DynamicPort& in) { return in.name == needleName; }, //
+                                      [](auto&) { return false; }                             //
+                                  },
+                    portOrCollection);
+            });
+            if (portIt != portCollection.end()) {
+                portCollection.erase(portIt);
+            } else {
+                throw Error("Port was not exported, while it is registered as such");
+            }
+        }
+
+        updateMetaInformation();
+    }
+
+    auto& blockRef() { return BlockWrapper<TSubGraph>::blockRef(); }
+    auto& blockRef() const { return BlockWrapper<TSubGraph>::blockRef(); }
+
+    const std::unordered_multimap<std::string, std::string>& exportedInputPortsForBlock() const { return _exportedInputPortsForBlock; }
+    const std::unordered_multimap<std::string, std::string>& exportedOutputPortsForBlock() const { return _exportedOutputPortsForBlock; }
+
+    BlockModel& findBlockWithUniqueName(std::string uniqueBlockName) {
+        for (const auto& block : this->blocks()) {
+            if (std::string(block->uniqueName()) == uniqueBlockName) {
+                return *block;
+            }
+        }
+        throw Error(fmt::format("Block {} not found in {}", uniqueBlockName, this->uniqueName()));
+    }
+
+    BlockModel& findFirstBlockWithName(std::string blockName) {
+        for (const auto& block : this->blocks()) {
+            if (std::string(block->name()) == blockName) {
+                return *block;
+            }
+        }
+        throw Error(fmt::format("Block {} not found in {}", blockName, this->uniqueName()));
+    }
+
+private:
+    DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
+        auto& block = findBlockWithUniqueName(uniqueBlockName);
+
+        if (portDirection == PortDirection::INPUT) {
+            return block.dynamicInputPort(portName);
+        } else {
+            return block.dynamicOutputPort(portName);
+        }
+    }
+
+    auto findExportedPortInfo(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) const {
+        auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
+        const auto& [from, to]      = bookkeepingCollection.equal_range(std::string(uniqueBlockName));
+        for (auto it = from; it != to; it++) {
+            if (it->second == portName) {
+                return std::make_pair(it, true);
+            }
+        }
+        return std::make_pair(bookkeepingCollection.end(), false);
+    }
+
+    void updateMetaInformation() {
+        auto& info = BlockWrapper<TSubGraph>::metaInformation();
+
+        auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
+            std::string              previousUniqueName;
+            std::vector<std::string> collectedPorts;
+            for (const auto& [blockUniqueName, portName] : bookkeepingCollection) {
+                if (previousUniqueName != blockUniqueName && !collectedPorts.empty()) {
+                    dest[previousUniqueName] = std::move(collectedPorts);
+                    collectedPorts.clear();
+                }
+                collectedPorts.push_back(portName);
+                previousUniqueName = blockUniqueName;
+            }
+            if (!collectedPorts.empty()) {
+                dest[previousUniqueName] = std::move(collectedPorts);
+                collectedPorts.clear();
+            }
+        };
+
+        property_map exportedInputPorts, exportedOutputPorts;
+        fillMetaInformation(exportedInputPorts, _exportedInputPortsForBlock);
+        fillMetaInformation(exportedOutputPorts, _exportedOutputPortsForBlock);
+
+        info["exportedInputPorts"]  = std::move(exportedInputPorts);
+        info["exportedOutputPorts"] = std::move(exportedOutputPorts);
+    }
+};
 
 class Graph : public gr::Block<Graph> {
 private:
@@ -184,14 +321,14 @@ public:
 
     Graph(property_map settings = {}) : gr::Block<Graph>(std::move(settings)) {
         _blocks.reserve(100); // TODO: remove
-        propertyCallbacks[graph::property::kEmplaceBlock]       = &Graph::propertyCallbackEmplaceBlock;
-        propertyCallbacks[graph::property::kRemoveBlock]        = &Graph::propertyCallbackRemoveBlock;
-        propertyCallbacks[graph::property::kInspectBlock]       = &Graph::propertyCallbackInspectBlock;
-        propertyCallbacks[graph::property::kReplaceBlock]       = &Graph::propertyCallbackReplaceBlock;
-        propertyCallbacks[graph::property::kEmplaceEdge]        = &Graph::propertyCallbackEmplaceEdge;
-        propertyCallbacks[graph::property::kRemoveEdge]         = &Graph::propertyCallbackRemoveEdge;
-        propertyCallbacks[graph::property::kGraphInspect]       = &Graph::propertyCallbackGraphInspect;
-        propertyCallbacks[graph::property::kRegistryBlockTypes] = &Graph::propertyCallbackRegistryBlockTypes;
+        propertyCallbacks[graph::property::kEmplaceBlock]       = std::mem_fn(&Graph::propertyCallbackEmplaceBlock);
+        propertyCallbacks[graph::property::kRemoveBlock]        = std::mem_fn(&Graph::propertyCallbackRemoveBlock);
+        propertyCallbacks[graph::property::kInspectBlock]       = std::mem_fn(&Graph::propertyCallbackInspectBlock);
+        propertyCallbacks[graph::property::kReplaceBlock]       = std::mem_fn(&Graph::propertyCallbackReplaceBlock);
+        propertyCallbacks[graph::property::kEmplaceEdge]        = std::mem_fn(&Graph::propertyCallbackEmplaceEdge);
+        propertyCallbacks[graph::property::kRemoveEdge]         = std::mem_fn(&Graph::propertyCallbackRemoveEdge);
+        propertyCallbacks[graph::property::kGraphInspect]       = std::mem_fn(&Graph::propertyCallbackGraphInspect);
+        propertyCallbacks[graph::property::kRegistryBlockTypes] = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
     }
     Graph(Graph&)            = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
@@ -318,13 +455,13 @@ public:
 
         property_map inputPorts;
         for (auto& portOrCollection : block->dynamicInputPorts()) {
-            inputPorts[std::string(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
+            inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
         }
         result["inputPorts"] = std::move(inputPorts);
 
         property_map outputPorts;
         for (auto& portOrCollection : block->dynamicOutputPorts()) {
-            outputPorts[std::string(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
+            outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
         }
         result["outputPorts"] = std::move(outputPorts);
 
@@ -396,6 +533,9 @@ public:
             throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
+        std::erase_if(_edges, [&it](const Edge& edge) { //
+            return std::addressof(edge.sourceBlock()) == it->get() || std::addressof(edge.destinationBlock()) == it->get();
+        });
         _blocks.erase(it);
         message.endpoint = graph::property::kBlockRemoved;
 
