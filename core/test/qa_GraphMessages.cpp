@@ -1,7 +1,7 @@
 #include <boost/ut.hpp>
 
-#include "gnuradio-4.0/Block.hpp"
-#include "gnuradio-4.0/Message.hpp"
+#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
@@ -10,7 +10,7 @@
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
 
-#include <optional>
+#include "message_utils.hpp"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -53,47 +53,6 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
             expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, state: WaitingToBeConnected) ⟶")) << result;
         };
     };
-};
-
-template<typename Condition>
-bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
-    auto start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < timeout) {
-        if (condition()) {
-            return true;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return false;
-}
-
-auto returnReplyMsg(gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location caller = std::source_location::current()) {
-    auto available = port.streamReader().available();
-    expect(gt(available, 0UZ)) << "didn't receive a reply message, caller: " << caller.file_name() << ":" << caller.line();
-    ReaderSpanLike auto messages = port.streamReader().get<SpanReleasePolicy::ProcessAll>(available);
-    Message             result;
-
-    if (expectedEndpoint) {
-        auto it = std::ranges::find_if(messages, [endpoint = *expectedEndpoint](const auto& message) { return message.endpoint == endpoint; });
-        expect(gt(available, 0UZ)) << "didn't receive the expected reply message, caller: " << caller.file_name() << ":" << caller.line();
-    } else {
-        result = messages[0];
-    }
-
-    expect(messages.consume(messages.size()));
-    fmt::print("Test got a reply: {}\n", result);
-    return result;
-};
-
-auto awaitReplyMsg(auto& graph, std::chrono::milliseconds timeout, gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location caller = std::source_location::current()) {
-    Message msg;
-
-    awaitCondition(timeout, [&port, &graph] {
-        graph.processScheduledMessages();
-        return port.streamReader().available() > 0;
-    });
-
-    return returnReplyMsg(port, expectedEndpoint, caller);
 };
 
 const boost::ut::suite NonRunningGraphTests = [] {
@@ -348,42 +307,6 @@ const boost::ut::suite RunningGraphTests = [] {
     expect(eq(ConnectionResult::SUCCESS, toGraph.connect(scheduler.msgIn)));
     expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromGraph)));
 
-    auto waitForAReply = [&](std::chrono::milliseconds maxWait = 1s, std::source_location currentSource = std::source_location::current()) {
-        auto startedAt = std::chrono::system_clock::now();
-        while (fromGraph.streamReader().available() == 0) {
-            std::this_thread::sleep_for(100ms);
-            if (std::chrono::system_clock::now() - startedAt > maxWait) {
-                break;
-            }
-        }
-        expect(fromGraph.streamReader().available() > 0) << "Caller at" << currentSource.file_name() << ":" << currentSource.line();
-        return fromGraph.streamReader().available() > 0;
-    };
-
-    auto emplaceTestBlock = [&](std::string type, std::string params, property_map properties) {
-        sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceBlock /* endpoint */, //
-            {{"type", std::move(type)}, {"parameters", std::move(params)}, {"properties", std::move(properties)}} /* data */);
-        expect(waitForAReply()) << "didn't receive a reply message";
-
-        const Message reply = returnReplyMsg(fromGraph);
-        expect(reply.data.has_value()) << "emplace block failed and returned an error";
-        return reply.data.has_value() ? std::get<std::string>(reply.data.value().at("uniqueName"s)) : std::string{};
-    };
-
-    auto emplaceTestEdge = [&](std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort) {
-        property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort},    //
-            {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort}, //
-            {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
-        sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
-        if (!waitForAReply()) {
-            fmt::println("didn't receive a reply message for {}", data);
-            return false;
-        }
-
-        const Message reply = returnReplyMsg(fromGraph);
-        return reply.data.has_value();
-    };
-
     std::expected<void, Error> schedulerRet;
     auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
 
@@ -397,8 +320,8 @@ const boost::ut::suite RunningGraphTests = [] {
     fmt::println("executed basic graph");
 
     // Adding a few blocks
-    auto multiply1 = emplaceTestBlock("gr::testing::Copy"s, "float"s, property_map{});
-    auto multiply2 = emplaceTestBlock("gr::testing::Copy"s, "float"s, property_map{});
+    auto multiply1 = sendEmplaceTestBlockMsg(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
+    auto multiply2 = sendEmplaceTestBlockMsg(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
     scheduler.processScheduledMessages();
 
     for (const auto& block : scheduler.graph().blocks()) {
@@ -406,15 +329,15 @@ const boost::ut::suite RunningGraphTests = [] {
     }
     expect(eq(scheduler.graph().blocks().size(), 4UZ)) << "should contain sink->multiply1->multiply2->sink";
 
-    expect(emplaceTestEdge(source.unique_name, "out", multiply1, "in")) << "emplace edge source -> multiply1 failed and returned an error";
-    expect(emplaceTestEdge(multiply1, "out", multiply2, "in")) << "emplace edge multiply1 -> multiply2 failed and returned an error";
-    expect(emplaceTestEdge(multiply2, "out", sink.unique_name, "in")) << "emplace edge multiply2 -> sink failed and returned an error";
+    expect(sendEmplaceTestEdgeMsg(toGraph, fromGraph, source.unique_name, "out", multiply1, "in")) << "emplace edge source -> multiply1 failed and returned an error";
+    expect(sendEmplaceTestEdgeMsg(toGraph, fromGraph, multiply1, "out", multiply2, "in")) << "emplace edge multiply1 -> multiply2 failed and returned an error";
+    expect(sendEmplaceTestEdgeMsg(toGraph, fromGraph, multiply2, "out", sink.unique_name, "in")) << "emplace edge multiply2 -> sink failed and returned an error";
     scheduler.processScheduledMessages();
 
     // Get the whole graph
     {
         sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */);
-        if (!waitForAReply()) {
+        if (!waitForAReply(fromGraph)) {
             fmt::println("didn't receive a reply message for kGraphInspect");
             expect(false);
         }
