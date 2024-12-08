@@ -96,7 +96,9 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
                 return;
             }
             for (const auto& tag : inputSpan.rawTags) {
-                const auto relIndex = static_cast<std::ptrdiff_t>(tag.index) - static_cast<std::ptrdiff_t>(inputSpan.streamIndex);
+                const auto relIndex = tag.index >= inputSpan.streamIndex                                   //
+                                          ? static_cast<std::ptrdiff_t>(tag.index - inputSpan.streamIndex) //
+                                          : -static_cast<std::ptrdiff_t>(inputSpan.streamIndex - tag.index);
                 if (relIndex >= 0 && static_cast<std::size_t>(relIndex) <= maxRelIndex) {
                     outputSpan.publishTag(tag.map, static_cast<std::size_t>(relIndex));
                 }
