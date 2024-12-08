@@ -11,57 +11,14 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Settings.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/testing/SettingsChangeRecorder.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 using namespace std::string_literals;
 
 namespace gr::setting_test {
 
-namespace utils {
-
-std::string format_variant(const auto& value) noexcept {
-    return std::visit(
-        [](auto& arg) {
-            using Type = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>) {
-                return fmt::format("{}", arg);
-            } else if constexpr (std::is_same_v<Type, std::monostate>) {
-                return fmt::format("monostate");
-            } else if constexpr (std::is_same_v<Type, std::vector<std::complex<float>>> || std::is_same_v<Type, std::vector<std::complex<double>>>) {
-                return fmt::format("[{}]", fmt::join(arg, ", "));
-            } else if constexpr (std::is_same_v<Type, std::vector<std::string>> || std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>> || std::is_same_v<Type, std::vector<unsigned short>> || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>> || std::is_same_v<Type, std::vector<signed char>> || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>> || std::is_same_v<Type, std::vector<long>> || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
-                return fmt::format("[{}]", fmt::join(arg, ", "));
-            } else {
-                return fmt::format("not-yet-supported type {}", gr::meta::type_name<Type>());
-            }
-        },
-        value);
-}
-
-void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
-    for (const auto& [key, newValue] : newMap) {
-        if (!oldMap.contains(key)) {
-            fmt::print("    key added '{}` = {}\n", key, format_variant(newValue));
-        } else {
-            const auto& oldValue = oldMap.at(key);
-            const bool  areEqual = std::visit(
-                [](auto&& arg1, auto&& arg2) {
-                    if constexpr (std::is_same_v<std::decay_t<decltype(arg1)>, std::decay_t<decltype(arg2)>>) {
-                        // compare values if they are of the same type
-                        return arg1 == arg2;
-                    } else {
-                        return false; // values are of different type
-                    }
-                },
-                oldValue, newValue);
-
-            if (!areEqual) {
-                fmt::print("    key value changed: '{}` = {} -> {}\n", key, format_variant(oldValue), format_variant(newValue));
-            }
-        }
-    }
-};
-} // namespace utils
+using gr::testing::SettingsChangeRecorder;
 
 template<typename T>
 struct Source : public Block<Source<T>> {
@@ -93,59 +50,6 @@ struct Source : public Block<Source<T>> {
 // optional shortening
 template<typename T, gr::meta::fixed_string description = "", typename... Arguments>
 using A = Annotated<T, description, Arguments...>;
-
-template<typename T>
-// struct TestBlock : public Block<TestBlock<T>, BlockingIO<true>, SupportedTypes<float, double>> { // TODO: reenable BlockingIO
-struct TestBlock : public Block<TestBlock<T>, SupportedTypes<float, double>> {
-    using Description = Doc<R""(
-some test doc documentation
-)"">;
-    PortIn<T>  in{};
-    PortOut<T> out{};
-
-    // settings
-    A<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">>                    scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
-    A<std::string, "context information", Visible>                                   context{};
-    gr::Size_t                                                                       n_samples_max = 0;
-    A<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1.0f;
-    std::vector<T>                                                                   vector_setting{T(3), T(2), T(1)};
-    A<std::vector<std::string>, "string vector">                                     string_vector_setting = {};
-
-    GR_MAKE_REFLECTABLE(TestBlock, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
-
-    bool       _debug            = true;
-    int        _updateCount      = 0;
-    bool       _resetCalled      = false;
-    gr::Size_t _nSamplesConsumed = 0;
-
-    void settingsChanged(const property_map& oldSettings, property_map& newSettings, property_map& fwdSettings) noexcept {
-        // optional function that is called whenever settings change
-        _updateCount++;
-
-        if (_debug) {
-            fmt::println("block '{}' settings changed - update_count: {}", this->name, _updateCount);
-            utils::printChanges(oldSettings, newSettings);
-            for (const auto& [key, value] : fwdSettings) {
-                fmt::println(" -- forward: '{}':{}", key, value);
-            }
-        }
-    }
-
-    void reset() {
-        // optional reset function
-        _nSamplesConsumed = 0;
-        _resetCalled      = true;
-    }
-
-    [[nodiscard]] constexpr T processOne(const T& a) noexcept {
-        _nSamplesConsumed++;
-        return a * scaling_factor;
-    }
-};
-
-static_assert(BlockLike<TestBlock<int>>);
-static_assert(BlockLike<TestBlock<float>>);
-static_assert(BlockLike<TestBlock<double>>);
 
 template<typename T, bool Average = false>
 struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, double>, Resampling<>> {
@@ -218,7 +122,7 @@ const boost::ut::suite SettingsTests = [] {
     "basic node settings tag"_test = [] {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
-        // define basic Sink->TestBlock->Sink flow graph
+        // define basic Sink->SettingsChangeRecorder->Sink flow graph
         auto& src = testGraph.emplaceBlock<Source<float>>({{"sample_rate", 42.f}, {"n_samples_max", n_samples}});
         expect(eq(src.settings().defaultParameters().size(), 9UZ)); // 7 base + 2 derived
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
@@ -230,12 +134,12 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(src.settings().autoUpdateParameters().size(), 3UL));  // 3 base + 0 derived
         expect(eq(src.settings().autoForwardParameters().size(), 1UL)); // "sample_rate"
 
-        auto& block1 = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestBlock#1"}});
-        auto& block2 = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestBlock#2"}});
+        auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#1"}});
+        auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#2"}});
         expect(eq(block1.settings().defaultParameters().size(), 13UZ)); // 7 base + 6 derived
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
         expect(eq(block1.settings().getStored().value().size(), 13UZ));
-        expect(eq(block1.name, "TestBlock#1"s));
+        expect(eq(block1.name, "SettingsChangeRecorder#1"s));
         expect(eq(block1.settings().getNAutoUpdateParameters(), 1UZ));
         expect(eq(block1.settings().autoUpdateParameters().size(), 8UL));  // 2 base + 6 derived
         expect(eq(block1.settings().autoForwardParameters().size(), 2UL)); // "sample_rate", "context"
@@ -355,7 +259,7 @@ const boost::ut::suite SettingsTests = [] {
 
     "constructor"_test = [] {
         "empty"_test = [] {
-            auto block = TestBlock<float>(); // Block::init() is not called
+            auto block = SettingsChangeRecorder<float>(); // Block::init() is not called
             expect(eq(block.settings().getNStoredParameters(), 0UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
@@ -372,7 +276,7 @@ const boost::ut::suite SettingsTests = [] {
         };
 
         "with init parameter"_test = [] {
-            auto block = TestBlock<float>({{"scaling_factor", 2.f}}); // Block::init() is not called
+            auto block = SettingsChangeRecorder<float>({{"scaling_factor", 2.f}}); // Block::init() is not called
             expect(eq(block.settings().getNStoredParameters(), 0UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
@@ -393,8 +297,8 @@ const boost::ut::suite SettingsTests = [] {
 
         "empty via graph"_test = [] {
             Graph testGraph;
-            auto& block = testGraph.emplaceBlock<TestBlock<float>>(); // Block::init() is called
-            expect(eq(block.settings().getNStoredParameters(), 1UZ)); // store default parameters
+            auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>(); // Block::init() is called
+            expect(eq(block.settings().getNStoredParameters(), 1UZ));              // store default parameters
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 9UL));  // all isWritable settings (enable reflections)
@@ -406,7 +310,7 @@ const boost::ut::suite SettingsTests = [] {
 
         "with init parameter via graph"_test = [] {
             Graph testGraph;
-            auto& block = testGraph.emplaceBlock<TestBlock<float>>({{"scaling_factor", 2.f}});
+            auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"scaling_factor", 2.f}});
             expect(eq(block.settings().getNStoredParameters(), 1UZ)); // store default parameters
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
@@ -420,7 +324,7 @@ const boost::ut::suite SettingsTests = [] {
 
     "vector-type support"_test = [] {
         Graph testGraph;
-        auto& block = testGraph.emplaceBlock<TestBlock<float>>();
+        auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // store default parameters
         expect(eq(block.settings().stagedParameters().size(), 0UZ));
         block.settings().updateActiveParameters();
@@ -444,13 +348,13 @@ const boost::ut::suite SettingsTests = [] {
 
     "unique ID"_test = [] {
         Graph       testGraph;
-        const auto& block1 = testGraph.emplaceBlock<TestBlock<float>>();
-        const auto& block2 = testGraph.emplaceBlock<TestBlock<float>>();
+        const auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
+        const auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
         expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
         expect(not eq(block1.unique_name, block2.unique_name)) << "unique per-type block id (string)";
 
-        auto merged1 = merge<"out", "in">(TestBlock<float>(), TestBlock<float>());
-        auto merged2 = merge<"out", "in">(TestBlock<float>(), TestBlock<float>());
+        auto merged1 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
+        auto merged2 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
         expect(not eq(merged1.unique_id, merged2.unique_id)) << "unique per-type block id (size_t) ";
         expect(not eq(merged1.unique_name, merged2.unique_name)) << "unique per-type block id (string) ";
     };
@@ -459,7 +363,7 @@ const boost::ut::suite SettingsTests = [] {
         auto progress     = std::make_shared<gr::Sequence>();
         auto ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("test_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
         //
-        auto wrapped1 = BlockWrapper<TestBlock<float>>();
+        auto wrapped1 = BlockWrapper<SettingsChangeRecorder<float>>();
         wrapped1.init(progress, ioThreadPool);
         expect(eq(wrapped1.settings().getNStoredParameters(), 1UZ));
         wrapped1.setName("test_name");
@@ -471,7 +375,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(std::get<std::string>(wrapped1.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
 
         // via constructor
-        auto wrapped2 = BlockWrapper<TestBlock<float>>({{"name", "test_name"}});
+        auto wrapped2 = BlockWrapper<SettingsChangeRecorder<float>>({{"name", "test_name"}});
         wrapped2.init(progress, ioThreadPool);
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ));
         expect(wrapped2.settings().set({{"context", "a string"}}).empty()) << "successful set returns empty map";
@@ -515,7 +419,7 @@ const boost::ut::suite SettingsTests = [] {
 
     "basic store/reset settings"_test = []() {
         Graph testGraph;
-        auto& block = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
+        auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
         expect(eq(block.settings().autoForwardParameters().size(), 2UZ)); // "context" , "sample_rate"
@@ -575,10 +479,10 @@ const boost::ut::suite AnnotationTests = [] {
     using namespace std::literals;
 
     "basic node annotations"_test = [] {
-        Graph             testGraph;
-        TestBlock<float>& block = testGraph.emplaceBlock<TestBlock<float>>();
-        expect(gr::blockDescription<TestBlock<float>>().find(std::string_view(TestBlock<float>::Description::value)) != std::string_view::npos);
-        expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(TestBlock<float>::Description::value))) << "type-erased block description";
+        Graph                          testGraph;
+        SettingsChangeRecorder<float>& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
+        expect(gr::blockDescription<SettingsChangeRecorder<float>>().find(std::string_view(SettingsChangeRecorder<float>::Description::value)) != std::string_view::npos);
+        expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(SettingsChangeRecorder<float>::Description::value))) << "type-erased block description";
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::description")), "scaling factor"sv));
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::documentation")), "y = a * x"sv));
         expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::unit")), "As"sv));
@@ -685,7 +589,7 @@ const boost::ut::suite TransactionTests = [] {
 
     "CtxSettings Time"_test = [] {
         Graph testGraph;
-        auto& block    = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName0"}, {"scaling_factor", 0.f}});
+        auto& block    = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName0"}, {"scaling_factor", 0.f}});
         auto  settings = CtxSettings(block);
         expect(block.settings().applyStagedParameters().forwardParameters.empty());
         block.settings().storeDefaults();
@@ -756,7 +660,7 @@ const boost::ut::suite TransactionTests = [] {
 #ifdef __EMSCRIPTEN__
     "CtxSettings Resolve Duplicate Timestamp"_test = [] {
         Graph               testGraph;
-        auto&               block     = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName0"}, {"scaling_factor", 0.f}});
+        auto&               block     = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName0"}, {"scaling_factor", 0.f}});
         auto                settings  = CtxSettings(block);
         const std::uint64_t timeNowNs = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
         auto                ctx0      = SettingsCtx(timeNowNs);
@@ -779,7 +683,7 @@ const boost::ut::suite TransactionTests = [] {
 #endif
     "CtxSettings Expired Parameters"_test = [] {
         Graph testGraph;
-        auto& block    = testGraph.emplaceBlock<TestBlock<float>>({{"scaling_factor", 0.f}});
+        auto& block    = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"scaling_factor", 0.f}});
         auto  settings = CtxSettings(block);
         expect(block.settings().applyStagedParameters().forwardParameters.empty());
         block.settings().storeDefaults();
@@ -854,7 +758,7 @@ const boost::ut::suite TransactionTests = [] {
 
     "CtxSettings Matching"_test = [&] {
         Graph      testGraph;
-        auto&      block    = testGraph.emplaceBlock<TestBlock<int>>({{"scaling_factor", 42}});
+        auto&      block    = testGraph.emplaceBlock<SettingsChangeRecorder<int>>({{"scaling_factor", 42}});
         auto       settings = CtxSettings(block, matchPred);
         const auto timeNow  = std::chrono::system_clock::now();
         const auto ctx0     = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow), "FAIR.SELECTOR.C=1:S=1:P=1");
@@ -883,7 +787,7 @@ const boost::ut::suite TransactionTests = [] {
     "CtxSettings Drop-In Settings replacement"_test = [&] {
         // the multiplexed Settings can be used as a drop-in replacement for "normal" Settings
         Graph testGraph;
-        auto& block = testGraph.emplaceBlock<TestBlock<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
+        auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
         auto  s     = CtxSettings<std::remove_reference<decltype(block)>::type>(block, matchPred);
         block.setSettings(s);
         auto ctx0 = SettingsCtx(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
@@ -973,7 +877,7 @@ const boost::ut::suite TransactionTests = [] {
 
     "CtxSettings supported context types"_test = [&] {
         Graph      testGraph;
-        auto&      block    = testGraph.emplaceBlock<TestBlock<int>>({{"scaling_factor", 1}});
+        auto&      block    = testGraph.emplaceBlock<SettingsChangeRecorder<int>>({{"scaling_factor", 1}});
         auto       settings = CtxSettings(block);
         const auto timeNow  = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
@@ -1005,7 +909,7 @@ blocks:
       n_samples_max: !!uint32 100
       sample_rate: !!float32 123456
   - name: test_block
-    id: gr::setting_test::TestBlock
+    id: gr::testing::SettingsChangeRecorder
   - name: sink
     id: gr::setting_test::Sink
 connections:
@@ -1014,7 +918,7 @@ connections:
 )";
         BlockRegistry              registry;
         gr::registerBlock<Source, double>(registry);
-        gr::registerBlock<TestBlock, double>(registry);
+        gr::registerBlock<SettingsChangeRecorder, double>(registry);
         gr::registerBlock<Sink, double>(registry);
         PluginLoader loader(registry, {});
         try {
