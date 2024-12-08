@@ -221,17 +221,25 @@ if(EMSCRIPTEN)
 endif()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
-if(NOT (TARGET refl-cpp))
-  add_library(refl-cpp INTERFACE)
-  target_include_directories(refl-cpp ${CMAKE_EXT_DEP_WARNING_GUARD}
-                             INTERFACE ${PROJECT_SOURCE_DIR}/third_party/refl-cpp/)
-endif()
-
 if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
-  target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
-                             INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+  target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
 endif()
+
+# include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
+include_directories("${CMAKE_SOURCE_DIR}/third_party")
+include_directories("${CMAKE_SOURCE_DIR}/third_party/exprtk")
+add_library(exprtk STATIC
+        "${CMAKE_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
+        "${CMAKE_SOURCE_DIR}/third_party/exprtk.hpp"
+)
+target_sources(exprtk PRIVATE "${CMAKE_SOURCE_DIR}/third_party/exprtk.hpp")
+target_include_directories(exprtk PUBLIC
+        "${CMAKE_SOURCE_DIR}/third_party"
+        "${CMAKE_SOURCE_DIR}/third_party/exprtk"
+)
+target_compile_options(exprtk PRIVATE -O3)
+# include exprtk header-only - END
 
 include(FetchContent)
 FetchContent_Declare(
@@ -274,7 +282,7 @@ endif()
 
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
-target_link_libraries(pmtv INTERFACE refl-cpp)
+target_link_libraries(pmtv INTERFACE)
 
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)

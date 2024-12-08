@@ -17,6 +17,11 @@ struct first_template_arg_helper<TemplateType<ValueType, OtherTypes...>> {
     using value_type = ValueType;
 };
 
+template<typename ValueType, std::size_t N>
+struct first_template_arg_helper<std::array<ValueType, N>> {
+    using value_type = ValueType;
+};
+
 template<typename T>
 constexpr auto* value_type_helper() {
     if constexpr (requires { typename T::value_type; }) {

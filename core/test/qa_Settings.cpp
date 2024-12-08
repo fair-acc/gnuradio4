@@ -1022,8 +1022,7 @@ connections:
             expect(sched.runAndWait().has_value());
             sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get("sample_rate")), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
         } catch (const std::string& e) {
-            fmt::print(std::cerr, "GRC loading failed: {}\n", e);
-            expect(false);
+            expect(false) << fmt::format("GRC loading failed: {}\n", e);
         }
     };
 #endif

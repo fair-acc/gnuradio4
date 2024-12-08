@@ -394,9 +394,8 @@ template<fixed_string... key>
 constexpr bool key_not_found = false;
 
 /**
- * constexpr const key map that allows modification of the values during run-time while the
- * compile-time look up of keys is free <-> similar to using structs and refl-cpp-based compile-time
- * reflection
+ * constexpr const key map that allows mdification of the values during run-time while the
+ * compile-time look up of keys is free
  *
  * @author: Ralph J. Steinhagen
  */
