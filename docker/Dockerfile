@@ -99,5 +99,104 @@ RUN git clone --depth 1 --branch ${ACPP_GIT_REF} https://github.com/AdaptiveCpp/
 
 ENV PATH="${ACPP_INSTALL_PREFIX}/bin:${PATH}"
 
+# Pre-build ONNX Runtime static libraries for WASM and native fallback.
+# The system .so (libonnxruntime1.21) is used for native builds by default;
+# these static libs provide WASM support and a native fallback without .so.
+ARG ONNXRUNTIME_VERSION=1.21.0
+ARG ORT_STATIC_LIB_DIR=/opt/onnxruntime
+
+RUN git clone --depth 1 --branch v${ONNXRUNTIME_VERSION} \
+      https://github.com/microsoft/onnxruntime.git /tmp/ort-src \
+ && mkdir -p ${ORT_STATIC_LIB_DIR}/wasm/lib ${ORT_STATIC_LIB_DIR}/wasm/include \
+             ${ORT_STATIC_LIB_DIR}/native/lib ${ORT_STATIC_LIB_DIR}/native/include \
+ && cd /tmp/ort-src \
+ # --- GCC 15 patches ---
+ && SEMVER_H=onnxruntime/core/common/semver.h \
+ && if [ -f "$SEMVER_H" ] && ! grep -q '<cstdint>' "$SEMVER_H"; then \
+      sed -i '/#pragma once/a #include <cstdint>' "$SEMVER_H"; \
+      sed -i 's/uint32_t major{}/uint32_t ver_major{}/g' "$SEMVER_H"; \
+      sed -i 's/uint32_t minor{}/uint32_t ver_minor{}/g' "$SEMVER_H"; \
+      sed -i 's/uint32_t patch{}/uint32_t ver_patch{}/g' "$SEMVER_H"; \
+    fi \
+ && SEMVER_CC=onnxruntime/core/common/semver.cc \
+ && if [ -f "$SEMVER_CC" ] && grep -qE '\.(major|minor|patch)' "$SEMVER_CC"; then \
+      sed -i 's/->major/->ver_major/g; s/->minor/->ver_minor/g; s/->patch/->ver_patch/g' "$SEMVER_CC"; \
+      sed -i 's/\.major/\.ver_major/g; s/\.minor/\.ver_minor/g; s/\.patch/\.ver_patch/g' "$SEMVER_CC"; \
+    fi \
+ # --- Eigen hash fixes ---
+ && if [ -f cmake/deps.txt ]; then \
+      sed -i 's/be8be39fdbc6e60e94fa7870b280707069b5b81a/32b145f525a8308d7ab1c09388b2e288312d8eba/g' cmake/deps.txt; \
+      sed -i 's/5ea4d05e62d7f954a46b3213f9b2535bdd866803/51982be81bbe52572b54180454df11a3ece9a934/g' cmake/deps.txt; \
+    fi \
+ # --- build native static lib ---
+ && python3 tools/ci_build/build.py \
+      --build_dir /tmp/ort-build-native --config Release \
+      --cmake_extra_defines CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      --cmake_extra_defines FETCHCONTENT_QUIET=OFF \
+      --cmake_extra_defines CMAKE_DISABLE_FIND_PACKAGE_Protobuf=TRUE \
+      --cmake_extra_defines CMAKE_DISABLE_FIND_PACKAGE_flatbuffers=TRUE \
+      --cmake_extra_defines onnxruntime_BUILD_UNIT_TESTS=OFF \
+      --update --build --minimal_build extended \
+      --disable_ml_ops --disable_contrib_ops \
+      --compile_no_warning_as_error --skip_tests --parallel 6 \
+ && B=/tmp/ort-build-native/Release \
+ && MRI=$(mktemp) \
+ && echo "CREATE ${ORT_STATIC_LIB_DIR}/native/lib/libonnxruntime.a" > "$MRI" \
+ && for lib in libonnxruntime_common.a libonnxruntime_flatbuffers.a libonnxruntime_framework.a \
+               libonnxruntime_graph.a libonnxruntime_lora.a libonnxruntime_mlas.a \
+               libonnxruntime_optimizer.a libonnxruntime_providers.a libonnxruntime_session.a \
+               libonnxruntime_util.a; do \
+      [ -f "$B/$lib" ] && echo "ADDLIB $B/$lib" >> "$MRI"; \
+    done \
+ && for lib in "$B/_deps/onnx-build/libonnx.a" "$B/_deps/onnx-build/libonnx_proto.a"; do \
+      [ -f "$lib" ] && echo "ADDLIB $lib" >> "$MRI"; \
+    done \
+ && for lib in "$B/_deps/protobuf-build/libprotobuf.a" "$B/_deps/protobuf-build/libprotobuf-lite.a"; do \
+      [ -f "$lib" ] && { echo "ADDLIB $lib" >> "$MRI"; break; }; \
+    done \
+ && [ -f "$B/_deps/flatbuffers-build/libflatbuffers.a" ] && \
+      echo "ADDLIB $B/_deps/flatbuffers-build/libflatbuffers.a" >> "$MRI" \
+ && find "$B/_deps/abseil_cpp-build" -name "libabsl_*.a" -type f 2>/dev/null | sort | \
+      while read -r lib; do echo "ADDLIB $lib" >> "$MRI"; done \
+ && [ -f "$B/_deps/pytorch_cpuinfo-build/libcpuinfo.a" ] && \
+      echo "ADDLIB $B/_deps/pytorch_cpuinfo-build/libcpuinfo.a" >> "$MRI" \
+ && for re2 in "$B/_deps/re2-build/libre2.a" /usr/local/lib64/libre2.a /usr/lib/x86_64-linux-gnu/libre2.a; do \
+      [ -f "$re2" ] && { echo "ADDLIB $re2" >> "$MRI"; break; }; \
+    done \
+ && echo "SAVE" >> "$MRI" && echo "END" >> "$MRI" \
+ && ar -M < "$MRI" && rm -f "$MRI" \
+ && strip --strip-debug ${ORT_STATIC_LIB_DIR}/native/lib/libonnxruntime.a 2>/dev/null || true \
+ && cp -r /tmp/ort-src/include/onnxruntime/core/session/* ${ORT_STATIC_LIB_DIR}/native/include/ \
+ # --- build WASM static lib ---
+ # ORT's build.py bundles its own emsdk (4.0.8); replace with system emsdk
+ # to ensure matching LLVM versions between ORT objects and wasm-ld
+ && rm -rf cmake/external/emsdk && ln -s ${EMSDK_HOME} cmake/external/emsdk \
+ && . ${EMSDK_HOME}/emsdk_env.sh \
+ && python3 tools/ci_build/build.py \
+      --build_dir /tmp/ort-build-wasm --config Release \
+      --cmake_extra_defines CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      --cmake_extra_defines FETCHCONTENT_QUIET=OFF \
+      --cmake_extra_defines onnxruntime_BUILD_UNIT_TESTS=OFF \
+      --cmake_extra_defines onnxruntime_ENABLE_LTO=OFF \
+      --cmake_extra_defines "CMAKE_CXX_FLAGS=-fwasm-exceptions" \
+      --cmake_extra_defines "CMAKE_C_FLAGS=-fwasm-exceptions" \
+      --update --build --minimal_build extended \
+      --disable_ml_ops --disable_contrib_ops \
+      --compile_no_warning_as_error --skip_tests --parallel 6 \
+      --skip_submodule_sync \
+      --build_wasm_static_lib --enable_wasm_simd --enable_wasm_threads \
+      --disable_wasm_exception_catching --enable_wasm_api_exception_catching \
+ && WB=/tmp/ort-build-wasm/Release \
+ && if [ -f "$WB/libonnxruntime_webassembly.a" ]; then \
+      cp "$WB/libonnxruntime_webassembly.a" ${ORT_STATIC_LIB_DIR}/wasm/lib/; \
+    elif [ -f "$WB/onnxruntime_webassembly.a" ]; then \
+      cp "$WB/onnxruntime_webassembly.a" ${ORT_STATIC_LIB_DIR}/wasm/lib/libonnxruntime_webassembly.a; \
+    fi \
+ && cp -r /tmp/ort-src/include/onnxruntime/core/session/* ${ORT_STATIC_LIB_DIR}/wasm/include/ \
+ # --- cleanup ---
+ && rm -rf /tmp/ort-src /tmp/ort-build-native /tmp/ort-build-wasm
+
+ENV ORT_STATIC_LIB_DIR=${ORT_STATIC_LIB_DIR}
+
 USER user
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
