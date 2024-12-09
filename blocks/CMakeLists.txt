@@ -5,6 +5,7 @@ add_subdirectory(filter)
 add_subdirectory(fourier)
 add_subdirectory(http)
 add_subdirectory(math)
+add_subdirectory(onnx)
 add_subdirectory(soapy)
 add_subdirectory(testing)
 
