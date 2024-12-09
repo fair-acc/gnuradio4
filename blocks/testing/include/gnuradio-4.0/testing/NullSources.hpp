@@ -25,17 +25,18 @@ static_assert(gr::BlockLike<NullSource<float>>);
 
 template<typename T>
 struct ConstantSource : public gr::Block<ConstantSource<T>> {
+    using value_t     = std::conditional_t<std::is_same_v<T, std::string>, std::string, meta::fundamental_base_value_type_t<T>>; // use base-type for types not supported by settings
     using Description = Doc<R""(A source block that emits a constant default value for each output sample.
 This block counts the number of samples emitted and optionally halts after reaching a specified maximum.
 Commonly used for testing and simulations where consistent output and finite execution are required.)"">;
 
     gr::PortOut<T> out;
 
-    Annotated<T, "default value", Visible, Doc<"default value for each sample">>                  default_value{};
+    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">>            default_value{};
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    GR_MAKE_REFLECTABLE(ConstantSource, out, n_samples_max, count);
+    GR_MAKE_REFLECTABLE(ConstantSource, out, default_value, n_samples_max, count);
 
     void reset() { count = 0U; }
 
@@ -44,7 +45,7 @@ Commonly used for testing and simulations where consistent output and finite exe
         if (n_samples_max > 0 && count >= n_samples_max) {
             this->requestStop();
         }
-        return default_value;
+        return T(default_value.value);
     }
 };
 
@@ -52,11 +53,12 @@ static_assert(gr::BlockLike<ConstantSource<float>>);
 
 template<typename T>
 struct SlowSource : public gr::Block<SlowSource<T>> {
+    using value_t     = std::conditional_t<std::is_same_v<T, std::string>, std::string, meta::fundamental_base_value_type_t<T>>; // use base-type for types not supported by settings
     using Description = Doc<R""(A source block that emits a constant default value every n miliseconds)"">;
 
-    gr::PortOut<T>                                                                  out;
-    Annotated<T, "default value", Visible, Doc<"default value for each sample">>    default_value{};
-    Annotated<gr::Size_t, "delay", Doc<"how many milliseconds between each value">> n_delay = 100U;
+    gr::PortOut<T>                                                                     out;
+    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">> default_value{};
+    Annotated<gr::Size_t, "delay", Doc<"how many milliseconds between each value">>    n_delay = 100U;
 
     GR_MAKE_REFLECTABLE(SlowSource, out, n_delay);
 
@@ -66,7 +68,7 @@ struct SlowSource : public gr::Block<SlowSource<T>> {
         if (!lastEventAt || std::chrono::system_clock::now() - *lastEventAt > std::chrono::milliseconds(n_delay)) {
             lastEventAt = std::chrono::system_clock::now();
 
-            output[0] = default_value;
+            output[0] = T(default_value.value);
             output.publish(1UZ);
         } else {
             output.publish(0UZ);
@@ -91,7 +93,7 @@ Commonly used for testing and simulations where consistent output and finite exe
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    GR_MAKE_REFLECTABLE(CountingSource, out, n_samples_max, count);
+    GR_MAKE_REFLECTABLE(CountingSource, out, default_value, n_samples_max, count);
 
     void reset() { count = 0U; }
 
@@ -100,7 +102,7 @@ Commonly used for testing and simulations where consistent output and finite exe
         if (n_samples_max > 0 && count >= n_samples_max) {
             this->requestStop();
         }
-        return default_value + T(count);
+        return T(default_value.value) + T(count);
     }
 };
 
