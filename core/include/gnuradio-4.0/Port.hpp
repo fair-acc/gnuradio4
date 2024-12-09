@@ -937,14 +937,18 @@ static_assert(std::is_default_constructible_v<PortOut<float>>);
  */
 class DynamicPort {
 public:
-    std::string_view name;
-    std::int16_t&    priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t&     min_samples;
-    std::size_t&     max_samples;
+    std::string  name;
+    std::int16_t priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t  min_samples;
+    std::size_t  max_samples;
 
 private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition
         virtual ~model() = default;
+
+        [[nodiscard]] virtual DynamicPort weakRef() const noexcept = 0;
+
+        [[nodiscard]] virtual std::intptr_t internalId() const noexcept = 0;
 
         [[nodiscard]] virtual std::any defaultValue() const noexcept = 0;
 
@@ -1021,6 +1025,10 @@ private:
 
         ~PortWrapper() override = default;
 
+        [[nodiscard]] DynamicPort weakRef() const noexcept override;
+
+        [[nodiscard]] std::intptr_t internalId() const noexcept override { return reinterpret_cast<std::intptr_t>(std::addressof(_value)); }
+
         [[nodiscard]] std::any defaultValue() const noexcept override { return _value.defaultValue(); }
 
         [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
@@ -1071,8 +1079,19 @@ public:
     DynamicPort(const DynamicPort& arg)            = delete;
     DynamicPort& operator=(const DynamicPort& arg) = delete;
 
-    DynamicPort(DynamicPort&& arg)            = default;
-    DynamicPort& operator=(DynamicPort&& arg) = delete;
+    DynamicPort(DynamicPort&& other) noexcept : name(other.name), priority(other.priority), min_samples(other.min_samples), max_samples(other.max_samples), _accessor(std::move(other._accessor)) {}
+    auto& operator=(DynamicPort&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(_accessor, tmp._accessor);
+        std::swap(name, tmp.name);
+        std::swap(priority, tmp.priority);
+        std::swap(min_samples, tmp.min_samples);
+        std::swap(max_samples, tmp.max_samples);
+        return *this;
+    }
+
+    bool operator==(const DynamicPort& other) const noexcept { return _accessor->internalId() == other._accessor->internalId(); }
+    bool operator!=(const DynamicPort& other) const noexcept { return _accessor->internalId() != other._accessor->internalId(); }
 
     // TODO: The lifetime of ports is a problem here, if we keep a reference to the port in DynamicPort, the port object/ can not be reallocated
     template<PortLike T>
@@ -1080,6 +1099,8 @@ public:
 
     template<PortLike T>
     explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, true>>(std::forward<T>(arg))} {}
+
+    [[nodiscard]] DynamicPort weakRef() const noexcept { return _accessor->weakRef(); }
 
     [[nodiscard]] std::any defaultValue() const noexcept { return _accessor->defaultValue(); }
 
@@ -1112,6 +1133,11 @@ public:
 
     [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) { return _accessor->connect(dst_port); }
 };
+
+template<PortLike T, bool owning>
+[[nodiscard]] DynamicPort DynamicPort::PortWrapper<T, owning>::weakRef() const noexcept {
+    return DynamicPort(_value, DynamicPort::non_owned_reference_tag{});
+}
 
 static_assert(PortLike<DynamicPort>);
 
