@@ -80,8 +80,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
 
   # Add a build type that keeps runtime checks enabled
   set(CMAKE_CXX_FLAGS_RELEASE
-          "-O2"
-          CACHE INTERNAL "Flags used by the compiler during release builds.")
+      "-O2"
+      CACHE INTERNAL "Flags used by the compiler during release builds.")
 
   # The default value is often an empty string, but this is usually not desirable and one of the other standard build
   # types is usually more appropriate.
@@ -228,18 +228,17 @@ endif()
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
 if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
-  target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+  target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
+                             INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
 endif()
 
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
-add_library(exprtk STATIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
+add_library(
+  exprtk STATIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
 )
-target_include_directories(exprtk PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk"
-)
+target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+                                         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
 target_compile_options(exprtk PRIVATE -O1)
 # include exprtk header-only - END
 
