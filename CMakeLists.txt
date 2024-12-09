@@ -227,16 +227,16 @@ if(NOT (TARGET magic_enum))
 endif()
 
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
-include_directories("${CMAKE_SOURCE_DIR}/third_party")
-include_directories("${CMAKE_SOURCE_DIR}/third_party/exprtk")
+include_directories("${PROJECT_SOURCE_DIR}/third_party")
+include_directories("${PROJECT_SOURCE_DIR}/third_party/exprtk")
 add_library(exprtk STATIC
-        "${CMAKE_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
-        "${CMAKE_SOURCE_DIR}/third_party/exprtk.hpp"
+        "${PROJECT_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
+        "${PROJECT_SOURCE_DIR}/third_party/exprtk.hpp"
 )
-target_sources(exprtk PRIVATE "${CMAKE_SOURCE_DIR}/third_party/exprtk.hpp")
+target_sources(exprtk PRIVATE "${PROJECT_SOURCE_DIR}/third_party/exprtk.hpp")
 target_include_directories(exprtk PUBLIC
-        "${CMAKE_SOURCE_DIR}/third_party"
-        "${CMAKE_SOURCE_DIR}/third_party/exprtk"
+        "${PROJECT_SOURCE_DIR}/third_party"
+        "${PROJECT_SOURCE_DIR}/third_party/exprtk"
 )
 target_compile_options(exprtk PRIVATE -O3)
 # include exprtk header-only - END
