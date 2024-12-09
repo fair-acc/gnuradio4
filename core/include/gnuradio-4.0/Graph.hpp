@@ -71,7 +71,7 @@ public:
         // as this class will handle them
         this->_dynamicPortsLoader = [] {};
 
-        this->_block.propertyCallbacks[graph::property::kSubgraphExportPort] = [this](auto& self, std::string_view property, Message message) -> std::optional<Message> {
+        this->_block.propertyCallbacks[graph::property::kSubgraphExportPort] = [this](auto& /*self*/, std::string_view /*property*/, Message message) -> std::optional<Message> {
             const auto&        data            = message.data.value();
             const std::string& uniqueBlockName = std::get<std::string>(data.at("uniqueBlockName"s));
             auto               portDirection   = std::get<std::string>(data.at("portDirection"s)) == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;

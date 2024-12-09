@@ -88,13 +88,27 @@ public:
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
-        _graph.forEachBlockMutable([this, &toSchedulerBuffer](auto& block) {
-            if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
-                this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()));
-            }
+        auto connectNestedBlocks = [this, &toSchedulerBuffer](auto& connectNestedBlocks_, auto& parent) -> void {
+            const auto& blocks = [&parent] -> std::span<std::unique_ptr<BlockModel>> {
+                if constexpr (requires { parent.blocks(); }) {
+                    return parent.blocks();
+                } else {
+                    return parent->blocks();
+                }
+            }();
+            for (auto& block : blocks) {
+                if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block->msgIn)) {
+                    this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
+                }
 
-            block.msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
-        });
+                block->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
+
+                if (block->blockCategory() != block::Category::NormalBlock) {
+                    connectNestedBlocks_(connectNestedBlocks_, block);
+                }
+            }
+        };
+        connectNestedBlocks(connectNestedBlocks, _graph);
 
         // Forward any messages to children that were received before the scheduler was initialised
         _messagePortsConnected = true;
@@ -106,6 +120,7 @@ public:
 
     void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> messages) {
         base_t::processMessages(port, messages); // filters messages and calls own property handler
+
         for (const gr::Message& msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
@@ -126,7 +141,24 @@ public:
         // Process messages in the graph
         _graph.processScheduledMessages();
         if (_nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
-            _graph.forEachBlockMutable(&BlockModel::processScheduledMessages);
+            auto processNestedBlocks = [](auto& processNestedBlocks_, auto& parent) -> void {
+                const auto& blocks = [&parent] -> std::span<std::unique_ptr<BlockModel>> {
+                    if constexpr (requires { parent.blocks(); }) {
+                        return parent.blocks();
+                    } else {
+                        return parent->blocks();
+                    }
+                }();
+
+                for (auto& block : blocks) {
+                    block->processScheduledMessages();
+
+                    if (block->blockCategory() != block::Category::NormalBlock) {
+                        processNestedBlocks_(processNestedBlocks_, block);
+                    }
+                }
+            };
+            processNestedBlocks(processNestedBlocks, _graph);
         }
 
         ReaderSpanLike auto messagesFromChildren = _fromChildMessagePort.streamReader().get();
