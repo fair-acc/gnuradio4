@@ -35,7 +35,7 @@ Commonly used for testing and simulations where consistent output and finite exe
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    GR_MAKE_REFLECTABLE(ConstantSource, out, n_samples_max, count);
+    GR_MAKE_REFLECTABLE(ConstantSource, out, default_value, n_samples_max, count);
 
     void reset() { count = 0U; }
 
@@ -91,7 +91,7 @@ Commonly used for testing and simulations where consistent output and finite exe
     Annotated<gr::Size_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0U;
     Annotated<gr::Size_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0U;
 
-    GR_MAKE_REFLECTABLE(CountingSource, out, n_samples_max, count);
+    GR_MAKE_REFLECTABLE(CountingSource, out, default_value, n_samples_max, count);
 
     void reset() { count = 0U; }
 
