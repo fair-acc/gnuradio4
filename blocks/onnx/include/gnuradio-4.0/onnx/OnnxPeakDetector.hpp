@@ -1,0 +1,139 @@
+#ifndef GR_ONNX_PEAK_DETECTOR_ONNX_HPP
+#define GR_ONNX_PEAK_DETECTOR_ONNX_HPP
+
+#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/onnx/OnnxSession.hpp>
+#include <gnuradio-4.0/onnx/OnnxUtils.hpp>
+
+#include <print>
+
+namespace gr::blocks::onnx {
+
+struct OnnxPeakDetector : gr::Block<OnnxPeakDetector> {
+    using Description = Doc<"Detects peaks in spectra using a trained ONNX model with heatmap NMS.">;
+
+    gr::PortIn<gr::DataSet<float>>  in;
+    gr::PortOut<gr::DataSet<float>> out;
+
+    Annotated<std::string, "model path">       model_path           = "";
+    Annotated<float, "confidence threshold">   confidence_threshold = 0.4f;
+    Annotated<gr::Size_t, "min peak distance"> min_peak_distance    = 8U;
+    Annotated<gr::Size_t, "max peaks">         max_peaks            = 8U;
+
+    GR_MAKE_REFLECTABLE(OnnxPeakDetector, in, out, model_path, confidence_threshold, min_peak_distance, max_peaks);
+
+    OnnxSession _session;
+
+    void start() {
+        if (model_path.value.empty()) {
+            using namespace gr::message;
+            this->emitErrorMessage("start()", "model_path is empty");
+            this->requestStop();
+            return;
+        }
+        auto result = _session.load(model_path);
+        if (!result) {
+            using namespace gr::message;
+            this->emitErrorMessage("start()", result.error());
+            this->requestStop();
+        }
+    }
+
+    void stop() { _session.reset(); }
+
+    [[nodiscard]] gr::DataSet<float> processOne(gr::DataSet<float> inData) noexcept {
+        if (!_session.isLoaded() || inData.signal_values.empty()) {
+            return inData;
+        }
+
+        const std::size_t modelN    = _session.modelN();
+        const std::size_t R         = _session.regressionChannels();
+        const std::size_t nSignals  = std::max(1UZ, inData.signal_names.size());
+        const std::size_t inputSize = inData.signal_values.size() / nSignals;
+
+        // resample to model dimension if needed
+        std::vector<float> modelInput(modelN);
+        if (inputSize == modelN) {
+            std::copy_n(inData.signal_values.begin(), modelN, modelInput.begin());
+        } else {
+            std::span<const float> firstSignal(inData.signal_values.data(), inputSize);
+            resample(firstSignal, modelInput);
+        }
+
+        // normalise (log-MAD, matching Python pipeline)
+        std::vector<float> normalised(modelN);
+        normalise(modelInput, normalised);
+
+        // run inference
+        auto result = _session.run(normalised);
+        if (!result) {
+            return inData;
+        }
+
+        // split output: first N = heatmap, remaining N*R = regression channels
+        const auto&            raw = *result;
+        std::span<const float> heatmap(raw.data(), modelN);
+        std::span<const float> regression(raw.data() + modelN, modelN * R);
+
+        // extract peaks via NMS
+        auto peaks = extractPeaks(heatmap, regression, R, confidence_threshold, min_peak_distance, max_peaks);
+
+        // resample heatmap back to input dimension if sizes differ
+        std::vector<float> heatmapOut;
+        if (inputSize != modelN) {
+            heatmapOut.resize(inputSize);
+            resample(heatmap, heatmapOut);
+        } else {
+            heatmapOut.assign(heatmap.begin(), heatmap.end());
+        }
+
+        // build output DataSet
+        gr::DataSet<float> output;
+        output.timestamp   = inData.timestamp;
+        output.axis_names  = inData.axis_names;
+        output.axis_units  = inData.axis_units;
+        output.axis_values = inData.axis_values;
+
+        output.signal_names      = {"Spectrum", "Heatmap"};
+        output.signal_quantities = {"", ""};
+        output.signal_units      = {inData.signal_units.empty() ? "" : inData.signal_units[0], ""};
+        output.signal_ranges     = {gr::Range<float>{0.f, 0.f}, gr::Range<float>{0.f, 1.f}};
+
+        output.extents = {static_cast<std::int32_t>(inputSize)};
+
+        output.signal_values.resize(2 * inputSize);
+        std::copy_n(inData.signal_values.begin(), inputSize, output.signal_values.begin());
+        std::copy(heatmapOut.begin(), heatmapOut.end(), output.signal_values.begin() + static_cast<std::ptrdiff_t>(inputSize));
+
+        output.meta_information = {{}, {}};
+
+        // scale peak positions from model domain back to input domain
+        float posScale = (inputSize != modelN) ? static_cast<float>(inputSize) / static_cast<float>(modelN) : 1.f;
+
+        std::vector<gr::DataSet<float>::idx_pmt_map> peakEvents;
+        for (const auto& p : peaks) {
+            float            scaledPos = p.position * posScale;
+            gr::property_map props{
+                {std::pmr::string("confidence"), gr::pmt::Value(p.confidence)},
+                {std::pmr::string("sigma"), gr::pmt::Value(p.sigma * posScale)},
+                {std::pmr::string("amplitude"), gr::pmt::Value(p.amplitude)},
+                {std::pmr::string("w68"), gr::pmt::Value(p.w68 * posScale)},
+                {std::pmr::string("w96"), gr::pmt::Value(p.w96 * posScale)},
+                {std::pmr::string("w99"), gr::pmt::Value(p.w99 * posScale)},
+                {std::pmr::string("kurtosis"), gr::pmt::Value(p.kurtosis)},
+            };
+            peakEvents.emplace_back(static_cast<std::ptrdiff_t>(scaledPos), std::move(props));
+        }
+        output.timing_events = {std::move(peakEvents), {}};
+
+        return output;
+    }
+};
+
+} // namespace gr::blocks::onnx
+
+inline const auto registerOnnxPeakDetector = gr::registerBlock<gr::blocks::onnx::OnnxPeakDetector>(gr::globalBlockRegistry());
+
+#endif // GR_ONNX_PEAK_DETECTOR_ONNX_HPP
