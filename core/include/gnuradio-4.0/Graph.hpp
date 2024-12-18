@@ -738,8 +738,15 @@ public:
     template<typename Source, typename Destination>
     requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string edgeName = "unnamed edge") {
-        auto* sourceBlock      = findBlock(sourceBlockRaw).get();
-        auto* destinationBlock = findBlock(destinationBlockRaw).get();
+        auto findBlockNoexcept = [this]<typename Block>(Block&& blockRaw) noexcept -> BlockModel* {
+            try {
+                return findBlock(std::forward<Block>(blockRaw)).get();
+            } catch (...) {
+                return nullptr;
+            }
+        };
+        auto* sourceBlock      = findBlockNoexcept(sourceBlockRaw);
+        auto* destinationBlock = findBlockNoexcept(destinationBlockRaw);
 
         if (sourceBlock == nullptr || destinationBlock == nullptr) {
             return ConnectionResult::FAILED;

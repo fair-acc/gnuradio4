@@ -1543,7 +1543,10 @@ protected:
      *   - consume in samples (has to be last to correctly propagate back-pressure)
      * @return struct { std::size_t produced_work, work_return_t}
      */
-    work::Result workInternal(std::size_t requestedWork) {
+
+    work::Result workInternal(std::size_t requestedWork)
+    requires(Derived::blockCategory == block::Category::NormalBlock)
+    {
         using enum gr::work::Status;
         using TInputTypes  = traits::block::stream_input_port_types<Derived>;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
@@ -1673,11 +1676,7 @@ protected:
                 }
             }
         } else { // block does not define any valid processing function
-            if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
-                return {requestedWork, 0UZ, OK};
-            } else {
-                static_assert(meta::always_false<traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
-            }
+            static_assert(meta::always_false<traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
         }
 
         // sanitise input/output samples based on explicit user-defined processBulk(...) return status
@@ -1749,8 +1748,26 @@ protected:
     } // end: work::Result workInternal(std::size_t requestedWork) { ... }
 
 public:
+    /**
+     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
+     *
+     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
+     * requested_work limit as an affine relation with the returned performed_work.
+     * @return { requested_work, performed_work, status}
+     */
+    template<typename = void>
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept
+    requires(!blockingIO) // regular non-blocking call
+    {
+        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+            return {requestedWork, 0UZ, gr::work::Status::OK};
+        } else {
+            return workInternal(requestedWork);
+        }
+    }
+
     work::Status invokeWork()
-    requires(blockingIO)
+    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock)
     {
         auto [work_requested, work_done, last_status] = workInternal(std::atomic_load_explicit(&ioRequestedWork, std::memory_order_acquire));
         ioWorkDone.increment(work_requested, work_done);
@@ -1767,21 +1784,7 @@ public:
      */
     template<typename = void>
     work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(!blockingIO) // regular non-blocking call
-    {
-        return workInternal(requested_work);
-    }
-
-    /**
-     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
-     *
-     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
-     * requested_work limit as an affine relation with the returned performed_work.
-     * @return { requested_work, performed_work, status}
-     */
-    template<typename = void>
-    work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(blockingIO) // regular blocking call (e.g. wating on HW, timer, blocking for any other reasons) -> this should be an exceptional use
+    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock) // regular blocking call (e.g. wating on HW, timer, blocking for any other reasons) -> this should be an exceptional use
     {
         constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
         std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
