@@ -24,7 +24,7 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate   = 1'000.f;
 
         Graph testGraph;
-        auto& clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({{"sample_rate", sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}, {"verbose_console", true}});
+        auto& clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({{"sample_rate", sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}, {"verbose_console", true}});
 
         auto addTimeTagEntry = []<typename T>(gr::basic::ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
             clockSource.tag_times.value.push_back(timeInNanoseconds);

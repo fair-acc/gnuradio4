@@ -253,7 +253,7 @@ template<typename T>
 using DefaultClockSource = ClockSource<T, true, std::chrono::system_clock, true>;
 } // namespace gr::basic
 
-auto registerClockSource = gr::registerBlock<gr::basic::DefaultClockSource, std::uint8_t, std::uint32_t, std::int32_t, float, double>(gr::globalBlockRegistry());
-static_assert(gr::HasProcessBulkFunction<gr::basic::ClockSource<float>>);
+auto registerClockSource = gr::registerBlock<gr::basic::DefaultClockSource, std::uint8_t>(gr::globalBlockRegistry());
+static_assert(gr::HasProcessBulkFunction<gr::basic::ClockSource<std::uint8_t>>);
 
 #endif // GNURADIO_CLOCK_SOURCE_HPP

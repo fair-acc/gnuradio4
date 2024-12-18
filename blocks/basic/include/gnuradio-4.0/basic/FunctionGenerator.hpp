@@ -115,7 +115,7 @@ auto addTimeTagEntry = []<typename T>(gr::basic::ClockSource<T>& clockSource, st
     clockSource.tag_values.value.push_back(value);
 };
 
-auto &clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({ gr::tag::SAMPLE_RATE(100.f), { "n_samples_max", 100 }, { "name", "ClockSource" } });
+auto &clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource>({ gr::tag::SAMPLE_RATE(100.f), { "n_samples_max", 100 }, { "name", "ClockSource" } });
 addTimeTagEntry(1'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1");
 addTimeTagEntry(10'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2");
 addTimeTagEntry(30'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3");
@@ -131,8 +131,8 @@ funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_ST
 The parameters will automatically update when a Tag containing the "context" field arrives.
 )"">;
 
-    PortIn<T>  in; // ClockSource input
-    PortOut<T> out;
+    PortIn<std::uint8_t> in; // ClockSource input
+    PortOut<T>           out;
 
     // TODO: Example of type aliases for sample_rate, make global and for all default Tags
     using SampleRate       = Annotated<float, "sample_rate", Visible, Doc<"stream sampling rate in [Hz]">>;

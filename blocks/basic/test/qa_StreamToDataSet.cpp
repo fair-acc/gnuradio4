@@ -33,7 +33,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 
         // all times are in nanoseconds
         constexpr std::uint64_t ms       = 1'000'000; // ms -> ns conversion factor (wish we had a proper C++ units-lib integration)
-        auto&                   clockSrc = graph.emplaceBlock<gr::basic::ClockSource<float>>({
+        auto&                   clockSrc = graph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({
             {"sample_rate", sample_rate},
             {"n_samples_max", kN_SAMPLES_MAX},
             {"name", "ClockSource"},                                                                                                           //

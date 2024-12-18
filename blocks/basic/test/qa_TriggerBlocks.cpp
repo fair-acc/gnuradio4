@@ -30,7 +30,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             Graph graph;
 
             // create blocks
-            auto& clockSrc = graph.emplaceBlock<gr::basic::ClockSource<float>>({//
+            auto& clockSrc = graph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({//
                 {"sample_rate", sample_rate}, {"n_samples_max", 1000U}, {"name", "ClockSource"},
                 {"tag_times",
                     std::vector<std::uint64_t>{
