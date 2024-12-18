@@ -61,8 +61,8 @@ s(t) = 2 * A * (t * f - floor(t * f + 0.5)) + O
 This waveform linearly increases from -amplitude to amplitude in the first half of its period and then decreases back to -amplitude in the second half, forming a triangle shape.
 s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
 )"">;
-    PortIn<T>  in; // ClockSource input
-    PortOut<T> out;
+    PortIn<std::uint8_t> in; // ClockSource input
+    PortOut<T>           out;
 
     Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                      sample_rate = 1000.f;
     Annotated<std::string, "signal_type", Visible, Doc<"see signal_generator::Type">> signal_type = "Sin";
