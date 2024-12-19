@@ -327,7 +327,7 @@ enum class Category {
  *     }
  *
  *     void start() override {
- *         propertyCallbacks.emplace(kMyCustomProperty, &MyBlock::propertyCallbackMyCustom);
+ *         propertyCallbacks.emplace(kMyCustomProperty, std::mem_fn(&MyBlock::propertyCallbackMyCustom));
  *     }
  * };
  * @endcode
@@ -428,18 +428,18 @@ public:
     MsgPortInBuiltin  msgIn;
     MsgPortOutBuiltin msgOut;
 
-    using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
+    using PropertyCallback = std::function<std::optional<Message>(Derived&, std::string_view, Message)>;
     std::map<std::string, PropertyCallback> propertyCallbacks{
-        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},               //
-        {block::property::kEcho, &Block::propertyCallbackEcho},                         //
-        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState},     //
-        {block::property::kSetting, &Block::propertyCallbackSettings},                  //
-        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},      //
-        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},       //
-        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},       //
-        {block::property::kActiveContext, &Block::propertyCallbackActiveContext},       //
-        {block::property::kSettingsCtx, &Block::propertyCallbackSettingsCtx},           //
-        {block::property::kSettingsContexts, &Block::propertyCallbackSettingsContexts}, //
+        {block::property::kHeartbeat, std::mem_fn(&Block::propertyCallbackHeartbeat)},               //
+        {block::property::kEcho, std::mem_fn(&Block::propertyCallbackEcho)},                         //
+        {block::property::kLifeCycleState, std::mem_fn(&Block::propertyCallbackLifecycleState)},     //
+        {block::property::kSetting, std::mem_fn(&Block::propertyCallbackSettings)},                  //
+        {block::property::kStagedSetting, std::mem_fn(&Block::propertyCallbackStagedSettings)},      //
+        {block::property::kStoreDefaults, std::mem_fn(&Block::propertyCallbackStoreDefaults)},       //
+        {block::property::kResetDefaults, std::mem_fn(&Block::propertyCallbackResetDefaults)},       //
+        {block::property::kActiveContext, std::mem_fn(&Block::propertyCallbackActiveContext)},       //
+        {block::property::kSettingsCtx, std::mem_fn(&Block::propertyCallbackSettingsCtx)},           //
+        {block::property::kSettingsContexts, std::mem_fn(&Block::propertyCallbackSettingsContexts)}, //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -1358,17 +1358,20 @@ protected:
     }
 
     std::size_t getMergedBlockLimit() {
-        if constexpr (requires(const Derived& d) {
-                          { available_samples(d) } -> std::same_as<std::size_t>;
-                      }) {
+        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+            return 0;
+        } else if constexpr (requires(const Derived& d) {
+                                 { available_samples(d) } -> std::same_as<std::size_t>;
+                             }) {
             return available_samples(self());
         } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0 && traits::block::stream_output_port_types<Derived>::size == 0) { // allow blocks that have neither input nor output ports (by merging source to sink block) -> use internal buffer size
             constexpr gr::Size_t chunkSize = Derived::merged_work_chunk_size();
             static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
                                                                              "friend function `available_samples(const BlockType&)` must be defined.");
             return chunkSize;
+        } else {
+            return std::numeric_limits<std::size_t>::max();
         }
-        return std::numeric_limits<std::size_t>::max();
     }
 
     template<typename TIn, typename TOut>
@@ -1540,7 +1543,10 @@ protected:
      *   - consume in samples (has to be last to correctly propagate back-pressure)
      * @return struct { std::size_t produced_work, work_return_t}
      */
-    work::Result workInternal(std::size_t requestedWork) {
+
+    work::Result workInternal(std::size_t requestedWork)
+    requires(Derived::blockCategory == block::Category::NormalBlock)
+    {
         using enum gr::work::Status;
         using TInputTypes  = traits::block::stream_input_port_types<Derived>;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
@@ -1742,8 +1748,26 @@ protected:
     } // end: work::Result workInternal(std::size_t requestedWork) { ... }
 
 public:
+    /**
+     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
+     *
+     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
+     * requested_work limit as an affine relation with the returned performed_work.
+     * @return { requested_work, performed_work, status}
+     */
+    template<typename = void>
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept
+    requires(!blockingIO) // regular non-blocking call
+    {
+        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+            return {requestedWork, 0UZ, gr::work::Status::OK};
+        } else {
+            return workInternal(requestedWork);
+        }
+    }
+
     work::Status invokeWork()
-    requires(blockingIO)
+    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock)
     {
         auto [work_requested, work_done, last_status] = workInternal(std::atomic_load_explicit(&ioRequestedWork, std::memory_order_acquire));
         ioWorkDone.increment(work_requested, work_done);
@@ -1760,21 +1784,7 @@ public:
      */
     template<typename = void>
     work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(!blockingIO) // regular non-blocking call
-    {
-        return workInternal(requested_work);
-    }
-
-    /**
-     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
-     *
-     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
-     * requested_work limit as an affine relation with the returned performed_work.
-     * @return { requested_work, performed_work, status}
-     */
-    template<typename = void>
-    work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(blockingIO) // regular blocking call (e.g. wating on HW, timer, blocking for any other reasons) -> this should be an exceptional use
+    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock) // regular blocking call (e.g. wating on HW, timer, blocking for any other reasons) -> this should be an exceptional use
     {
         constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
         std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
@@ -1852,7 +1862,7 @@ public:
 
             std::optional<Message> retMessage;
             try {
-                retMessage = (self().*callback)(message.endpoint, message); // N.B. life-time: message is copied
+                retMessage = callback(self(), message.endpoint, message); // N.B. life-time: message is copied
             } catch (const gr::exception& e) {
                 retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(e));

@@ -10,61 +10,84 @@
 
 namespace gr {
 
-inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc) {
-    Graph testGraph;
+namespace detail {
+
+inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml) {
 
     std::map<std::string, BlockModel*> createdBlocks;
 
-    const auto yaml = pmtv::yaml::deserialize(yamlSrc);
-    if (!yaml) {
-        throw gr::exception(fmt::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc));
-    }
-
-    auto blks = std::get<std::vector<pmtv::pmt>>(yaml.value().at("blocks"));
+    auto blks = std::get<std::vector<pmtv::pmt>>(yaml.at("blocks"));
     for (const auto& blk : blks) {
         auto grcBlock = std::get<property_map>(blk);
 
-        const auto name = std::get<std::string>(grcBlock["name"]);
-        const auto id   = std::get<std::string>(grcBlock["id"]);
+        const auto blockName = std::get<std::string>(grcBlock["name"]);
+        const auto blockType = std::get<std::string>(grcBlock["id"]);
 
-        std::string type = "double";
+        std::string blockParametrization = "double";
         /// TODO: when using saveGrc template_args is not saved, this has to be implemented
         if (auto it = grcBlock.find("template_args"); it != grcBlock.end()) {
-            type = std::get<std::string>(it->second);
+            blockParametrization = std::get<std::string>(it->second);
         }
 
-        auto currentBlock = loader.instantiate(id, type);
-        if (!currentBlock) {
-            throw fmt::format("Unable to create block of type '{}'", id);
-        }
+        if (blockType == "SUBGRAPH") {
+            auto& subGraph           = resultGraph.addBlock(std::make_unique<GraphWrapper<gr::Graph>>());
+            createdBlocks[blockName] = &subGraph;
+            subGraph.setName(blockName);
 
-        currentBlock->setName(name);
+            auto* subGraphDirect = static_cast<GraphWrapper<gr::Graph>*>(&subGraph);
+            subGraphDirect->setName(blockName);
 
-        const auto parametersPmt = grcBlock["parameters"];
-        if (const auto parameters = std::get_if<property_map>(&parametersPmt)) {
-            currentBlock->settings().loadParametersFromPropertyMap(*parameters);
-        } else {
-            currentBlock->settings().loadParametersFromPropertyMap({});
-        }
+            const auto& graphData = std::get<property_map>(grcBlock["graph"]);
+            loadGraphFromMap(loader, subGraphDirect->blockRef(), graphData);
 
-        if (auto it = grcBlock.find("ctx_parameters"); it != grcBlock.end()) {
-            auto parametersCtx = std::get<std::vector<pmtv::pmt>>(it->second);
-            for (const auto& ctxPmt : parametersCtx) {
-                auto       ctxPar        = std::get<property_map>(ctxPmt);
-                const auto ctxName       = std::get<std::string>(ctxPar["context"]);
-                const auto ctxTime       = std::get<std::uint64_t>(ctxPar["time"]); // in ns
-                const auto ctxParameters = std::get<property_map>(ctxPar["parameters"]);
+            const auto& exportedPorts = std::get<std::vector<pmtv::pmt>>(graphData.at("exported_ports"));
+            for (const auto& exportedPort_ : exportedPorts) {
+                auto exportedPort = std::get<std::vector<pmtv::pmt>>(exportedPort_);
+                if (exportedPort.size() != 3) {
+                    throw fmt::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
+                }
 
-                currentBlock->settings().loadParametersFromPropertyMap(ctxParameters, SettingsCtx{ctxTime, ctxName});
+                auto& block = subGraphDirect->findFirstBlockWithName(std::get<std::string>(exportedPort[0]));
+
+                subGraphDirect->exportPort(true,
+                    /* block's unique name */ std::string(block.uniqueName()),
+                    /* port direction */ std::get<std::string>(exportedPort[1]) == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT,
+                    /* port name */ std::get<std::string>(exportedPort[2]));
             }
+        } else {
+            auto currentBlock = loader.instantiate(blockType, blockParametrization);
+            if (!currentBlock) {
+                throw fmt::format("Unable to create block of type '{}'", blockType);
+            }
+
+            currentBlock->setName(blockName);
+
+            const auto parametersPmt = grcBlock["parameters"];
+            if (const auto parameters = std::get_if<property_map>(&parametersPmt)) {
+                currentBlock->settings().loadParametersFromPropertyMap(*parameters);
+            } else {
+                currentBlock->settings().loadParametersFromPropertyMap({});
+            }
+
+            if (auto it = grcBlock.find("ctx_parameters"); it != grcBlock.end()) {
+                auto parametersCtx = std::get<std::vector<pmtv::pmt>>(it->second);
+                for (const auto& ctxPmt : parametersCtx) {
+                    auto       ctxPar        = std::get<property_map>(ctxPmt);
+                    const auto ctxName       = std::get<std::string>(ctxPar["context"]);
+                    const auto ctxTime       = std::get<std::uint64_t>(ctxPar["time"]); // in ns
+                    const auto ctxParameters = std::get<property_map>(ctxPar["parameters"]);
+
+                    currentBlock->settings().loadParametersFromPropertyMap(ctxParameters, SettingsCtx{ctxTime, ctxName});
+                }
+            }
+            if (const auto failed = currentBlock->settings().activateContext(); failed == std::nullopt) {
+                throw gr::exception("Settings for context could not be activated");
+            }
+            createdBlocks[blockName] = &resultGraph.addBlock(std::move(currentBlock));
         }
-        if (const auto failed = currentBlock->settings().activateContext(); failed == std::nullopt) {
-            throw gr::exception("Settings for context could not be activated");
-        }
-        createdBlocks[name] = &testGraph.addBlock(std::move(currentBlock));
     } // for blocks
 
-    auto connections = std::get<std::vector<pmtv::pmt>>(yaml.value().at("connections"));
+    auto connections = std::get<std::vector<pmtv::pmt>>(yaml.at("connections"));
     for (const auto& conn : connections) {
         auto connection = std::get<std::vector<pmtv::pmt>>(conn);
         if (connection.size() != 4) {
@@ -73,14 +96,14 @@ inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc) {
 
         auto parseBlockPort = [&](const auto& blockField, const auto& portField) {
             const auto blockName = std::get<std::string>(blockField);
-            auto       node      = createdBlocks.find(blockName);
-            if (node == createdBlocks.end()) {
-                throw fmt::format("Unknown node '{}'", blockName);
+            auto       block     = createdBlocks.find(blockName);
+            if (block == createdBlocks.end()) {
+                throw fmt::format("Unknown block '{}'", blockName);
             }
 
             struct result {
-                decltype(node) block_it;
-                PortDefinition port_definition;
+                decltype(block) block_it;
+                PortDefinition  port_definition;
             };
 
             if (const auto portFields = std::get_if<std::vector<pmtv::pmt>>(&portField)) {
@@ -89,126 +112,163 @@ inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc) {
                 }
                 const auto index    = std::get<std::int64_t>(portFields->at(0));
                 const auto subIndex = std::get<std::int64_t>(portFields->at(1));
-                return result{node, {static_cast<std::size_t>(index), static_cast<std::size_t>(subIndex)}};
+                return result{block, {static_cast<std::size_t>(index), static_cast<std::size_t>(subIndex)}};
 
             } else {
                 const auto index = std::get<std::int64_t>(portField);
-                return result{node, {static_cast<std::size_t>(index)}};
+                return result{block, {static_cast<std::size_t>(index)}};
             }
         };
 
         auto src = parseBlockPort(connection[0], connection[1]);
         auto dst = parseBlockPort(connection[2], connection[3]);
-        testGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
+        resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
     } // for connections
-
-    return testGraph;
 }
 
-inline std::string saveGrc(const gr::Graph& testGraph) {
+inline gr::property_map saveGraphToMap(const gr::Graph& rootGraph) {
+    pmtv::map_t result;
 
-    pmtv::map_t yaml;
+    {
+        std::vector<pmtv::pmt> serializedBlocks;
+        rootGraph.forEachBlock([&](const auto& block) {
+            pmtv::map_t map;
+            map["name"] = std::string(block.name());
 
-    std::vector<pmtv::pmt> blocks;
-    testGraph.forEachBlock([&](const auto& node) {
-        pmtv::map_t map;
-        map["name"] = std::string(node.name());
-
-        const auto& fullTypeName = node.typeName();
-        std::string typeName(fullTypeName.cbegin(), std::find(fullTypeName.cbegin(), fullTypeName.cend(), '<'));
-        map.emplace("id", std::move(typeName));
-
-        // Helper function to write parameters
-        auto writeParameters = [&](const property_map& settingsMap, const property_map& metaInformation = {}) {
-            pmtv::map_t parameters;
-            auto        writeMap = [&](const auto& localMap) {
-                for (const auto& [settingsKey, settingsValue] : localMap) {
-                    std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
+            const auto& fullTypeName = block.typeName();
+            if (fullTypeName == "gr::Graph") {
+                map.emplace("id", "SUBGRAPH");
+                auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(std::addressof(block));
+                if (subGraphDirect == nullptr) {
+                    throw gr::Error(fmt::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block.uniqueName(), rootGraph.unique_name));
                 }
-            };
-            writeMap(settingsMap);
-            if (!metaInformation.empty()) {
-                writeMap(metaInformation);
-            }
-            return parameters;
-        };
+                property_map graphYaml = detail::saveGraphToMap(subGraphDirect->blockRef());
 
-        const auto& stored = node.settings().getStoredAll();
-        if (stored.contains("")) {
-            const auto& ctxParameters = stored.at("");
-            const auto& settingsMap   = ctxParameters.back().second; // write only the last parameters
-            if (!node.metaInformation().empty() || !settingsMap.empty()) {
-                map["parameters"] = writeParameters(settingsMap, node.metaInformation());
-            }
-        }
+                std::vector<pmtv::pmt> exportedPortsData;
+                for (const auto& [blockName, portName] : subGraphDirect->exportedInputPortsForBlock()) {
+                    exportedPortsData.push_back(std::vector<pmtv::pmt>{blockName, "INPUT"s, portName});
+                }
+                for (const auto& [blockName, portName] : subGraphDirect->exportedOutputPortsForBlock()) {
+                    exportedPortsData.push_back(std::vector<pmtv::pmt>{blockName, "OUTPUT"s, portName});
+                }
 
-        std::vector<pmtv::pmt> ctxParamsSeq;
-        for (const auto& [ctx, ctxParameters] : stored) {
-            if (ctx == "") {
-                continue;
-            }
+                graphYaml["exported_ports"] = std::move(exportedPortsData);
+                map.emplace("graph", std::move(graphYaml));
 
-            for (const auto& [ctxTime, settingsMap] : ctxParameters) {
-                pmtv::map_t ctxParam;
+            } else {
+                std::string typeName(fullTypeName.cbegin(), std::find(fullTypeName.cbegin(), fullTypeName.cend(), '<'));
+                map.emplace("id", std::move(typeName));
 
-                // Convert ctxTime.context to a string, regardless of its actual type
-                std::string contextStr = std::visit(
-                    [](const auto& arg) -> std::string {
-                        using T = std::decay_t<decltype(arg)>;
-                        if constexpr (std::is_same_v<T, std::string>) {
-                            return arg;
-                        } else if constexpr (std::is_arithmetic_v<T>) {
-                            return std::to_string(arg);
+                // Helper function to write parameters
+                auto writeParameters = [&](const property_map& settingsMap, const property_map& metaInformation = {}) {
+                    pmtv::map_t parameters;
+                    auto        writeMap = [&](const auto& localMap) {
+                        for (const auto& [settingsKey, settingsValue] : localMap) {
+                            std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
                         }
-                        return "";
-                    },
-                    ctxTime.context);
+                    };
+                    writeMap(settingsMap);
+                    if (!metaInformation.empty()) {
+                        writeMap(metaInformation);
+                    }
+                    return parameters;
+                };
 
-                ctxParam["context"]    = contextStr;
-                ctxParam["time"]       = ctxTime.time;
-                ctxParam["parameters"] = writeParameters(settingsMap);
-                ctxParamsSeq.emplace_back(std::move(ctxParam));
+                const auto& stored = block.settings().getStoredAll();
+                if (stored.contains("")) {
+                    const auto& ctxParameters = stored.at("");
+                    const auto& settingsMap   = ctxParameters.back().second; // write only the last parameters
+                    if (!block.metaInformation().empty() || !settingsMap.empty()) {
+                        map["parameters"] = writeParameters(settingsMap, block.metaInformation());
+                    }
+                }
+
+                std::vector<pmtv::pmt> ctxParamsSeq;
+                for (const auto& [ctx, ctxParameters] : stored) {
+                    if (ctx == "") {
+                        continue;
+                    }
+
+                    for (const auto& [ctxTime, settingsMap] : ctxParameters) {
+                        pmtv::map_t ctxParam;
+
+                        // Convert ctxTime.context to a string, regardless of its actual type
+                        std::string contextStr = std::visit(
+                            [](const auto& arg) -> std::string {
+                                using T = std::decay_t<decltype(arg)>;
+                                if constexpr (std::is_same_v<T, std::string>) {
+                                    return arg;
+                                } else if constexpr (std::is_arithmetic_v<T>) {
+                                    return std::to_string(arg);
+                                }
+                                return "";
+                            },
+                            ctxTime.context);
+
+                        ctxParam["context"]    = contextStr;
+                        ctxParam["time"]       = ctxTime.time;
+                        ctxParam["parameters"] = writeParameters(settingsMap);
+                        ctxParamsSeq.emplace_back(std::move(ctxParam));
+                    }
+                }
+                map["ctx_parameters"] = ctxParamsSeq;
             }
-        }
-        map["ctx_parameters"] = ctxParamsSeq;
 
-        blocks.emplace_back(std::move(map));
-    });
-    yaml["blocks"] = blocks;
+            serializedBlocks.emplace_back(std::move(map));
+        });
+        result["blocks"] = std::move(serializedBlocks);
+    }
 
-    std::vector<pmtv::pmt> connections;
-    testGraph.forEachEdge([&](const auto& edge) {
-        std::vector<pmtv::pmt> seq;
+    {
+        std::vector<pmtv::pmt> serializedConnections;
+        rootGraph.forEachEdge([&](const auto& edge) {
+            std::vector<pmtv::pmt> seq;
 
-        auto writePortDefinition = [&](const auto& definition) { //
-            std::visit(meta::overloaded(                         //
-                           [&](const PortDefinition::IndexBased& _definition) {
-                               if (_definition.subIndex != meta::invalid_index) {
-                                   std::vector<pmtv::pmt> seqPort;
+            auto writePortDefinition = [&](const auto& definition) { //
+                std::visit(meta::overloaded(                         //
+                               [&](const PortDefinition::IndexBased& _definition) {
+                                   if (_definition.subIndex != meta::invalid_index) {
+                                       std::vector<pmtv::pmt> seqPort;
 
-                                   seqPort.push_back(std::int64_t(_definition.topLevel));
-                                   seqPort.push_back(std::int64_t(_definition.subIndex));
-                                   seq.push_back(seqPort);
-                               } else {
-                                   seq.push_back(std::int64_t(_definition.topLevel));
-                               }
-                           }, //
-                           [&](const PortDefinition::StringBased& _definition) { seq.push_back(_definition.name); }),
-                definition.definition);
-        };
+                                       seqPort.push_back(std::int64_t(_definition.topLevel));
+                                       seqPort.push_back(std::int64_t(_definition.subIndex));
+                                       seq.push_back(seqPort);
+                                   } else {
+                                       seq.push_back(std::int64_t(_definition.topLevel));
+                                   }
+                               }, //
+                               [&](const PortDefinition::StringBased& _definition) { seq.push_back(_definition.name); }),
+                    definition.definition);
+            };
 
-        seq.push_back(edge.sourceBlock().name().data());
-        writePortDefinition(edge.sourcePortDefinition());
+            seq.push_back(edge.sourceBlock().name().data());
+            writePortDefinition(edge.sourcePortDefinition());
 
-        seq.push_back(edge.destinationBlock().name().data());
-        writePortDefinition(edge.destinationPortDefinition());
+            seq.push_back(edge.destinationBlock().name().data());
+            writePortDefinition(edge.destinationPortDefinition());
 
-        connections.emplace_back(seq);
-    });
-    yaml["connections"] = connections;
+            serializedConnections.emplace_back(seq);
+        });
+        result["connections"] = std::move(serializedConnections);
+    }
 
-    return pmtv::yaml::serialize(yaml);
+    return result;
 }
+
+} // namespace detail
+
+inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc) {
+    Graph      resultGraph;
+    const auto yaml = pmtv::yaml::deserialize(yamlSrc);
+    if (!yaml) {
+        throw gr::exception(fmt::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc));
+    }
+
+    detail::loadGraphFromMap(loader, resultGraph, *yaml);
+    return resultGraph;
+}
+
+inline std::string saveGrc(const gr::Graph& rootGraph) { return pmtv::yaml::serialize(detail::saveGraphToMap(rootGraph)); }
 
 } // namespace gr
 

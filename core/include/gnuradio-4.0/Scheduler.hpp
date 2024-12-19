@@ -47,6 +47,29 @@ protected:
     std::vector<gr::Message> _pendingMessagesToChildren;
     bool                     _messagePortsConnected = false;
 
+    template<typename Fn>
+    void forAllUnmanagedBlocks(Fn&& function) {
+        auto doForNestedBlocks = [this, &function](auto& doForNestedBlocks_, auto& parent) -> void {
+            const auto& blocks = [&parent] -> std::span<std::unique_ptr<BlockModel>> {
+                if constexpr (requires { parent.blocks(); }) {
+                    return parent.blocks();
+                } else {
+                    return parent->blocks();
+                }
+                // Silence warnings
+                return {};
+            }();
+            for (auto& block : blocks) {
+                function(block);
+
+                if (block->blockCategory() == block::Category::TransparentBlockGroup) {
+                    doForNestedBlocks_(doForNestedBlocks_, block);
+                }
+            }
+        };
+        doForNestedBlocks(doForNestedBlocks, _graph);
+    }
+
 public:
     using base_t = Block<Derived>;
 
@@ -88,12 +111,12 @@ public:
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
-        _graph.forEachBlockMutable([this, &toSchedulerBuffer](auto& block) {
-            if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block.msgIn)) {
-                this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block.uniqueName()));
+        forAllUnmanagedBlocks([this, &toSchedulerBuffer](auto& block) {
+            if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block->msgIn)) {
+                this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
             }
 
-            block.msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
+            block->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
         });
 
         // Forward any messages to children that were received before the scheduler was initialised
@@ -106,6 +129,7 @@ public:
 
     void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> messages) {
         base_t::processMessages(port, messages); // filters messages and calls own property handler
+
         for (const gr::Message& msg : messages) {
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
@@ -126,7 +150,7 @@ public:
         // Process messages in the graph
         _graph.processScheduledMessages();
         if (_nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
-            _graph.forEachBlockMutable(&BlockModel::processScheduledMessages);
+            forAllUnmanagedBlocks([](auto& block) { block->processScheduledMessages(); });
         }
 
         ReaderSpanLike auto messagesFromChildren = _fromChildMessagePort.streamReader().get();
@@ -157,7 +181,7 @@ public:
 
     std::expected<void, Error> runAndWait() {
         [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("scheduler_base.runAndWait");
-        base_t::processScheduledMessages(); // make sure initial subscriptions are processed
+        processScheduledMessages(); // make sure initial subscriptions are processed
         if (this->state() == lifecycle::State::IDLE) {
             if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
@@ -173,7 +197,7 @@ public:
         // * singleThreaded[Blocking] naturally block in the calling thread
         // * multiThreaded[Blocking] spawn two worker and block on 'waitDone()'
         waitDone();
-        this->processScheduledMessages();
+        processScheduledMessages();
 
         if (this->state() == lifecycle::State::RUNNING) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
@@ -186,7 +210,7 @@ public:
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
             }
         }
-        this->processScheduledMessages();
+        processScheduledMessages();
         return {};
     }
 
@@ -200,7 +224,28 @@ public:
     [[nodiscard]] const JobLists& jobs() const noexcept { return _jobLists; }
 
 protected:
-    forceinline work::Result traverseBlockListOnce(const std::vector<BlockModel*>& blocks) noexcept {
+    void disconnectAllEdges() {
+        _graph.disconnectAllEdges();
+        forAllUnmanagedBlocks([&](auto& block) {
+            if (block->blockCategory() == block::Category::TransparentBlockGroup) {
+                auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
+                graph->blockRef().disconnectAllEdges();
+            }
+        });
+    }
+
+    bool connectPendingEdges() {
+        bool result = _graph.connectPendingEdges();
+        this->forAllUnmanagedBlocks([&](auto& block) {
+            if (block->blockCategory() == block::Category::TransparentBlockGroup) {
+                auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
+                result      = result && graph->blockRef().connectPendingEdges();
+            }
+        });
+        return result;
+    }
+
+    work::Result traverseBlockListOnce(const std::vector<BlockModel*>& blocks) noexcept {
         constexpr std::size_t requestedWorkAllBlocks = std::numeric_limits<std::size_t>::max();
         std::size_t           performedWorkAllBlocks = 0UZ;
         bool                  unfinishedBlocksExist  = false; // i.e. at least one block returned OK, INSUFFICIENT_INPUT_ITEMS, or INSUFFICIENT_OUTPU_ITEMS
@@ -227,18 +272,22 @@ protected:
     }
 
     void reset() {
-        _graph.forEachBlockMutable([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block.changeState(lifecycle::INITIALISED)); });
-        _graph.disconnectAllEdges();
+        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeState(lifecycle::INITIALISED)); });
+        disconnectAllEdges();
     }
 
     void start() {
-        const bool result = _graph.reconnectAllEdges();
+        disconnectAllEdges();
+        auto result = connectPendingEdges();
+
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
 
         std::lock_guard lock(_jobListsMutex);
-        _graph.forEachBlockMutable([this](auto& block) { this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block.changeState(lifecycle::RUNNING)); });
+        forAllUnmanagedBlocks([this](auto& block) { //
+            this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeState(lifecycle::RUNNING));
+        });
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
             static_cast<Derived*>(this)->poolWorker(0UZ, _jobLists);
@@ -340,10 +389,10 @@ protected:
     }
 
     void stop() {
-        _graph.forEachBlockMutable([this](auto& block) {
-            this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block.changeState(lifecycle::State::REQUESTED_STOP));
-            if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block.changeState(lifecycle::State::STOPPED));
+        forAllUnmanagedBlocks([this](auto& block) {
+            this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeState(lifecycle::State::REQUESTED_STOP));
+            if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
+                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeState(lifecycle::State::STOPPED));
             }
         });
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
@@ -351,21 +400,21 @@ protected:
     }
 
     void pause() {
-        _graph.forEachBlockMutable([this](auto& block) {
-            this->emitErrorMessageIfAny("pause() -> LifecycleState", block.changeState(lifecycle::State::REQUESTED_PAUSE));
-            if (!block.isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                this->emitErrorMessageIfAny("pause() -> LifecycleState", block.changeState(lifecycle::State::PAUSED));
+        forAllUnmanagedBlocks([this](auto& block) {
+            this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeState(lifecycle::State::REQUESTED_PAUSE));
+            if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
+                this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeState(lifecycle::State::PAUSED));
             }
         });
         this->emitErrorMessageIfAny("pause() -> LifecycleState", this->changeStateTo(lifecycle::State::PAUSED));
     }
 
     void resume() {
-        const bool result = _graph.connectPendingEdges();
+        auto result = connectPendingEdges();
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
-        _graph.forEachBlockMutable([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block.changeState(lifecycle::RUNNING)); });
+        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeState(lifecycle::RUNNING)); });
     }
 };
 
@@ -395,13 +444,20 @@ private:
         }
 
         std::lock_guard lock(base_t::_jobListsMutex);
+
+        std::size_t blockCount = 0UZ;
+        this->forAllUnmanagedBlocks([&blockCount](auto&& block) { blockCount++; });
+        std::vector<BlockModel*> allBlocks;
+        allBlocks.reserve(blockCount);
+        this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
+
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
             auto& job = this->_jobLists->emplace_back(std::vector<BlockModel*>());
-            job.reserve(this->_graph.blocks().size() / n_batches + 1);
-            for (std::size_t j = i; j < this->_graph.blocks().size(); j += n_batches) {
-                job.push_back(this->_graph.blocks()[j].get());
+            job.reserve(allBlocks.size() / n_batches + 1);
+            for (std::size_t j = i; j < allBlocks.size(); j += n_batches) {
+                job.push_back(allBlocks[j]);
             }
         }
     }

@@ -1,6 +1,7 @@
 #ifndef GNURADIO_BUFFER2_H
 #define GNURADIO_BUFFER2_H
 
+#include <array>
 #include <bit>
 #include <concepts>
 #include <cstdint>
