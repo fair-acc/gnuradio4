@@ -33,7 +33,7 @@ const boost::ut::suite TagTests = [] {
         constexpr gr::Size_t n_samples   = 1900;
         constexpr float      sample_rate = 2000.f;
         Graph                testGraph;
-        auto&                src = testGraph.emplaceBlock<gr::basic::ClockSource<float, useIoThreadPool>>({{"sample_rate", sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}, {"verbose_console", verbose}});
+        auto&                src = testGraph.emplaceBlock<ClockSource<std::uint8_t, useIoThreadPool>>({{"sample_rate", sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}, {"verbose_console", verbose}});
         src.tags                 = {
             {0, {{"key", "value@0"}}},       //
             {1, {{"key", "value@1"}}},       //
@@ -44,8 +44,8 @@ const boost::ut::suite TagTests = [] {
             {1002, {{"key", "value@1002"}}}, //
             {1023, {{"key", "value@1023"}}}  //
         };
-        auto& sink1 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink1"}});
-        auto& sink2 = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink2"}});
+        auto& sink1 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink1"}});
+        auto& sink2 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink2"}});
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink1)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink2)));
 
@@ -113,7 +113,7 @@ const boost::ut::suite TagTests = [] {
         constexpr gr::Size_t n_samples   = 200;
         constexpr float      sample_rate = 1000.f;
         Graph                testGraph;
-        auto&                clockSrc  = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({{"sample_rate", sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}});
+        auto&                clockSrc  = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{"sample_rate", sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}});
         auto&                signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({{"sample_rate", sample_rate}, {"name", "SignalGenerator"}});
         auto&                sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"verbose_console", true}});
 
@@ -170,7 +170,7 @@ const boost::ut::suite TagTests = [] {
         constexpr std::uint32_t N           = 1000;
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
-        auto&                   clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({{"sample_rate", sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{"sample_rate", sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
         const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         const auto createTriggerPropertyMap = [](const auto context) -> property_map {
@@ -232,10 +232,10 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate   = 1'000.f;
 
         Graph      testGraph;
-        auto&      clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource<float>>({{"sample_rate", sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto&      clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{"sample_rate", sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
         const auto now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
-        auto addTimeTagEntry = []<typename T>(gr::basic::ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
+        auto addTimeTagEntry = []<typename T>(ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
             clockSource.tag_times.value.push_back(timeInNanoseconds);
             clockSource.tag_values.value.push_back(value);
         };
