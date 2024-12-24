@@ -15,31 +15,44 @@
 namespace gr {
 
 /**
- * @brief A simple circular history buffer that supports contiguous ranged access across the wrap-around point.
+ * @brief A single-threaded circular history buffer with a double-mapped array,
+ * allowing either newest-at-[0] (`push_back`) or oldest-at-[0] (`push_front`) usage.
  *
- * This buffer is similar to the `circular_buffer<T>` and uses a double-mapped memory approach.
- * It is optimised for single-threaded use and does not provide thread-safety or multi-writer/multi-reader support.
+ * ### Storage
+ * - Dynamic (`N == std::dynamic_extent`): uses `std::vector<T>` (size = 2 * capacity).
+ * - Fixed (`N != std::dynamic_extent`): uses `std::array<T, N * 2>`.
  *
- * Example usage:
- * gr::history_buffer<int, 5> buffer;
- * buffer.push_back(1);  // buffer: [1] (size: 1, capacity: 5)
- * buffer.push_back(2);  // buffer: [2, 1] (size: 2, capacity: 5)
- * buffer.push_back(3);  // buffer: [3, 2, 1] (size: 3, capacity: 5)
- * buffer.push_back(4);  // buffer: [4, 3, 2, 1] (size: 4, capacity: 5)
- * buffer.push_back(5);  // buffer: [5, 4, 3, 2, 1] (size: 5, capacity: 5)
- * buffer.push_back(6);  // buffer: [6, 5, 4, 3, 2] (size: 5, capacity: 5)
+ * ### Key Operations
+ * - `push_back(const T&)`: Add new item, drop oldest if full, index `[0]` is newest.
+ * - `push_front(const T&)`: Add new item, drop oldest if full, index `[0]` is oldest.
+ * - `pop_front()`, `pop_back()`: Remove from logical front/back of the ring.
+ * - `front()`, `back()`: Returns the first/last item in logical order.
+ * - `operator[](i)`, `at(i)`: Unchecked/checked access.
+ * - `resize(...)` (dynamic-only): Adjust capacity, preserving existing data.
+ * - `get_span(...)`: Obtain a contiguous view across wrap boundaries.
  *
- * // :
- * buffer[0];     // value: 6 - unchecked access of last/actual sample
- * buffer[1];     // value: 5 - unchecked access of previous sample
- * ...
- * buffer.at(0);  // value: 6 - checked access of last/actual sample
- * buffer.at(1); // value: 5 - checked access of last/actual sample
- * ...
- * buffer.get_span(0, 3);  // span: [6, 5, 4]
- * buffer.get_span(1, 3);  // span: [6, 3]
- * buffer.get_span(0);     // span: [6, 5, 4, 3, 2]
- * buffer.get_span(1);     // span: [5, 4, 3, 2s]
+ * ### Examples
+ * \code{.cpp}
+ * gr::history_buffer<int, 5> hb_newest;   // Use push_back -> index[0] is newest
+ * hb_newest.push_back(1); // [1]
+ * hb_newest.push_back(2); // [2, 1]
+ * hb_newest.push_back(3); // [3, 2, 1]
+ * // => index[0] == 3, newest item
+ *
+ * gr::history_buffer<int, 5> hb_oldest;   // Use push_front -> index[0] is oldest
+ * hb_oldest.push_front(10); // [10]
+ * hb_oldest.push_front(20); // [10, 20]
+ * hb_oldest.push_front(30); // [10, 20, 30]
+ * // => index[0] == 10, oldest item
+ *
+ * hb_newest.pop_front();  // remove newest => now hb_newest: [2, 1]
+ * hb_oldest.pop_front();  // remove oldest => now hb_oldest: [20, 30]
+ *
+ * auto val = hb_newest.front();  // val == 2
+ * auto last = hb_newest.back();  // last == 1
+ * \endcode
+ *
+ * This class is not thread-safe. For concurrency, use external synchronization.
  */
 template<typename T, std::size_t N = std::dynamic_extent, typename Allocator = std::allocator<T>>
 class HistoryBuffer {
@@ -100,8 +113,8 @@ public:
     /**
      * @brief Adds a range of elements the end expiring the oldest elements beyond the buffer's capacities.
      */
-    template<typename Iter>
-    constexpr void push_back_bulk(Iter cbegin, Iter cend) noexcept {
+    template<std::input_iterator Iter>
+    constexpr void push_back(Iter cbegin, Iter cend) noexcept {
         const auto nSamplesToCopy = std::distance(cbegin, cend);
         Iter       optimizedBegin = static_cast<std::size_t>(nSamplesToCopy) > _capacity ? std::prev(cend, static_cast<std::ptrdiff_t>(_capacity)) : cbegin;
         for (auto it = optimizedBegin; it != cend; ++it) {
@@ -109,12 +122,165 @@ public:
         }
     }
 
+    template<std::input_iterator Iter>
+    constexpr void push_back_bulk(Iter cbegin, Iter cend) noexcept {
+        return push_back(cbegin, cend);
+    }
+
     /**
      * @brief Adds a range of elements the end expiring the oldest elements beyond the buffer's capacities.
      */
-    template<typename Range>
+    template<std::ranges::range Range>
+    constexpr void push_back(const Range& range) noexcept {
+        push_back_bulk(range.cbegin(), range.cend());
+    }
+
+    template<std::ranges::range Range>
     constexpr void push_back_bulk(const Range& range) noexcept {
         push_back_bulk(range.cbegin(), range.cend());
+    }
+
+    /**
+     * @brief Adds an element to the front expiring the oldest element beyond the buffer's capacities.
+     */
+    constexpr void push_front(const T& value) noexcept {
+        if (_size == _capacity) {
+            if (++_write_position == _capacity) {
+                _write_position = 0U;
+            }
+        } else {
+            ++_size;
+        }
+
+        std::size_t insertPos = _write_position + (_size - 1);
+        if (insertPos >= _capacity) {
+            insertPos -= _capacity;
+        }
+
+        _buffer[insertPos]             = value;
+        _buffer[insertPos + _capacity] = value;
+    }
+
+    /**
+     * @brief Inserts a contiguous range [first, last) so that the new items become
+     *        the "newest" in the ring, with operator[](0) always the oldest.
+     */
+    template<std::input_iterator Iter>
+    constexpr void push_front(Iter first, Iter last) noexcept {
+        std::size_t n = static_cast<std::size_t>(std::distance(first, last));
+        if (n == 0) {
+            return;
+        }
+
+        if (n >= _capacity) { // input range is larger than capacity -> keep only trailing bit
+            first = last - static_cast<std::ptrdiff_t>(_capacity);
+            n     = _capacity;
+        }
+
+        const std::size_t needed = _size + n;
+        if (needed > _capacity) { // wrap-around detected
+            std::size_t discardCount = needed - _capacity;
+            _size -= discardCount;
+
+            std::size_t newPos = _write_position + discardCount;
+            if (newPos >= _capacity) {
+                newPos -= _capacity; // single-step wrap-around
+            }
+            _write_position = newPos;
+        }
+
+        _size += n;
+
+        std::size_t startPos = _write_position + (_size - n);
+        if (startPos >= _capacity) {
+            startPos -= _capacity; // single-step wrap-around
+        }
+
+        const std::ptrdiff_t chunk1 = static_cast<std::ptrdiff_t>(std::min(n, _capacity - startPos));
+        std::copy(first, first + chunk1, _buffer.data() + startPos);
+        std::copy(first, first + chunk1, _buffer.data() + startPos + _capacity);
+
+        const std::ptrdiff_t chunk2 = static_cast<std::ptrdiff_t>(n) - chunk1;
+        if (chunk2 > 0) { // copy the remainder (if needed)
+            std::copy(first + chunk1, last, _buffer.data());
+            std::copy(first + chunk1, last, _buffer.data() + _capacity);
+        }
+    }
+
+    /**
+     * @brief Adds a range of elements the end expiring the oldest element so that the new items become
+     *        the "newest" in the ring, with operator[](0) always the oldest.
+     */
+    template<std::ranges::range Range>
+    constexpr void push_front(const Range& r) noexcept {
+        push_front(std::begin(r), std::end(r));
+    }
+
+    /**
+     * @brief Removes the logical front element (i.e. `operator[](0)`) from the buffer, decreasing the size by one.
+     *
+     * @throws std::out_of_range if the buffer is empty.
+     *
+     * @note
+     * - If you only call `push_back(...)`, `operator[](0)` is the newest element; hence `pop_front()` removes the newest.
+     * - If you only call `push_front(...)`, `operator[](0)` is the oldest element; hence `pop_front()` removes the oldest.
+     * - Mixing both push modes can lead to non-intuitive behavior for front/back usage.
+     */
+    constexpr void pop_front() {
+        if (empty()) {
+            throw std::out_of_range("pop_front() called on empty HistoryBuffer");
+        }
+        if constexpr (N == std::dynamic_extent) {
+            if (++_write_position == _capacity) {
+                _write_position = 0U;
+            }
+        } else {
+            if (_write_position == N - 1U) {
+                _write_position = 0U;
+            } else {
+                ++_write_position;
+            }
+        }
+        --_size;
+    }
+
+    /**
+     * @brief Removes the logical back element (i.e. `operator[](size() - 1)`) from the buffer, decreasing the size by one.
+     *
+     * @throws std::out_of_range if the buffer is empty.
+     *
+     * @note
+     * - If you only call `push_back(...)`, `operator[](size() - 1)` is the oldest element; hence `pop_back()` removes the oldest.
+     * - If you only call `push_front(...)`, `operator[](size() - 1)` is the newest element; hence `pop_back()` removes the newest.
+     * - Mixing both push modes can lead to non-intuitive behavior for front/back usage.
+     */
+    constexpr void pop_back() {
+        if (empty()) {
+            throw std::out_of_range("pop_back() called on empty HistoryBuffer");
+        }
+        // The item at [size()-1] is physically "after" the ring’s start—no need to shift _write_position
+        --_size;
+    }
+
+    constexpr void resize(std::size_t newCapacity)
+    requires(N == std::dynamic_extent)
+    {
+        if (newCapacity == 0) {
+            throw std::out_of_range("new capacity is zero");
+        }
+
+        std::vector<T, Allocator> newBuf(newCapacity * 2);
+
+        const std::size_t copyCount = std::min(_size, newCapacity);
+        const auto        oldFirst  = cbegin();
+        std::copy(oldFirst, oldFirst + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin());                                                        // copy first half
+        std::copy(newBuf.begin(), newBuf.begin() + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin() + static_cast<std::ptrdiff_t>(newCapacity)); // mirror second half
+
+        // update members
+        _buffer         = std::move(newBuf); // destroys old buffer
+        _capacity       = newCapacity;
+        _size           = copyCount;
+        _write_position = 0; // implementation choice
     }
 
     /**
@@ -137,6 +303,14 @@ public:
         }
         return _buffer[map_index(index)];
     }
+
+    [[nodiscard]] constexpr T& front() noexcept { return _buffer[map_index(0)]; }
+
+    [[nodiscard]] constexpr const T& front() const noexcept { return _buffer[map_index(0)]; }
+
+    [[nodiscard]] constexpr T& back() noexcept { return _buffer[map_index(_size - 1)]; }
+
+    [[nodiscard]] constexpr const T& back() const noexcept { return _buffer[map_index(_size - 1)]; }
 
     [[nodiscard]] constexpr size_t size() const noexcept { return _size; }
 
