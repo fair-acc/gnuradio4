@@ -11,7 +11,8 @@ using namespace gr;
 
 template<typename T>
 struct Selector : Block<Selector<T>, NoDefaultTagForwarding> {
-    using Description = Doc<R""(@brief basic multiplexing class to route arbitrary inputs to outputs
+    using Description = Doc<R""(
+@brief basic multiplexing class to route arbitrary inputs to outputs
 
 See https://wiki.gnuradio.org/index.php/Selector
 
@@ -113,22 +114,22 @@ you can set the `backPressure` property to false.
             }
 
             std::set<std::pair<gr::Size_t, gr::Size_t>> duplicateSet{};
-            for (auto i : std::views::iota(static_cast<std::size_t>(0), map_in.value.size())) {
-                gr::Size_t inIdx  = map_in.value[i];
-                gr::Size_t outIdx = map_out.value[i];
 
-                _internalMappingInOut[inIdx].push_back(outIdx);
-                _internalMappingOutIn[outIdx].push_back(inIdx);
+            for (std::size_t i = 0U; i < map_out.value.size(); ++i) {
+                _internalMappingInOut[static_cast<std::size_t>(map_in.value[i])].push_back(static_cast<std::size_t>(map_out.value[i]));
+                _internalMappingOutIn[static_cast<std::size_t>(map_out.value[i])].push_back(static_cast<std::size_t>(map_in.value[i]));
 
-                if (!duplicateSet.insert({inIdx, outIdx}).second) { // check for duplicates
-                    throw std::invalid_argument(fmt::format("Duplicate pair (in:{}, out:{}) at i={}", inIdx, outIdx, i));
+                const auto isDuplicate = !duplicateSet.insert({map_in.value[i], map_out.value[i]}).second;
+                if (isDuplicate) {
+                    throw std::invalid_argument(fmt::format("map_in[{}]:{} and map_out[{}]:{} are duplicated", i, map_in.value[i], i, map_out.value[i]));
                 }
 
-                if (inIdx >= n_inputs) { // range checks
-                    throw std::invalid_argument(fmt::format("map_in[{}] = {} is >= n_inputs ({})", i, inIdx, n_inputs));
+                if (map_in.value[i] >= n_inputs) {
+                    throw std::invalid_argument(fmt::format("map_in[{}] contains port index ({}) > n_inputs ({})", i, map_in.value[i], n_inputs));
                 }
-                if (outIdx >= n_outputs) {
-                    throw std::invalid_argument(fmt::format("map_out[{}] = {} is >= n_outputs ({})", i, outIdx, n_outputs));
+
+                if (map_out.value[i] >= n_outputs) {
+                    throw std::invalid_argument(fmt::format("map_out[{}] contains port index ({}) > n_outputs ({})", i, map_in.value[i], n_outputs));
                 }
             }
         }
@@ -150,18 +151,15 @@ you can set the `backPressure` property to false.
 
         std::vector<std::size_t> outOffsets(outs.size(), 0UZ);
         auto                     copyToOutput = [&outOffsets](std::size_t nSamplesToCopy, auto& inputSpan, auto& outputSpan, std::size_t outIndex) {
-            const auto diffCount  = static_cast<std::ptrdiff_t>(nSamplesToCopy);
-            const auto diffOffset = static_cast<std::ptrdiff_t>((outIndex == std::numeric_limits<std::size_t>::max()) ? 0U : outOffsets[outIndex]);
-
-            std::copy_n(inputSpan.begin(), diffCount, std::next(outputSpan.begin(), diffOffset));
-
+            const std::size_t offset = outIndex == std::numeric_limits<std::size_t>::max() ? 0UZ : outOffsets[outIndex];
+            std::copy_n(inputSpan.begin(), nSamplesToCopy, std::next(outputSpan.begin(), offset));
             if (outIndex != std::numeric_limits<std::size_t>::max()) {
                 outOffsets[outIndex] += nSamplesToCopy;
             }
-
-            for (const auto& tag : inputSpan.tags()) { // Tag handling
-                if (tag.first >= 0 && static_cast<std::size_t>(tag.first) < nSamplesToCopy) {
-                    outputSpan.publishTag(tag.second, static_cast<std::size_t>(tag.first) + static_cast<std::size_t>(diffOffset));
+            const auto tags = inputSpan.tags();
+            for (const auto& tag : tags) {
+                if (tag.first < nSamplesToCopy) {
+                    outputSpan.publishTag(tag.second, tag.first + offset);
                 }
             }
             outputSpan.publish(nSamplesToCopy);
@@ -207,7 +205,7 @@ you can set the `backPressure` property to false.
                             outSpan[nSamplesToPublish] = ins[inIndex][iS];
                             for (const auto& tag : ins[inIndex].rawTags) {
                                 const auto relIndex = tag.index >= ins[inIndex].streamIndex ? static_cast<std::ptrdiff_t>(tag.index - ins[inIndex].streamIndex) : -static_cast<std::ptrdiff_t>(ins[inIndex].streamIndex - tag.index);
-                                if (relIndex == static_cast<std::ptrdiff_t>(iS)) {
+                                if (relIndex == iS) {
                                     outSpan.publishTag(tag.map, nSamplesToPublish);
                                 }
                             }
@@ -249,7 +247,7 @@ you can set the `backPressure` property to false.
 };
 } // namespace gr::basic
 
-inline static auto registerSelector = gr::registerBlock<gr::basic::Selector, float, double>(gr::globalBlockRegistry());
+auto registerSelector = gr::registerBlock<gr::basic::Selector, float, double>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::Selector<double>>);
 
 #endif // include guard
