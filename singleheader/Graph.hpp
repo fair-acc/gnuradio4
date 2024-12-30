@@ -4425,13 +4425,13 @@ inline auto this_source_location() { return "not yet implemented"; }
 #ifndef GNURADIO_REFLECTION_HPP
 #define GNURADIO_REFLECTION_HPP
 
-// #include <gnuradio-4.0/meta/utils.hpp>
-
 // #include <gnuradio-4.0/meta/typelist.hpp>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
 
 
 #include <array>
-//#include <string> // for type_name specialization
+// #include <string> // for type_name specialization
 #include <tuple>
 #ifdef _MSC_VER
 #include <vector> // for type_name specialization
@@ -4458,36 +4458,31 @@ inline auto this_source_location() { return "not yet implemented"; }
 #define GR_REFLECT_LIGHT_DECLTYPES_IMPL(x, ...) decltype(x) __VA_OPT__(, GR_REFLECT_LIGHT_DECLTYPES_AGAIN GR_REFLECT_LIGHT_PARENS(__VA_ARGS__))
 #define GR_REFLECT_LIGHT_DECLTYPES_AGAIN()      GR_REFLECT_LIGHT_DECLTYPES_IMPL
 
-#define GR_MAKE_REFLECTABLE(T, ...)                                                                                    \
-    friend void gr_refl_determine_base_type(T const&, ...) {}                                                          \
-                                                                                                                       \
-    template<std::derived_from<T> GrRefl_U>                                                                            \
-    requires(not std::is_same_v<GrRefl_U, T>) and                                                                      \
-            std::is_void_v<decltype(gr_refl_determine_base_type(                                                       \
-                std::declval<gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), 0))>                                  \
-    friend T gr_refl_determine_base_type(GrRefl_U const&, int) {                                                       \
-        return std::declval<T>();                                                                                      \
-    }                                                                                                                  \
-                                                                                                                       \
-    template<std::derived_from<T> GrRefl_U, typename GrRefl_Not>                                                       \
-    requires(not std::is_same_v<GrRefl_U, T>) and (not std::derived_from<GrRefl_Not, T>) and                           \
-            std::is_void_v<decltype(gr_refl_determine_base_type(                                                       \
-                std::declval<gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), std::declval<GrRefl_Not>()))>         \
-    friend T gr_refl_determine_base_type(GrRefl_U const&, GrRefl_Not const&) {                                         \
-        return std::declval<T>();                                                                                      \
-    }                                                                                                                  \
-                                                                                                                       \
-    using gr_refl_class_name = gr::meta::constexpr_string<#T>;                                                                  \
-                                                                                                                       \
-    constexpr auto gr_refl_members_as_tuple()& { return std::tie(__VA_ARGS__); }                                       \
-                                                                                                                       \
-    constexpr auto gr_refl_members_as_tuple() const& { return std::tie(__VA_ARGS__); }                                 \
-                                                                                                                       \
-    using gr_refl_data_member_types = gr::meta::typelist<GR_REFLECT_LIGHT_DECLTYPES(__VA_ARGS__)>;                     \
-                                                                                                                       \
-    static constexpr std::integral_constant<std::size_t, GR_REFLECT_LIGHT_COUNT_ARGS(__VA_ARGS__)>                     \
-        gr_refl_data_member_count{};                                                                                   \
-                                                                                                                       \
+#define GR_MAKE_REFLECTABLE(T, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+    friend void gr_refl_determine_base_type(T const&, ...) {}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    template<std::derived_from<T> GrRefl_U>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
+    requires(not std::is_same_v<GrRefl_U, T>) and std::is_void_v<decltype(gr_refl_determine_base_type(std::declval<::gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), 0))>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  \
+    friend T gr_refl_determine_base_type(GrRefl_U const&, int) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+        return std::declval<T>();                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+    }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    template<std::derived_from<T> GrRefl_U, typename GrRefl_Not>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    requires(not std::is_same_v<GrRefl_U, T>) and (not std::derived_from<GrRefl_Not, T>) and std::is_void_v<decltype(gr_refl_determine_base_type(std::declval<::gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), std::declval<GrRefl_Not>()))>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+    friend T gr_refl_determine_base_type(GrRefl_U const&, GrRefl_Not const&) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
+        return std::declval<T>();                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+    }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    using gr_refl_class_name = ::gr::meta::constexpr_string<#T>;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    constexpr auto gr_refl_members_as_tuple()& { return std::tie(__VA_ARGS__); }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    constexpr auto gr_refl_members_as_tuple() const& { return std::tie(__VA_ARGS__); }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    using gr_refl_data_member_types = ::gr::meta::typelist<GR_REFLECT_LIGHT_DECLTYPES(__VA_ARGS__)>;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
+    static constexpr std::integral_constant<std::size_t, GR_REFLECT_LIGHT_COUNT_ARGS(__VA_ARGS__)> gr_refl_data_member_count{};                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
     static constexpr auto gr_refl_data_member_names = std::tuple { GR_REFLECT_LIGHT_TO_STRINGS(__VA_ARGS__) }
 
 namespace gr::refl {
@@ -4619,11 +4614,11 @@ consteval auto type_to_string(T*) {
         return count;
     }();
     if constexpr (comma_nospace_count == 0) {
-        return meta::fixed_string<size>(fun + offset, fun + offset + size);
+        return ::gr::meta::fixed_string<size>(fun + offset, fun + offset + size);
     } else {
-        meta::fixed_string<size + comma_nospace_count> buf = {};
-        size_t r                                   = offset;
-        size_t w                                   = 0;
+        ::gr::meta::fixed_string<size + comma_nospace_count> buf = {};
+        size_t                                               r   = offset;
+        size_t                                               w   = 0;
         for (; r < offset + size; ++w, ++r) {
             buf[w] = fun[r];
             if (fun[r] == ',' and fun[r + 1] != ' ') {
@@ -4676,7 +4671,7 @@ consteval auto nttp_to_string() {
     static_assert(offset < fun_size);
     static_assert(size <= fun_size);
     static_assert(offset + size <= fun_size);
-    return meta::fixed_string<size>(fun + offset, fun + offset + size);
+    return ::gr::meta::fixed_string<size>(fun + offset, fun + offset + size);
 }
 } // namespace detail
 
@@ -4686,18 +4681,18 @@ concept reflectable = std::is_class_v<std::remove_cvref_t<T>> and requires {
 };
 
 template<typename T>
-inline constexpr auto type_name = meta::constexpr_string<detail::type_to_string(static_cast<T*>(nullptr))>();
+inline constexpr auto type_name = ::gr::meta::constexpr_string<detail::type_to_string(static_cast<T*>(nullptr))>();
 
 template<auto T>
 requires std::is_enum_v<decltype(T)>
-inline constexpr auto enum_name = meta::constexpr_string<detail::nttp_to_string<T>()>();
+inline constexpr auto enum_name = ::gr::meta::constexpr_string<detail::nttp_to_string<T>()>();
 
 template<auto T>
-inline constexpr auto nttp_name = meta::constexpr_string<detail::nttp_to_string<T>()>();
+inline constexpr auto nttp_name = ::gr::meta::constexpr_string<detail::nttp_to_string<T>()>();
 
-#define GR_SPECIALIZE_TYPE_NAME(T)                                                                                     \
-    template<>                                                                                                         \
-    inline constexpr auto type_name<T> = meta::constexpr_string<#T> {}
+#define GR_SPECIALIZE_TYPE_NAME(T)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
+    template<>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
+    inline constexpr auto type_name<T> = ::gr::meta::constexpr_string<#T> {}
 
 GR_SPECIALIZE_TYPE_NAME(bool);
 GR_SPECIALIZE_TYPE_NAME(char);
@@ -4725,7 +4720,7 @@ GR_SPECIALIZE_TYPE_NAME(std::string_view);
 
 #ifdef _MSC_VER
 template<typename T>
-inline constexpr auto type_name<std::vector<T>> = meta::constexpr_string<"std::vector<" + type_name<T> + '>'>{};
+inline constexpr auto type_name<std::vector<T>> = ::gr::meta::constexpr_string<"std::vector<" + type_name<T> + '>'>{};
 #endif
 
 template<typename T>
@@ -4753,7 +4748,7 @@ constexpr size_t data_member_count<T> = T::gr_refl_data_member_count + data_memb
 template<typename T, size_t Idx>
 constexpr auto data_member_name = [] {
     static_assert(Idx < data_member_count<T>);
-    return meta::constexpr_string<"Error">();
+    return ::gr::meta::constexpr_string<"Error">();
 }();
 
 template<reflectable T, size_t Idx>
@@ -4764,7 +4759,7 @@ template<reflectable T, size_t Idx>
 requires(Idx >= data_member_count<base_type<T>>) and (Idx < data_member_count<T>)
 constexpr auto data_member_name<T, Idx> = std::get<Idx - data_member_count<base_type<T>>>(T::gr_refl_data_member_names);
 
-template<reflectable T, meta::fixed_string Name>
+template<reflectable T, ::gr::meta::fixed_string Name>
 constexpr auto data_member_index = detail::ic<[]<size_t... Is>(std::index_sequence<Is...>) { //
     return ((Name == data_member_name<T, Is>.value ? Is : 0) + ...);
 }(std::make_index_sequence<data_member_count<T>>())>;
@@ -4783,7 +4778,7 @@ constexpr decltype(auto) data_member(reflectable auto&& obj) {
     }
 }
 
-template<meta::fixed_string Name>
+template<::gr::meta::fixed_string Name>
 constexpr decltype(auto) data_member(reflectable auto&& obj) {
     return data_member<data_member_index<std::remove_cvref_t<decltype(obj)>, Name>>(obj);
 }
@@ -4799,20 +4794,20 @@ constexpr decltype(auto) all_data_members(reflectable auto&& obj) {
 
 namespace detail {
 template<size_t N>
-struct data_member_id : meta::fixed_string<N> {
+struct data_member_id : ::gr::meta::fixed_string<N> {
     static constexpr bool is_name = N != 0;
 
     const size_t index;
 
     consteval data_member_id(const char (&txt)[N + 1])
     requires(N != 0)
-        : meta::fixed_string<N>(txt), index(size_t(-1)) {}
+        : ::gr::meta::fixed_string<N>(txt), index(size_t(-1)) {}
 
     consteval data_member_id(std::convertible_to<size_t> auto idx)
     requires(N == 0)
-        : meta::fixed_string<0>(), index(size_t(idx)) {}
+        : ::gr::meta::fixed_string<0>(), index(size_t(idx)) {}
 
-    consteval meta::fixed_string<N> const& string() const { return *this; }
+    consteval ::gr::meta::fixed_string<N> const& string() const { return *this; }
 };
 
 template<size_t N>
@@ -4885,7 +4880,7 @@ constexpr std::array<std::size_t, N> iota_array<N, std::index_sequence<Values...
 } // namespace detail
 
 template<reflectable T, std::array Idxs = detail::iota_array<data_member_count<T>>>
-using data_member_types = decltype([]<size_t... Is>(std::index_sequence<Is...>) -> meta::typelist<data_member_type<T, Idxs[Is]>...> { //
+using data_member_types = decltype([]<size_t... Is>(std::index_sequence<Is...>) -> ::gr::meta::typelist<data_member_type<T, Idxs[Is]>...> { //
     return {};
 }(std::make_index_sequence<Idxs.size()>()));
 
@@ -4902,20 +4897,20 @@ struct make_typelist_from_index_sequence_impl;
 
 template<size_t... Is, auto Fun>
 struct make_typelist_from_index_sequence_impl<std::index_sequence<Is...>, Fun> {
-    using type = meta::concat<decltype(Fun(ic<Is>))...>;
+    using type = ::gr::meta::concat<decltype(Fun(ic<Is>))...>;
 };
 } // namespace detail
 
 /**
- * Constructs a meta::typelist via concatenation of all type lists returned from applying \p Fun to each index in the
+ * Constructs a ::gr::meta::typelist via concatenation of all type lists returned from applying \p Fun to each index in the
  * given std::index_sequence \p IdxSeq.
  *
  * \tparam IdxSeq  The sequence of indexes to pass to \p Fun.
  * \tparam Fun     A function object (e.g. Lambda) that is called for every integer in \p IdxSeq. It is passed an
- *                 std::integral_constant<std::size_t, Idx> and needs to return a meta::typelist object. The return
- *                 types of all \p Fun invocations are then concatenated (meta::concat) to the resulting typelist.
+ *                 std::integral_constant<std::size_t, Idx> and needs to return a ::gr::meta::typelist object. The return
+ *                 types of all \p Fun invocations are then concatenated (::gr::meta::concat) to the resulting typelist.
  */
-template <typename IdxSeq, auto Fun>
+template<typename IdxSeq, auto Fun>
 using make_typelist_from_index_sequence = typename detail::make_typelist_from_index_sequence_impl<IdxSeq, Fun>::type;
 
 } // namespace gr::refl
@@ -6590,6 +6585,7 @@ static constexpr bool has_posix_mmap_interface = false;
 #ifndef GNURADIO_BUFFER2_H
 #define GNURADIO_BUFFER2_H
 
+#include <array>
 #include <bit>
 #include <concepts>
 #include <cstdint>
@@ -9430,6 +9426,7 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
     }
     WriterSpanLike auto msgSpan = port.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
     msgSpan[0]                  = std::move(message);
+    msgSpan.publish(1UZ);
 }
 } // namespace detail
 
@@ -10891,14 +10888,18 @@ static_assert(std::is_default_constructible_v<PortOut<float>>);
  */
 class DynamicPort {
 public:
-    std::string_view name;
-    std::int16_t&    priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
-    std::size_t&     min_samples;
-    std::size_t&     max_samples;
+    std::string  name;
+    std::int16_t priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
+    std::size_t  min_samples;
+    std::size_t  max_samples;
 
 private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition
         virtual ~model() = default;
+
+        [[nodiscard]] virtual DynamicPort weakRef() const noexcept = 0;
+
+        [[nodiscard]] virtual std::intptr_t internalId() const noexcept = 0;
 
         [[nodiscard]] virtual std::any defaultValue() const noexcept = 0;
 
@@ -10975,6 +10976,10 @@ private:
 
         ~PortWrapper() override = default;
 
+        [[nodiscard]] DynamicPort weakRef() const noexcept override;
+
+        [[nodiscard]] std::intptr_t internalId() const noexcept override { return reinterpret_cast<std::intptr_t>(std::addressof(_value)); }
+
         [[nodiscard]] std::any defaultValue() const noexcept override { return _value.defaultValue(); }
 
         [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
@@ -11025,8 +11030,19 @@ public:
     DynamicPort(const DynamicPort& arg)            = delete;
     DynamicPort& operator=(const DynamicPort& arg) = delete;
 
-    DynamicPort(DynamicPort&& arg)            = default;
-    DynamicPort& operator=(DynamicPort&& arg) = delete;
+    DynamicPort(DynamicPort&& other) noexcept : name(other.name), priority(other.priority), min_samples(other.min_samples), max_samples(other.max_samples), _accessor(std::move(other._accessor)) {}
+    auto& operator=(DynamicPort&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(_accessor, tmp._accessor);
+        std::swap(name, tmp.name);
+        std::swap(priority, tmp.priority);
+        std::swap(min_samples, tmp.min_samples);
+        std::swap(max_samples, tmp.max_samples);
+        return *this;
+    }
+
+    bool operator==(const DynamicPort& other) const noexcept { return _accessor->internalId() == other._accessor->internalId(); }
+    bool operator!=(const DynamicPort& other) const noexcept { return _accessor->internalId() != other._accessor->internalId(); }
 
     // TODO: The lifetime of ports is a problem here, if we keep a reference to the port in DynamicPort, the port object/ can not be reallocated
     template<PortLike T>
@@ -11034,6 +11050,8 @@ public:
 
     template<PortLike T>
     explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, true>>(std::forward<T>(arg))} {}
+
+    [[nodiscard]] DynamicPort weakRef() const noexcept { return _accessor->weakRef(); }
 
     [[nodiscard]] std::any defaultValue() const noexcept { return _accessor->defaultValue(); }
 
@@ -11066,6 +11084,11 @@ public:
 
     [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) { return _accessor->connect(dst_port); }
 };
+
+template<PortLike T, bool owning>
+[[nodiscard]] DynamicPort DynamicPort::PortWrapper<T, owning>::weakRef() const noexcept {
+    return DynamicPort(_value, DynamicPort::non_owned_reference_tag{});
+}
 
 static_assert(PortLike<DynamicPort>);
 
@@ -17698,7 +17721,7 @@ enum class Category {
  *     }
  *
  *     void start() override {
- *         propertyCallbacks.emplace(kMyCustomProperty, &MyBlock::propertyCallbackMyCustom);
+ *         propertyCallbacks.emplace(kMyCustomProperty, std::mem_fn(&MyBlock::propertyCallbackMyCustom));
  *     }
  * };
  * @endcode
@@ -17799,18 +17822,18 @@ public:
     MsgPortInBuiltin  msgIn;
     MsgPortOutBuiltin msgOut;
 
-    using PropertyCallback = std::optional<Message> (Derived::*)(std::string_view, Message);
+    using PropertyCallback = std::function<std::optional<Message>(Derived&, std::string_view, Message)>;
     std::map<std::string, PropertyCallback> propertyCallbacks{
-        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},               //
-        {block::property::kEcho, &Block::propertyCallbackEcho},                         //
-        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState},     //
-        {block::property::kSetting, &Block::propertyCallbackSettings},                  //
-        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},      //
-        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},       //
-        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},       //
-        {block::property::kActiveContext, &Block::propertyCallbackActiveContext},       //
-        {block::property::kSettingsCtx, &Block::propertyCallbackSettingsCtx},           //
-        {block::property::kSettingsContexts, &Block::propertyCallbackSettingsContexts}, //
+        {block::property::kHeartbeat, std::mem_fn(&Block::propertyCallbackHeartbeat)},               //
+        {block::property::kEcho, std::mem_fn(&Block::propertyCallbackEcho)},                         //
+        {block::property::kLifeCycleState, std::mem_fn(&Block::propertyCallbackLifecycleState)},     //
+        {block::property::kSetting, std::mem_fn(&Block::propertyCallbackSettings)},                  //
+        {block::property::kStagedSetting, std::mem_fn(&Block::propertyCallbackStagedSettings)},      //
+        {block::property::kStoreDefaults, std::mem_fn(&Block::propertyCallbackStoreDefaults)},       //
+        {block::property::kResetDefaults, std::mem_fn(&Block::propertyCallbackResetDefaults)},       //
+        {block::property::kActiveContext, std::mem_fn(&Block::propertyCallbackActiveContext)},       //
+        {block::property::kSettingsCtx, std::mem_fn(&Block::propertyCallbackSettingsCtx)},           //
+        {block::property::kSettingsContexts, std::mem_fn(&Block::propertyCallbackSettingsContexts)}, //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -18729,17 +18752,20 @@ protected:
     }
 
     std::size_t getMergedBlockLimit() {
-        if constexpr (requires(const Derived& d) {
-                          { available_samples(d) } -> std::same_as<std::size_t>;
-                      }) {
+        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+            return 0;
+        } else if constexpr (requires(const Derived& d) {
+                                 { available_samples(d) } -> std::same_as<std::size_t>;
+                             }) {
             return available_samples(self());
         } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0 && traits::block::stream_output_port_types<Derived>::size == 0) { // allow blocks that have neither input nor output ports (by merging source to sink block) -> use internal buffer size
             constexpr gr::Size_t chunkSize = Derived::merged_work_chunk_size();
             static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
                                                                              "friend function `available_samples(const BlockType&)` must be defined.");
             return chunkSize;
+        } else {
+            return std::numeric_limits<std::size_t>::max();
         }
-        return std::numeric_limits<std::size_t>::max();
     }
 
     template<typename TIn, typename TOut>
@@ -18911,7 +18937,10 @@ protected:
      *   - consume in samples (has to be last to correctly propagate back-pressure)
      * @return struct { std::size_t produced_work, work_return_t}
      */
-    work::Result workInternal(std::size_t requestedWork) {
+
+    work::Result workInternal(std::size_t requestedWork)
+    requires(Derived::blockCategory == block::Category::NormalBlock)
+    {
         using enum gr::work::Status;
         using TInputTypes  = traits::block::stream_input_port_types<Derived>;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
@@ -19113,8 +19142,26 @@ protected:
     } // end: work::Result workInternal(std::size_t requestedWork) { ... }
 
 public:
+    /**
+     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
+     *
+     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
+     * requested_work limit as an affine relation with the returned performed_work.
+     * @return { requested_work, performed_work, status}
+     */
+    template<typename = void>
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept
+    requires(!blockingIO) // regular non-blocking call
+    {
+        if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
+            return {requestedWork, 0UZ, gr::work::Status::OK};
+        } else {
+            return workInternal(requestedWork);
+        }
+    }
+
     work::Status invokeWork()
-    requires(blockingIO)
+    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock)
     {
         auto [work_requested, work_done, last_status] = workInternal(std::atomic_load_explicit(&ioRequestedWork, std::memory_order_acquire));
         ioWorkDone.increment(work_requested, work_done);
@@ -19131,21 +19178,7 @@ public:
      */
     template<typename = void>
     work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(!blockingIO) // regular non-blocking call
-    {
-        return workInternal(requested_work);
-    }
-
-    /**
-     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
-     *
-     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
-     * requested_work limit as an affine relation with the returned performed_work.
-     * @return { requested_work, performed_work, status}
-     */
-    template<typename = void>
-    work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(blockingIO) // regular blocking call (e.g. wating on HW, timer, blocking for any other reasons) -> this should be an exceptional use
+    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock) // regular blocking call (e.g. wating on HW, timer, blocking for any other reasons) -> this should be an exceptional use
     {
         constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
         std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
@@ -19223,7 +19256,7 @@ public:
 
             std::optional<Message> retMessage;
             try {
-                retMessage = (self().*callback)(message.endpoint, message); // N.B. life-time: message is copied
+                retMessage = callback(self(), message.endpoint, message); // N.B. life-time: message is copied
             } catch (const gr::exception& e) {
                 retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(e));
@@ -19704,9 +19737,26 @@ public:
 
     Edge& operator=(const Edge&) = delete;
 
-    Edge(Edge&&) noexcept = default;
+    Edge(Edge&& other) noexcept : _sourceBlock(std::exchange(other._sourceBlock, nullptr)), _destinationBlock(std::exchange(other._destinationBlock, nullptr)), _sourcePortDefinition(std::move(other._sourcePortDefinition)), _destinationPortDefinition(std::move(other._destinationPortDefinition)), _state(other._state), _actualBufferSize(other._actualBufferSize), _edgeType(other._edgeType), _sourcePort(std::exchange(other._sourcePort, nullptr)), _destinationPort(std::exchange(other._destinationPort, nullptr)), _minBufferSize(other._minBufferSize), _weight(other._weight), _name(std::move(other._name)) {}
 
-    Edge& operator=(Edge&&) noexcept = default;
+    Edge& operator=(Edge&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(tmp._sourceBlock, _sourceBlock);
+        std::swap(tmp._destinationBlock, _destinationBlock);
+        std::swap(tmp._sourcePortDefinition, _sourcePortDefinition);
+        std::swap(tmp._destinationPortDefinition, _destinationPortDefinition);
+        std::swap(tmp._state, _state);
+        std::swap(tmp._actualBufferSize, _actualBufferSize);
+        std::swap(tmp._edgeType, _edgeType);
+        std::swap(tmp._sourcePort, _sourcePort);
+        std::swap(tmp._destinationPort, _destinationPort);
+
+        std::swap(tmp._minBufferSize, _minBufferSize);
+        std::swap(tmp._weight, _weight);
+        std::swap(tmp._name, _name);
+
+        return *this;
+    }
 
     Edge(BlockModel* sourceBlock, PortDefinition sourcePortDefinition, BlockModel* destinationBlock, PortDefinition destinationPortDefinition, std::size_t minBufferSize, std::int32_t weight, std::string name) : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock), _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
 
@@ -19809,10 +19859,10 @@ public:
     MsgPortInBuiltin*  msgIn;
     MsgPortOutBuiltin* msgOut;
 
-    static std::string_view portName(const DynamicPortOrCollection& portOrCollection) {
+    static std::string portName(const DynamicPortOrCollection& portOrCollection) {
         return std::visit(meta::overloaded{                                          //
                               [](const gr::DynamicPort& port) { return port.name; }, //
-                              [](const NamedPortCollection& namedCollection) { return namedCollection.name; }},
+                              [](const NamedPortCollection& namedCollection) { return std::string(namedCollection.name); }},
             portOrCollection);
     }
 
@@ -20024,7 +20074,7 @@ constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
 template<BlockLike T>
 requires std::is_constructible_v<T, property_map>
 class BlockWrapper : public BlockModel {
-private:
+protected:
     static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
     T           _block;
     std::string _type_name = gr::meta::type_name<T>();
@@ -20050,36 +20100,37 @@ private:
         msgOut = std::addressof(_block.msgOut);
     }
 
-    template<typename TPort>
-    constexpr static auto& processPort(auto& where, TPort& port) noexcept {
-        where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
-        return where.back();
-    }
-
-    void dynamicPortLoader() {
+    void dynamicPortsLoader() {
         if (_dynamicPortsLoaded) {
             return;
         }
 
-        auto registerPort = [this]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
-            if constexpr (CurrentPortType::kIsDynamicCollection) {
-                auto&               collection = CurrentPortType::getPortObject(blockRef());
-                NamedPortCollection result;
-                result.name = CurrentPortType::Name;
-                for (auto& port : collection) {
-                    processPort(result.ports, port);
-                }
-                where.push_back(std::move(result));
-            } else {
-                auto& port = CurrentPortType::getPortObject(blockRef());
-                port.name  = CurrentPortType::Name;
-                processPort(where, port);
-            }
+        auto processPort = []<typename TPort>(auto& where, TPort& port) -> auto& {
+            where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
+            return where.back();
         };
 
-        using Node = std::remove_cvref_t<decltype(blockRef())>;
-        traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts);
-        traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts);
+        using TBlock = std::remove_cvref_t<decltype(blockRef())>;
+        if constexpr (TBlock::blockCategory == block::Category::NormalBlock) {
+            auto registerPort = [this, processPort]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
+                if constexpr (CurrentPortType::kIsDynamicCollection) {
+                    auto&               collection = CurrentPortType::getPortObject(blockRef());
+                    NamedPortCollection result;
+                    result.name = CurrentPortType::Name;
+                    for (auto& port : collection) {
+                        processPort(result.ports, port);
+                    }
+                    where.push_back(std::move(result));
+                } else {
+                    auto& port = CurrentPortType::getPortObject(blockRef());
+                    port.name  = CurrentPortType::Name;
+                    processPort(where, port);
+                }
+            };
+
+            traits::block::all_input_ports<TBlock>::for_each(registerPort, _dynamicInputPorts);
+            traits::block::all_output_ports<TBlock>::for_each(registerPort, _dynamicOutputPorts);
+        }
 
         _dynamicPortsLoaded = true;
     }
@@ -20088,7 +20139,7 @@ public:
     BlockWrapper() : BlockWrapper(gr::property_map()) {}
     explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
         initMessagePorts();
-        _dynamicPortsLoader = std::bind_front(&BlockWrapper::dynamicPortLoader, this);
+        _dynamicPortsLoader = [this] { this->dynamicPortsLoader(); };
     }
 
     BlockWrapper(const BlockWrapper& other)            = delete;
@@ -20733,7 +20784,144 @@ inline static const char* kGraphInspect   = "GraphInspect";
 inline static const char* kGraphInspected = "GraphInspected";
 
 inline static const char* kRegistryBlockTypes = "RegistryBlockTypes";
+
+inline static const char* kSubgraphExportPort   = "SubgraphExportPort";
+inline static const char* kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
+
+template<typename TSubGraph>
+class GraphWrapper : public BlockWrapper<TSubGraph> {
+private:
+    std::unordered_multimap<std::string, std::string> _exportedInputPortsForBlock;
+    std::unordered_multimap<std::string, std::string> _exportedOutputPortsForBlock;
+
+public:
+    GraphWrapper() {
+        // We need to make sure nobody touches our dynamic ports
+        // as this class will handle them
+        this->_dynamicPortsLoader = [] {};
+
+        this->_block.propertyCallbacks[graph::property::kSubgraphExportPort] = [this](auto& /*self*/, std::string_view /*property*/, Message message) -> std::optional<Message> {
+            const auto&        data            = message.data.value();
+            const std::string& uniqueBlockName = std::get<std::string>(data.at("uniqueBlockName"s));
+            auto               portDirection   = std::get<std::string>(data.at("portDirection"s)) == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;
+            const std::string& portName        = std::get<std::string>(data.at("portName"s));
+            const bool         exportFlag      = std::get<bool>(data.at("exportFlag"s));
+
+            exportPort(exportFlag, uniqueBlockName, portDirection, portName);
+
+            message.endpoint = graph::property::kSubgraphExportedPort;
+            return message;
+        };
+    }
+
+    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
+        auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
+        if (infoFound == exportFlag) {
+            throw Error(fmt::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
+        }
+
+        auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName);
+        auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
+        auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
+        if (exportFlag) {
+            bookkeepingCollection.emplace(uniqueBlockName, portName);
+            portCollection.push_back(port.weakRef());
+        } else {
+            bookkeepingCollection.erase(infoIt);
+            // TODO: Add support for exporting port collections
+            auto portIt = std::ranges::find_if(portCollection, [needleName = port.name](const auto& portOrCollection) {
+                return std::visit(meta::overloaded{
+                                      //
+                                      [&](DynamicPort& in) { return in.name == needleName; }, //
+                                      [](auto&) { return false; }                             //
+                                  },
+                    portOrCollection);
+            });
+            if (portIt != portCollection.end()) {
+                portCollection.erase(portIt);
+            } else {
+                throw Error("Port was not exported, while it is registered as such");
+            }
+        }
+
+        updateMetaInformation();
+    }
+
+    auto& blockRef() { return BlockWrapper<TSubGraph>::blockRef(); }
+    auto& blockRef() const { return BlockWrapper<TSubGraph>::blockRef(); }
+
+    const std::unordered_multimap<std::string, std::string>& exportedInputPortsForBlock() const { return _exportedInputPortsForBlock; }
+    const std::unordered_multimap<std::string, std::string>& exportedOutputPortsForBlock() const { return _exportedOutputPortsForBlock; }
+
+    BlockModel& findBlockWithUniqueName(std::string uniqueBlockName) {
+        for (const auto& block : this->blocks()) {
+            if (std::string(block->uniqueName()) == uniqueBlockName) {
+                return *block;
+            }
+        }
+        throw Error(fmt::format("Block {} not found in {}", uniqueBlockName, this->uniqueName()));
+    }
+
+    BlockModel& findFirstBlockWithName(std::string blockName) {
+        for (const auto& block : this->blocks()) {
+            if (std::string(block->name()) == blockName) {
+                return *block;
+            }
+        }
+        throw Error(fmt::format("Block {} not found in {}", blockName, this->uniqueName()));
+    }
+
+private:
+    DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
+        auto& block = findBlockWithUniqueName(uniqueBlockName);
+
+        if (portDirection == PortDirection::INPUT) {
+            return block.dynamicInputPort(portName);
+        } else {
+            return block.dynamicOutputPort(portName);
+        }
+    }
+
+    auto findExportedPortInfo(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) const {
+        auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
+        const auto& [from, to]      = bookkeepingCollection.equal_range(std::string(uniqueBlockName));
+        for (auto it = from; it != to; it++) {
+            if (it->second == portName) {
+                return std::make_pair(it, true);
+            }
+        }
+        return std::make_pair(bookkeepingCollection.end(), false);
+    }
+
+    void updateMetaInformation() {
+        auto& info = BlockWrapper<TSubGraph>::metaInformation();
+
+        auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
+            std::string              previousUniqueName;
+            std::vector<std::string> collectedPorts;
+            for (const auto& [blockUniqueName, portName] : bookkeepingCollection) {
+                if (previousUniqueName != blockUniqueName && !collectedPorts.empty()) {
+                    dest[previousUniqueName] = std::move(collectedPorts);
+                    collectedPorts.clear();
+                }
+                collectedPorts.push_back(portName);
+                previousUniqueName = blockUniqueName;
+            }
+            if (!collectedPorts.empty()) {
+                dest[previousUniqueName] = std::move(collectedPorts);
+                collectedPorts.clear();
+            }
+        };
+
+        property_map exportedInputPorts, exportedOutputPorts;
+        fillMetaInformation(exportedInputPorts, _exportedInputPortsForBlock);
+        fillMetaInformation(exportedOutputPorts, _exportedOutputPortsForBlock);
+
+        info["exportedInputPorts"]  = std::move(exportedInputPorts);
+        info["exportedOutputPorts"] = std::move(exportedOutputPorts);
+    }
+};
 
 class Graph : public gr::Block<Graph> {
 private:
@@ -20863,14 +21051,14 @@ public:
 
     Graph(property_map settings = {}) : gr::Block<Graph>(std::move(settings)) {
         _blocks.reserve(100); // TODO: remove
-        propertyCallbacks[graph::property::kEmplaceBlock]       = &Graph::propertyCallbackEmplaceBlock;
-        propertyCallbacks[graph::property::kRemoveBlock]        = &Graph::propertyCallbackRemoveBlock;
-        propertyCallbacks[graph::property::kInspectBlock]       = &Graph::propertyCallbackInspectBlock;
-        propertyCallbacks[graph::property::kReplaceBlock]       = &Graph::propertyCallbackReplaceBlock;
-        propertyCallbacks[graph::property::kEmplaceEdge]        = &Graph::propertyCallbackEmplaceEdge;
-        propertyCallbacks[graph::property::kRemoveEdge]         = &Graph::propertyCallbackRemoveEdge;
-        propertyCallbacks[graph::property::kGraphInspect]       = &Graph::propertyCallbackGraphInspect;
-        propertyCallbacks[graph::property::kRegistryBlockTypes] = &Graph::propertyCallbackRegistryBlockTypes;
+        propertyCallbacks[graph::property::kEmplaceBlock]       = std::mem_fn(&Graph::propertyCallbackEmplaceBlock);
+        propertyCallbacks[graph::property::kRemoveBlock]        = std::mem_fn(&Graph::propertyCallbackRemoveBlock);
+        propertyCallbacks[graph::property::kInspectBlock]       = std::mem_fn(&Graph::propertyCallbackInspectBlock);
+        propertyCallbacks[graph::property::kReplaceBlock]       = std::mem_fn(&Graph::propertyCallbackReplaceBlock);
+        propertyCallbacks[graph::property::kEmplaceEdge]        = std::mem_fn(&Graph::propertyCallbackEmplaceEdge);
+        propertyCallbacks[graph::property::kRemoveEdge]         = std::mem_fn(&Graph::propertyCallbackRemoveEdge);
+        propertyCallbacks[graph::property::kGraphInspect]       = std::mem_fn(&Graph::propertyCallbackGraphInspect);
+        propertyCallbacks[graph::property::kRegistryBlockTypes] = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
     }
     Graph(Graph&)            = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
@@ -20997,13 +21185,13 @@ public:
 
         property_map inputPorts;
         for (auto& portOrCollection : block->dynamicInputPorts()) {
-            inputPorts[std::string(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
+            inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
         }
         result["inputPorts"] = std::move(inputPorts);
 
         property_map outputPorts;
         for (auto& portOrCollection : block->dynamicOutputPorts()) {
-            outputPorts[std::string(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
+            outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
         }
         result["outputPorts"] = std::move(outputPorts);
 
@@ -21075,6 +21263,9 @@ public:
             throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
+        std::erase_if(_edges, [&it](const Edge& edge) { //
+            return std::addressof(edge.sourceBlock()) == it->get() || std::addressof(edge.destinationBlock()) == it->get();
+        });
         _blocks.erase(it);
         message.endpoint = graph::property::kBlockRemoved;
 
@@ -21277,8 +21468,15 @@ public:
     template<typename Source, typename Destination>
     requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = 65536, std::int32_t weight = 0, std::string edgeName = "unnamed edge") {
-        auto* sourceBlock      = findBlock(sourceBlockRaw).get();
-        auto* destinationBlock = findBlock(destinationBlockRaw).get();
+        auto findBlockNoexcept = [this]<typename Block>(Block&& blockRaw) noexcept -> BlockModel* {
+            try {
+                return findBlock(std::forward<Block>(blockRaw)).get();
+            } catch (...) {
+                return nullptr;
+            }
+        };
+        auto* sourceBlock      = findBlockNoexcept(sourceBlockRaw);
+        auto* destinationBlock = findBlockNoexcept(destinationBlockRaw);
 
         if (sourceBlock == nullptr || destinationBlock == nullptr) {
             return ConnectionResult::FAILED;
@@ -21582,10 +21780,10 @@ public:
             auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
-                return std::make_tuple(std::move(std::get < OutId ^ 1 > (left_out)), std::move(right_out));
+                return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
 
             } else if constexpr (traits::block::stream_output_port_types<Left>::size == 2) {
-                return std::tuple_cat(std::make_tuple(std::move(std::get < OutId ^ 1 > (left_out))), std::move(right_out));
+                return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
 
             } else if constexpr (traits::block::stream_output_port_types<Right>::size == 1) {
                 return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) { return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out)); }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>());
