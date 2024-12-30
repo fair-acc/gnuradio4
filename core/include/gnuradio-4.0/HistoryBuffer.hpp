@@ -132,7 +132,7 @@ public:
      */
     template<std::ranges::range Range>
     constexpr void push_back(const Range& range) noexcept {
-        push_back_bulk(range.cbegin(), range.cend());
+        push_back_bulk(std::ranges::begin(range), std::ranges::end(range));
     }
 
     template<std::ranges::range Range>
@@ -213,7 +213,7 @@ public:
      */
     template<std::ranges::range Range>
     constexpr void push_front(const Range& r) noexcept {
-        push_front(std::begin(r), std::end(r));
+        push_front(std::ranges::begin(r), std::ranges::end(r));
     }
 
     /**
@@ -277,7 +277,7 @@ public:
         std::copy(newBuf.begin(), newBuf.begin() + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin() + static_cast<std::ptrdiff_t>(newCapacity)); // mirror second half
 
         // update members
-        _buffer         = std::move(newBuf); // destroys old buffer
+        std::swap(_buffer, newBuf);
         _capacity       = newCapacity;
         _size           = copyCount;
         _write_position = 0; // implementation choice
