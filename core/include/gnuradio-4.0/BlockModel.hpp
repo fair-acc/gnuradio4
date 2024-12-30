@@ -55,9 +55,26 @@ public:
 
     Edge& operator=(const Edge&) = delete;
 
-    Edge(Edge&&) noexcept = default;
+    Edge(Edge&& other) noexcept : _sourceBlock(std::exchange(other._sourceBlock, nullptr)), _destinationBlock(std::exchange(other._destinationBlock, nullptr)), _sourcePortDefinition(std::move(other._sourcePortDefinition)), _destinationPortDefinition(std::move(other._destinationPortDefinition)), _state(other._state), _actualBufferSize(other._actualBufferSize), _edgeType(other._edgeType), _sourcePort(std::exchange(other._sourcePort, nullptr)), _destinationPort(std::exchange(other._destinationPort, nullptr)), _minBufferSize(other._minBufferSize), _weight(other._weight), _name(std::move(other._name)) {}
 
-    Edge& operator=(Edge&&) noexcept = default;
+    Edge& operator=(Edge&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(tmp._sourceBlock, _sourceBlock);
+        std::swap(tmp._destinationBlock, _destinationBlock);
+        std::swap(tmp._sourcePortDefinition, _sourcePortDefinition);
+        std::swap(tmp._destinationPortDefinition, _destinationPortDefinition);
+        std::swap(tmp._state, _state);
+        std::swap(tmp._actualBufferSize, _actualBufferSize);
+        std::swap(tmp._edgeType, _edgeType);
+        std::swap(tmp._sourcePort, _sourcePort);
+        std::swap(tmp._destinationPort, _destinationPort);
+
+        std::swap(tmp._minBufferSize, _minBufferSize);
+        std::swap(tmp._weight, _weight);
+        std::swap(tmp._name, _name);
+
+        return *this;
+    }
 
     Edge(BlockModel* sourceBlock, PortDefinition sourcePortDefinition, BlockModel* destinationBlock, PortDefinition destinationPortDefinition, std::size_t minBufferSize, std::int32_t weight, std::string name) : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock), _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
 
@@ -160,10 +177,10 @@ public:
     MsgPortInBuiltin*  msgIn;
     MsgPortOutBuiltin* msgOut;
 
-    static std::string_view portName(const DynamicPortOrCollection& portOrCollection) {
+    static std::string portName(const DynamicPortOrCollection& portOrCollection) {
         return std::visit(meta::overloaded{                                          //
                               [](const gr::DynamicPort& port) { return port.name; }, //
-                              [](const NamedPortCollection& namedCollection) { return namedCollection.name; }},
+                              [](const NamedPortCollection& namedCollection) { return std::string(namedCollection.name); }},
             portOrCollection);
     }
 
@@ -375,7 +392,7 @@ constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
 template<BlockLike T>
 requires std::is_constructible_v<T, property_map>
 class BlockWrapper : public BlockModel {
-private:
+protected:
     static_assert(std::is_same_v<T, std::remove_reference_t<T>>);
     T           _block;
     std::string _type_name = gr::meta::type_name<T>();
@@ -401,36 +418,37 @@ private:
         msgOut = std::addressof(_block.msgOut);
     }
 
-    template<typename TPort>
-    constexpr static auto& processPort(auto& where, TPort& port) noexcept {
-        where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
-        return where.back();
-    }
-
-    void dynamicPortLoader() {
+    void dynamicPortsLoader() {
         if (_dynamicPortsLoaded) {
             return;
         }
 
-        auto registerPort = [this]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
-            if constexpr (CurrentPortType::kIsDynamicCollection) {
-                auto&               collection = CurrentPortType::getPortObject(blockRef());
-                NamedPortCollection result;
-                result.name = CurrentPortType::Name;
-                for (auto& port : collection) {
-                    processPort(result.ports, port);
-                }
-                where.push_back(std::move(result));
-            } else {
-                auto& port = CurrentPortType::getPortObject(blockRef());
-                port.name  = CurrentPortType::Name;
-                processPort(where, port);
-            }
+        auto processPort = []<typename TPort>(auto& where, TPort& port) -> auto& {
+            where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
+            return where.back();
         };
 
-        using Node = std::remove_cvref_t<decltype(blockRef())>;
-        traits::block::all_input_ports<Node>::for_each(registerPort, _dynamicInputPorts);
-        traits::block::all_output_ports<Node>::for_each(registerPort, _dynamicOutputPorts);
+        using TBlock = std::remove_cvref_t<decltype(blockRef())>;
+        if constexpr (TBlock::blockCategory == block::Category::NormalBlock) {
+            auto registerPort = [this, processPort]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
+                if constexpr (CurrentPortType::kIsDynamicCollection) {
+                    auto&               collection = CurrentPortType::getPortObject(blockRef());
+                    NamedPortCollection result;
+                    result.name = CurrentPortType::Name;
+                    for (auto& port : collection) {
+                        processPort(result.ports, port);
+                    }
+                    where.push_back(std::move(result));
+                } else {
+                    auto& port = CurrentPortType::getPortObject(blockRef());
+                    port.name  = CurrentPortType::Name;
+                    processPort(where, port);
+                }
+            };
+
+            traits::block::all_input_ports<TBlock>::for_each(registerPort, _dynamicInputPorts);
+            traits::block::all_output_ports<TBlock>::for_each(registerPort, _dynamicOutputPorts);
+        }
 
         _dynamicPortsLoaded = true;
     }
@@ -439,7 +457,7 @@ public:
     BlockWrapper() : BlockWrapper(gr::property_map()) {}
     explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
         initMessagePorts();
-        _dynamicPortsLoader = std::bind_front(&BlockWrapper::dynamicPortLoader, this);
+        _dynamicPortsLoader = [this] { this->dynamicPortsLoader(); };
     }
 
     BlockWrapper(const BlockWrapper& other)            = delete;
