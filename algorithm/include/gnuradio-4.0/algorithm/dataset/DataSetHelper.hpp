@@ -152,6 +152,11 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     return T(20) * gr::math::log10(x); // 20 * log10(x)
 }
 
+template<typename T>
+[[nodiscard]] constexpr T inverseDecibel(T x) noexcept {
+    return gr::math::pow(T(10), x / T(20)); // Inverse decibel => 10^(value / 20)
+}
+
 template<bool ThrowOnFailure = true, typename T>
 [[maybe_unused]] constexpr bool verify(const DataSet<T>& dataSet, std::source_location location = std::source_location::current()) {
     auto handleFailure = [&](const std::string& message) -> bool {

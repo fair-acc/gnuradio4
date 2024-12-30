@@ -22,13 +22,9 @@
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 #include "DataSetHelper.hpp"
+#include "DataSetMath.hpp"
 
 namespace gr::dataset {
-
-template<typename T>
-[[nodiscard]] constexpr T inverseDecibel(T x) noexcept {
-    return gr::math::pow(T(10), x / T(20)); // Inverse decibel => 10^(value / 20)
-}
 
 namespace estimators {
 template<typename T>
@@ -502,6 +498,244 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
         return getIndexValue(dataSet, dim::X, 0, signalIndex);
     }
     return std::numeric_limits<TValue>::quiet_NaN(); // No crossing found
+}
+
+template<typename T>
+struct StepStartDetectionResult {
+    std::size_t index;        ///< Index where the step starts.
+    T           initialValue; ///< Initial value of the signal.
+    T           minValue;     ///< Minimum value of the signal.
+    T           maxValue;     ///< Maximum value of the signal.
+    bool        isRising;     ///< Indicates if the detected step is rising (true) or falling (false).
+};
+
+template<typename T>
+std::optional<StepStartDetectionResult<T>> detectStepStart(const DataSet<T>& ds, std::size_t signalIndex = 0UZ) {
+    // Verify the DataSet
+    if (!gr::dataset::verify<true>(ds)) {
+        throw gr::exception("Invalid DataSet for step/pulse start detection.");
+    }
+
+    auto signal = ds.signalValues(signalIndex);
+    if (signal.empty()) {
+        throw gr::exception("Signal is empty.");
+    }
+
+    T initial = signal.front();
+    T max_val = estimators::getMaximum(ds, signalIndex);
+    T min_val = estimators::getMinimum(ds, signalIndex);
+
+    bool isRising  = initial < max_val;
+    bool isFalling = initial > min_val;
+
+    if (!isRising && !isFalling) {
+        return std::nullopt; // No clear step detected
+    }
+
+    // Determine target value based on edge type
+    T target = isRising ? max_val : min_val;
+
+    // Find the threshold crossing (50% of change)
+    T halfChange = isRising ? initial + T(0.5f) * (max_val - initial) : initial - T(0.5f) * (initial - min_val);
+
+    // Utilize existing getZeroCrossing to find the trigger time
+    T triggerTime;
+    try {
+        triggerTime = estimators::getZeroCrossing(ds, halfChange, signalIndex);
+    } catch (...) {
+        return std::nullopt; // Failed to compute trigger time
+    }
+
+    // Find the closest index to the triggerTime
+    const auto& xAxis = ds.axisValues(0);
+    auto        it    = std::lower_bound(xAxis.begin(), xAxis.end(), triggerTime);
+    if (it == xAxis.end()) {
+        return std::nullopt; // No step detected
+    }
+    std::size_t index = std::distance(xAxis.begin(), it);
+
+    // Ensure the index is within bounds
+    if (index >= signal.size()) {
+        return std::nullopt;
+    }
+
+    // Populate the result struct
+    StepStartDetectionResult<T> result;
+    result.index        = index;
+    result.initialValue = initial;
+    result.minValue     = min_val;
+    result.maxValue     = max_val;
+    result.isRising     = isRising;
+
+    return result;
+}
+
+template<typename T>
+struct StepPulseResponseMetrics {
+    bool isPulse       = false; ///< Indicates if the response is a pulse.
+    T    triggerTime   = 0.0;   ///< Time at which the trigger occurs (50% crossing).
+    T    V1            = 0.0;   ///< Steady-state level before the step.
+    T    V2            = 0.0;   ///< Steady-state level after the step.
+    T    V3            = 0.0;   ///< Steady-state level after the pulse (if pulse).
+    T    riseTime      = 0.0;   ///< Rise time (e.g., 10% -> 90% of V2 - V1).
+    T    peakAmplitude = 0.0;   ///< Peak amplitude relative to V1.
+    T    peakTime      = 0.0;   ///< Time at which the peak occurs.
+    T    overshoot     = 0.0;   ///< Overshoot percentage.
+    T    settlingTime  = 0.0;   ///< Settling time within 2% of V2.
+};
+
+template <typename T,  typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+StepPulseResponseMetrics<T> analyzeStepPulseResponse(const DataSet<T>& ds, std::size_t signalIndex = 0UZ) {
+    StepPulseResponseMetrics<T> metrics;
+
+    // Step 1: Smooth the signal to reduce noise
+    DataSet<T> smoothed = filter::applyMovingAverage(ds, 5, signalIndex); // Window size 5 as an example
+    std::span<const T> smoothedAxisValues = smoothed.axisValues(dim::X);
+    std::span<const T> smoothedsignalValues = smoothed.signalValues(signalIndex);
+
+    // Step 2: Compute the derivative
+    auto derivative = computeDerivative(smoothed, signalIndex);
+
+    // Step 3: Detect step start
+    auto detectionResult = estimators::detectStepStart(smoothed, signalIndex);
+
+    if (!detectionResult.has_value()) {
+        throw gr::exception("No step detected in the signal.");
+    }
+
+    const auto& result = detectionResult.value();
+
+    metrics.isPulse = false; // Default
+
+    // Step 4: Compute V1 and V2 using existing getMedian
+    // V1: median of pre-step region
+    std::size_t V1WindowSize = smoothedsignalValues.size() / 10; // Example: first 10% as pre-step
+    if (V1WindowSize == 0) {
+        V1WindowSize = 10; // Minimum pre-step samples
+    }
+    std::size_t V1Start = (result.index >= V1WindowSize) ? result.index - V1WindowSize : 0;
+    std::size_t V1End = result.index;
+    metrics.V1 = estimators::getMedian(smoothed, V1Start, V1End, signalIndex);
+
+    // V2: median of post-step region
+    std::size_t V2Start = result.index;
+    std::size_t V2End = V2Start + V1WindowSize;
+    if (V2End > smoothedsignalValues.size()) {
+        V2End = smoothedsignalValues.size();
+    }
+    metrics.V2 = estimators::getMedian(smoothed, V2Start, V2End, signalIndex);
+
+    // Step 5: Determine if it's a pulse by checking for a falling or rising edge after the step
+    // Compare initial value with max/min to determine edge direction
+    bool isRising = result.isRising;
+
+    if (isRising) {
+        // Look for a significant drop after V2 indicating a pulse
+        T postStepThreshold = metrics.V2 * TValue(0.5); // Example threshold for pulse detection
+        bool pulseDetected = false;
+        std::size_t pulseIndex = smoothedsignalValues.size(); // Initialize to size (no pulse)
+        for (std::size_t i = V2End; i < smoothedsignalValues.size(); ++i) {
+            if (smoothedsignalValues[i] < postStepThreshold) {
+                pulseDetected = true;
+                pulseIndex = i;
+                break;
+            }
+        }
+        if (pulseDetected) {
+            metrics.isPulse = true;
+            // Compute V3 as median of post-pulse region
+            std::size_t V3Start = pulseIndex;
+            std::size_t V3End = V3Start + V1WindowSize;
+            if (V3End > smoothedsignalValues.size()) {
+                V3End = smoothedsignalValues.size();
+            }
+            metrics.V3 = estimators::getMedian(smoothed, V3Start, V3End, signalIndex);
+        }
+    } else {
+        // Look for a significant rise after V2 indicating a pulse
+        T postStepThreshold = metrics.V2 * TValue(1.5); // Example threshold for pulse detection
+        bool pulseDetected = false;
+        std::size_t pulseIndex = smoothedsignalValues.size(); // Initialize to size (no pulse)
+        for (std::size_t i = V2End; i < smoothedsignalValues.size(); ++i) {
+            if (smoothedsignalValues[i] > postStepThreshold) {
+                pulseDetected = true;
+                pulseIndex = i;
+                break;
+            }
+        }
+        if (pulseDetected) {
+            metrics.isPulse = true;
+            // Compute V3 as median of post-pulse region
+            std::size_t V3Start = pulseIndex;
+            std::size_t V3End = V3Start + V1WindowSize;
+            if (V3End > smoothedsignalValues.size()) {
+                V3End = smoothedsignalValues.size();
+            }
+            metrics.V3 = estimators::getMedian(smoothed, V3Start, V3End, signalIndex);
+        }
+    }
+
+    // Step 6: Compute trigger time (already obtained from detection)
+    metrics.triggerTime = result.index < smoothedsignalValues.size() ? smoothedAxisValues[result.index] : 0.0;
+
+    // Step 7: Compute rise time (10% -> 90%)
+    T riseStart = isRising ? metrics.V1 + TValue(0.1) * (metrics.V2 - metrics.V1) : metrics.V1 - TValue(0.1) * (metrics.V1 - metrics.V2);
+    T riseEnd = isRising ? metrics.V1 + TValue(0.9) * (metrics.V2 - metrics.V1) : metrics.V1 - TValue(0.9) * (metrics.V1 - metrics.V2);
+    // Compute rise start time
+    T riseStartTime;
+    try {
+        riseStartTime = estimators::getZeroCrossing(smoothed, riseStart, signalIndex);
+    } catch (...) {
+        riseStartTime = TValue(0); // Default or handle as needed
+    }
+    // Compute rise end time
+    T riseEndTime;
+    try {
+        riseEndTime = estimators::getZeroCrossing(smoothed, riseEnd, signalIndex);
+    } catch (...) {
+        riseEndTime = TValue(0); // Default or handle as needed
+    }
+    metrics.riseTime = riseEndTime - riseStartTime;
+
+    // Step 8: Compute peak amplitude and peak time
+    // Find maximum value and its index
+    auto maxIter = std::max_element(smoothedsignalValues.begin(), smoothedsignalValues.end(),
+        [&](const T& a, const T& b) -> bool { return gr::value(a) < gr::value(b); });
+    if (maxIter == smoothedsignalValues.end()) {
+        throw gr::exception("Failed to find peak amplitude.");
+    }
+    std::size_t maxIndex = std::distance(smoothedsignalValues.begin(), maxIter);
+    metrics.peakAmplitude = *maxIter - metrics.V1;
+    metrics.peakTime = smoothedAxisValues[maxIndex];
+
+    // Step 9: Compute overshoot
+    metrics.overshoot = ((metrics.peakAmplitude) / (metrics.V2 - metrics.V1)) * TValue(100);
+
+    // Step 10: Compute settling time (2% around V2)
+    T settlingLower = metrics.V2 - TValue(0.02) * gr::math::abs(metrics.V2 - metrics.V1);
+    T settlingUpper = metrics.V2 + TValue(0.02) * gr::math::abs(metrics.V2 - metrics.V1);
+    std::size_t settlingIndex = smoothedsignalValues.size();
+    for (std::size_t i = result.index; i < smoothedsignalValues.size(); ++i) {
+        T val = smoothedsignalValues[i];
+        if (val >= settlingLower && val <= settlingUpper) {
+            // Check if all subsequent points are within the settling band
+            bool settled = true;
+            for (std::size_t j = i; j < smoothedsignalValues.size(); ++j) {
+                T current = smoothedsignalValues[j];
+                if (!(current >= settlingLower && current <= settlingUpper)) {
+                    settled = false;
+                    break;
+                }
+            }
+            if (settled) {
+                settlingIndex = i;
+                metrics.settlingTime = smoothedAxisValues[i];
+                break;
+            }
+        }
+    }
+
+    return metrics;
 }
 
 } // namespace estimators

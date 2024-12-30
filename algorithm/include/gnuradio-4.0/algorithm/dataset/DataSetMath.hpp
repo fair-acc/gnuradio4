@@ -43,7 +43,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     case MathOp::SQRT: return (y1 + y2) > TValue(0) ? gr::math::sqrt(y1 + y2) : std::numeric_limits<TValue>::quiet_NaN();
     case MathOp::LOG10: return tenLog10((y1 + y2));
     case MathOp::DB: return decibel((y1 + y2));
-    case MathOp::INV_DB: return inverseDecibel(y1);
+    case MathOp::INV_DB: return inverseDecibel<T>(y1);
     case MathOp::IDENTITY:
     default: return (y1 + y2);
     }
@@ -124,6 +124,46 @@ template<typename T>
 }
 
 // WIP complete other convenience and missing math functions
+
+template<typename T>
+std::vector<T> computeDerivative(const DataSet<T>& ds, std::size_t signalIndex = 0UZ) {
+    auto signal = ds.signalValues(signalIndex);
+    if (signal.size() < 2) {
+        throw gr::exception("signal must contain at least two samples to compute derivative.");
+    }
+
+    std::vector<T> derivative;
+    derivative.reserve(signal.size() - 1UZ);
+    for (std::size_t i = 1UZ; i < signal.size(); ++i) {
+        derivative.push_back(signal[i] - signal[i - 1UZ]);
+    }
+    return derivative;
+}
+
+namespace filter {
+
+template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+DataSet<T> applyMovingAverage(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ) {
+    if (windowSize == 0 || !(windowSize & 1)) {
+        throw gr::exception("windowSize must be a positive odd number.");
+    }
+
+    DataSet<T> smoothed       = ds;
+    const auto signal         = ds.signalValues(signalIndex);
+    auto       smoothedSignal = smoothed.signalValues(signalIndex);
+
+    const std::size_t halfWindow = windowSize / 2UZ;
+    for (std::size_t i = 0UZ; i < signal.size(); ++i) {
+        std::size_t start = (i >= halfWindow) ? i - halfWindow : 0UZ;
+        std::size_t end   = std::min(i + halfWindow + 1UZ, signal.size());
+
+        T sum             = std::accumulate(signal.begin() + static_cast<std::ptrdiff_t>(start), signal.begin() + static_cast<std::ptrdiff_t>(end), T(0));
+        smoothedSignal[i] = sum / TValue(end - start);
+    }
+    return smoothed;
+}
+
+} // namespace filter
 
 } // namespace gr::dataset
 

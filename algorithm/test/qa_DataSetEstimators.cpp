@@ -298,6 +298,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
     using namespace boost::ut;
     using namespace boost::ut::literals;
     using namespace gr::dataset;
+    using test::detail::approx;
 
     "basic math API "_test = []<typename T = double> {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
@@ -372,7 +373,215 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         expect(eq(dsInv.signal_values[0], T(1))) << "inv_db test";
     };
 
+    "computeDerivative"_test = []<typename T = double> {
+        "ramp"_test = [] {
+            auto ds = generate::ramp<T>("ramp", 5, 0.0, 1.0);
+
+            auto           derivative = computeDerivative(ds);
+            std::vector<T> expected   = {0.2, 0.2, 0.2, 0.2};
+
+            for (std::size_t i = 0; i < expected.size(); ++i) {
+                T val = derivative[i];
+                expect(approx(val, expected[i], T(1e-3))) << fmt::format("Derivative at index {}: expected {}, got {}", i, expected[i], val);
+            }
+        };
+
+        "step"_test = [] {
+            auto ds_step         = generate::randomStepFunction<T>("step", 6, 3); // [0, 0, 0, 1, 1, 1]
+            auto derivative_step = computeDerivative(ds_step);
+
+            std::vector<T> expected_step = {0.0, 0.0, 1.0, 0.0, 0.0};
+            for (std::size_t i = 0; i < expected_step.size(); ++i) {
+                T val = derivative_step[i];
+                expect(approx(val, expected_step[i], T(1e-3))) << fmt::format("Step Derivative at index {}: expected {}, got {}", i, expected_step[i], val);
+            }
+        };
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "detectStepStart"_test = []<typename T = double> {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+        // Create a step signal with a clear step at index 3
+        auto ds_step         = generate::randomStepFunction<T>("step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        auto detectionResult = estimators::detectStepStart(ds_step, 0);
+
+        expect(detectionResult.has_value()) << "Step should be detected.";
+        if (detectionResult.has_value()) {
+            const auto& result = detectionResult.value();
+            expect(eq(result.index, static_cast<std::size_t>(3))) << fmt::format("Detected step start at index {}, expected 3", result.index);
+            expect(eq(result.initialValue, T(0.0))) << fmt::format("Initial value: expected 0.0, got {}", result.initialValue);
+            expect(eq(result.minValue, T(0.0))) << fmt::format("Min value: expected 0.0, got {}", result.minValue);
+            expect(eq(result.maxValue, T(1.0))) << fmt::format("Max value: expected 1.0, got {}", result.maxValue);
+            expect(result.isRising) << "Step should be rising.";
+        }
+
+        // Create a noisy signal without a clear step
+        auto ds_no_step      = generate::triangular<T>("no_step", 5); // [0, 0.2, 0.4, 0.2, 0]
+        auto detectionNoStep = estimators::detectStepStart(ds_no_step, 0);
+        expect(!detectionNoStep.has_value()) << "No step should be detected.";
+
+        // Create a noisy step signal
+        auto ds_noisy_step = generate::randomStepFunction<T>("noisy_step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        // Introduce noise in the signal after the step
+        ds_noisy_step.signal_values[3] += value_t(0.1); // Slight overshoot
+        ds_noisy_step.signal_values[4] -= value_t(0.05);
+        ds_noisy_step.signal_values[5] += value_t(0.05);
+
+        auto detectionNoisyStep = estimators::detectStepStart(ds_noisy_step, 0);
+        expect(detectionNoisyStep.has_value()) << "Noisy step should still be detected.";
+        if (detectionNoisyStep.has_value()) {
+            const auto& result = detectionNoisyStep.value();
+            expect(eq(result.index, static_cast<std::size_t>(3))) << fmt::format("Detected noisy step start at index {}, expected 3", result.index);
+            expect(eq(result.initialValue, T(0.0))) << fmt::format("Initial value: expected 0.0, got {}", result.initialValue);
+            expect(eq(result.minValue, T(0.0))) << fmt::format("Min value: expected 0.0, got {}", result.minValue);
+            expect(eq(result.maxValue, T(1.1))) << fmt::format("Max value: expected 1.1, got {}", result.maxValue);
+            expect(result.isRising) << "Step should be rising.";
+        }
+
+        // Create a falling step signal
+        auto ds_falling_step = generate::randomStepFunction<T>("falling_step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        // Reverse the signal to make it a falling step
+        for (auto& val : ds_falling_step.signal_values) {
+            val = value_t(1.0) - val;
+        }
+        auto detectionFallingStep = estimators::detectStepStart(ds_falling_step, 0);
+        expect(detectionFallingStep.has_value()) << "Falling step should be detected.";
+        if (detectionFallingStep.has_value()) {
+            const auto& result = detectionFallingStep.value();
+            expect(eq(result.index, static_cast<std::size_t>(3))) << fmt::format("Detected falling step start at index {}, expected 3", result.index);
+            expect(eq(result.initialValue, T(1.0))) << fmt::format("Initial value: expected 1.0, got {}", result.initialValue);
+            expect(eq(result.minValue, T(0.0))) << fmt::format("Min value: expected 0.0, got {}", result.minValue);
+            expect(eq(result.maxValue, T(1.0))) << fmt::format("Max value: expected 1.0, got {}", result.maxValue);
+            expect(!result.isRising) << "Step should be falling.";
+        }
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "analyzeStepPulseResponse - Step"_test = []<typename T = double> {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+
+        // Create a step signal with a clear step at index 50
+        auto ds_step      = generate::randomStepFunction<T>("step", 100, 50); // [0, 0, ..., 0, 1, 1, ..., 1]
+        auto metrics_step = estimators::analyzeStepPulseResponse(ds_step, 0);
+
+        // Verify basic metrics
+        expect(!metrics_step.isPulse) << "Should not be classified as a pulse.";
+        expect(approx(metrics_step.V1, T(0.0), T(1e-2))) << "V1 should be approximately 0.0.";
+        expect(approx(metrics_step.V2, T(1.0), T(1e-2))) << "V2 should be approximately 1.0.";
+        expect(approx(metrics_step.triggerTime, T(50.0), T(1e-1))) << "Trigger time should be around 50.0.";
+
+        // Verify rise time
+        expect(approx(metrics_step.riseTime, T(0.4), T(1e-1))) << "Rise time should be small.";
+
+        // Verify peak amplitude and time
+        expect(approx(metrics_step.peakAmplitude, T(1.0), T(1e-2))) << "Peak amplitude should be approximately 1.0.";
+        expect(approx(metrics_step.peakTime, T(50.0), T(1e-1))) << "Peak time should be around 50.0.";
+
+        // Verify overshoot
+        expect(approx(metrics_step.overshoot, T(0.0), T(1e-2))) << "Overshoot should be 0.0%.";
+
+        // Verify settling time
+        expect(approx(metrics_step.settlingTime, T(50.0), T(1e-1))) << "Settling time should be around 50.0.";
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "analyzeStepPulseResponse - Pulse"_test = []<typename T = double> {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+
+        // Create a pulse signal with a step at index 40 and a fall at index 60
+        auto ds_pulse = generate::stepFunction<T>("pulse", 100, 40); // [0, 0, ..., 0, 1, 1, ..., 1]
+        // Introduce a falling edge to create a pulse
+        for (std::size_t i = 60; i < 80; ++i) {
+            ds_pulse.signal_values[i] = 1.0 - 0.01 * (i - 60); // Gradually decrease
+        }
+        for (std::size_t i = 80; i < 100; ++i) {
+            ds_pulse.signal_values[i] = 0.0; // Settled back to 0
+        }
+        // Adjust axis values accordingly
+        // Assuming axisValues are time indices, e.g., [0,1,2,...,99]
+        // Not shown here for brevity
+
+        auto metrics_pulse = estimators::analyzeStepPulseResponse(ds_pulse, 0);
+
+        // Verify basic metrics
+        expect(metrics_pulse.isPulse) << "Should be classified as a pulse.";
+        expect(approx(metrics_pulse.V1, T(0.0), T(1e-2))) << "V1 should be approximately 0.0.";
+        expect(approx(metrics_pulse.V2, T(1.0), T(1e-2))) << "V2 should be approximately 1.0.";
+        expect(approx(metrics_pulse.V3, T(0.0), T(1e-2))) << "V3 should be approximately 0.0.";
+        expect(approx(metrics_pulse.triggerTime, T(40.0), T(1e-1))) << "Trigger time should be around 40.0.";
+
+        // Verify rise time
+        expect(approx(metrics_pulse.riseTime, T(0.4), T(1e-1))) << "Rise time should be small.";
+
+        // Verify peak amplitude and time
+        expect(approx(metrics_pulse.peakAmplitude, T(1.0), T(1e-2))) << "Peak amplitude should be approximately 1.0.";
+        expect(approx(metrics_pulse.peakTime, T(40.0), T(1e-1))) << "Peak time should be around 40.0.";
+
+        // Verify overshoot
+        expect(approx(metrics_pulse.overshoot, T(0.0), T(1e-2))) << "Overshoot should be 0.0%.";
+
+        // Verify settling time
+        expect(approx(metrics_pulse.settlingTime, T(60.0), T(1e-1))) << "Settling time should be around 60.0.";
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    // skip / "analyzeStepPulseResponse - No Step"_test = []<typename T = double> {
+    //     using value_t = gr::meta::fundamental_base_value_type_t<T>;
+    //
+    //     // Create a symmetric triangular signal with no step
+    //     auto ds_no_step = generate::triangular<T>("no_step", 100); // [0, ..., peak, ..., 0]
+    //     expect(throws([&]() { estimators::analyzeStepPulseResponse(ds_no_step, 0); })) << "Should throw exception when no step is detected.";
+    // } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+    //
+    // skip / "analyzeStepPulseResponse - Noisy Step"_test = []<typename T = double> {
+    //     using value_t = gr::meta::fundamental_base_value_type_t<T>;
+    //
+    //     // Create a step signal with a clear step at index 50
+    //     auto ds_noisy_step = generate::randomStepFunction<T>("noisy_step", 100, 50); // [0, 0, ..., 0, 1, 1, ..., 1]
+    //     // Introduce noise in the signal after the step
+    //     for (std::size_t i = 50; i < 100; ++i) {
+    //         ds_noisy_step.signal_values[i] += value_t(0.05 * ((i % 2 == 0) ? 1.0 : -1.0)); // Add small noise
+    //     }
+    //
+    //     auto metrics_noisy_step = estimators::analyzeStepPulseResponse(ds_noisy_step, 0);
+    //
+    //     // Verify basic metrics
+    //     expect(!metrics_noisy_step.isPulse) << "Noisy step should still be classified as a step.";
+    //     expect(approx(metrics_noisy_step.V1, T(0.0), T(1e-2))) << "V1 should be approximately 0.0.";
+    //     expect(approx(metrics_noisy_step.V2, T(1.0), T(1e-1))) << "V2 should be approximately 1.0 with some tolerance.";
+    //     expect(approx(metrics_noisy_step.triggerTime, T(50.0), T(1e-1))) << "Trigger time should be around 50.0.";
+    //
+    //     // Verify rise time
+    //     expect(approx(metrics_noisy_step.riseTime, T(0.4), T(1e-1))) << "Rise time should be small.";
+    //
+    //     // Verify peak amplitude and time
+    //     expect(approx(metrics_noisy_step.peakAmplitude, T(1.0), T(1e-1))) << "Peak amplitude should be approximately 1.0 with some tolerance.";
+    //     expect(approx(metrics_noisy_step.peakTime, T(50.0), T(1e-1))) << "Peak time should be around 50.0.";
+    //
+    //     // Verify overshoot
+    //     expect(approx(metrics_noisy_step.overshoot, T(0.0), T(5.0))) << "Overshoot should be small despite noise.";
+    //
+    //     // Verify settling time
+    //     expect(approx(metrics_noisy_step.settlingTime, T(50.0), T(1e-1))) << "Settling time should be around 50.0 with some tolerance.";
+    // } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
     // WIP -- add more DataSet<T> math-related functionality here
+};
+
+const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
+    using namespace boost::ut;
+    using namespace gr::dataset;
+    using test::detail::approx;
+
+    "applyMovingAverage"_test = []<typename T> {
+        gr::DataSet<T> ds = generate::ramp<T>("ramp", 5, 0.0, 1.0); // [0, 0.2, 0.4, 0.6, 0.8]
+
+        auto smoothed = filter::applyMovingAverage(ds, 3UZ);
+
+        std::vector<T> expected = {0.1, 0.2, 0.4, 0.6, 0.7};
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            T val = smoothed.signal_values[i];
+            expect(approx(val, expected[i], T(1e-3))) << fmt::format("smoothed value at index {}: expected {}, got {}", i, expected[i], val);
+        }
+
+        expect(throws([&]() { filter::applyMovingAverage(ds, 4); }));
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 };
 
 #pragma GCC diagnostic pop

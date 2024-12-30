@@ -123,6 +123,39 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] gr::DataSet<T> stepFunction(std::string name, std::size_t count, std::uint64_t stepAt = 0U) {
+    if (count == 0UZ) {
+        throw std::invalid_argument("Count must be greater than 0");
+    }
+    if (stepAt == 0UZ) {
+        stepAt = count/2;
+    }
+
+    gr::DataSet<T> ds;
+    ds.signal_names      = {name};
+    ds.signal_quantities = {"Amplitude"};
+    ds.signal_units      = {""};
+    ds.axis_names        = {"Time"};
+    ds.axis_units        = {"s"};
+    ds.axis_values.resize(1);
+    ds.axis_values[0].resize(count);
+    ds.signal_values.resize(count);
+    ds.meta_information.resize(1);
+    ds.timing_events.resize(1);
+    ds.extents = {1, static_cast<std::int32_t>(count)};
+
+    for (std::size_t i = 0; i < count; ++i) {
+        ds.axis_values[0][i] = static_cast<TValue>(i);
+        TValue val           = static_cast<TValue>(i < stepAt ? 0.0 : 1.0);
+        ds.signal_values[i]  = detail::initialize<T>(static_cast<TValue>(val), static_cast<TValue>(1) / static_cast<TValue>(10));
+    }
+
+    ds.signal_ranges.push_back(Range<T>{static_cast<T>(0), static_cast<T>(1)});
+
+    return ds;
+}
+
+template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 [[nodiscard]] gr::DataSet<T> randomStepFunction(std::string name, std::size_t count, std::uint64_t seed = 0U) {
     if (count == 0) {
         throw std::invalid_argument("Count must be greater than 0");
