@@ -576,6 +576,153 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
     };
 };
 
+const boost::ut::suite<"2nd-order resonator"> _resonsatorTests = [] {
+    using namespace boost::ut;
+    using namespace gr::filter;
+    using enum Frequency;
+    using enum ResponseType;
+    using enum gr::filter::Type;
+    using enum iir::Design;
+    using magic_enum::enum_name;
+
+    tag("visual") / "visual frequency-domain"_test = []() {
+        using namespace gr::graphs;
+        constexpr double fs = 1000.0;
+
+        // generate test frequency range
+        auto sequence_range = [](auto start, auto end, auto step) {
+            using namespace std::views; // for iota and transform
+            return iota(1, (end - start) / step + 2) | transform([=](auto i) { return start + step * (i - 1); });
+        };
+        std::vector<double> frequencies;
+        for (auto subrange : {sequence_range(0.1, 0.9, 0.01), sequence_range(1.0, 9.0, 0.01), sequence_range(10.0, 90.0, 0.1), sequence_range(100.0, 490.0, 10.0)}) {
+            std::ranges::move(subrange, std::back_inserter(frequencies));
+        }
+        const auto          resonator1         = iir::designResonatorPhysical(fs, 10., 0.01);
+        const auto          resonator2         = iir::designResonatorPhysical(fs, 10., 0.10);
+        const auto          resonator3         = iir::designResonatorPhysical(fs, 10., 0.999);
+        std::vector<double> responseResonator1 = calculateFrequencyResponse<MagnitudeDB>(frequencies, fs, resonator1);
+        std::vector<double> responseResonator2 = calculateFrequencyResponse<MagnitudeDB>(frequencies, fs, resonator2);
+        std::vector<double> responseResonator3 = calculateFrequencyResponse<MagnitudeDB>(frequencies, fs, resonator3);
+
+        // plots
+        auto chart        = gr::graphs::ImChart<119, 21, LogAxisTransform>({{0.1, fs}, {-20., +40}});
+        chart.axis_name_x = "[Hz]";
+        chart.axis_name_y = "[dB]";
+        chart.draw(frequencies, responseResonator1, fmt::format("Resonator: \\zeta=0.01)", countFilterCoefficients(resonator1)));
+        chart.draw(frequencies, responseResonator2, fmt::format("\\zeta=0.1)", countFilterCoefficients(resonator2)));
+        chart.draw(frequencies, responseResonator3, fmt::format("\\zeta=1.00)", countFilterCoefficients(resonator3)));
+        chart.draw();
+    };
+
+    tag("visual") / "visual time-domain"_test = []() {
+        constexpr double fs   = 1000.0;
+        constexpr double xMin = 0.0;
+        constexpr double xMax = 1.05;
+
+        std::vector<double> xValues(static_cast<std::size_t>((xMax - xMin) * fs));
+        for (std::size_t i = 0UZ; i < xValues.size(); ++i) {
+            xValues[i] = xMin + static_cast<double>(i) / fs;
+        }
+
+        auto chart        = gr::graphs::ImChart<120, 25>({{xMin, xMax}, {-0.15, +2.05}});
+        chart.axis_name_x = "time [s]";
+        chart.axis_name_y = "resonator response [a.u.]";
+
+        for (const auto& zeta : {0.01, 0.1, 0.99}) {
+            auto                filter = Filter<double>(iir::designResonatorPhysical(fs, 10., zeta));
+            std::vector<double> yValue(xValues.size());
+            std::vector<double> yFiltered(xValues.size());
+            std::transform(xValues.cbegin(), xValues.cend(), yValue.begin(), [](double t) { return t < 0.05 ? 0.0 : 1.0; });
+            std::transform(yValue.cbegin(), yValue.cend(), yFiltered.begin(), [&filter](double y) { return filter.processOne(y); });
+            expect(nothrow([&] { chart.draw(xValues, yFiltered, fmt::format("resonance@zeta={}", zeta)); })) << fmt::format("resonance@zeta={} does not throw", zeta);
+        }
+
+        expect(nothrow([&] { chart.draw(); }));
+    };
+
+    "frequency response"_test = []() {
+        constexpr double fs        = 1000.0;
+        constexpr double frequency = 100.0;
+        constexpr double zeta      = 0.01;
+
+        const auto resonator = iir::designResonatorPhysical(fs, frequency, zeta);
+
+        std::vector<double> frequencies = {50.0, 75.0, 100.0, 125.0, 150.0};
+        auto                response    = calculateFrequencyResponse<Magnitude>(frequencies, fs, resonator);
+
+        expect(ge(response[2], 10.0)) << fmt::format("gain {:.4f} at resonant frequency {:.0f} Hz", response[2], frequencies[2]);
+
+        expect(le(response[0], response[1])) << fmt::format("gains {:.4f} @ {:.0f} < {:.4f} at {:.0f} should fall off (left side).", response[0], frequencies[0], response[1], frequencies[1]);
+        expect(le(response[1], response[2])) << fmt::format("gains {:.4f} @ {:.0f} < {:.4f} at {:.0f} should fall off (left side).", response[1], frequencies[1], response[2], frequencies[2]);
+        expect(le(response[3], response[2])) << fmt::format("gains {:.4f} @ {:.0f} < {:.4f} at {:.0f} should fall off (right side).", response[3], frequencies[3], response[2], frequencies[2]);
+        expect(le(response[4], response[3])) << fmt::format("gains {:.4f} @ {:.0f} < {:.4f} at {:.0f} should fall off (right side).", response[4], frequencies[4], response[3], frequencies[3]);
+    };
+
+    "impulse response"_test = []() {
+        constexpr double      fs        = 1000.0;
+        constexpr double      frequency = 100.0;
+        constexpr double      zeta      = 0.05;
+        constexpr std::size_t steps     = 1000;
+
+        const auto resonator = iir::designResonatorPhysical(fs, frequency, zeta);
+        auto       filter    = Filter<double>(resonator);
+
+        std::vector<double> impulse(steps, 0.0);
+        impulse[0] = 1.0; // impulse at t=0
+
+        std::vector<double> absResponse(steps);
+        std::transform(impulse.begin(), impulse.end(), absResponse.begin(), [&filter](double sample) { return std::abs(filter.processOne(sample)); });
+
+        // track peaks in abs response
+        std::vector<double> peaks;
+        for (std::size_t i = 1; i < steps - 1; ++i) {
+            if (absResponse[i] > absResponse[i - 1] && absResponse[i] > absResponse[i + 1]) {
+                peaks.push_back(absResponse[i]);
+            }
+        }
+        expect(ge(peaks.size(), 10UZ)) << "no peaks found";
+
+        for (std::size_t i = 1; i < peaks.size(); ++i) {
+            expect(le(peaks[i], peaks[i - 1])) << fmt::format("insufficient peak decay at index {}", i);
+        }
+    };
+
+    "designResonatorDigital - corner cases"_test = []() {
+        constexpr double fs         = 1000.0;
+        constexpr double frequency  = 100.0;
+        constexpr double poleRadius = 0.95;
+
+        expect(throws([&] { iir::designResonatorDigital(0.0, frequency, poleRadius); })) << "zero sampling rate should throw.";
+        expect(throws([&] { iir::designResonatorDigital(fs, -frequency, poleRadius); })) << "negative frequency should throw.";
+        expect(throws([&] { iir::designResonatorDigital(fs, fs / 2.0, poleRadius); })) << "crequency equal to Nyquist rate should throw.";
+        expect(throws([&] { iir::designResonatorDigital(fs, frequency, 0.0); })) << "pole radius of 0.0 should throw.";
+        expect(throws([&] { iir::designResonatorDigital(fs, frequency, 1.0); })) << "pole radius of 1.0 should throw.";
+        expect(throws([&] { iir::designResonatorDigital(fs, frequency, 1.01); })) << "Pole radius greater than 1.0 should throw.";
+    };
+
+    "designResonatorPhysical - corner cases"_test = []() {
+        constexpr double fs          = 1000.0;
+        constexpr double frequency   = 100.0;
+        constexpr double zetaDamping = 0.1;
+
+        expect(throws([&] { iir::designResonatorPhysical(0.0, frequency, zetaDamping); })) << "zero sampling rate should throw.";
+        expect(throws([&] { iir::designResonatorPhysical(fs, -frequency, zetaDamping); })) << "negative frequency should throw.";
+        expect(throws([&] { iir::designResonatorPhysical(fs, frequency, -0.01); })) << "negative zeta damping should throw.";
+    };
+
+    "designResonatorRF - corner cases"_test = []() {
+        constexpr double fs        = 1000.0;
+        constexpr double frequency = 100.0;
+        constexpr double Q         = 10.0;
+
+        expect(throws([&] { iir::designResonatorRF(0.0, frequency, Q); })) << "zero sampling rate should throw.";
+        expect(throws([&] { iir::designResonatorRF(fs, -frequency, Q); })) << "negative frequency should throw.";
+        expect(throws([&] { iir::designResonatorRF(fs, frequency, 0.0); })) << "zero Q factor should throw.";
+        expect(throws([&] { iir::designResonatorRF(fs, frequency, -5.0); })) << "negative Q factor should throw.";
+    };
+};
+
 const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
     using namespace boost::ut;
     using namespace gr::filter;

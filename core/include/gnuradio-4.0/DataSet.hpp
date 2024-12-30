@@ -31,7 +31,7 @@ struct Range {
 /**
  * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
  */
-template<typename T>
+template<typename U, typename T = std::remove_cvref_t<U>>
 concept PacketLike = requires(T t) {
     typename T::value_type;
     typename T::pmt_map;
@@ -43,7 +43,7 @@ concept PacketLike = requires(T t) {
 /**
  * @brief A concept that describes a Tensor, which is a subset of the DataSet struct.
  */
-template<typename T>
+template<typename U, typename T = std::remove_cvref_t<U>>
 concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;
@@ -62,7 +62,7 @@ concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
  * values, and ranges, as well as metadata and timing events. This struct provides a flexible way to store and organize
  * data with associated metadata, and can be customized for different types of data and applications.
  */
-template<typename T>
+template<typename U, typename T = std::remove_cvref_t<U>>
 concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;

@@ -25,7 +25,22 @@
 
 namespace gr {
 
-using Size_t = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+#pragma GCC diagnostic push // suppress unavoidable float/int/size_t conversion warnings
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#pragma GCC diagnostic ignored "-Wshorten-64-to-32"
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
+
+using Size_t                            = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+inline constexpr Size_t      max_Size_t = std::numeric_limits<gr::Size_t>::max();
+inline constexpr std::size_t max_size_t = std::numeric_limits<std::size_t>::max();
+
+template<typename T, typename U>
+T cast(U value) { /// gcc/clang warning suppressing cast
+    return static_cast<T>(value);
+}
+
+#pragma GCC diagnostic pop
 
 namespace meta {
 
@@ -346,15 +361,15 @@ namespace detail {
 template<std::integral auto N>
 consteval auto fixed_string_from_number_impl() {
     constexpr size_t buf_len = [] {
-        auto x   = N;
-        size_t  len = x < 0 ? 1u : 0u; // minus character
-        while (x != 0) { // count digits
+        auto   x   = N;
+        size_t len = x < 0 ? 1u : 0u; // minus character
+        while (x != 0) {              // count digits
             ++len;
             x /= 10;
         }
         return len;
     }();
-    fixed_string<buf_len> ret {};
+    fixed_string<buf_len> ret{};
 
     constexpr bool negative = N < 0;
 

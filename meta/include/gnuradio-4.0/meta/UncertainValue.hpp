@@ -354,6 +354,15 @@ template<typename T>
 }
 
 template<typename T>
+[[nodiscard]] constexpr T abs(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return gr::value(value) > T(0) ? value : -value;
+    } else {
+        return std::abs(value);
+    }
+}
+
+template<typename T>
 [[nodiscard]] constexpr T log(const T& x) noexcept {
     if constexpr (UncertainValueLike<T>) {
         using base_t = gr::meta::fundamental_base_value_type_t<T>;

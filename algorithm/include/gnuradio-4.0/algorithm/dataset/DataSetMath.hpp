@@ -2,6 +2,7 @@
 #define DATASETMATH_HPP
 
 #include <fmt/format.h>
+#include <random>
 
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Message.hpp>
@@ -43,7 +44,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     case MathOp::SQRT: return (y1 + y2) > TValue(0) ? gr::math::sqrt(y1 + y2) : std::numeric_limits<TValue>::quiet_NaN();
     case MathOp::LOG10: return tenLog10((y1 + y2));
     case MathOp::DB: return decibel((y1 + y2));
-    case MathOp::INV_DB: return inverseDecibel(y1);
+    case MathOp::INV_DB: return inverseDecibel<T>(y1);
     case MathOp::IDENTITY:
     default: return (y1 + y2);
     }
@@ -124,6 +125,259 @@ template<typename T>
 }
 
 // WIP complete other convenience and missing math functions
+
+template<typename T>
+std::vector<T> computeDerivative(const DataSet<T>& ds, std::size_t signalIndex = 0UZ) {
+    auto signal = ds.signalValues(signalIndex);
+    if (signal.size() < 2) {
+        throw gr::exception("signal must contain at least two samples to compute derivative.");
+    }
+
+    std::vector<T> derivative;
+    derivative.reserve(signal.size() - 1UZ);
+    for (std::size_t i = 1UZ; i < signal.size(); ++i) {
+        derivative.push_back(signal[i] - signal[i - 1UZ]);
+    }
+    return derivative;
+}
+
+template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+DataSet<T> addNoise(const DataSet<T>& ds, TValue noiseLevel, std::size_t signalIndex = 0UZ, std::uint64_t seed = 0U) {
+    if (noiseLevel < TValue(0)) {
+        throw gr::exception(fmt::format("noiseLevel {} must be a positive number.", noiseLevel));
+    }
+
+    DataSet<T> noisy;
+    if constexpr (mode == ProcessMode::Copy) { // copy
+        noisy = ds;
+    } else { // or move (in-place)
+        noisy = std::move(ds);
+    }
+    const auto         signal      = ds.signalValues(signalIndex);
+    auto               noisySignal = noisy.signalValues(signalIndex);
+    std::random_device rd;
+    std::mt19937_64    rng(seed == 0 ? rd() : seed);
+    using Distribution = std::conditional_t<std::is_integral_v<TValue>, std::uniform_int_distribution<TValue>, std::uniform_real_distribution<TValue>>;
+
+    Distribution dist(-noiseLevel, +noiseLevel);
+
+    for (std::size_t i = 0UZ; i < signal.size(); ++i) {
+        noisySignal[i] += dist(rng);
+    }
+    return noisy;
+}
+
+namespace filter {
+
+template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+DataSet<T> applyMovingAverage(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ) {
+    if (windowSize == 0 || !(windowSize & 1)) {
+        throw gr::exception("windowSize must be a positive odd number.");
+    }
+
+    DataSet<T> smoothed;
+    if constexpr (mode == ProcessMode::Copy) { // copy
+        smoothed = ds;
+    } else { // or move (in-place)
+        smoothed = std::move(ds);
+    }
+    const auto signal         = ds.signalValues(signalIndex);
+    auto       smoothedSignal = smoothed.signalValues(signalIndex);
+
+    const std::size_t halfWindow = windowSize / 2UZ;
+    for (std::size_t i = 0UZ; i < signal.size(); ++i) {
+        std::size_t start = (i >= halfWindow) ? i - halfWindow : 0UZ;
+        std::size_t end   = std::min(i + halfWindow + 1UZ, signal.size());
+
+        T sum             = std::accumulate(signal.begin() + static_cast<std::ptrdiff_t>(start), signal.begin() + static_cast<std::ptrdiff_t>(end), T(0));
+        smoothedSignal[i] = sum / TValue(end - start);
+    }
+    return smoothed;
+}
+
+template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+constexpr DataSet<T> applyMedian(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    if (windowSize == 0) {
+        throw gr::exception(fmt::format("windowSize: {} must be a positive number.", windowSize), location);
+    }
+
+    DataSet<T> filtered;
+    if constexpr (mode == ProcessMode::Copy) {
+        filtered = ds;
+    } else {
+        filtered = std::move(ds);
+    }
+
+    const std::vector<T> signal{filtered.signalValues(signalIndex).begin(), filtered.signalValues(signalIndex).end()};
+    auto                 filteredSignal = filtered.signalValues(signalIndex);
+    const std::size_t    N              = filteredSignal.size();
+
+    std::vector<T>    medianWindow(windowSize); // temporary mutable copy for in-place partitioning
+    const std::size_t halfWindow = windowSize / 2UZ;
+    for (std::size_t i = 0UZ; i < N; ++i) {
+        const auto        start = static_cast<std::ptrdiff_t>(i > halfWindow ? i - halfWindow : 0UZ);
+        const auto        end   = static_cast<std::ptrdiff_t>(std::min(i + halfWindow + 1UZ, N));
+        const std::size_t size  = static_cast<std::size_t>(end - start);
+
+        std::copy(signal.begin() + start, signal.begin() + end, medianWindow.begin());
+
+        auto medianWindowView = std::span(medianWindow.data(), size);
+        auto midIter          = medianWindowView.begin() + (size / 2UZ);
+        std::ranges::nth_element(medianWindowView, midIter);
+
+        if ((size & 1UZ) == 0UZ) { // even-sized window -> take average around mid-point
+            auto midPrev      = std::ranges::max_element(medianWindowView.begin(), midIter);
+            filteredSignal[i] = T(0.5) * (*midPrev + *midIter);
+        } else { // odd-sized window -> use exact mid-point
+            filteredSignal[i] = *midIter;
+        }
+    }
+
+    return filtered;
+}
+
+template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+constexpr DataSet<T> applyRms(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    if (windowSize == 0UZ) {
+        throw gr::exception(fmt::format("windowSize: {} must be a positive number.", windowSize), location);
+    }
+
+    DataSet<T> filtered;
+    if constexpr (mode == ProcessMode::Copy) {
+        filtered = ds;
+    } else {
+        filtered = std::move(ds);
+    }
+
+    const std::vector<T> signal{filtered.signalValues(signalIndex).begin(), filtered.signalValues(signalIndex).end()};
+    auto                 filteredSignal = filtered.signalValues(signalIndex);
+    const std::size_t    N              = filteredSignal.size();
+
+    for (std::size_t i = 0; i < N; ++i) {
+        std::size_t start = (i > (windowSize / 2UZ)) ? i - (windowSize / 2UZ) : 0UZ;
+        std::size_t end   = std::min(i + (windowSize / 2UZ) + 1UZ, N);
+        std::size_t size  = (end - start);
+
+        T sum  = T(0);
+        T sum2 = T(0);
+        for (std::size_t j = start; j < end; ++j) {
+            sum += signal[j];
+            sum2 += signal[j] * signal[j];
+        }
+        if (size > 1UZ) {
+            T mean            = sum / gr::cast<TValue>(size);
+            filteredSignal[i] = gr::math::sqrt(gr::math::abs(sum2 / gr::cast<TValue>(size) - mean * mean));
+        } else {
+            filteredSignal[i] = gr::cast<TValue>(0);
+        }
+    }
+
+    return filtered;
+}
+
+template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+constexpr DataSet<T> applyPeakToPeak(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    if (windowSize == 0UZ) {
+        throw gr::exception(fmt::format("windowSize: {} must be a positive number.", windowSize), location);
+    }
+
+    DataSet<T> filtered;
+    if constexpr (mode == ProcessMode::Copy) {
+        filtered = ds;
+    } else {
+        filtered = std::move(ds);
+    }
+
+    const std::vector<T> signal{filtered.signalValues(signalIndex).begin(), filtered.signalValues(signalIndex).end()};
+    auto                 filteredSignal = filtered.signalValues(signalIndex);
+    const std::size_t    N              = filteredSignal.size();
+
+    const std::size_t halfWindow = windowSize / 2UZ;
+
+    for (std::size_t i = 0; i < N; ++i) {
+        std::size_t start = (i > halfWindow) ? i - halfWindow : 0UZ;
+        std::size_t end   = std::min(i + halfWindow + 1UZ, N);
+
+        auto minVal = std::numeric_limits<T>::max();
+        auto maxVal = std::numeric_limits<T>::lowest();
+        for (std::size_t j = start; j < end; ++j) {
+            if (signal[j] < minVal) {
+                minVal = signal[j];
+            }
+            if (signal[j] > maxVal) {
+                maxVal = signal[j];
+            }
+        }
+        filteredSignal[i] = maxVal - minVal;
+    }
+
+    return filtered;
+}
+
+template<ProcessMode mode = ProcessMode::Copy, bool symmetric = false, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename U>
+DataSet<T> applyFilter(D&& dataSet, const gr::filter::FilterCoefficients<U>& coeffs, std::size_t signalIndex = max_size_t) {
+    using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
+    constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
+
+    static_assert(!(isConstDataSet && mode == ProcessMode::InPlace), "cannot perform in-place computation on const DataSet<T>");
+
+    DataSet<T> smoothed;
+    if constexpr (mode == ProcessMode::Copy) { // copy
+        smoothed = dataSet;
+    } else { // or move (in-place)
+        smoothed = std::move(dataSet);
+    }
+
+    auto forwardPass = [&](std::span<T> signal) -> void {
+        auto filter = gr::filter::ErrorPropagatingFilter<T>(coeffs);
+        if constexpr (UncertainValueLike<TValue>) {
+            std::ranges::transform(signal, signal.begin(), [&](auto& val) { return filter.processOne(val); });
+        } else {
+            std::ranges::transform(signal, signal.begin(), [&](auto& val) { return gr::value(filter.processOne(val)); });
+        }
+    };
+
+    auto backwardPass = [&](std::span<T> signal) -> void {
+        auto filter = gr::filter::ErrorPropagatingFilter<T>(coeffs);
+        if constexpr (UncertainValueLike<TValue>) {
+            std::ranges::transform(signal | std::views::reverse, signal.rbegin(), [&](auto& val) { return filter.processOne(val); });
+        } else {
+            std::ranges::transform(signal | std::views::reverse, signal.rbegin(), [&](auto& val) { return gr::value(filter.processOne(val)); });
+        }
+    };
+
+    auto processSignal = [&](std::size_t sigIndex) {
+        auto signal = smoothed.signalValues(sigIndex);
+        if constexpr (!symmetric) {
+            forwardPass(signal); // forward pass only
+        } else {
+            std::vector<T> copy(signal.begin(), signal.end());
+            forwardPass(signal); // forward pass
+            backwardPass(copy);  // reverse pass
+            // combine both passes
+            for (std::size_t i = 0UZ; i < signal.size(); i++) {
+                signal[i] = T{0.5} * (signal[i] + copy[i]);
+            }
+        }
+    };
+
+    if (signalIndex != max_size_t) {
+        processSignal(signalIndex);
+    } else {
+        for (std::size_t dsIndex = 0UZ; dsIndex < smoothed.size(); dsIndex++) {
+            processSignal(dsIndex);
+        }
+    }
+
+    return smoothed;
+}
+
+template<ProcessMode Mode = ProcessMode::Copy, typename T, typename... TFilterCoefficients>
+DataSet<T> applySymmetricFilter(const DataSet<T>& ds, TFilterCoefficients&&... coeffs) {
+    return applyFilter<Mode, true>(ds, 0UZ, std::forward<TFilterCoefficients>(coeffs)...);
+}
+
+} // namespace filter
 
 } // namespace gr::dataset
 

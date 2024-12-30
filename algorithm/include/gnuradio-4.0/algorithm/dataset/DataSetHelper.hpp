@@ -10,11 +10,31 @@ inline static constexpr std::size_t Y = 1UZ; /// Y-axis index
 inline static constexpr std::size_t Z = 2UZ; /// Z-axis index
 } // namespace dim
 
+enum class ProcessMode : std::uint8_t {
+    InPlace = 0U, /// in-place processing
+    Copy          /// copy first, then process
+};
+
+enum class MetaInfo : std::uint8_t {
+    None = 0U, /// do nothing
+    Apply      /// add meta-info to DataSet<T>::meta_information[] or ::timing_events[] where applicable
+};
+
 namespace detail {
-inline void checkRangeIndex(std::size_t minIndex, std::size_t maxIndex, std::size_t dataCount, std::source_location location = std::source_location::current()) {
-    if (minIndex > maxIndex || maxIndex > dataCount) {
-        throw gr::exception(fmt::format("{} invalid range: [{},{}), dataCount={}", location, minIndex, maxIndex, dataCount));
+
+template<typename T>
+std::size_t checkIndexRange(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = 0UZ, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+    const std::size_t maxDataSetIndex = ds.axisValues(dim::X).size();
+    if (maxIndex == max_size_t) { // renormalise default range
+        maxIndex = maxDataSetIndex;
     }
+    if (minIndex > maxIndex || minIndex >= maxDataSetIndex || maxIndex > maxDataSetIndex || signalIndex >= ds.size()) {
+        throw gr::exception(fmt::format("DataSet<{}> ({}/{}: \"{}\") indices [{}, {}] out of range [0, {}]",                                    //
+                                gr::meta::type_name<T>(), signalIndex, ds.size(), signalIndex < ds.size() ? ds.signalName(signalIndex) : "???", //
+                                minIndex, maxIndex, maxDataSetIndex),
+            location);
+    }
+    return maxIndex;
 }
 
 template<typename T, typename U>
@@ -56,11 +76,11 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T>
-T getDistance(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t indexMin = 0UZ, std::size_t indexMax = 0UZ, std::size_t signalIndex = 0UZ) {
-    if (indexMax == 0UZ) { // renormalise default range
+T getDistance(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ) {
+    if (indexMax == max_size_t) { // renormalise default range
         indexMax = dataSet.axisValues(dim::X).size() - 1UZ;
     }
-    detail::checkRangeIndex(indexMin, indexMax, dataSet.axisValues(dim::X).size());
+    indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex);
 
     if (dimIndex == dim::X || dimIndex == dim::Y) {
         return getIndexValue(dataSet, dimIndex, indexMax, signalIndex) - getIndexValue(dataSet, dimIndex, indexMin, signalIndex);
@@ -131,7 +151,7 @@ std::vector<T> getSubArrayCopy(const DataSet<T>& ds, std::size_t indexMin, std::
     if (indexMax <= indexMin) {
         return {};
     }
-    detail::checkRangeIndex(indexMin, indexMax, ds.axisValues(0).size());
+    indexMax                  = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex);
     std::span<const T> values = ds.signalValues(signalIndex);
     return std::vector<T>(values.begin() + static_cast<std::ptrdiff_t>(indexMin), values.begin() + static_cast<std::ptrdiff_t>(indexMax));
 }
@@ -150,6 +170,11 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
         return -std::numeric_limits<TValue>::infinity();
     }
     return T(20) * gr::math::log10(x); // 20 * log10(x)
+}
+
+template<typename T>
+[[nodiscard]] constexpr T inverseDecibel(T x) noexcept {
+    return gr::math::pow(T(10), x / T(20)); // Inverse decibel => 10^(value / 20)
 }
 
 template<bool ThrowOnFailure = true, typename T>

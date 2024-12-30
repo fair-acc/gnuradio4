@@ -2,6 +2,7 @@
 #include <fmt/format.h>
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp> // for draw(...)
+#include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <fmt/ranges.h>
@@ -26,6 +27,11 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
     using namespace boost::ut;
     using namespace gr::dataset;
     constexpr static std::size_t nSamples = 201UZ;
+
+    "triangular DataSet"_test = []<typename T = double> {
+        gr::DataSet<T> ds = generate::from<T>("generic DataSet", std::vector{0, 1, 1, 2, 3, 5, 8, 13});
+        gr::dataset::draw(ds);
+    };
 
     "triangular DataSet"_test = []<typename T = double> {
         gr::DataSet<T> ds = generate::triangular<T>("triagonal", nSamples);
@@ -61,11 +67,12 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
     };
 
     "ramp + gauss DataSet"_test = []<typename T = double> {
+        using value_t             = gr::meta::fundamental_base_value_type_t<T>;
         constexpr T mean          = T(nSamples) / T(2);
         constexpr T sigma         = T(nSamples) / T(10);
         const T     normalisation = sigma * gr::math::sqrt(T(2) * std::numbers::pi_v<T>);
 
-        gr::DataSet<T> ds1 = generate::ramp<T>("ramp", nSamples, 0.0, 0.2);
+        gr::DataSet<T> ds1 = generate::ramp<T>("ramp", nSamples, value_t(0), value_t(0.2));
         gr::DataSet<T> ds2 = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation);
         gr::DataSet<T> ds  = addFunction(ds1, ds2);
 
@@ -183,15 +190,15 @@ const boost::ut::suite<"DataSet<T> estimator"> _qaDataSetEstimators = [] {
         expect(approx(estimators::computeFWHM(data, 2), T(4), T(1e-5)));
         expect(approx(estimators::computeInterpolatedFWHM(data, 2), T(3), T(1e-5)));
 
-        expect(eq(estimators::getLocationMaximum(ds, 0UZ, nSamples), int(5)));
-        expect(eq(estimators::getLocationMinimum(ds, 0UZ, nSamples), int(0)));
-        expect(eq(estimators::getLocationMaximum(ds), int(5)));
-        expect(eq(estimators::getLocationMinimum(ds), int(0)));
+        expect(eq(estimators::getMaximum(ds, 0UZ, nSamples).value().index, 5UZ));
+        expect(eq(estimators::getMinimum(ds, 0UZ, nSamples).value().index, 10UZ));
+        expect(eq(estimators::getMaximum(ds).value().index, 5UZ));
+        expect(eq(estimators::getMinimum(ds).value().index, 10UZ));
 
-        expect(eq(gr::value(estimators::getMaximum(ds, 0UZ, nSamples)), value_t(1)));
-        expect(eq(gr::value(estimators::getMaximum(ds)), value_t(1)));
-        expect(eq(gr::value(estimators::getMinimum(ds, 0UZ, nSamples)), value_t(0)));
-        expect(eq(gr::value(estimators::getMinimum(ds)), value_t(0)));
+        expect(eq(gr::value(estimators::getMaximum(ds, 0UZ, nSamples).value().value), value_t(1)));
+        expect(eq(gr::value(estimators::getMaximum(ds).value().value), value_t(1)));
+        expect(eq(gr::value(estimators::getMinimum(ds, 0UZ, nSamples).value().value), value_t(0)));
+        expect(eq(gr::value(estimators::getMinimum(ds).value().value), value_t(0)));
 
         expect(approx(estimators::getMean(ds, 0UZ, nSamples), T(0.454545), T(1e-3f)));
         expect(approx(estimators::getMean(ds), T(0.454545), T(1e-3f)));
@@ -298,6 +305,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
     using namespace boost::ut;
     using namespace boost::ut::literals;
     using namespace gr::dataset;
+    using test::detail::approx;
 
     "basic math API "_test = []<typename T = double> {
         using value_t = gr::meta::fundamental_base_value_type_t<T>;
@@ -372,7 +380,234 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         expect(eq(dsInv.signal_values[0], T(1))) << "inv_db test";
     };
 
+    "computeDerivative"_test = []<typename T = double> {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+
+        "ramp"_test = [] {
+            auto ds = generate::ramp<T>("ramp", 5, value_t(0.), value_t(1.));
+
+            auto           derivative = computeDerivative(ds);
+            std::vector<T> expected   = {0.2, 0.2, 0.2, 0.2};
+
+            for (std::size_t i = 0; i < expected.size(); ++i) {
+                T val = derivative[i];
+                expect(approx(val, expected[i], T(1e-3))) << fmt::format("Derivative at index {}: expected {}, got {}", i, expected[i], val);
+            }
+        };
+
+        "step"_test = [] {
+            auto ds_step         = generate::randomStepFunction<T>("step", 6, 3); // [0, 0, 0, 1, 1, 1]
+            auto derivative_step = computeDerivative(ds_step);
+
+            std::vector<T> expected_step = {0.0, 0.0, 1.0, 0.0, 0.0};
+            for (std::size_t i = 0; i < expected_step.size(); ++i) {
+                T val = derivative_step[i];
+                expect(approx(val, expected_step[i], T(1e-3))) << fmt::format("Step Derivative at index {}: expected {}, got {}", i, expected_step[i], val);
+            }
+        };
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "filter DataSet"_test = []<typename T = double> {
+        using value_t             = gr::meta::fundamental_base_value_type_t<T>;
+        auto ds_step              = generate::stepFunction<T>("step", 200, 25);
+        auto responseCoefficients = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5));
+        auto filtered             = gr::dataset::filter::applyFilter(ds_step, responseCoefficients);
+        if constexpr (std::is_same_v<T, float>) {
+            gr::dataset::draw(ds_step, DefaultChartConfig{});
+            gr::dataset::draw(filtered, DefaultChartConfig{.reset_view = gr::graphs::ResetChartView::RESET});
+        }
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "detectStepStart"_test = []<typename T = double> {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+        // Create a step signal with a clear step at index 3
+        auto ds_step         = generate::stepFunction<T>("step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        auto detectionResult = estimators::detectStepStart(ds_step);
+
+        expect(detectionResult.has_value()) << "step should be detected.";
+        if (detectionResult.has_value()) {
+            const auto& result = detectionResult.value();
+            expect(eq(result.index, 3UZ)) << "detected step start";
+            expect(eq(gr::value(result.initialValue), value_t(0.0))) << "initial value";
+            expect(eq(gr::value(result.minValue), value_t(0.0))) << "min value";
+            expect(eq(gr::value(result.maxValue), value_t(1.0))) << "max value";
+            expect(result.isRising) << "step should be rising.";
+        }
+
+        auto ds_noisy_step = generate::randomStepFunction<T>("noisy_step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        ds_noisy_step.signal_values[3] += value_t(0.1);                           // slight overshoot
+
+        auto detectionNoisyStep = estimators::detectStepStart(ds_noisy_step);
+        expect(detectionNoisyStep.has_value()) << "noisy step should still be detected.";
+        if (detectionNoisyStep.has_value()) {
+            const auto& result = detectionNoisyStep.value();
+            expect(eq(result.index, 3UZ)) << "detected step start";
+            expect(eq(gr::value(result.initialValue), value_t(0.0))) << "initial value";
+            expect(eq(gr::value(result.minValue), value_t(0.0))) << "min value";
+            expect(eq(gr::value(result.maxValue), value_t(1.1))) << "max value";
+            expect(result.isRising) << "step should be rising.";
+        }
+
+        auto ds_falling_step = generate::randomStepFunction<T>("falling_step", 6, 3); // [0, 0, 0, 1, 1, 1]
+        for (auto& val : ds_falling_step.signal_values) {
+            val = value_t(1.0) - val;
+        }
+        auto detectionFallingStep = estimators::detectStepStart(ds_falling_step);
+        expect(detectionFallingStep.has_value()) << "falling step should be detected.";
+        if (detectionFallingStep.has_value()) {
+            const auto& result = detectionFallingStep.value();
+            expect(eq(result.index, 3UZ)) << "detected step start";
+            expect(eq(gr::value(result.initialValue), T(1.0))) << "initial value";
+            expect(eq(gr::value(result.minValue), T(0.0))) << "min value";
+            expect(eq(gr::value(result.maxValue), T(1.0))) << "max value";
+            expect(!result.isRising) << "step should be falling.";
+        }
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "analyzeStepPulseResponse - Step"_test = []<typename T = double> {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+        auto response = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5));
+        auto ds_step  = gr::dataset::filter::applyFilter(generate::stepFunction<T>("step", 100, 20), response);
+        auto metrics  = estimators::analyzeStepPulseResponse(ds_step);
+
+        if constexpr (std::is_same_v<T, float>) {
+            gr::dataset::draw(ds_step, DefaultChartConfig{});
+        }
+
+        "basic metrics"_test = [&] {
+            expect(!metrics.isPulse);
+            expect(approx(metrics.V1, T(0.0), T(1e-1))) << "V1 initial level";
+            expect(approx(metrics.V2, T(1.0), T(1e-1))) << "V2 flat-top level";
+            expect(approx(metrics.triggerTime, T(20.4), T(1e-1)));
+        };
+
+        "rising-edge metrics"_test = [&] {
+            expect(approx(metrics.riseTime, T(2.1), T(1e-1)));
+            expect(approx(metrics.peakAmplitude, T(1.21), T(1e-2)));
+            expect(approx(metrics.peakTime, T(23.0), T(2)));
+            expect(approx(metrics.overshoot, T(123.0), T(1)));
+            expect(approx(metrics.settlingTime, T(31.0), T(1e-1)));
+        };
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "analyzeStepPulseResponse - Pulse"_test = []<typename T = double> {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+
+        auto ds_pulse_proto = generate::stepFunction<T>("pulse", 100, 20);
+        for (std::size_t i = 50; i < 70; ++i) {
+            ds_pulse_proto.signal_values[i] = 1.0 - 0.01 * (i - 50); // gradual decrease at end-of-flat top
+        }
+        for (std::size_t i = 70; i < 100; ++i) {
+            ds_pulse_proto.signal_values[i] = 0.0; // final level
+        }
+
+        auto response = gr::filter::iir::designResonatorPhysical(value_t(1), value_t(0.1), value_t(0.5));
+        auto ds_pulse = gr::dataset::filter::applyFilter(ds_pulse_proto, response);
+        auto metrics  = estimators::analyzeStepPulseResponse(ds_pulse);
+
+        if constexpr (std::is_same_v<T, float>) {
+            gr::dataset::draw(ds_pulse, DefaultChartConfig{});
+        }
+
+        "basic metrics"_test = [&] {
+            expect(metrics.isPulse);
+            expect(approx(metrics.V1, T(0.0), T(1e-1))) << "V1 initial level";
+            expect(approx(metrics.V2, T(1.0), T(1e-1))) << "V2 flat-top level";
+            expect(approx(metrics.triggerTime, T(20.4), T(1e-1)));
+        };
+
+        "rising-edge metrics"_test = [&] {
+            expect(approx(metrics.riseTime, T(2.1), T(1e-1)));
+            expect(approx(metrics.peakAmplitude, T(1.21), T(1e-2)));
+            expect(approx(metrics.peakTime, T(23.0), T(2)));
+            expect(approx(metrics.overshoot, T(123.0), T(1)));
+            expect(approx(metrics.settlingTime, T(31.0), T(1e-1)));
+        };
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "analyzeStepPulseResponse - dampled and noisy Step"_test = []<typename T = double> {
+        using value_t                = gr::meta::fundamental_base_value_type_t<T>;
+        constexpr value_t noiseLevel = value_t(0.05);
+
+        auto response = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, {.order = 1UZ, .fLow = 0.05, .fs = 1.0});
+        auto val      = gr::dataset::filter::applyFilter<ProcessMode::InPlace>(generate::stepFunction<T>("damped step", 100, 20), response);
+        auto ds_step  = gr::dataset::addNoise<ProcessMode::InPlace>(val, noiseLevel, 0UZ, 42U);
+        auto metrics  = estimators::analyzeStepPulseResponse(ds_step);
+
+        if constexpr (std::is_same_v<T, float>) {
+            gr::dataset::draw(ds_step, DefaultChartConfig{});
+        }
+
+        "basic metrics"_test = [&] {
+            expect(!metrics.isPulse);
+            expect(approx(metrics.V1, T(0.0), T(noiseLevel))) << "V1 initial level";
+            expect(approx(metrics.V2, T(1.0), T(noiseLevel))) << "V2 flat-top level";
+            expect(approx(metrics.triggerTime, T(21.5), T(0.5)));
+        };
+
+        "rising-edge metrics"_test = [&] {
+            expect(approx(metrics.riseTime, T(7), T(1)));
+            expect(approx(metrics.peakAmplitude, T(1.0), T(2 * noiseLevel)));
+            expect(approx(metrics.peakTime, T(33.0), T(1)));
+            expect(approx(metrics.overshoot, T(100.0), T(2 * noiseLevel * 100)));
+            expect(gr::math::isfinite(metrics.settlingTime));
+        };
+    } | std::tuple<float /*, double, gr::UncertainValue<float>, gr::UncertainValue<double>*/>{};
+
     // WIP -- add more DataSet<T> math-related functionality here
+};
+
+const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
+    using namespace boost::ut;
+    using namespace gr::dataset;
+    using test::detail::approx;
+
+    "applyMovingAverage"_test = []<typename T> {
+        using value_t     = gr::meta::fundamental_base_value_type_t<T>;
+        gr::DataSet<T> ds = generate::ramp<T>("ramp", 5, value_t(0), value_t(1)); // [0, 0.2, 0.4, 0.6, 0.8]
+
+        auto smoothed = filter::applyMovingAverage(ds, 3UZ);
+
+        std::vector<T> expected = {0.1, 0.2, 0.4, 0.6, 0.7};
+        for (std::size_t i = 0; i < expected.size(); ++i) {
+            T val = smoothed.signal_values[i];
+            expect(approx(val, expected[i], T(1e-3))) << fmt::format("smoothed value at index {}: expected {}, got {}", i, expected[i], val);
+        }
+
+        expect(throws([&]() { filter::applyMovingAverage(ds, 4); }));
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "applyMedian"_test = []<typename T>() {
+        using value_t = gr::meta::fundamental_base_value_type_t<T>;
+
+        auto ds1 = filter::applyMedian<ProcessMode::Copy>(generate::from<T>("median_test", std::vector<value_t>{1, 5, 3, 2, 0, 8}), 3UZ);
+        expect(eq(ds1.signal_values[1], T(3))); // median of {1,5,3} is 3
+        expect(eq(ds1.signal_values[2], T(3))); // median of {5,3,2} is 3
+
+        auto ds2 = filter::applyMedian<ProcessMode::InPlace>(generate::from<T>("median_test", std::vector<value_t>{3, 3, 4, 3, 3, 4, 3, 3}), 3UZ);
+        for (std::size_t i = 0UZ; i < ds2.signal_values.size(); ++i) {
+            expect(eq(ds2.signal_values[i], T(3))) << "filter outlier around 3";
+        }
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "applyRms"_test = []<typename T>() {
+        using value_t            = gr::meta::fundamental_base_value_type_t<T>;
+        auto           ds        = generate::from<T>("rms_test", std::vector<value_t>{0, 10, 10, 10, 0});
+        gr::DataSet<T> ds_median = filter::applyRms<ProcessMode::Copy>(ds, 3UZ);
+        expect(eq(ds_median.signal_values[2], T(0))) << "RMS with identical points => 0 stdev (around mean).";
+        expect(eq(ds_median.signal_values[2], estimators::getRms(ds, 1UZ, 3UZ))) << "RMS with identical points => 0 stdev (around mean).";
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
+
+    "applyPeakToPeak"_test = []<typename T>() {
+        auto ds = filter::applyPeakToPeak(generate::from<T>("p2p_test", std::vector<T>{1, 2, 3, 5, 5, 0}), 3UZ);
+
+        expect(eq(ds.signal_values[0], T(1))); // window is {1, 2}    min=1, max=2 => range = 1
+        expect(eq(ds.signal_values[1], T(2))); // window is {1, 2, 3} min=1, max=3 => range = 2
+        expect(eq(ds.signal_values[2], T(3))); // window is {2, 3, 5} min=2, max=5 => range = 3
+        expect(eq(ds.signal_values[3], T(2)));
+        expect(eq(ds.signal_values[4], T(5)));
+        expect(eq(ds.signal_values[5], T(5))); // window is {5, 0}    min=0, max=5 => ramge = 5
+    } | std::tuple<float, double>{};
 };
 
 #pragma GCC diagnostic pop

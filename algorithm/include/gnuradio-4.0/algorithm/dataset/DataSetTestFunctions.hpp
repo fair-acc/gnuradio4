@@ -19,8 +19,8 @@
 namespace gr::dataset::generate {
 
 namespace detail {
-template<typename T>
-constexpr auto initialize = [](typename gr::meta::fundamental_base_value_type_t<T> value, typename gr::meta::fundamental_base_value_type_t<T> uncertainty = {}) -> T {
+template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+constexpr auto initialize = [](TValue value, TValue uncertainty = {}) -> T {
     if constexpr (gr::UncertainValueLike<T>) {
         return T{value, uncertainty};
     } else {
@@ -28,6 +28,48 @@ constexpr auto initialize = [](typename gr::meta::fundamental_base_value_type_t<
     }
 };
 } // namespace detail
+
+template<typename T, std::ranges::range RangeValues, std::ranges::range RangeUnc = std::span<const gr::meta::fundamental_base_value_type_t<T>>, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+requires std::convertible_to<std::ranges::range_value_t<RangeValues>, TValue> && std::convertible_to<std::ranges::range_value_t<RangeUnc>, TValue>
+[[nodiscard]] constexpr gr::DataSet<T> from(std::string name, RangeValues&& valuesRange, RangeUnc&& uncertaintiesRange = {}, std::source_location location = std::source_location::current()) {
+    // N.B. nomen est open, consider namespace as part of calling function 'gr::dataset::generate::from(...)'
+    auto values        = std::span{std::ranges::data(valuesRange), std::ranges::size(valuesRange)};
+    auto uncertainties = std::span{std::ranges::data(uncertaintiesRange), std::ranges::size(uncertaintiesRange)};
+
+    if (values.empty()) {
+        throw gr::exception("value span must not be empty", location);
+    }
+    const auto     count = values.size();
+    gr::DataSet<T> ds;
+    ds.signal_names      = {std::move(name)};
+    ds.signal_quantities = {"Amplitude"};
+    ds.signal_units      = {""};
+    ds.axis_names        = {"Index"};
+    ds.axis_units        = {""};
+    ds.axis_values.resize(1);
+    ds.axis_values[0].resize(count);
+    ds.signal_values.resize(count);
+    ds.meta_information.resize(1);
+    ds.timing_events.resize(1);
+    ds.extents = {1, static_cast<std::int32_t>(count)};
+
+    for (std::size_t i = 0; i < count; ++i) {
+        ds.axis_values[0][i] = static_cast<TValue>(i);
+    }
+
+    const TValue defaultUnc = TValue(0);
+    TValue       lastUnc    = uncertainties.empty() ? defaultUnc : *(uncertainties.end() - 1);
+    for (std::size_t i = 0UZ; i < count; ++i) {
+        TValue val          = values[i];
+        TValue unc          = (i < uncertainties.size()) ? uncertainties[i] : lastUnc;
+        ds.signal_values[i] = detail::initialize<T>(val, unc);
+    }
+
+    auto [minIt, maxIt] = std::minmax_element(values.begin(), values.end());
+    ds.signal_ranges.push_back({static_cast<T>(*minIt), static_cast<T>(*maxIt)});
+
+    return ds;
+}
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 [[nodiscard]] constexpr gr::DataSet<T> triangular(std::string name, std::size_t count, TValue offset = 0, TValue amplitude = 1) {
@@ -79,10 +121,12 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     ds.extents = {1, static_cast<std::int32_t>(count)};
 
     for (std::size_t i = 0; i < count; i++) {
-        ds.axis_values[0][i] = static_cast<T>(i);
-        ds.signal_values[i]  = detail::initialize<T>(TValue(offset) + TValue(amplitude) * TValue(i) / TValue(count), TValue(amplitude) / TValue(10));
+        ds.axis_values[0][i] = gr::cast<T>(i);
+        TValue value         = offset + amplitude * gr::cast<TValue>(gr::cast<TValue>(i) / gr::cast<TValue>(count));
+        TValue uncertainty   = gr::cast<TValue>(amplitude / gr::cast<TValue>(10));
+        ds.signal_values[i]  = detail::initialize<T>(gr::cast<TValue>(value), gr::cast<TValue>(uncertainty));
     }
-    ds.signal_ranges.push_back({T(offset), T(amplitude)});
+    ds.signal_ranges.push_back({gr::cast<T>(offset), gr::cast<T>(amplitude)});
     return ds;
 }
 
@@ -118,6 +162,39 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 
     auto minmax = std::minmax_element(ds.signal_values.begin(), ds.signal_values.end());
     ds.signal_ranges.push_back(Range<T>{*minmax.first, *minmax.second});
+
+    return ds;
+}
+
+template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] gr::DataSet<T> stepFunction(std::string name, std::size_t count, std::uint64_t stepAt = 0U) {
+    if (count == 0UZ) {
+        throw std::invalid_argument("Count must be greater than 0");
+    }
+    if (stepAt == 0UZ) {
+        stepAt = count / 2;
+    }
+
+    gr::DataSet<T> ds;
+    ds.signal_names      = {name};
+    ds.signal_quantities = {"Amplitude"};
+    ds.signal_units      = {""};
+    ds.axis_names        = {"Time"};
+    ds.axis_units        = {"s"};
+    ds.axis_values.resize(1);
+    ds.axis_values[0].resize(count);
+    ds.signal_values.resize(count);
+    ds.meta_information.resize(1);
+    ds.timing_events.resize(1);
+    ds.extents = {1, static_cast<std::int32_t>(count)};
+
+    for (std::size_t i = 0; i < count; ++i) {
+        ds.axis_values[0][i] = static_cast<TValue>(i);
+        TValue val           = static_cast<TValue>(i < stepAt ? 0.0 : 1.0);
+        ds.signal_values[i]  = detail::initialize<T>(static_cast<TValue>(val), static_cast<TValue>(1) / static_cast<TValue>(10));
+    }
+
+    ds.signal_ranges.push_back(Range<T>{static_cast<T>(0), static_cast<T>(1)});
 
     return ds;
 }
