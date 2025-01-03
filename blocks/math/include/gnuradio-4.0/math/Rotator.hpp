@@ -20,7 +20,7 @@ struct Rotator : gr::Block<Rotator<T>> {
        thus effectively performing a frequency translation.
 
 This block supports either `phase_increment` in radians per sample (x) or relative `frequency_shift` in Hz for a
-given 'sample_rate' in Hz (N.B sample_rate can is normalised to '1' by default).
+given 'sample_rate' in Hz (N.B sample_rate is normalised to '1' by default).
  )"">;
 
     PortIn<T>  in;
