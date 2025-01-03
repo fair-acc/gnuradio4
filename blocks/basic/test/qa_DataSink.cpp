@@ -496,7 +496,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events.size(), 1u));
                         expect(eq(dataset.signal_names[0], "test signal"s));
                         expect(eq(dataset.signal_units[0], "none"s));
-                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{-2, +2}));
+                        expect(eq(dataset.signal_ranges[0], gr::Range<std::int32_t>{-2, +2}));
                         expect(eq(dataset.timing_events[0].size(), 1u));
                         expect(eq(dataset.timing_events[0][0].first, 3));
                         receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
@@ -563,7 +563,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events.size(), 1u));
                         expect(eq(dataset.signal_names[0], "test signal"s));
                         expect(eq(dataset.signal_units[0], "no unit"s));
-                        expect(eq(dataset.signal_ranges[0], std::vector{-2, +2}));
+                        expect(eq(dataset.signal_ranges[0], gr::Range<std::int32_t>{-2, +2}));
                         expect(eq(dataset.timing_events[0].size(), 1UZ));
                         expect(eq(dataset.timing_events[0][0].first, 0));
                         receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
@@ -626,7 +626,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events.size(), 1u));
                         expect(eq(dataset.signal_names[0], "test signal"s));
                         expect(eq(dataset.signal_units[0], "none"s));
-                        expect(eq(dataset.signal_ranges[0], std::vector<int32_t>{0, kSamples - 1}));
+                        expect(eq(dataset.signal_ranges[0], gr::Range<int32_t>{0, kSamples - 1}));
                         expect(eq(dataset.timing_events[0].size(), 1u));
                         expect(eq(dataset.timing_events[0][0].first, -5000));
                         receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());

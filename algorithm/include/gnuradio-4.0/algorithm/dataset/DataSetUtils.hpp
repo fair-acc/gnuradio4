@@ -17,9 +17,9 @@ template<DataSetLike TDataSet>
 [[maybe_unused]] bool draw(const TDataSet& dataSet, const DefaultChartConfig config = {}) {
     using TValueType = typename TDataSet::value_type;
 
-    if (dataSet.signal_values.empty()                                        // check for empty data
-        || dataSet.axis_values.empty() || dataSet.axis_values[0].empty()     // empty axis definition
-        || dataSet.signal_ranges.empty() || dataSet.signal_ranges[0].empty() // empty min/max definition
+    if (dataSet.signal_values.empty()                                    // check for empty data
+        || dataSet.axis_values.empty() || dataSet.axis_values[0].empty() // empty axis definition
+        || dataSet.signal_ranges.empty()                                 // empty min/max definition
     ) {
         return false;
     }
@@ -38,8 +38,8 @@ template<DataSetLike TDataSet>
     assert(!dataSet.signal_ranges.empty());
     const TValueType xMin = dataSet.axis_values[0].front();
     const TValueType xMax = dataSet.axis_values[0].back();
-    TValueType       yMin = dataSet.signal_ranges[0].front();
-    TValueType       yMax = dataSet.signal_ranges[0].back();
+    TValueType       yMin = dataSet.signal_ranges[0].min;
+    TValueType       yMax = dataSet.signal_ranges[0].max;
 
     if constexpr (std::is_arithmetic_v<TValueType>) {
         const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values);
@@ -92,15 +92,15 @@ template<DataSetLike TDataSet>
 template<typename T>
 void updateMinMax(DataSet<T>& dataSet) {
     if constexpr (std::is_arithmetic_v<T>) {
-        const auto [min, max]       = std::ranges::minmax_element(dataSet.signal_values);
-        dataSet.signal_ranges[0][0] = *min;
-        dataSet.signal_ranges[0][1] = *max;
+        const auto [min, max]        = std::ranges::minmax_element(dataSet.signal_values);
+        dataSet.signal_ranges[0].min = *min;
+        dataSet.signal_ranges[0].max = *max;
     } else if constexpr (gr::meta::complex_like<T>) {
         const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, //
             [](const T& a, const T& b) { return std::abs(a) < std::abs(b); });
 
-        dataSet.signal_ranges[0][0] = *min;
-        dataSet.signal_ranges[0][1] = *max;
+        dataSet.signal_ranges[0].min = *min;
+        dataSet.signal_ranges[0].max = *max;
     } else {
         static_assert(std::is_arithmetic_v<T> || std::is_same_v<T, std::complex<typename T::value_type>>, "Unsupported type for DataSet");
     }

@@ -7,10 +7,11 @@
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <fmt/std.h>
-#include <gnuradio-4.0/Tag.hpp>
-#include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <source_location>
 #include <vector>
+
+#include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 namespace gr {
 namespace time {
@@ -97,6 +98,39 @@ struct fmt::formatter<gr::UncertainValue<T>> {
         return out;
     }
 };
+
+namespace gr {
+template<gr::UncertainValueLike T>
+std::ostream& operator<<(std::ostream& os, const T& v) {
+    return os << fmt::format("{}", v);
+}
+} // namespace gr
+
+// DataSet - Range formatter
+
+namespace gr {
+template<typename T>
+struct Range;
+}
+
+namespace fmt {
+template<typename T>
+struct formatter<gr::Range<T>> {
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const gr::Range<T>& range, FormatContext& ctx) {
+        return fmt::format_to(ctx.out(), "[min: {}, max: {}]", range.min, range.max);
+    }
+};
+} // namespace fmt
+
+namespace gr {
+template<typename T>
+std::ostream& operator<<(std::ostream& os, const gr::Range<T>& v) {
+    return os << fmt::format("{}", v);
+}
+} // namespace gr
 
 // pmt formatter
 

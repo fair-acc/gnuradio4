@@ -20,7 +20,7 @@ template<class TLhs, class TRhs, class TEpsilon>
 }
 } // namespace test::detail
 
-const boost::ut::suite uncertainValue = [] {
+const boost::ut::suite<"basic UncertainValue<T> tests"> _uncertainValue = [] {
     using namespace boost::ut;
     using namespace std::literals::complex_literals;
     using namespace gr;
@@ -707,7 +707,7 @@ const boost::ut::suite uncertainValue = [] {
     };
 };
 
-const boost::ut::suite uncertainValueTrigonometric = [] {
+const boost::ut::suite<"UncertainValue<T> trigonometric functions"> _uncertainValueTrigonometric = [] {
     using namespace boost::ut;
     using namespace std::literals::complex_literals;
     using namespace gr;
@@ -763,7 +763,7 @@ const boost::ut::suite uncertainValueTrigonometric = [] {
     };
 };
 
-const boost::ut::suite uncertainValueExpTests = [] {
+const boost::ut::suite<"UncertainValue<T> exponential functions"> uncertainValueExpTests = [] {
     using namespace boost::ut;
     using namespace std::literals::complex_literals;
     using namespace gr;
@@ -802,6 +802,74 @@ const boost::ut::suite uncertainValueExpTests = [] {
             // absolute (real-valued only) or retain their complex nature)
         }
     };
+};
+
+const boost::ut::suite<"UncertainValue<T> - additional tests"> _additionalTests = [] {
+    using namespace boost::ut;
+    using namespace std::literals::complex_literals;
+    using namespace gr;
+    using test::detail::approx;
+
+    "math operations and isfinite"_test = []<typename T> {
+        using ValueType = gr::meta::fundamental_base_value_type_t<T>;
+
+        constexpr static auto initialize = [](typename gr::meta::fundamental_base_value_type_t<T> value, typename gr::meta::fundamental_base_value_type_t<T> uncertainty = {}) -> T {
+            if constexpr (gr::UncertainValueLike<T>) {
+                return T{value, uncertainty};
+            } else {
+                return value;
+            }
+        };
+
+        "log"_test = [] {
+            T    x                    = initialize(ValueType(10), ValueType(0.1));
+            T    result               = gr::math::log(x);
+            auto expected_value       = std::log(ValueType(10));
+            auto expected_uncertainty = gr::UncertainValueLike<T> ? ValueType(0.1) / ValueType(10) : ValueType(0);
+            expect(approx(gr::value(result), expected_value, ValueType(1e-3f))) << "log(x): value";
+            if constexpr (gr::UncertainValueLike<T>) {
+                expect(approx(gr::uncertainty(result), expected_uncertainty, ValueType(1e-3f))) << "log(x): uncertainty";
+            }
+        };
+
+        "log10"_test = [] {
+            T    x                    = initialize(ValueType(10), ValueType(0.1));
+            T    result               = gr::math::log10(x);
+            auto expected_value       = std::log10(ValueType(10));
+            auto expected_uncertainty = gr::UncertainValueLike<T> ? ValueType(0.1) / (ValueType(10) * std::numbers::ln10_v<ValueType>) : ValueType(0);
+            expect(approx(gr::value(result), expected_value, ValueType(1e-3f))) << "log10(x): value";
+            if constexpr (gr::UncertainValueLike<T>) {
+                expect(approx(gr::uncertainty(result), expected_uncertainty, ValueType(1e-3f))) << "log10(x): uncertainty";
+            }
+        };
+
+        "edge case: log and log10 with a zero value"_test = [] {
+            T    x            = initialize(ValueType(0), ValueType(0));
+            auto result_log   = gr::math::log(x);
+            auto result_log10 = gr::math::log10(x);
+            expect(std::isinf(gr::value(result_log)) && gr::value(result_log) < 0) << "log(0): value is -inf";
+            expect(std::isinf(gr::value(result_log10)) && gr::value(result_log10) < 0) << "log10(0): value is -inf";
+        };
+
+        "edge case: isfinite with finite and infinite inputs"_test = [] {
+            T x = initialize(ValueType(5), ValueType(0.1));
+            expect(gr::math::isfinite(x)) << "isfinite: finite value";
+
+            if constexpr (gr::UncertainValueLike<T>) {
+                T y{ValueType(5), std::numeric_limits<ValueType>::infinity()};
+                expect(!gr::math::isfinite(y)) << "isfinite: infinite uncertainty";
+
+                T z{std::numeric_limits<ValueType>::infinity(), ValueType(0.1)};
+                expect(!gr::math::isfinite(z)) << "isfinite: infinite value";
+
+                T w{std::numeric_limits<ValueType>::infinity(), std::numeric_limits<ValueType>::infinity()};
+                expect(!gr::math::isfinite(w)) << "isfinite: infinite value and uncertainty";
+            } else {
+                T y = std::numeric_limits<ValueType>::infinity();
+                expect(!gr::math::isfinite(y)) << "isfinite: infinite value";
+            }
+        };
+    } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 };
 
 int main() { /* tests are statically executed */ }
