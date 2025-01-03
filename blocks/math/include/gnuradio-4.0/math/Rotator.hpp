@@ -19,7 +19,7 @@ struct Rotator : gr::Block<Rotator<T>> {
 @brief Rotator block shifts complex input samples by a given incremental phase every sample,
        thus effectively performing a frequency translation.
 
-This blocks supports either `phase_increment` in radians per sample (x) or relative `frequency_shift` in Hz for a
+This block supports either `phase_increment` in radians per sample (x) or relative `frequency_shift` in Hz for a
 given 'sample_rate' in Hz (N.B sample_rate can is normalised to '1' by default).
  )"">;
 
