@@ -821,6 +821,136 @@ const boost::ut::suite HistoryBufferTest = [] {
         const auto& const_buffer = hb_double;
         static_assert(std::is_const_v<std::remove_pointer_t<decltype(const_buffer.data())>>, "is const");
     };
+
+    "HistoryBuffer - forward/reversed usage"_test = [] {
+        HistoryBuffer<int> forward(5);  // stores push_back(..) with forward[0] being newest sample
+        HistoryBuffer<int> backward(5); // stores push_front(..) with backward[0] being the oldest sample
+
+        // push {1,2,3,4,5,6} individually to both
+        for (int i = 1; i <= 6; ++i) {
+            forward.push_back(i);
+            backward.push_front(i);
+        }
+
+        // expected content of forward:  [6,5,4,3,2]
+        expect(eq(forward.size(), 5UZ));
+        expect(eq(forward[0], 6));
+        expect(eq(forward[1], 5));
+        expect(eq(forward[4], 2));
+
+        // expected content of backward: [2,3,4,5,6]
+        expect(eq(backward.size(), 5UZ));
+        expect(eq(backward[0], 2));
+        expect(eq(backward[1], 3));
+        expect(eq(backward[2], 4));
+        expect(eq(backward[3], 5));
+        expect(eq(backward[4], 6));
+
+        // Bulk test:
+        backward.reset();
+        backward.push_front(std::vector<int>{10, 11, 12, 13, 14, 15, 16}); // push more than capacity:
+        expect(eq(backward[0], 12));
+        expect(eq(backward[4], 16));
+
+        expect(throws<std::out_of_range>([&] { (void)backward.at(5); }));
+    };
+
+    "HistoryBuffer - resize test"_test = [] {
+        using namespace boost::ut;
+        using namespace gr;
+
+        // Only for dynamic-extent
+        HistoryBuffer<int> hb(5);
+        for (int i = 1; i <= 5; ++i) {
+            hb.push_back(i);
+        }
+        // now: [5,4,3,2,1]
+        expect(eq(hb.size(), 5UZ));
+
+        // resize to bigger capacity
+        hb.resize(8);
+        expect(eq(hb.capacity(), 8UZ));
+        expect(eq(hb.size(), 5UZ));
+        // index[0] should still be '5'
+        expect(eq(hb[0], 5));
+
+        // push more data
+        for (int i = 6; i <= 10; ++i) {
+            hb.push_back(i); // if we keep pushing
+        }
+        expect(eq(hb.size(), 8UZ)); // now full at 8
+        expect(eq(hb[0], 10));      // newest => 10
+
+        // shrink
+        hb.resize(3);
+        expect(eq(hb.capacity(), 3UZ));
+        expect(eq(hb.size(), 3UZ));
+        // we keep the "most recent" 3 => new index[0] should be 10 still, if it fits
+        expect(eq(hb[0], 10));
+    };
+
+    "HistoryBuffer - front/back test"_test = [] {
+        HistoryBuffer<int> hb(5);
+        expect(eq(hb.empty(), true));
+
+        for (int i = 1; i <= 6; ++i) {
+            hb.push_back(i);
+        }
+        // final ring => [6,5,4,3,2]
+        expect(eq(hb.front(), 6)) << "front == [0] => newest sample in push_back orientation";
+        expect(eq(hb.back(), 2)) << "back == [size-1] => oldest sample";
+
+        hb.reset();
+        for (int i = 1; i <= 6; ++i) {
+            hb.push_front(i);
+        }
+        // final ring => [2,3,4,5,6] in logical terms
+        expect(eq(hb.front(), 2)) << "front == [0] => oldest sample in push_front orientation";
+        expect(eq(hb.back(), 6)) << "back == [size-1] => newest sample";
+    };
+
+    "HistoryBuffer - pop_front/pop_back"_test = [] {
+        using namespace boost::ut;
+        using namespace gr;
+
+        HistoryBuffer<int> hb(5);
+        for (int i = 1; i <= 5; ++i) { // push_back => newest @ [0]
+            hb.push_back(i);           // final ring => [5,4,3,2,1]
+        }
+        expect(eq(hb.size(), 5UZ));
+        expect(eq(hb[0], 5));
+        expect(eq(hb[4], 1));
+
+        // pop_front => removes [0] => was '5'
+        hb.pop_front();
+        expect(eq(hb.size(), 4UZ));
+        expect(eq(hb[0], 4)); // now ring => [4,3,2,1]
+
+        // pop_back => removes [size()-1] => was '1'
+        hb.pop_back();
+        expect(eq(hb.size(), 3UZ));
+        expect(eq(hb[0], 4)); // ring => [4,3,2]
+        expect(eq(hb[2], 2));
+
+        // test emptiness
+        hb.pop_front(); // remove '4' => size=2
+        hb.pop_front(); // remove '3' => size=1
+        hb.pop_back();  // remove '2' => size=0
+        expect(eq(hb.size(), 0UZ));
+        expect(throws<std::out_of_range>([&] { hb.pop_back(); }));
+        expect(throws<std::out_of_range>([&] { hb.pop_front(); }));
+
+        // test push_front orientation
+        HistoryBuffer<int> hb2(5);
+        for (int i = 1; i <= 5; ++i) {
+            hb2.push_front(i); // final ring => [1,2,3,4,5] logically
+        }
+        expect(eq(hb2[0], 1));
+        hb2.pop_front(); // remove '1'
+        expect(eq(hb2[0], 2));
+        hb2.pop_back(); // remove '5'
+        expect(eq(hb2[hb2.size() - 1], 4));
+    };
 };
 
 int main() { /* not needed for UT */ }
