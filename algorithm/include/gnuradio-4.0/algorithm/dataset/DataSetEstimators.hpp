@@ -36,9 +36,8 @@ namespace estimators {
 template<typename T>
 [[nodiscard]] constexpr T computeCentreOfMass(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = max_size_t, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
     maxIndex = detail::checkIndexRange(ds, minIndex, maxIndex, signalIndex, location);
-    ;
-    T com  = T(0);
-    T mass = T(0);
+    T com    = T(0);
+    T mass   = T(0);
 
     for (std::size_t i = minIndex; i < maxIndex; i++) {
         const T x     = getIndexValue(ds, dim::X, i);
@@ -66,10 +65,10 @@ template<std::ranges::random_access_range T, typename TValue = gr::meta::fundame
     for (upperLimit = index; upperLimit < data.size() && data[upperLimit] > maxHalf; upperLimit++) {
         // done in condition
     }
-    for (lowerLimit = index; lowerLimit >= 0 && data[lowerLimit] > maxHalf; lowerLimit--) {
+    for (lowerLimit = index; data[lowerLimit] > maxHalf; lowerLimit--) {
         // done in condition
     }
-    if (upperLimit >= data.size() || lowerLimit < 0) {
+    if (upperLimit >= data.size()) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
     return static_cast<TValue>(upperLimit - lowerLimit);
@@ -87,10 +86,10 @@ template<std::ranges::random_access_range T, typename TValue = typename T::value
     for (upperLimit = index; upperLimit < data.size() && data[upperLimit] > maxHalf; upperLimit++) {
         // done in condition
     }
-    for (lowerLimit = index; lowerLimit >= 0 && data[lowerLimit] > maxHalf; lowerLimit--) {
+    for (lowerLimit = index; data[lowerLimit] > maxHalf; lowerLimit--) {
         // done in condition
     }
-    if (upperLimit >= data.size() || lowerLimit < 0) {
+    if (upperLimit >= data.size()) {
         return std::numeric_limits<TValue>::quiet_NaN();
     }
     TValue lowerRefined = detail::linearInterpolate(value_t(lowerLimit), value_t(lowerLimit + 1), data[lowerLimit], data[lowerLimit + 1], maxHalf);
@@ -178,7 +177,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     }
 
     std::vector<T> data(values.begin(), values.end()); // temporary mutable copy for in-place partitioning
-    auto           mid = data.begin() + data.size() / 2;
+    auto           mid = data.begin() + static_cast<std::ptrdiff_t>(data.size()) / 2;
     std::ranges::nth_element(data, mid);
 
     if ((data.size() & 1UZ) == 0UZ) {
@@ -520,7 +519,7 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
 
     T thresholdCrossing = isRising ? initial + threshold * (max_val - initial) : initial - threshold * (initial - min_val);
     T triggerTime       = estimators::getZeroCrossing<MetaInfo::None>(ds, thresholdCrossing, indexMin, indexMax, signalIndex);
-    if (triggerTime == std::numeric_limits<TValue>::quiet_NaN()) {
+    if (std::isnan(gr::value(triggerTime))) {
         return std::nullopt; // failed to compute trigger time
     }
 
@@ -588,7 +587,7 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         prevRMS = localRMS;
     }
     T settlingLevel = estimators::getMean(dataSet, settlingTimeIdx, maxIndex + windowSize, signalIndex);
-    settlingTime += windowSize / 2UZ;
+    settlingTime += static_cast<int>(windowSize) / 2;
     if (settlingTime < 0) {
         return std::nullopt;
     }

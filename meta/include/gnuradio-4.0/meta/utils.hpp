@@ -26,10 +26,13 @@
 namespace gr {
 
 #pragma GCC diagnostic push // suppress unavoidable float/int/size_t conversion warnings
+#pragma GCC diagnostic ignored "-Wconversion"
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
 #pragma GCC diagnostic ignored "-Wshorten-64-to-32"
 #pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
 #pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
+#endif
 
 using Size_t                            = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
 inline constexpr Size_t      max_Size_t = std::numeric_limits<gr::Size_t>::max();

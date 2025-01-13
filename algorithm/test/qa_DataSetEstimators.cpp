@@ -89,7 +89,11 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
+#pragma GCC diagnostic ignored "-Wfloat-conversion"
+#pragma GCC diagnostic ignored "-Wconversion"
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wimplicit-float-conversion" // GCC & Clang: Loss or promotion of floating-point precision, disabled only for unit-tests
+#endif
 
 const boost::ut::suite<"DataSet<T> element-wise accessor"> _dataSetAccessors = [] {
     using namespace boost::ut;
@@ -495,7 +499,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
 
         auto ds_pulse_proto = generate::stepFunction<T>("pulse", 100, 20);
         for (std::size_t i = 50; i < 70; ++i) {
-            ds_pulse_proto.signal_values[i] = 1.0 - 0.01 * (i - 50); // gradual decrease at end-of-flat top
+            ds_pulse_proto.signal_values[i] = value_t(1.0) - value_t(0.01) * value_t(i - 50); // gradual decrease at end-of-flat top
         }
         for (std::size_t i = 70; i < 100; ++i) {
             ds_pulse_proto.signal_values[i] = 0.0; // final level
@@ -568,7 +572,7 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
 
         auto smoothed = filter::applyMovingAverage(ds, 3UZ);
 
-        std::vector<T> expected = {0.1, 0.2, 0.4, 0.6, 0.7};
+        std::vector<T> expected = {value_t(0.1), value_t(0.2), value_t(0.4), value_t(0.6), value_t(0.7)};
         for (std::size_t i = 0; i < expected.size(); ++i) {
             T val = smoothed.signal_values[i];
             expect(approx(val, expected[i], T(1e-3))) << fmt::format("smoothed value at index {}: expected {}, got {}", i, expected[i], val);

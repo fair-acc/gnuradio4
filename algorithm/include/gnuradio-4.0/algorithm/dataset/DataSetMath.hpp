@@ -222,7 +222,7 @@ constexpr DataSet<T> applyMedian(const DataSet<T>& ds, std::size_t windowSize, s
         std::copy(signal.begin() + start, signal.begin() + end, medianWindow.begin());
 
         auto medianWindowView = std::span(medianWindow.data(), size);
-        auto midIter          = medianWindowView.begin() + (size / 2UZ);
+        auto midIter          = medianWindowView.begin() + static_cast<std::ptrdiff_t>(size / 2UZ);
         std::ranges::nth_element(medianWindowView, midIter);
 
         if ((size & 1UZ) == 0UZ) { // even-sized window -> take average around mid-point

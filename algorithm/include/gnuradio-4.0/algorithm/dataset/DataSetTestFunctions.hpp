@@ -152,7 +152,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     ds.timing_events.resize(1UZ);
     ds.extents = {1, static_cast<std::int32_t>(count)};
 
-    auto gauss = [](U x, U mu, U sigma) -> TValue { return std::exp(-std::pow((TValue(x) - TValue(mu)) / TValue(sigma), 2) / U(2)) / (TValue(sigma) * std::sqrt(TValue(2) * std::numbers::pi_v<TValue>)); };
+    auto gauss = [](U x, U mu, U sig) -> TValue { return std::exp(-std::pow((TValue(x) - TValue(mu)) / TValue(sig), 2) / U(2)) / (TValue(sig) * std::sqrt(TValue(2) * std::numbers::pi_v<TValue>)); };
 
     for (std::size_t i = 0; i < count; ++i) {
         ds.axis_values[0][i] = static_cast<TValue>(i);
