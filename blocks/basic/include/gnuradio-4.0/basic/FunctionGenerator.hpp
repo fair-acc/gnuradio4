@@ -159,7 +159,7 @@ The parameters will automatically update when a Tag containing the "context" fie
     T                              _timeTick   = T(1.) / static_cast<T>(sample_rate);
 
     void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) {
-        if (new_settings.contains(gr::tag::TRIGGER_META_INFO.shortKey()) || new_settings.contains(function_generator::toString(function_generator::signal_type))) {
+        if (new_settings.contains(function_generator::toString(function_generator::signal_type))) {
             _currentTime = T(0.);
             _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
         }
