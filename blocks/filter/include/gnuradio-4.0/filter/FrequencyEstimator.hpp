@@ -83,10 +83,10 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     requires(TParent::ResamplingControl::kIsConst)
     {
         // process input sample through the IIR filter
-        _inputHistory.push_back(input);
+        _inputHistory.push_front(input);
         const T output = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), static_cast<T>(0))         // feed-forward
                          - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), static_cast<T>(0)); // feed-back
-        _outputHistory.push_back(output);
+        _outputHistory.push_front(output);
         _prevFrequency = estimateFrequency();
         return _prevFrequency;
     }
@@ -106,12 +106,12 @@ This block estimates the frequency of a signal using the time-domain algorithm d
 
             for (const T& sample : chunk) {
                 // process input sample through the IIR filter
-                _inputHistory.push_back(sample);
+                _inputHistory.push_front(sample);
 
                 const T output_sample = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), static_cast<T>(0))         // feed-forward
                                         - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), static_cast<T>(0)); // feed-back
 
-                _outputHistory.push_back(output_sample);
+                _outputHistory.push_front(output_sample);
             }
 
             _prevFrequency = estimateFrequency();
@@ -241,7 +241,7 @@ This block estimates the frequency of a signal using the frequency-domain algori
     [[nodiscard]] T processOne(T input) noexcept
     requires(TParent::ResamplingControl::kIsConst)
     {
-        _inputHistory.push_back(input);
+        _inputHistory.push_front(input);
         _prevFrequency = estimateFrequencyFFT();
         return _prevFrequency;
     }
@@ -260,7 +260,7 @@ This block estimates the frequency of a signal using the frequency-domain algori
             std::span<const T> chunk  = input.subspan(offset, this->input_chunk_size);
 
             for (const T& sample : chunk) {
-                _inputHistory.push_back(sample);
+                _inputHistory.push_front(sample);
             }
 
             _prevFrequency = estimateFrequencyFFT();
