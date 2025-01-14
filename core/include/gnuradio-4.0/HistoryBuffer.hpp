@@ -23,8 +23,8 @@ namespace gr {
  * - Fixed (`N != std::dynamic_extent`): uses `std::array<T, N * 2>`.
  *
  * ### Key Operations
- * - `push_back(const T&)`: Add new item, drop oldest if full, index `[0]` is newest.
- * - `push_front(const T&)`: Add new item, drop oldest if full, index `[0]` is oldest.
+ * - `push_front(const T&)`: Add new item, drop oldest if full, index `[0]` is newest.
+ * - `push_back(const T&)`: Add new item, drop oldest if full, index `[0]` is oldest.
  * - `pop_front()`, `pop_back()`: Remove from logical front/back of the ring.
  * - `front()`, `back()`: Returns the first/last item in logical order.
  * - `operator[](i)`, `at(i)`: Unchecked/checked access.
@@ -33,16 +33,16 @@ namespace gr {
  *
  * ### Examples
  * \code{.cpp}
- * gr::history_buffer<int, 5> hb_newest;   // Use push_back -> index[0] is newest
- * hb_newest.push_back(1); // [1]
- * hb_newest.push_back(2); // [2, 1]
- * hb_newest.push_back(3); // [3, 2, 1]
+ * gr::history_buffer<int, 5> hb_newest;   // use push_front -> index[0] is newest
+ * hb_newest.push_front(1); // [1]
+ * hb_newest.push_front(2); // [2, 1]
+ * hb_newest.push_front(3); // [3, 2, 1]
  * // => index[0] == 3, newest item
  *
- * gr::history_buffer<int, 5> hb_oldest;   // Use push_front -> index[0] is oldest
- * hb_oldest.push_front(10); // [10]
- * hb_oldest.push_front(20); // [10, 20]
- * hb_oldest.push_front(30); // [10, 20, 30]
+ * gr::history_buffer<int, 5> hb_oldest;   // use push_back -> index[0] is oldest
+ * hb_oldest.push_back(10); // [10]
+ * hb_oldest.push_back(20); // [10, 20]
+ * hb_oldest.push_back(30); // [10, 20, 30]
  * // => index[0] == 10, oldest item
  *
  * hb_newest.pop_front();  // remove newest => now hb_newest: [2, 1]
@@ -61,7 +61,7 @@ class HistoryBuffer {
 
     buffer_type _buffer{};
     std::size_t _capacity = N;
-    std::size_t _write_position{0};
+    std::size_t _write_position{0UZ};
     std::size_t _size{0UZ};
 
     /**
@@ -98,7 +98,7 @@ public:
     /**
      * @brief Adds an element to the end expiring the oldest element beyond the buffer's capacities.
      */
-    constexpr void push_back(const T& value) noexcept {
+    constexpr void push_front(const T& value) noexcept {
         if (_size < _capacity) [[unlikely]] {
             ++_size;
         }
@@ -114,36 +114,26 @@ public:
      * @brief Adds a range of elements the end expiring the oldest elements beyond the buffer's capacities.
      */
     template<std::input_iterator Iter>
-    constexpr void push_back(Iter cbegin, Iter cend) noexcept {
-        const auto nSamplesToCopy = std::distance(cbegin, cend);
-        Iter       optimizedBegin = static_cast<std::size_t>(nSamplesToCopy) > _capacity ? std::prev(cend, static_cast<std::ptrdiff_t>(_capacity)) : cbegin;
-        for (auto it = optimizedBegin; it != cend; ++it) {
-            push_back(*it);
+    constexpr void push_front(Iter begin, Iter end) noexcept {
+        const auto nSamplesToCopy = std::distance(begin, end);
+        Iter       optimizedBegin = static_cast<std::size_t>(nSamplesToCopy) > _capacity ? std::prev(end, static_cast<std::ptrdiff_t>(_capacity)) : begin;
+        for (auto it = optimizedBegin; it != end; ++it) {
+            push_front(*it);
         }
-    }
-
-    template<std::input_iterator Iter>
-    constexpr void push_back_bulk(Iter cbegin, Iter cend) noexcept {
-        return push_back(cbegin, cend);
     }
 
     /**
      * @brief Adds a range of elements the end expiring the oldest elements beyond the buffer's capacities.
      */
     template<std::ranges::range Range>
-    constexpr void push_back(const Range& range) noexcept {
-        push_back_bulk(std::ranges::begin(range), std::ranges::end(range));
-    }
-
-    template<std::ranges::range Range>
-    constexpr void push_back_bulk(const Range& range) noexcept {
-        push_back_bulk(range.cbegin(), range.cend());
+    constexpr void push_front(const Range& range) noexcept {
+        push_front(std::ranges::begin(range), std::ranges::end(range));
     }
 
     /**
      * @brief Adds an element to the front expiring the oldest element beyond the buffer's capacities.
      */
-    constexpr void push_front(const T& value) noexcept {
+    constexpr void push_back(const T& value) noexcept {
         if (_size == _capacity) {
             if (++_write_position == _capacity) {
                 _write_position = 0U;
@@ -166,7 +156,7 @@ public:
      *        the "newest" in the ring, with operator[](0) always the oldest.
      */
     template<std::input_iterator Iter>
-    constexpr void push_front(Iter first, Iter last) noexcept {
+    constexpr void push_back(Iter first, Iter last) noexcept {
         std::size_t n = static_cast<std::size_t>(std::distance(first, last));
         if (n == 0) {
             return;
@@ -212,8 +202,8 @@ public:
      *        the "newest" in the ring, with operator[](0) always the oldest.
      */
     template<std::ranges::range Range>
-    constexpr void push_front(const Range& r) noexcept {
-        push_front(std::ranges::begin(r), std::ranges::end(r));
+    constexpr void push_back(const Range& r) noexcept {
+        push_back(std::ranges::begin(r), std::ranges::end(r));
     }
 
     /**
@@ -222,8 +212,8 @@ public:
      * @throws std::out_of_range if the buffer is empty.
      *
      * @note
-     * - If you only call `push_back(...)`, `operator[](0)` is the newest element; hence `pop_front()` removes the newest.
-     * - If you only call `push_front(...)`, `operator[](0)` is the oldest element; hence `pop_front()` removes the oldest.
+     * - If you only call `push_front(...)`, `operator[](0)` is the newest element; hence `pop_front()` removes the newest.
+     * - If you only call `push_back(...)`, `operator[](0)` is the oldest element; hence `pop_front()` removes the oldest.
      * - Mixing both push modes can lead to non-intuitive behavior for front/back usage.
      */
     constexpr void pop_front() {
@@ -250,8 +240,8 @@ public:
      * @throws std::out_of_range if the buffer is empty.
      *
      * @note
-     * - If you only call `push_back(...)`, `operator[](size() - 1)` is the oldest element; hence `pop_back()` removes the oldest.
-     * - If you only call `push_front(...)`, `operator[](size() - 1)` is the newest element; hence `pop_back()` removes the newest.
+     * - If you only call `push_front(...)`, `operator[](size() - 1)` is the oldest element; hence `pop_back()` removes the oldest.
+     * - If you only call `push_back(...)`, `operator[](size() - 1)` is the newest element; hence `pop_back()` removes the newest.
      * - Mixing both push modes can lead to non-intuitive behavior for front/back usage.
      */
     constexpr void pop_back() {
@@ -280,7 +270,7 @@ public:
         std::swap(_buffer, newBuf);
         _capacity       = newCapacity;
         _size           = copyCount;
-        _write_position = 0; // implementation choice
+        _write_position = 0UZ; // implementation choice
     }
 
     /**

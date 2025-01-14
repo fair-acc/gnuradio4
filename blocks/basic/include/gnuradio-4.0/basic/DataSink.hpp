@@ -591,7 +591,7 @@ public:
                 listener->process(historyView, inData, tagData);
             }
             if (_history) {
-                _history->push_back_bulk(inData.begin(), inData.end());
+                _history->push_front(inData);
             }
         }
         return work::Status::OK;
@@ -609,7 +609,7 @@ private:
 
         auto new_history = gr::HistoryBuffer<T>(new_size);
         if (_history) {
-            new_history.push_back_bulk(_history->begin(), _history->end());
+            new_history.push_front(_history->begin(), _history->end());
         }
         _history = std::move(new_history);
     }

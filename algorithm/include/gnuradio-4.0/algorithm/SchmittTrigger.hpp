@@ -103,7 +103,7 @@ struct SchmittTrigger {
         }
 
         if constexpr (Method == BASIC_LINEAR_INTERPOLATION) {
-            _historyBuffer.push_back(input);
+            _historyBuffer.push_front(input);
             if (_historyBuffer.size() < 2) {
                 return EdgeDetection::NONE;
             }
@@ -113,7 +113,7 @@ struct SchmittTrigger {
 
             auto computeEdgePosition = [&](const EdgeType& y1, const EdgeType& y2) -> std::pair<std::int32_t, EdgeType> {
                 if (y1 == y2) {
-                    return {static_cast<std::int32_t>(0), static_cast<EdgeType>(0)};
+                    return {static_cast<std::int32_t>(0U), static_cast<EdgeType>(0)};
                 }
                 const EdgeType offset   = (EdgeType(_offset) - y1) / (y2 - y1);
                 std::int32_t   intPart  = static_cast<std::int32_t>(std::floor(gr::value(offset)));
@@ -145,7 +145,7 @@ struct SchmittTrigger {
         }
 
         if constexpr (Method == LINEAR_INTERPOLATION) {
-            _historyBuffer.push_back(input);
+            _historyBuffer.push_front(input);
 
             if (_historyBuffer.size() < 2) {
                 return EdgeDetection::NONE;

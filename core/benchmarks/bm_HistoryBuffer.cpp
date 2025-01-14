@@ -91,11 +91,21 @@ inline const boost::ut::suite _buffer_tests = [] {
     {
         HistoryBuffer<int> buffer(32);
 
-        "history_buffer<int>(32)"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+        "history_buffer<int>(32) - push_front"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+            static int counter = 0;
+            for (std::size_t i = 0; i < samples; i++) {
+                buffer.push_front(counter);
+                if (const auto data = buffer[0] != counter) {
+                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
+                }
+                counter++;
+            }
+        };
+        "history_buffer<int>(32) - push_back"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_back(counter);
-                if (const auto data = buffer[0] != counter) {
+                if (const auto data = buffer[buffer.size() - 1UZ] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
                 }
                 counter++;
@@ -105,11 +115,22 @@ inline const boost::ut::suite _buffer_tests = [] {
     {
         HistoryBuffer<int> buffer(32);
 
-        "history_buffer<int, 32>"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+        "history_buffer<int, 32> - push_front"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+            static int counter = 0;
+            for (std::size_t i = 0; i < samples; i++) {
+                buffer.push_front(counter);
+                if (const auto data = buffer[0] != counter) {
+                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
+                }
+                counter++;
+            }
+        };
+
+        "history_buffer<int, 32> - push_back"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_back(counter);
-                if (const auto data = buffer[0] != counter) {
+                if (const auto data = buffer[buffer.size() - 1UZ] != counter) {
                     throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
                 }
                 counter++;
@@ -140,7 +161,16 @@ inline const boost::ut::suite _buffer_tests = [] {
     {
         HistoryBuffer<int, 32> buffer;
 
-        "history_buffer<int, 32>  - no checks"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+        "history_buffer<int, 32>  - no checks - push_front"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+            static int counter = 0;
+            for (std::size_t i = 0; i < samples; i++) {
+                buffer.push_front(counter);
+                [[maybe_unused]] const auto data = buffer[0];
+                counter++;
+            }
+        };
+
+        "history_buffer<int, 32>  - no checks - push_back"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_back(counter);
@@ -152,7 +182,16 @@ inline const boost::ut::suite _buffer_tests = [] {
     {
         HistoryBuffer<int> buffer(32);
 
-        "history_buffer<int>(32)  - no checks"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+        "history_buffer<int>(32)  - no checks - push_front"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
+            static int counter = 0;
+            for (std::size_t i = 0; i < samples; i++) {
+                buffer.push_front(counter);
+                [[maybe_unused]] const auto data = buffer[0];
+                counter++;
+            }
+        };
+
+        "history_buffer<int>(32)  - no checks - push_back"_benchmark.repeat<n_repetitions>(samples) = [&buffer] {
             static int counter = 0;
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_back(counter);

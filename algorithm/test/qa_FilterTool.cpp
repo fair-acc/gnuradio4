@@ -839,7 +839,7 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
             gr::HistoryBuffer<T, 8> buffer;
             ::benchmark::benchmark<10>(fmt::format("HistoryBuffer<{}>", gr::meta::type_name<T>()), nSamples) = [&actualGain, &buffer, &yValues] {
                 for (auto& yValue : yValues) {
-                    buffer.push_back(yValue);
+                    buffer.push_front(yValue);
                     actualGain = std::max(actualGain, buffer[0]);
                 }
             };
