@@ -342,9 +342,8 @@ private:
         dataSet.signal_names.emplace_back(signal_name);
         dataSet.signal_quantities.emplace_back(signal_quantity);
         dataSet.signal_units.emplace_back(signal_unit);
-        dataSet.signal_ranges.resize(1UZ);    // one data set
-        dataSet.signal_ranges[0].resize(2UZ); // [min, max]s
-        dataSet.meta_information.resize(1);   // one data set
+        dataSet.signal_ranges.resize(1UZ);  // one data set
+        dataSet.meta_information.resize(1); // one data set
         dataSet.meta_information[0]["ctx"]    = filter;
         dataSet.meta_information[0]["n_pre"]  = n_pre;
         dataSet.meta_information[0]["n_post"] = n_post;

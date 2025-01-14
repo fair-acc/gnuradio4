@@ -79,7 +79,7 @@ concept UncertainValueLike = gr::meta::is_instantiation_of<T, UncertainValue>;
 
 template<typename T>
 requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] inline constexpr auto value(const T& val) noexcept {
+[[nodiscard]] constexpr auto value(const T& val) noexcept {
     if constexpr (UncertainValueLike<T>) {
         return val.value;
     } else {
@@ -89,7 +89,7 @@ requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
 
 template<typename T>
 requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] inline constexpr auto uncertainty(const T& val) noexcept {
+[[nodiscard]] constexpr auto uncertainty(const T& val) noexcept {
     if constexpr (UncertainValueLike<T>) {
         return val.uncertainty;
     } else {
@@ -119,7 +119,7 @@ using UncertainValueType_t = detail::UncertainValueValueType<T>::type;
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator+(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator+(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value + rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -141,13 +141,13 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator+=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator+=(T& lhs, const U& rhs) noexcept {
     lhs = lhs + rhs;
     return lhs;
 }
 
 template<UncertainValueLike T, typename ValueTypeT = UncertainValueType_t<T>>
-inline constexpr T operator+(const T& val) {
+constexpr T operator+(const T& val) {
     if constexpr (meta::complex_like<ValueTypeT>) {
         return val;
     } else {
@@ -157,7 +157,7 @@ inline constexpr T operator+(const T& val) {
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator-(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator-(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value - rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -178,19 +178,19 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator-=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator-=(T& lhs, const U& rhs) noexcept {
     lhs = lhs - rhs;
     return lhs;
 }
 
 template<UncertainValueLike T>
-inline constexpr T operator-(const T& val) {
+constexpr T operator-(const T& val) {
     return {-val.value, val.uncertainty};
 }
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator*(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator*(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value * rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -212,14 +212,14 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator*=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator*=(T& lhs, const U& rhs) noexcept {
     lhs = lhs * rhs;
     return lhs;
 }
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator/(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator/(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value * rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -252,7 +252,7 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
     lhs = lhs / rhs;
     return lhs;
 }
@@ -261,9 +261,15 @@ inline constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
 
 namespace gr::math {
 
+template<typename T, typename U>
+requires(std::is_arithmetic_v<T> && std::is_arithmetic_v<U>)
+[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
+    return std::pow(base, exponent);
+}
+
 template<gr::UncertainValueLike T, std::floating_point U, typename ValueTypeT = gr::UncertainValueType_t<T>>
 requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> || std::integral<U>
-[[nodiscard]] inline constexpr T pow(const T& base, U exponent) noexcept {
+[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
     if (base.value == static_cast<meta::fundamental_base_value_type_t<ValueTypeT>>(0)) [[unlikely]] {
         if (exponent == 0) [[unlikely]] {
             return T{1, 0};
@@ -283,8 +289,8 @@ requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> 
 
 template<gr::UncertainValueLike T, gr::UncertainValueLike U, typename ValueTypeT = gr::UncertainValueType_t<T>, typename ValueTypeU = gr::UncertainValueType_t<T>>
 requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, gr::meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr T pow(const T& base, const U& exponent) noexcept {
-    if (base.value == 0.0) [[unlikely]] {
+[[nodiscard]] constexpr T pow(const T& base, const U& exponent) noexcept {
+    if (base.value == ValueTypeT(0)) [[unlikely]] {
         if (exponent.value == static_cast<ValueTypeU>(0)) [[unlikely]] {
             return T{1, 0};
         } else {
@@ -302,7 +308,7 @@ requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, gr:
 }
 
 template<typename T>
-[[nodiscard]] inline constexpr T sqrt(const T& value) noexcept {
+[[nodiscard]] constexpr T sqrt(const T& value) noexcept {
     if constexpr (gr::UncertainValueLike<T>) {
         using ValueType = meta::fundamental_base_value_type_t<T>;
         return gr::math::pow(value, ValueType(0.5));
@@ -312,7 +318,7 @@ template<typename T>
 }
 
 template<typename T>
-[[nodiscard]] inline constexpr T sin(const T& x) noexcept {
+[[nodiscard]] constexpr T sin(const T& x) noexcept {
     if constexpr (gr::UncertainValueLike<T>) {
         return T{std::sin(x.value), std::abs(std::cos(x.value) * x.uncertainty)};
     } else {
@@ -321,7 +327,7 @@ template<typename T>
 }
 
 template<typename T>
-[[nodiscard]] inline constexpr T cos(const T& x) noexcept {
+[[nodiscard]] constexpr T cos(const T& x) noexcept {
     if constexpr (gr::UncertainValueLike<T>) {
         return T{std::cos(x.value), std::abs(std::sin(x.value) * x.uncertainty)};
     } else {
@@ -330,11 +336,62 @@ template<typename T>
 }
 
 template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_t<T>>
-[[nodiscard]] inline constexpr T exp(const T& x) noexcept {
+[[nodiscard]] constexpr T exp(const T& x) noexcept {
     if constexpr (gr::meta::complex_like<ValueTypeT>) {
         return gr::math::pow(gr::UncertainValue<ValueTypeT>{std::numbers::e_v<typename ValueTypeT::value_type>, static_cast<ValueTypeT>(0)}, x);
     } else {
         return gr::math::pow(gr::UncertainValue<ValueTypeT>{std::numbers::e_v<ValueTypeT>, static_cast<ValueTypeT>(0)}, x);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr bool isfinite(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return std::isfinite(gr::value(value)) && std::isfinite(gr::uncertainty(value));
+    } else {
+        return std::isfinite(value);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T abs(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return gr::value(value) > T(0) ? value : -value;
+    } else {
+        return std::abs(value);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T log(const T& x) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        using base_t = gr::meta::fundamental_base_value_type_t<T>;
+        auto val     = std::log(gr::value(x));
+        if constexpr (gr::meta::complex_like<base_t>) {
+            constexpr auto derivative = base_t(1) / x.value; // derivative(log(z)) = 1/z
+            return T{val, std::abs(derivative) * gr::uncertainty(x)};
+        } else {
+            return T{val, std::abs(gr::uncertainty(x) / gr::value(x))}; // derivative(log(x)) = 1/x
+        }
+    } else {
+        return std::log(x);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T log10(const T& x) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        using base_t        = gr::meta::fundamental_base_value_type_t<T>;
+        auto           val  = std::log10(gr::value(x));
+        constexpr auto ln10 = std::numbers::ln10_v<base_t>;
+        if constexpr (gr::meta::complex_like<base_t>) {
+            constexpr auto derivative = base_t(1) / (x.value * ln10); // derivative(log10(z)) = 1 / (z * ln(10))
+            return T{val, std::abs(derivative) * gr::uncertainty(x)};
+        } else {
+            return T{val, std::abs(gr::uncertainty(x) / (gr::value(x) * ln10))}; // derivative(log10(x)) = 1 / (x * ln(10))
+        }
+    } else {
+        return std::log10(x);
     }
 }
 

@@ -3773,7 +3773,25 @@ namespace vir::stdx
 
 namespace gr {
 
-using Size_t = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+#pragma GCC diagnostic push // suppress unavoidable float/int/size_t conversion warnings
+#pragma GCC diagnostic ignored "-Wconversion"
+#ifdef __clang__
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#pragma GCC diagnostic ignored "-Wshorten-64-to-32"
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
+#pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
+#endif
+
+using Size_t                            = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+inline constexpr Size_t      max_Size_t = std::numeric_limits<gr::Size_t>::max();
+inline constexpr std::size_t max_size_t = std::numeric_limits<std::size_t>::max();
+
+template<typename T, typename U>
+T cast(U value) { /// gcc/clang warning suppressing cast
+    return static_cast<T>(value);
+}
+
+#pragma GCC diagnostic pop
 
 namespace meta {
 
@@ -4094,15 +4112,15 @@ namespace detail {
 template<std::integral auto N>
 consteval auto fixed_string_from_number_impl() {
     constexpr size_t buf_len = [] {
-        auto x   = N;
-        size_t  len = x < 0 ? 1u : 0u; // minus character
-        while (x != 0) { // count digits
+        auto   x   = N;
+        size_t len = x < 0 ? 1u : 0u; // minus character
+        while (x != 0) {              // count digits
             ++len;
             x /= 10;
         }
         return len;
     }();
-    fixed_string<buf_len> ret {};
+    fixed_string<buf_len> ret{};
 
     constexpr bool negative = N < 0;
 
@@ -8344,7 +8362,26 @@ static_assert(BufferLike<CircularBuffer<int32_t>>);
 #ifndef GNURADIO_DATASET_HPP
 #define GNURADIO_DATASET_HPP
 
-// #include "Tag.hpp"
+#include <chrono>
+#include <cstdint>
+#include <map>
+// #include <pmtv/pmt.hpp>
+
+#include <variant>
+#include <vector>
+
+// #include <gnuradio-4.0/meta/reflection.hpp>
+
+
+// #include "Message.hpp"
+#ifndef GNURADIO_MESSAGE_HPP
+#define GNURADIO_MESSAGE_HPP
+
+// #include <gnuradio-4.0/Buffer.hpp>
+
+// #include <gnuradio-4.0/CircularBuffer.hpp>
+
+// #include <gnuradio-4.0/Tag.hpp>
 #ifndef GNURADIO_TAG_HPP
 #define GNURADIO_TAG_HPP
 
@@ -8363,6 +8400,9 @@ static_assert(BufferLike<CircularBuffer<int32_t>>);
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <fmt/std.h>
+#include <source_location>
+#include <vector>
+
 // #include <gnuradio-4.0/Tag.hpp>
 
 // #include <gnuradio-4.0/meta/UncertainValue.hpp>
@@ -8448,7 +8488,7 @@ concept UncertainValueLike = gr::meta::is_instantiation_of<T, UncertainValue>;
 
 template<typename T>
 requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] inline constexpr auto value(const T& val) noexcept {
+[[nodiscard]] constexpr auto value(const T& val) noexcept {
     if constexpr (UncertainValueLike<T>) {
         return val.value;
     } else {
@@ -8458,7 +8498,7 @@ requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
 
 template<typename T>
 requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] inline constexpr auto uncertainty(const T& val) noexcept {
+[[nodiscard]] constexpr auto uncertainty(const T& val) noexcept {
     if constexpr (UncertainValueLike<T>) {
         return val.uncertainty;
     } else {
@@ -8488,7 +8528,7 @@ using UncertainValueType_t = detail::UncertainValueValueType<T>::type;
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator+(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator+(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value + rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -8510,13 +8550,13 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator+=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator+=(T& lhs, const U& rhs) noexcept {
     lhs = lhs + rhs;
     return lhs;
 }
 
 template<UncertainValueLike T, typename ValueTypeT = UncertainValueType_t<T>>
-inline constexpr T operator+(const T& val) {
+constexpr T operator+(const T& val) {
     if constexpr (meta::complex_like<ValueTypeT>) {
         return val;
     } else {
@@ -8526,7 +8566,7 @@ inline constexpr T operator+(const T& val) {
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator-(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator-(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value - rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -8547,19 +8587,19 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator-=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator-=(T& lhs, const U& rhs) noexcept {
     lhs = lhs - rhs;
     return lhs;
 }
 
 template<UncertainValueLike T>
-inline constexpr T operator-(const T& val) {
+constexpr T operator-(const T& val) {
     return {-val.value, val.uncertainty};
 }
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator*(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator*(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value * rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -8581,14 +8621,14 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator*=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator*=(T& lhs, const U& rhs) noexcept {
     lhs = lhs * rhs;
     return lhs;
 }
 
 template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
 requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr auto operator/(const T& lhs, const U& rhs) noexcept {
+[[nodiscard]] constexpr auto operator/(const T& lhs, const U& rhs) noexcept {
     if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
         using ResultType = decltype(lhs.value * rhs.value);
         if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
@@ -8621,7 +8661,7 @@ requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta:
 }
 
 template<UncertainValueLike T, typename U>
-inline constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
+constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
     lhs = lhs / rhs;
     return lhs;
 }
@@ -8630,9 +8670,15 @@ inline constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
 
 namespace gr::math {
 
+template<typename T, typename U>
+requires(std::is_arithmetic_v<T> && std::is_arithmetic_v<U>)
+[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
+    return std::pow(base, exponent);
+}
+
 template<gr::UncertainValueLike T, std::floating_point U, typename ValueTypeT = gr::UncertainValueType_t<T>>
 requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> || std::integral<U>
-[[nodiscard]] inline constexpr T pow(const T& base, U exponent) noexcept {
+[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
     if (base.value == static_cast<meta::fundamental_base_value_type_t<ValueTypeT>>(0)) [[unlikely]] {
         if (exponent == 0) [[unlikely]] {
             return T{1, 0};
@@ -8652,8 +8698,8 @@ requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> 
 
 template<gr::UncertainValueLike T, gr::UncertainValueLike U, typename ValueTypeT = gr::UncertainValueType_t<T>, typename ValueTypeU = gr::UncertainValueType_t<T>>
 requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, gr::meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] inline constexpr T pow(const T& base, const U& exponent) noexcept {
-    if (base.value == 0.0) [[unlikely]] {
+[[nodiscard]] constexpr T pow(const T& base, const U& exponent) noexcept {
+    if (base.value == ValueTypeT(0)) [[unlikely]] {
         if (exponent.value == static_cast<ValueTypeU>(0)) [[unlikely]] {
             return T{1, 0};
         } else {
@@ -8671,7 +8717,7 @@ requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, gr:
 }
 
 template<typename T>
-[[nodiscard]] inline constexpr T sqrt(const T& value) noexcept {
+[[nodiscard]] constexpr T sqrt(const T& value) noexcept {
     if constexpr (gr::UncertainValueLike<T>) {
         using ValueType = meta::fundamental_base_value_type_t<T>;
         return gr::math::pow(value, ValueType(0.5));
@@ -8681,7 +8727,7 @@ template<typename T>
 }
 
 template<typename T>
-[[nodiscard]] inline constexpr T sin(const T& x) noexcept {
+[[nodiscard]] constexpr T sin(const T& x) noexcept {
     if constexpr (gr::UncertainValueLike<T>) {
         return T{std::sin(x.value), std::abs(std::cos(x.value) * x.uncertainty)};
     } else {
@@ -8690,7 +8736,7 @@ template<typename T>
 }
 
 template<typename T>
-[[nodiscard]] inline constexpr T cos(const T& x) noexcept {
+[[nodiscard]] constexpr T cos(const T& x) noexcept {
     if constexpr (gr::UncertainValueLike<T>) {
         return T{std::cos(x.value), std::abs(std::sin(x.value) * x.uncertainty)};
     } else {
@@ -8699,7 +8745,7 @@ template<typename T>
 }
 
 template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_t<T>>
-[[nodiscard]] inline constexpr T exp(const T& x) noexcept {
+[[nodiscard]] constexpr T exp(const T& x) noexcept {
     if constexpr (gr::meta::complex_like<ValueTypeT>) {
         return gr::math::pow(gr::UncertainValue<ValueTypeT>{std::numbers::e_v<typename ValueTypeT::value_type>, static_cast<ValueTypeT>(0)}, x);
     } else {
@@ -8707,12 +8753,61 @@ template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_
     }
 }
 
+template<typename T>
+[[nodiscard]] constexpr bool isfinite(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return std::isfinite(gr::value(value)) && std::isfinite(gr::uncertainty(value));
+    } else {
+        return std::isfinite(value);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T abs(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return gr::value(value) > T(0) ? value : -value;
+    } else {
+        return std::abs(value);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T log(const T& x) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        using base_t = gr::meta::fundamental_base_value_type_t<T>;
+        auto val     = std::log(gr::value(x));
+        if constexpr (gr::meta::complex_like<base_t>) {
+            constexpr auto derivative = base_t(1) / x.value; // derivative(log(z)) = 1/z
+            return T{val, std::abs(derivative) * gr::uncertainty(x)};
+        } else {
+            return T{val, std::abs(gr::uncertainty(x) / gr::value(x))}; // derivative(log(x)) = 1/x
+        }
+    } else {
+        return std::log(x);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T log10(const T& x) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        using base_t        = gr::meta::fundamental_base_value_type_t<T>;
+        auto           val  = std::log10(gr::value(x));
+        constexpr auto ln10 = std::numbers::ln10_v<base_t>;
+        if constexpr (gr::meta::complex_like<base_t>) {
+            constexpr auto derivative = base_t(1) / (x.value * ln10); // derivative(log10(z)) = 1 / (z * ln(10))
+            return T{val, std::abs(derivative) * gr::uncertainty(x)};
+        } else {
+            return T{val, std::abs(gr::uncertainty(x) / (gr::value(x) * ln10))}; // derivative(log10(x)) = 1 / (x * ln(10))
+        }
+    } else {
+        return std::log10(x);
+    }
+}
+
 } // namespace gr::math
 
 #endif // GNURADIO_UNCERTAINVALUE_HPP
 
-#include <source_location>
-#include <vector>
 
 namespace gr {
 namespace time {
@@ -8799,6 +8894,39 @@ struct fmt::formatter<gr::UncertainValue<T>> {
         return out;
     }
 };
+
+namespace gr {
+template<gr::UncertainValueLike T>
+std::ostream& operator<<(std::ostream& os, const T& v) {
+    return os << fmt::format("{}", v);
+}
+} // namespace gr
+
+// DataSet - Range formatter
+
+namespace gr {
+template<typename T>
+struct Range;
+}
+
+namespace fmt {
+template<typename T>
+struct formatter<gr::Range<T>> {
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const gr::Range<T>& range, FormatContext& ctx) {
+        return fmt::format_to(ctx.out(), "[min: {}, max: {}]", range.min, range.max);
+    }
+};
+} // namespace fmt
+
+namespace gr {
+template<typename T>
+std::ostream& operator<<(std::ostream& os, const gr::Range<T>& v) {
+    return os << fmt::format("{}", v);
+}
+} // namespace gr
 
 // pmt formatter
 
@@ -9129,168 +9257,6 @@ inline constexpr std::array<std::string_view, 15> kDefaultTags = {"sample_rate",
 
 #endif // GNURADIO_TAG_HPP
 
-#include <chrono>
-#include <cstdint>
-// #include <gnuradio-4.0/meta/reflection.hpp>
-
-#include <map>
-// #include <pmtv/pmt.hpp>
-
-#include <variant>
-#include <vector>
-
-namespace gr {
-
-struct LayoutRight {};
-
-struct LayoutLeft {};
-
-/**
- * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
- */
-template<typename T>
-concept PacketLike = requires(T t) {
-    typename T::value_type;
-    typename T::pmt_map;
-    requires std::is_same_v<decltype(t.timestamp), int64_t>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-};
-
-/**
- * @brief A concept that describes a Tensor, which is a subset of the DataSet struct.
- */
-template<typename T>
-concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
-    typename T::value_type;
-    typename T::pmt_map;
-    typename T::tensor_layout_type;
-    requires std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
-    requires std::is_same_v<decltype(t.layout), typename T::tensor_layout_type>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-};
-
-/**
- * @brief: a DataSet consists of signal data, metadata, and associated axis information.
- *
- * The DataSet can be used to store and manipulate data in a structured way, and supports various types of axes,
- * layouts, and signal data. The dataset contains information such as timestamp, axis names and units, signal names,
- * values, and ranges, as well as metadata and timing events. This struct provides a flexible way to store and organize
- * data with associated metadata, and can be customized for different types of data and applications.
- */
-template<typename T>
-concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) {
-    typename T::value_type;
-    typename T::pmt_map;
-    typename T::tensor_layout_type;
-    requires std::is_same_v<decltype(t.timestamp), int64_t>;
-
-    // axis layout:
-    requires std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.axis_values), std::vector<std::vector<typename T::value_type>>>;
-
-    // signal data storage
-    requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_quantities), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
-    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.signal_errors), std::vector<typename T::value_type>>;
-    requires std::is_same_v<decltype(t.signal_ranges), std::vector<std::vector<typename T::value_type>>>;
-
-    // meta data
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, property_map>>>>;
-};
-
-template<typename T>
-struct DataSet {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
-
-    // axis layout:
-    std::vector<std::string>    axis_names{};  // e.g. time, frequency, …
-    std::vector<std::string>    axis_units{};  // axis base SI-unit
-    std::vector<std::vector<T>> axis_values{}; // explicit axis values
-
-    // signal data layout:
-    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout{};  // row-major, column-major, “special”
-
-    // signal data storage:
-    std::vector<std::string>    signal_names{};      // size = extents[0]
-    std::vector<std::string>    signal_quantities{}; // size = extents[0]
-    std::vector<std::string>    signal_units{};      // size = extents[0]
-    std::vector<T>              signal_values{};     // size = \PI_i extents[i]
-    std::vector<T>              signal_errors{};     // size = \PI_i extents[i] or '0' if not applicable
-    std::vector<std::vector<T>> signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
-
-    // meta data
-    std::vector<pmt_map>                                              meta_information{};
-    std::vector<std::vector<std::pair<std::ptrdiff_t, property_map>>> timing_events{};
-
-    GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_errors, signal_ranges, meta_information, timing_events);
-};
-
-static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
-static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
-static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
-
-template<typename T>
-struct Tensor {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
-
-    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout{};  // row-major, column-major, “special”
-
-    std::vector<T> signal_values{}; // size = \PI_i extents[i]
-    std::vector<T> signal_errors{}; // size = \PI_i extents[i] or '0' if not applicable
-
-    // meta data
-    std::vector<pmt_map> meta_information{};
-
-    GR_MAKE_REFLECTABLE(Tensor, timestamp, extents, layout, signal_values, signal_errors, meta_information);
-};
-
-static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
-static_assert(TensorLike<Tensor<float>>, "Tensor<std::byte> concept conformity");
-static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity");
-
-template<typename T>
-struct Packet {
-    using value_type = T;
-    using pmt_map    = std::map<std::string, pmtv::pmt>;
-
-    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
-    std::vector<T>       signal_values{}; // size = \PI_i extents[i
-    std::vector<pmt_map> meta_information{};
-
-    GR_MAKE_REFLECTABLE(Packet, timestamp, signal_values, meta_information);
-};
-
-static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
-static_assert(PacketLike<Packet<float>>, "Packet<std::byte> concept conformity");
-static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity");
-
-} // namespace gr
-
-#endif // GNURADIO_DATASET_HPP
-
-// #include "Message.hpp"
-#ifndef GNURADIO_MESSAGE_HPP
-#define GNURADIO_MESSAGE_HPP
-
-// #include <gnuradio-4.0/Buffer.hpp>
-
-// #include <gnuradio-4.0/CircularBuffer.hpp>
-
 // #include <gnuradio-4.0/meta/formatter.hpp>
 
 // #include <gnuradio-4.0/meta/reflection.hpp>
@@ -9503,6 +9469,205 @@ struct fmt::formatter<gr::Message> {
 inline std::ostream& operator<<(std::ostream& os, const gr::Message& msg) { return os << fmt::format("{}", msg); }
 
 #endif // include guard
+
+// #include "Tag.hpp"
+
+
+namespace gr {
+
+struct LayoutRight {};
+
+struct LayoutLeft {};
+
+template<typename T>
+struct Range {
+    T min = 0;
+    T max = 0;
+    GR_MAKE_REFLECTABLE(Range, min, max);
+
+    auto operator<=>(const Range<T>& other) const = default;
+};
+
+/**
+ * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
+ */
+template<typename U, typename T = std::remove_cvref_t<U>>
+concept PacketLike = requires(T t) {
+    typename T::value_type;
+    typename T::pmt_map;
+    requires std::is_same_v<decltype(t.timestamp), int64_t>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+};
+
+/**
+ * @brief A concept that describes a Tensor, which is a subset of the DataSet struct.
+ */
+template<typename U, typename T = std::remove_cvref_t<U>>
+concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
+    typename T::value_type;
+    typename T::pmt_map;
+    typename T::tensor_layout_type;
+    requires std::is_same_v<decltype(t.extents), std::vector<std::int32_t>>;
+    requires std::is_same_v<decltype(t.layout), typename T::tensor_layout_type>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+};
+
+/**
+ * @brief: a DataSet consists of signal data, metadata, and associated axis information.
+ *
+ * The DataSet can be used to store and manipulate data in a structured way, and supports various types of axes,
+ * layouts, and signal data. The dataset contains information such as timestamp, axis names and units, signal names,
+ * values, and ranges, as well as metadata and timing events. This struct provides a flexible way to store and organize
+ * data with associated metadata, and can be customized for different types of data and applications.
+ */
+template<typename U, typename T = std::remove_cvref_t<U>>
+concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) {
+    typename T::value_type;
+    typename T::pmt_map;
+    typename T::tensor_layout_type;
+    requires std::is_same_v<decltype(t.timestamp), int64_t>;
+
+    // axis layout:
+    requires std::is_same_v<decltype(t.axis_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.axis_units), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.axis_values), std::vector<std::vector<typename T::value_type>>>;
+
+    // signal data storage
+    requires std::is_same_v<decltype(t.signal_names), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_quantities), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_units), std::vector<std::string>>;
+    requires std::is_same_v<decltype(t.signal_values), std::vector<typename T::value_type>>;
+    requires std::is_same_v<decltype(t.signal_ranges), std::vector<Range<typename T::value_type>>>;
+
+    // meta data
+    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::property_map>>>>;
+};
+
+template<typename T>
+struct DataSet {
+    using value_type         = T;
+    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map            = std::map<std::string, pmtv::pmt>;
+    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+
+    // axis layout:
+    std::vector<std::string>    axis_names{};  // axis quantity, e.g. time, frequency, …
+    std::vector<std::string>    axis_units{};  // axis base SI-unit
+    std::vector<std::vector<T>> axis_values{}; // explicit axis values
+
+    // signal data layout:
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
+
+    // signal data storage:
+    std::vector<std::string> signal_names{};      // size = extents[0]
+    std::vector<std::string> signal_quantities{}; // size = extents[0]
+    std::vector<std::string> signal_units{};      // size = extents[0]
+    std::vector<T>           signal_values{};     // size = \PI_i extents[i]
+    std::vector<Range<T>>    signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
+
+    // meta data
+    std::vector<pmt_map>                                                  meta_information{};
+    std::vector<std::vector<std::pair<std::ptrdiff_t, gr::property_map>>> timing_events{};
+
+    GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_ranges, meta_information, timing_events);
+
+    [[nodiscard]] std::size_t        axisCount() const noexcept { return axis_names.size(); }
+    [[nodiscard]] std::string&       axisName(std::size_t i = 0UZ) { return axis_names[_axCheck(i)]; }
+    [[nodiscard]] std::string_view   axisName(std::size_t i = 0UZ) const { return axis_names[_axCheck(i)]; }
+    [[nodiscard]] std::string&       axisUnit(std::size_t i = 0UZ) { return axis_units[_axCheck(i)]; }
+    [[nodiscard]] std::string_view   axisUnit(std::size_t i = 0UZ) const { return axis_units[_axCheck(i)]; }
+    [[nodiscard]] std::span<T>       axisValues(std::size_t i = 0UZ) { return axis_values[_axCheck(i)]; }
+    [[nodiscard]] std::span<const T> axisValues(std::size_t i = 0UZ) const { return axis_values[_axCheck(i)]; }
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return signal_names.size(); }
+    [[nodiscard]] std::string&          signalName(std::size_t i = 0UZ) { return signal_names[_idxCheck(i)]; }
+    [[nodiscard]] std::string_view      signalName(std::size_t i = 0UZ) const { return signal_names[_idxCheck(i)]; }
+    [[nodiscard]] std::string&          signalQuantity(std::size_t i = 0UZ) { return signal_quantities[_idxCheck(i)]; }
+    [[nodiscard]] std::string_view      signalQuantity(std::size_t i = 0UZ) const { return signal_quantities[_idxCheck(i)]; }
+    [[nodiscard]] std::string&          signalUnit(std::size_t i = 0UZ) { return signal_units[_idxCheck(i)]; }
+    [[nodiscard]] std::string_view      signalUnit(std::size_t i = 0UZ) const { return signal_units[_idxCheck(i)]; }
+    [[nodiscard]] std::span<T>          signalValues(std::size_t i = 0UZ) { return {std::next(signal_values.data(), _idxCheckS(i) * _valsPerSigS()), _valsPerSig()}; }
+    [[nodiscard]] std::span<const T>    signalValues(std::size_t i = 0UZ) const { return {std::next(signal_values.data(), _idxCheckS(i) * _valsPerSigS()), _valsPerSig()}; }
+    [[nodiscard]] Range<T>&             signalRange(std::size_t i = 0UZ) { return signal_ranges[_idxCheck(i)]; }
+    [[nodiscard]] const Range<T>&       signalRange(std::size_t i = 0UZ) const { return signal_ranges[_idxCheck(i)]; }
+
+private:
+    [[nodiscard]] std::size_t _axCheck(std::size_t i, std::source_location loc = std::source_location::current()) const {
+        if (i >= axis_names.size()) {
+            throw gr::exception(fmt::format("{} axis out of range: i={} >= [0, {}]", loc.function_name(), i, axis_names.size()), loc);
+        }
+        return i;
+    }
+
+    [[nodiscard]] std::size_t _idxCheck(std::size_t i, std::source_location location = std::source_location::current()) const {
+        if (i >= size()) {
+            throw gr::exception(fmt::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
+        }
+        return i;
+    }
+
+    [[nodiscard]] std::ptrdiff_t _idxCheckS(std::size_t i, std::source_location location = std::source_location::current()) const {
+        if (i >= size()) {
+            throw gr::exception(fmt::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
+        }
+        return static_cast<std::ptrdiff_t>(i);
+    }
+
+    [[nodiscard]] std::size_t    _valsPerSig() const noexcept { return size() == 0U ? 0U : signal_values.size() / size(); }
+    [[nodiscard]] std::ptrdiff_t _valsPerSigS() const noexcept { return static_cast<std::ptrdiff_t>(size() == 0U ? 0U : signal_values.size() / size()); }
+};
+
+static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
+static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
+static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
+
+template<typename T>
+struct Tensor {
+    using value_type         = T;
+    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map            = std::map<std::string, pmtv::pmt>;
+    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    tensor_layout_type        layout{};  // row-major, column-major, “special”
+
+    std::vector<T> signal_values{}; // size = \PI_i extents[i]
+
+    // meta data
+    std::vector<pmt_map> meta_information{};
+
+    GR_MAKE_REFLECTABLE(Tensor, timestamp, extents, layout, signal_values, meta_information);
+};
+
+static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
+static_assert(TensorLike<Tensor<float>>, "Tensor<std::byte> concept conformity");
+static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity");
+
+template<typename T>
+struct Packet {
+    using value_type = T;
+    using pmt_map    = std::map<std::string, pmtv::pmt>;
+
+    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
+    std::vector<T>       signal_values{}; // size = \PI_i extents[i
+    std::vector<pmt_map> meta_information{};
+
+    GR_MAKE_REFLECTABLE(Packet, timestamp, signal_values, meta_information);
+};
+
+static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<float>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity");
+
+} // namespace gr
+
+#endif // GNURADIO_DATASET_HPP
+
+// #include "Message.hpp"
 
 // #include "Tag.hpp"
 

@@ -71,8 +71,8 @@ void equalDataset(const gr::blocks::fft::FFT<T, gr::DataSet<U>>& fftBlock, const
 
     for (std::size_t i = 0U; i < 5; i++) {
         const auto mm = std::minmax_element(std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N)), std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N)));
-        expect(approx(*mm.first, ds1.signal_ranges[i][0], tolerance));
-        expect(approx(*mm.second, ds1.signal_ranges[i][1], tolerance));
+        expect(approx(*mm.first, ds1.signal_ranges[i].min, tolerance));
+        expect(approx(*mm.second, ds1.signal_ranges[i].max, tolerance));
     }
 }
 
