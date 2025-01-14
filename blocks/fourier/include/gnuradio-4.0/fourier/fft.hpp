@@ -202,7 +202,6 @@ On the choice of window (mathematically aka. apodisation) functions
             ds.signal_ranges[i] = {*mm.first, *mm.second};
         }
 
-        ds.signal_errors    = {};
         ds.meta_information = {{{"sample_rate", sample_rate}, {"signal_name", signal_name}, {"signal_unit", signal_unit}, {"signal_min", signal_min}, {"signal_max", signal_max}, //
             {"fft_size", fftSize}, {"window", window}, {"output_in_db", outputInDb}, {"output_in_deg", outputInDeg}, {"unwrap_phase", unwrapPhase},                               //
             {"input_chunk_size", this->input_chunk_size}, {"output_chunk_size", this->output_chunk_size}, {"stride", this->stride}}};

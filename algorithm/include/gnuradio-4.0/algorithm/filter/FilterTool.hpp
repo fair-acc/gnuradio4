@@ -29,6 +29,7 @@
 #endif
 
 #include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
@@ -324,10 +325,8 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
     }
 };
 
-template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::unseq>
+template<typename T, std::size_t bufferSize = std::dynamic_extent, Form form = std::is_floating_point_v<T> ? Form::DF_II : Form::DF_I, auto execPolicy = std::execution::unseq, typename TBaseType = meta::fundamental_base_value_type_t<T>>
 struct ErrorPropagatingFilter {
-    using TBaseType = meta::fundamental_base_value_type_t<T>;
-
     Filter<T, bufferSize, form, execPolicy>         filterMean;
     Filter<TBaseType, bufferSize, form, execPolicy> filterSquared;
 
@@ -344,14 +343,17 @@ struct ErrorPropagatingFilter {
         filterSquared.reset(gr::value(defaultValue) * gr::value(defaultValue));
     }
 
-    T processOne(const T& inputSample) {
-        T         mean   = filterMean.processOne(inputSample);
-        TBaseType square = filterSquared.processOne(gr::value(inputSample) * gr::value(inputSample));
+    gr::UncertainValue<TBaseType> processOne(const T& inputSample) {
+        const T         mean     = filterMean.processOne(inputSample);
+        const TBaseType meanVal  = gr::value(mean);
+        const TBaseType meanUnc  = gr::uncertainty(mean);
+        const TBaseType inputVal = gr::value(inputSample);
+        const TBaseType square   = filterSquared.processOne(inputVal * inputVal);
 
         if constexpr (UncertainValueLike<T>) {
-            return {mean.value, std::sqrt(std::abs(square - gr::value(mean) * gr::value(mean)) + gr::uncertainty(mean) * gr::uncertainty(mean))};
+            return {meanVal, std::sqrt(std::abs(square - meanVal * meanVal) + meanUnc * meanUnc)};
         } else {
-            return {mean.value, std::sqrt(std::abs(square - mean * mean))};
+            return {meanVal, std::sqrt(std::abs(square - meanVal * meanVal))};
         }
     }
 };
@@ -910,6 +912,47 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
         }
         return sections;
     }
+}
+
+template<std::floating_point T>
+FilterCoefficients<T> designResonatorDigital(T samplingRate, T frequency, T poleRadius, std::source_location location = std::source_location::current()) {
+    if (samplingRate <= T(0) || frequency <= T(0) || frequency >= samplingRate / T(2)) {
+        throw gr::exception(fmt::format("samplingRateHz {} and frequencyHz {} must be > 0.", samplingRate, frequency), location);
+    }
+    if (poleRadius <= T(0) || poleRadius >= T(1)) {
+        throw gr::exception(fmt::format("poleRadius {} must be in (0,1).", poleRadius), location);
+    }
+
+    const T theta = T(2) * std::numbers::pi_v<T> * frequency / samplingRate;
+    const T a1    = -T(2) * poleRadius * gr::math::cos(theta);                            // a1 = -2⋅r⋅cos(θ)
+    const T a2    = poleRadius * poleRadius;                                              // a2 = r²
+    return FilterCoefficients<T>{.b = {T(1) + a1 + a2, T(0), T(0)}, .a = {T(1), a1, a2}}; // b0 = 1 + a1 + a2 (DC normalisation)
+}
+
+template<std::floating_point T>
+FilterCoefficients<T> designResonatorPhysical(T samplingRate, T frequency, T zetaDamping, std::source_location location = std::source_location::current()) {
+    if (frequency <= T(0)) {
+        throw gr::exception(fmt::format("frequency {} must be > 0.", frequency), location);
+    }
+    if (zetaDamping < T(0)) {
+        throw gr::exception(fmt::format("zetaDamping {} must be >= 0.", zetaDamping), location);
+    }
+    T rApprox = std::exp(-zetaDamping * T(2) * std::numbers::pi_v<T> * frequency / samplingRate); // approximation: r ~ exp(-ζ * omega0 / fs))
+    return designResonatorDigital<T>(samplingRate, frequency, std::min(rApprox, T(0.9999)), location);
+}
+
+template<std::floating_point T>
+FilterCoefficients<T> designResonatorRF(T samplingRateHz, T frequency, T Q, std::source_location location = std::source_location::current()) {
+    if (frequency <= 0.0) {
+        throw gr::exception(fmt::format("frequency {} must be > 0.", frequency), location);
+    }
+    if (Q <= 0.0) {
+        throw gr::exception(fmt::format("Q {} must be > 0.", Q), location);
+    }
+
+    const T BW      = frequency / Q;                                            // approximates 3dB BW
+    T       rApprox = std::exp(-std::numbers::pi_v<T> * (BW / samplingRateHz)); // approximation: discrete r => exp(-pi * BW/fs):
+    return designResonatorDigital<T>(samplingRateHz, frequency, std::min(rApprox, T(0.9999)), location);
 }
 
 } // namespace iir

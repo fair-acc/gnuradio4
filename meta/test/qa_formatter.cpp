@@ -4,7 +4,8 @@
 #include <expected>
 
 #include <fmt/format.h>
-
+#include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::meta::test {
@@ -68,6 +69,10 @@ const boost::ut::suite uncertainValueFormatter = [] {
         expect(eq("(1.230 ± 0.450)"s, fmt::format("{:1.3f}", UncertainDouble{1.23, 0.45})));
         expect(eq("(3.140 ± 0.010)"s, fmt::format("{:1.3f}", UncertainDouble{3.14, 0.01})));
         expect(eq("(0.000 ± 0.000)"s, fmt::format("{:1.3f}", UncertainDouble{0, 0})));
+
+        std::stringstream ss;
+        ss << UncertainDouble{1.23, 0.45};
+        expect(eq("(1.23 ± 0.45)"s, ss.str()));
     };
 };
 
@@ -108,6 +113,20 @@ const boost::ut::suite expectedFormatter = [] {
     auto error = fmt::format("{}", Expected(std::unexpected("Error")));
     fmt::println("expected formatter test: {}", error);
     expect(eq(error, "<std::unexpected: Error>"s));
+};
+
+const boost::ut::suite<"Range<T> formatter"> _rangeFormatter = [] {
+    using namespace boost::ut;
+    using namespace std::literals::string_literals;
+
+    "fmt::formatter<Range<std::int32t>>"_test = [] {
+        gr::Range<std::int32_t> range{-2, 2};
+        expect(eq("[min: -2, max: 2]"s, fmt::format("{}", range)));
+    };
+    "fmt::formatter<Range<float>>"_test = [] {
+        gr::Range<float> range{-2.5f, 2.5f};
+        expect(eq("[min: -2.5, max: 2.5]"s, fmt::format("{}", range)));
+    };
 };
 
 } // namespace gr::meta::test
