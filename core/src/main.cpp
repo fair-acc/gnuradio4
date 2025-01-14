@@ -178,7 +178,7 @@ int main() {
     }
 
     {
-        auto merged = merge<"out1", "original">(merge<"out0", "original">(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
+        auto merged = merge<"out#1", "original">(merge<"out#0", "original">(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
         reflectBlock(merged);
 
         // execute graph
