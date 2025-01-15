@@ -174,7 +174,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 }
 
                 ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
-                expect(ge(maxOutput, ValueType{.9f})) << fmt::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
+                expect(ge(maxOutput, static_cast<ValueType>(.9f))) << fmt::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
             };
 
             "verify out-of-band signal is attenuated"_test = [&filter] {
@@ -192,7 +192,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 }
 
                 ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
-                expect(le(maxOutput, ValueType{.2f})) << fmt::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
+                expect(le(maxOutput, static_cast<ValueType>(.2f))) << fmt::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
             };
         } |
         std::tuple<std::pair<float, meta::constexpr_string<"FIR">>,           //
