@@ -30,7 +30,7 @@ struct PortDefinition {
 };
 
 struct Edge {
-    enum class EdgeState { WaitingToBeConnected, Connected, Overriden, ErrorConnecting, PortNotFound, IncompatiblePorts };
+    enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts };
 
     // Member variables that are controlled by the graph and scheduler
     BlockModel*    _sourceBlock      = nullptr; /// non-owning reference

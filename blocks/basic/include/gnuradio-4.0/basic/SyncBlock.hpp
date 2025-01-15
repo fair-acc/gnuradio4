@@ -178,7 +178,7 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, NoDefaultTagForwarding, SyncBl
                 const std::size_t nSamplesToDrop    = syncData[i].index - minPre;
                 const std::size_t nSamplesToConsume = nSamplesToDrop + nSamplesToPublish;
 
-                std::ranges::copy_n(ins[i].begin() + nSamplesToDrop, static_cast<std::ptrdiff_t>(nSamplesToPublish), outs[i].begin());
+                std::ranges::copy_n(std::next(ins[i].begin(), static_cast<std::ptrdiff_t>(nSamplesToDrop)), static_cast<std::ptrdiff_t>(nSamplesToPublish), outs[i].begin());
                 const std::size_t totalDroppedSamples = _nDroppedSamples[i] + nSamplesToDrop;
 
                 publishDroppedSamplesTagIfNotZero(outs[i], totalDroppedSamples);
@@ -238,10 +238,10 @@ struct SyncBlock : public gr::Block<SyncBlock<T>, NoDefaultTagForwarding, SyncBl
     }
 
     constexpr void publishInputTags(InputSpanLike auto& in, OutputSpanLike auto& out, std::size_t nDroppedSamples, std::size_t nSamplesToPublish) {
-        const auto tags = in.tags();
-        for (const auto& tag : tags) {
-            if (tag.first >= nDroppedSamples && tag.first < nSamplesToPublish + nDroppedSamples) {
-                out.publishTag(tag.second, tag.first - nDroppedSamples);
+        for (const auto& tag : in.rawTags) {
+            const std::size_t relativeTagIndex = getRelativeTagIndex(in, tag);
+            if (relativeTagIndex != std::numeric_limits<std::size_t>::max() && relativeTagIndex >= nDroppedSamples && relativeTagIndex < nSamplesToPublish + nDroppedSamples) {
+                out.publishTag(tag.map, relativeTagIndex - nDroppedSamples);
             }
         }
     }
