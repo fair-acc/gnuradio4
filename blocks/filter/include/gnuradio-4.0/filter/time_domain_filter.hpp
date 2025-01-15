@@ -42,7 +42,7 @@ H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
     }
 
     constexpr T processOne(T input) noexcept {
-        inputHistory.push_back(input);
+        inputHistory.push_front(input);
         return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
     }
 };
@@ -85,32 +85,32 @@ a are the feedback coefficients
         if constexpr (form == IIRForm::DF_I) {
             // y[n] = b[0] * x[n]   + b[1] * x[n-1] + ... + b[N] * x[n-N]
             //      - a[1] * y[n-1] - a[2] * y[n-2] - ... - a[M] * y[n-M]
-            inputHistory.push_back(input);
+            inputHistory.push_front(input);
             const T feedforward = std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
             const T feedback    = std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
             const T output      = feedforward - feedback;
-            outputHistory.push_back(output);
+            outputHistory.push_front(output);
             return output;
         } else if constexpr (form == IIRForm::DF_II) {
             // w[n] = x[n] - a[1] * w[n-1] - a[2] * w[n-2] - ... - a[M] * w[n-M]
             // y[n] =        b[0] * w[n]   + b[1] * w[n-1] + ... + b[N] * w[n-N]
             const T w = input - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-            inputHistory.push_back(w);
+            inputHistory.push_front(w);
 
             return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
         } else if constexpr (form == IIRForm::DF_I_TRANSPOSED) {
             // w_1[n] = x[n] - a[1] * w_2[n-1] - a[2] * w_2[n-2] - ... - a[M] * w_2[n-M]
             // y[n]   = b[0] * w_2[n] + b[1] * w_2[n-1] + ... + b[N] * w_2[n-N]
             const T v0 = input - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-            outputHistory.push_back(v0);
+            outputHistory.push_front(v0);
 
             return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
         } else if constexpr (form == IIRForm::DF_II_TRANSPOSED) {
             // y[n] = b_0 * f[n] + Σ (b_k * f[n−k] − a_k * y[n−k]) for k = 1 to N
             const T output = b[0] * input + std::transform_reduce(std::execution::unseq, b.cbegin() + 1, b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}) - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
 
-            inputHistory.push_back(input);
-            outputHistory.push_back(output);
+            inputHistory.push_front(input);
+            outputHistory.push_front(output);
             return output;
         }
     }

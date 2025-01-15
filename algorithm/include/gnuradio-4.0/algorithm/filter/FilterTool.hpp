@@ -124,35 +124,35 @@ template<typename T, std::size_t bufferSize, Form form = std::is_floating_point_
     if constexpr (form == Form::DF_I) {
         // y[n] = b[0]·x[n]   + b[1]·x[n-1] + … + b[N]·x[n-N]
         //      - a[1]·y[n-1] - a[2]·y[n-2] - … - a[M]·y[n-M]
-        inputHistory.push_back(input);
+        inputHistory.push_front(input);
         T output = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>())                // feed-forward path
                    - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()); // feedback path
-        outputHistory.push_back(output);
+        outputHistory.push_front(output);
         return output;
     } else if constexpr (form == Form::DF_II) {
         // w[n] = x[n] - a[1]·w[n-1] - a[2]·w[n-2] - … - a[M]·w[n-M]
         // y[n] =        b[0]·w[n]   + b[1]·w[n-1] + … + b[N]·w[n-N]
         if (a.size() > 1) {
             const T w = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), inputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
-            inputHistory.push_back(w);
+            inputHistory.push_front(w);
             return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
         } else {
-            inputHistory.push_back(input);
+            inputHistory.push_front(input);
             return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
         }
     } else if constexpr (form == Form::DF_I_TRANSPOSED) {
         // w_1[n] = x[n] - a[1]·w_2[n-1] - a[2]·w_2[n-2] - … - a[M]·w_2[n-M]
         // y[n]   = b[0]·w_2[n] + b[1]·w_2[n-1] + … + b[N]·w_2[n-N]
         T v0 = input - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
-        outputHistory.push_back(v0);
+        outputHistory.push_front(v0);
         return std::transform_reduce(execPolicy, b.cbegin(), b.cend(), outputHistory.cbegin(), T{0}, std::plus<>(), std::multiplies<>());
     } else if constexpr (form == Form::DF_II_TRANSPOSED) {
         // y[n] = b_0·f[n] + \sum_(k=1)^N(b_k·f[n−k] − a_k·y[n−k])
         T output = b[0] * input                                                                                                                                       //
                    + std::transform_reduce(execPolicy, std::next(b.cbegin()), b.cend(), inputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>()) //
                    - std::transform_reduce(execPolicy, std::next(a.cbegin()), a.cend(), outputHistory.cbegin(), static_cast<T>(0), std::plus<>(), std::multiplies<>());
-        inputHistory.push_back(input);
-        outputHistory.push_back(output);
+        inputHistory.push_front(input);
+        outputHistory.push_front(output);
         return output;
     } else {
         static_assert(gr::meta::always_false<T>, "should not reach here");
@@ -276,12 +276,12 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
         const auto& autocorrelationFunction = section.autoCorrelation;
 
         // Feed-forward path (uncorrelated uncertainties)
-        inputHistory.push_back(inputUncertainty * inputUncertainty);
+        inputHistory.push_front(inputUncertainty * inputUncertainty);
         TBaseType feedForwardUncertainty = std::transform_reduce(execPolicy, b.cbegin(), b.cend(), inputHistory.cbegin(), static_cast<TBaseType>(0), //
             std::plus<>(), [](TBaseType bVal, TBaseType sigma2) { return bVal * bVal * sigma2; });
 
         if (a.size() <= 1 || autocorrelationFunction.empty()) {
-            outputHistory.push_back(feedForwardUncertainty);
+            outputHistory.push_front(feedForwardUncertainty);
             return feedForwardUncertainty;
         }
 
@@ -296,7 +296,7 @@ struct Filter<UncertainValue<T>, bufferSize, form, execPolicy> {
         }
 
         TBaseType totalUncertainty = feedForwardUncertainty + feedbackUncertainty;
-        outputHistory.push_back(totalUncertainty);
+        outputHistory.push_front(totalUncertainty);
         return totalUncertainty;
     }
 

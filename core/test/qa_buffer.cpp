@@ -707,7 +707,7 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(eq(hb.size(), 0UZ));
 
         for (std::size_t i = 1; i <= capacity + 1; ++i) {
-            hb.push_back(static_cast<int>(i));
+            hb.push_front(static_cast<int>(i));
         }
         expect(eq(hb.capacity(), capacity));
         expect(eq(hb.size(), capacity));
@@ -725,8 +725,8 @@ const boost::ut::suite HistoryBufferTest = [] {
 
     "HistoryBuffer - range tests"_test = [] {
         HistoryBuffer<int> hb(5);
-        hb.push_back_bulk(std::array{1, 2, 3});
-        hb.push_back_bulk(std::vector{4, 5, 6});
+        hb.push_front(std::array{1, 2, 3});
+        hb.push_front(std::vector{4, 5, 6});
         expect(eq(hb.capacity(), 5UZ));
         expect(eq(hb.size(), 5UZ));
 
@@ -761,8 +761,8 @@ const boost::ut::suite HistoryBufferTest = [] {
         HistoryBuffer<int, 8UZ> buffer8;
 
         for (std::size_t i = 0UZ; i <= buffer8.capacity(); ++i) {
-            buffer5.push_back(static_cast<int>(i));
-            buffer8.push_back(static_cast<int>(i));
+            buffer5.push_front(static_cast<int>(i));
+            buffer8.push_front(static_cast<int>(i));
         }
 
         expect(eq(buffer5[0], 8));
@@ -778,8 +778,8 @@ const boost::ut::suite HistoryBufferTest = [] {
         const auto&        const_hb_one = hb_one; // tests const access
         expect(eq(hb_one.capacity(), 1UZ));
         expect(eq(hb_one.size(), 0UZ));
-        hb_one.push_back(41);
-        hb_one.push_back(42);
+        hb_one.push_front(41);
+        hb_one.push_front(42);
         expect(eq(hb_one.capacity(), 1UZ));
         expect(eq(hb_one.size(), 1UZ));
         expect(eq(hb_one[0], 42));
@@ -790,17 +790,17 @@ const boost::ut::suite HistoryBufferTest = [] {
         // Push more elements than buffer size
         HistoryBuffer<int> hb_overflow(5);
         auto               in = std::vector{1, 2, 3, 4, 5, 6};
-        hb_overflow.push_back_bulk(in.begin(), in.end());
+        hb_overflow.push_front(in.begin(), in.end());
         expect(eq(hb_overflow[0], 6));
-        hb_overflow.push_back_bulk(std::vector{7, 8, 9, 10, 11, 12, 13, 14});
+        hb_overflow.push_front(std::vector{7, 8, 9, 10, 11, 12, 13, 14});
         expect(eq(hb_overflow[0], 14));
-        hb_overflow.push_back_bulk(std::array{15, 16, 17});
+        hb_overflow.push_front(std::array{15, 16, 17});
         expect(eq(hb_overflow[0], 17));
 
         // Test with different types, e.g., double
         HistoryBuffer<double> hb_double(5);
         for (int i = 0; i < 10; ++i) {
-            hb_double.push_back(i * 0.1);
+            hb_double.push_front(i * 0.1);
         }
         expect(eq(hb_double.capacity(), 5UZ));
         expect(eq(hb_double.size(), 5UZ));
@@ -823,13 +823,13 @@ const boost::ut::suite HistoryBufferTest = [] {
     };
 
     "HistoryBuffer - forward/reversed usage"_test = [] {
-        HistoryBuffer<int> forward(5);  // stores push_back(..) with forward[0] being newest sample
-        HistoryBuffer<int> backward(5); // stores push_front(..) with backward[0] being the oldest sample
+        HistoryBuffer<int> forward(5);  // stores push_front(..) with forward[0] being newest sample
+        HistoryBuffer<int> backward(5); // stores push_back(..) with backward[0] being the oldest sample
 
         // push {1,2,3,4,5,6} individually to both
         for (int i = 1; i <= 6; ++i) {
-            forward.push_back(i);
-            backward.push_front(i);
+            forward.push_front(i);
+            backward.push_back(i);
         }
 
         // expected content of forward:  [6,5,4,3,2]
@@ -848,7 +848,7 @@ const boost::ut::suite HistoryBufferTest = [] {
 
         // Bulk test:
         backward.reset();
-        backward.push_front(std::vector<int>{10, 11, 12, 13, 14, 15, 16}); // push more than capacity:
+        backward.push_back(std::vector<int>{10, 11, 12, 13, 14, 15, 16}); // push more than capacity:
         expect(eq(backward[0], 12));
         expect(eq(backward[4], 16));
 
@@ -862,7 +862,7 @@ const boost::ut::suite HistoryBufferTest = [] {
         // Only for dynamic-extent
         HistoryBuffer<int> hb(5);
         for (int i = 1; i <= 5; ++i) {
-            hb.push_back(i);
+            hb.push_front(i);
         }
         // now: [5,4,3,2,1]
         expect(eq(hb.size(), 5UZ));
@@ -876,7 +876,7 @@ const boost::ut::suite HistoryBufferTest = [] {
 
         // push more data
         for (int i = 6; i <= 10; ++i) {
-            hb.push_back(i); // if we keep pushing
+            hb.push_front(i); // if we keep pushing
         }
         expect(eq(hb.size(), 8UZ)); // now full at 8
         expect(eq(hb[0], 10));      // newest => 10
@@ -894,7 +894,7 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(eq(hb.empty(), true));
 
         for (int i = 1; i <= 6; ++i) {
-            hb.push_back(i);
+            hb.push_front(i);
         }
         // final ring => [6,5,4,3,2]
         expect(eq(hb.front(), 6)) << "front == [0] => newest sample in push_back orientation";
@@ -902,7 +902,7 @@ const boost::ut::suite HistoryBufferTest = [] {
 
         hb.reset();
         for (int i = 1; i <= 6; ++i) {
-            hb.push_front(i);
+            hb.push_back(i);
         }
         // final ring => [2,3,4,5,6] in logical terms
         expect(eq(hb.front(), 2)) << "front == [0] => oldest sample in push_front orientation";
@@ -915,7 +915,7 @@ const boost::ut::suite HistoryBufferTest = [] {
 
         HistoryBuffer<int> hb(5);
         for (int i = 1; i <= 5; ++i) { // push_back => newest @ [0]
-            hb.push_back(i);           // final ring => [5,4,3,2,1]
+            hb.push_front(i);          // final ring => [5,4,3,2,1]
         }
         expect(eq(hb.size(), 5UZ));
         expect(eq(hb[0], 5));
@@ -943,7 +943,7 @@ const boost::ut::suite HistoryBufferTest = [] {
         // test push_front orientation
         HistoryBuffer<int> hb2(5);
         for (int i = 1; i <= 5; ++i) {
-            hb2.push_front(i); // final ring => [1,2,3,4,5] logically
+            hb2.push_back(i); // final ring => [1,2,3,4,5] logically
         }
         expect(eq(hb2[0], 1));
         hb2.pop_front(); // remove '1'

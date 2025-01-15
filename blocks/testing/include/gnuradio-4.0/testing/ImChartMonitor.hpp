@@ -24,9 +24,9 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 
     GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name);
 
-    HistoryBuffer<T>   _historyBufferX{1000};
-    HistoryBuffer<T>   _historyBufferY{1000};
-    HistoryBuffer<Tag> _historyBufferTags{1000};
+    HistoryBuffer<T> _historyBufferX{1000UZ};
+    HistoryBuffer<T> _historyBufferY{1000UZ};
+    HistoryBuffer<T> _historyBufferTags{1000UZ};
 
     void start() {
         fmt::println("started sink {} aka. '{}'", this->unique_name, this->name);
@@ -44,11 +44,14 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
         _historyBufferY.push_back(input);
 
         if (this->inputTagsPresent()) { // received tag
-            _historyBufferTags.push_back(this->mergedInputTag());
-            _historyBufferTags[1].index = 0;
+            _historyBufferTags.push_back(_historyBufferY.back());
             this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
         } else {
-            _historyBufferTags.push_back(Tag(0UZ, property_map()));
+            if constexpr (std::is_floating_point_v<T>) {
+                _historyBufferTags.push_back(std::numeric_limits<T>::quiet_NaN());
+            } else {
+                _historyBufferTags.push_back(std::numeric_limits<T>::lowest());
+            }
         }
     }
 
@@ -66,16 +69,6 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
                 gr::graphs::resetView();
             }
 
-            // create reversed copies -- draw(...) expects std::ranges::input_range ->
-            std::vector<T> reversedX(_historyBufferX.rbegin(), _historyBufferX.rend());
-            std::vector<T> reversedY(_historyBufferY.rbegin(), _historyBufferY.rend());
-            std::vector<T> reversedTag(_historyBufferX.size());
-            if constexpr (std::is_floating_point_v<T>) {
-                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.map.empty() ? std::numeric_limits<T>::quiet_NaN() : yValue; });
-            } else {
-                std::transform(_historyBufferTags.rbegin(), _historyBufferTags.rend(), _historyBufferY.rbegin(), reversedTag.begin(), [](const Tag& tag, const T& yValue) { return tag.map.empty() ? std::numeric_limits<T>::lowest() : yValue; });
-            }
-
             auto adjustRange = [](T min, T max) {
                 min            = std::min(min, T(0));
                 max            = std::max(max, T(0));
@@ -84,8 +77,8 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
             };
 
             auto chart = gr::graphs::ImChart<130, 28>({{*xMin, *xMax}, adjustRange(*yMin, *yMax)});
-            chart.draw(reversedX, reversedY, signal_name);
-            chart.draw<gr::graphs::Style::Marker>(reversedX, reversedTag, "Tags");
+            chart.draw(_historyBufferX, _historyBufferY, signal_name);
+            chart.draw<gr::graphs::Style::Marker>(_historyBufferX, _historyBufferTags, "Tags");
             chart.draw();
         } else if constexpr (gr::DataSetLike<T>) {
             if (_historyBufferY.empty()) {

@@ -124,9 +124,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                     throw gr::exception("n_pre must be <= output port CircularBuffer size");
                 }
             }
-            auto newBuffer = HistoryBuffer<T>(MIN_BUFFER_SIZE + std::get<gr::Size_t>(newSettings.at("n_pre")));
-            newBuffer.push_back_bulk(_history);
-            _history = std::move(newBuffer);
+            _history.resize(MIN_BUFFER_SIZE + std::get<gr::Size_t>(newSettings.at("n_pre")));
         }
 
         if constexpr (!streamOut) {
@@ -321,7 +319,7 @@ private:
     void copyInputSamplesToHistory(InputSpanLike auto& inSamples, std::size_t maxSamplesToCopy) {
         if (n_pre > 0) {
             const auto samplesToCopy = std::min(maxSamplesToCopy, inSamples.size());
-            _history.push_back_bulk(inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy)));
+            _history.push_front(inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy)));
         }
     }
 

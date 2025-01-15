@@ -446,7 +446,7 @@ private:
         std::lock_guard lock(base_t::_jobListsMutex);
 
         std::size_t blockCount = 0UZ;
-        this->forAllUnmanagedBlocks([&blockCount](auto&& block) { blockCount++; });
+        this->forAllUnmanagedBlocks([&blockCount](auto&& /*block*/) { blockCount++; });
         std::vector<BlockModel*> allBlocks;
         allBlocks.reserve(blockCount);
         this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
