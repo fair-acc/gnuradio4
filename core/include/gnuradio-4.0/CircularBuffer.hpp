@@ -277,7 +277,7 @@ class CircularBuffer {
             // and would result in a double dealloc during the default destruction
             return isMmapAllocated ? size : 2 * size;
         }
-    }; // struct buffer_impl
+    }; // struct BufferImpl
 
     template<typename U = T>
     class Writer;
@@ -712,24 +712,24 @@ class CircularBuffer {
         }
     }
 
-    std::shared_ptr<BufferImpl> _shared_buffer_ptr;
-    explicit CircularBuffer(std::shared_ptr<BufferImpl> shared_buffer_ptr) : _shared_buffer_ptr(shared_buffer_ptr) {}
+    std::shared_ptr<BufferImpl> _sharedBufferPtr;
+    explicit CircularBuffer(std::shared_ptr<BufferImpl> sharedBufferPtr) : _sharedBufferPtr(sharedBufferPtr) {}
 
 public:
     CircularBuffer() = delete;
-    explicit CircularBuffer(std::size_t min_size, Allocator allocator = DefaultAllocator()) : _shared_buffer_ptr(std::make_shared<BufferImpl>(min_size, allocator)) {}
+    explicit CircularBuffer(std::size_t minSize, Allocator allocator = DefaultAllocator()) : _sharedBufferPtr(std::make_shared<BufferImpl>(minSize, allocator)) {}
     ~CircularBuffer() = default;
 
-    [[nodiscard]] std::size_t           size() const noexcept { return _shared_buffer_ptr->_size; }
-    [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_shared_buffer_ptr); }
-    [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_shared_buffer_ptr); }
+    [[nodiscard]] std::size_t           size() const noexcept { return _sharedBufferPtr->_size; }
+    [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_sharedBufferPtr); }
+    [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_sharedBufferPtr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] std::size_t n_writers() const { return _shared_buffer_ptr->_writer_count.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::size_t n_readers() const { return _shared_buffer_ptr->_reader_count.load(std::memory_order_relaxed); }
-    [[nodiscard]] const auto& claim_strategy() { return _shared_buffer_ptr->_claimStrategy; }
-    [[nodiscard]] const auto& wait_strategy() { return _shared_buffer_ptr->_claimStrategy._wait_strategy; }
-    [[nodiscard]] const auto& cursor_sequence() { return _shared_buffer_ptr->_claimStrategy._publishCursor; }
+    [[nodiscard]] std::size_t n_writers() const { return _sharedBufferPtr->_writer_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t n_readers() const { return _sharedBufferPtr->_reader_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] const auto& claim_strategy() { return _sharedBufferPtr->_claimStrategy; }
+    [[nodiscard]] const auto& wait_strategy() { return _sharedBufferPtr->_claimStrategy._wait_strategy; }
+    [[nodiscard]] const auto& cursor_sequence() { return _sharedBufferPtr->_claimStrategy._publishCursor; }
 };
 static_assert(BufferLike<CircularBuffer<int32_t>>);
 
