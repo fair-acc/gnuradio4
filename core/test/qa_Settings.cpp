@@ -932,4 +932,11 @@ connections:
 #endif
 };
 
+const boost::ut::suite<"conversion tests"> conversionTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::setting_test;
+
+};
+
 int main() { /* tests are statically executed */ }

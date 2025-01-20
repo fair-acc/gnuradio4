@@ -177,7 +177,7 @@ blocks:
   - name: main_source
     id: good::fixed_source
     parameters:
-      event_count: !!uint32 100
+      event_count: 100
       unknown_property: 42
   - name: multiplier
     id: good::multiply
@@ -186,7 +186,7 @@ blocks:
   - name: sink
     id: good::cout_sink
     parameters:
-      total_count: !!uint32 100
+      total_count: 100
       unknown_property: 42
 
 connections:
@@ -197,7 +197,10 @@ connections:
 
             const auto context  = getContext();
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
+            fmt::println("yml-before:\n {}\nafter:\n{}", pluginsTestGrc, graphSrc);
+
             auto       graph    = gr::loadGrc(context->loader, graphSrc);
+            auto       graph2    = gr::loadGrc(context->loader, pluginsTestGrc);
 
             expect(eq(graph.blocks().size(), 4UZ));
 
