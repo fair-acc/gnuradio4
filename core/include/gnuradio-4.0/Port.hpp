@@ -591,7 +591,7 @@ private:
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{}; // todo: for now this is only used in the output ports
 
-    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = 65536) const noexcept {
+    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = 4096) const noexcept {
         if constexpr (kIsInput) {
             return BufferType(buffer_size).new_reader();
         } else {
@@ -599,7 +599,7 @@ private:
         }
     }
 
-    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = 65536) const noexcept {
+    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = 4096) const noexcept {
         if constexpr (kIsInput) {
             return TagBufferType(buffer_size).new_reader();
         } else {

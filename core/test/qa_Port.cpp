@@ -48,7 +48,7 @@ const boost::ut::suite PortTests = [] {
 
     "InputPort"_test = [] {
         PortIn<int> in;
-        expect(eq(in.buffer().streamBuffer.size(), 65536UZ));
+        expect(eq(in.buffer().streamBuffer.size(), 4096UZ));
 
         auto writer    = in.buffer().streamBuffer.new_writer();
         auto tagWriter = in.buffer().tagBuffer.new_writer();

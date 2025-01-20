@@ -102,26 +102,23 @@ const boost::ut::suite ExportPortsTests_ = [] {
         // Export ports from the sub-graph
 
         if (!waitForAReply(fromScheduler)) {
-            fmt::println("didn't receive a reply message for kSubgraphExportPort");
-            expect(false);
+            expect(false) << "didn't receive a reply message for kSubgraphExportPort";
         }
 
         // Make connections
-
         expect(sendEmplaceTestEdgeMsg(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph.uniqueName()), "in")) << "emplace edge source -> group failed and returned an error";
         expect(sendEmplaceTestEdgeMsg(toScheduler, fromScheduler, std::string(subGraph.uniqueName()), "out", sink.unique_name, "in")) << "emplace edge multiply2 -> sink failed and returned an error";
-
         // Get the whole graph
         {
             sendMessage<Set>(toScheduler, graph.unique_name /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */);
             if (!waitForAReply(fromScheduler)) {
-                fmt::println("didn't receive a reply message for kGraphInspect");
-                expect(false);
+                expect(false) << "didn't receive a reply message for kGraphInspect";
             }
 
             const Message reply = returnReplyMsg(fromScheduler);
-            expect(reply.data.has_value());
-
+            if (!reply.data.has_value()) {
+                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+            }
             const auto& data     = reply.data.value();
             const auto& children = std::get<property_map>(data.at("children"s));
             expect(eq(children.size(), 3UZ));

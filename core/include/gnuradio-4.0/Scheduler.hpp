@@ -49,7 +49,7 @@ protected:
 
     template<typename Fn>
     void forAllUnmanagedBlocks(Fn&& function) {
-        auto doForNestedBlocks = [this, &function](auto& doForNestedBlocks_, auto& parent) -> void {
+        auto doForNestedBlocks = [&function](auto& doForNestedBlocks_, auto& parent) -> void {
             const auto& blocks = [&parent] -> std::span<std::unique_ptr<BlockModel>> {
                 if constexpr (requires { parent.blocks(); }) {
                     return parent.blocks();

@@ -17,20 +17,25 @@ struct PortDefinition {
     struct IndexBased {
         std::size_t topLevel;
         std::size_t subIndex;
+
+        bool operator==(const IndexBased& other) const { return (topLevel == other.topLevel) && (subIndex == other.subIndex); }
     };
 
     struct StringBased {
         std::string name;
+
+        bool operator==(const StringBased& other) const { return (name == other.name); }
     };
 
     std::variant<IndexBased, StringBased> definition;
 
     constexpr PortDefinition(std::size_t _topLevel, std::size_t _subIndex = meta::invalid_index) : definition(IndexBased{_topLevel, _subIndex}) {}
     constexpr PortDefinition(std::string name) : definition(StringBased(std::move(name))) {}
+    bool operator==(const PortDefinition& other) const { return (definition == other.definition); }
 };
 
 struct Edge {
-    enum class EdgeState { WaitingToBeConnected, Connected, Overriden, ErrorConnecting, PortNotFound, IncompatiblePorts };
+    enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts };
 
     // Member variables that are controlled by the graph and scheduler
     BlockModel*    _sourceBlock      = nullptr; /// non-owning reference
@@ -96,6 +101,16 @@ public:
     constexpr std::size_t nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
     constexpr std::size_t nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
     constexpr PortType    edgeType() const { return _edgeType; }
+
+    constexpr bool hasSameSourcePort(const Edge& other) const noexcept {
+        if (_sourceBlock != other._sourceBlock) {
+            return false;
+        }
+        if (_sourcePortDefinition.definition == other._sourcePortDefinition.definition) {
+            return true;
+        }
+        return false;
+    }
 };
 
 class BlockModel {

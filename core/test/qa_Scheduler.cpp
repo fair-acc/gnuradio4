@@ -682,8 +682,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
         auto oldProgress = scheduler.graph().progress().value();
-        expect(awaitCondition(1s, [&scheduler, &oldProgress] { // wait until there is no more progress (i.e. wait until all initial buffers are filled)
-            std::this_thread::sleep_for(100ms);                // wait
+        expect(awaitCondition(2s, [&scheduler, &oldProgress] { // wait until there is no more progress (i.e. wait until all initial buffers are filled)
+            std::this_thread::sleep_for(200ms);                // wait
             auto newProgress = scheduler.graph().progress().value();
             if (oldProgress == newProgress) {
                 return true;
@@ -691,6 +691,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             oldProgress = newProgress;
             return false;
         })) << "BusyLoopBlock sleeping";
+
+        // check that buffers are full
+        expect(eq(source.out.streamWriter().available(), 0UZ));
+        expect(eq(monitor.in.streamReader().available(), graph::defaultMinBufferSize));
+
         const auto progressAfterInit = scheduler.graph().progress().value();
         auto       estInvokeCount    = [&monitor] {
             const auto invokeCountInit = monitor._invokeCount.value();
