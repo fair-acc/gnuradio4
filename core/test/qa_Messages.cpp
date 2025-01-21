@@ -616,10 +616,10 @@ const boost::ut::suite MessagesTests = [] {
             };
         };
 
-        auto checkReply = [](auto& fromScheduler, std::string testCase, std::size_t nReplyExpected, std::string_view serviceName, std::string_view endPoint, auto data, std::source_location location = std::source_location::current()) -> std::optional<bool> {
+        auto checkReply = [](auto& fromSchedulerLoc, std::string testCase, std::size_t nReplyExpected, std::string_view serviceName, std::string_view endPoint, auto data, std::source_location location = std::source_location::current()) -> std::optional<bool> {
             using namespace boost::ut;
 
-            std::size_t nAvailable = fromScheduler.streamReader().available();
+            std::size_t nAvailable = fromSchedulerLoc.streamReader().available();
             if (nReplyExpected == 0UZ) {
                 if (nAvailable == 0UZ) {
                     return true;
@@ -633,7 +633,7 @@ const boost::ut::suite MessagesTests = [] {
             if (nReplyExpected == 0) {
                 return false;
             }
-            const Message reply = returnReplyMsg(fromScheduler);
+            const Message reply = returnReplyMsg(fromSchedulerLoc);
             expect(eq(reply.clientRequestID, "uniqueUserID#42"s));
             expect(eq(reply.serviceName, serviceName));
             expect(eq(reply.endpoint, std::string(endPoint)));

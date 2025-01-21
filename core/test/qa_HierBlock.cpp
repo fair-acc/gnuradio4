@@ -73,20 +73,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
         std::expected<void, Error> schedulerRet;
         auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
 
-        sendMessage<Set>(toScheduler, subGraph.uniqueName(), graph::property::kSubgraphExportPort,
-            property_map{
-                {"uniqueBlockName"s, subGraphDirect->blockRef().pass2->unique_name}, //
-                {"portDirection"s, "output"},                                        //
-                {"portName"s, "out"},                                                //
-                {"exportFlag"s, true}                                                //
-            });
-        sendMessage<Set>(toScheduler, subGraph.uniqueName(), graph::property::kSubgraphExportPort,
-            property_map{
-                {"uniqueBlockName"s, subGraphDirect->blockRef().pass1->unique_name}, //
-                {"portDirection"s, "input"},                                         //
-                {"portName"s, "in"},                                                 //
-                {"exportFlag"s, true}                                                //
-            });
+        sendMessage<Set>(toScheduler, subGraph.uniqueName(), graph::property::kSubgraphExportPort, //
+            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass2->unique_name}, {"portDirection"s, "output"}, {"portName"s, "out"}, {"exportFlag"s, true}});
+        sendMessage<Set>(toScheduler, subGraph.uniqueName(), graph::property::kSubgraphExportPort, //
+            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass1->unique_name}, {"portDirection"s, "input"}, {"portName"s, "in"}, {"exportFlag"s, true}});
         scheduler.processScheduledMessages();
 
         std::thread schedulerThread1(runScheduler);
@@ -99,23 +89,29 @@ const boost::ut::suite ExportPortsTests_ = [] {
         }
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
 
-        // Export ports from the sub-graph
-
-        if (!waitForAReply(fromScheduler)) {
-            expect(false) << "didn't receive a reply message for kSubgraphExportPort";
+        // 2 export ports from the sub-graph
+        if (!waitForReply(fromScheduler, 2UZ)) {
+            expect(false) << "Reply messages not received for kSubgraphExportPort.";
         }
+        expect(ge(getNReplyMessages(fromScheduler), 2UZ));
+        consumeAllReplyMessages(fromScheduler);
+        expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
         // Make connections
-        expect(sendEmplaceTestEdgeMsg(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph.uniqueName()), "in")) << "emplace edge source -> group failed and returned an error";
-        expect(sendEmplaceTestEdgeMsg(toScheduler, fromScheduler, std::string(subGraph.uniqueName()), "out", sink.unique_name, "in")) << "emplace edge multiply2 -> sink failed and returned an error";
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph.uniqueName()), "in", graph.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, std::string(subGraph.uniqueName()), "out", sink.unique_name, "in", graph.unique_name);
+        expect(eq(getNReplyMessages(fromScheduler), 0UZ));
+
         // Get the whole graph
         {
             sendMessage<Set>(toScheduler, graph.unique_name /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */);
-            if (!waitForAReply(fromScheduler)) {
-                expect(false) << "didn't receive a reply message for kGraphInspect";
+            if (!waitForReply(fromScheduler)) {
+                expect(false) << "Reply message not received for kGraphInspect.";
             }
 
-            const Message reply = returnReplyMsg(fromScheduler);
+            expect(eq(getNReplyMessages(fromScheduler), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromScheduler);
+            expect(eq(getNReplyMessages(fromScheduler), 0UZ));
             if (!reply.data.has_value()) {
                 expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
             }
