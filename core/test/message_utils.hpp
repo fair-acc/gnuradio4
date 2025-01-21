@@ -31,16 +31,16 @@ bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
     return false;
 }
 
-inline auto returnReplyMsg(gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location caller = std::source_location::current()) {
+inline Message getAndConsumeFirstReplyMessage(gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location sourceLocation = std::source_location::current()) {
     auto available = port.streamReader().available();
-    expect(gt(available, 0UZ)) << "didn't receive a reply message, caller: " << caller.file_name() << ":" << caller.line() << "\n";
-    ReaderSpanLike auto messages = port.streamReader().get<SpanReleasePolicy::ProcessAll>(available);
+    expect(gt(available, 0UZ)) << fmt::format("No available messages. Requested at:{}\n", sourceLocation);
+    ReaderSpanLike auto messages = port.streamReader().get();
     Message             result;
 
     if (expectedEndpoint) {
         auto it = std::ranges::find_if(messages, [endpoint = *expectedEndpoint](const auto& message) { return message.endpoint == endpoint; });
         if (it == messages.end()) {
-            expect(gt(available, 0UZ)) << "didn't receive the expected reply message, caller: " << caller.file_name() << ":" << caller.line() << "\n";
+            expect(false) << fmt::format("Message with endpoint ({}) not found. Requested at:{}\n", *expectedEndpoint, sourceLocation);
         } else {
             result = *it;
         }
@@ -48,16 +48,37 @@ inline auto returnReplyMsg(gr::MsgPortIn& port, std::optional<std::string> expec
         result = messages[0];
     }
 
-    expect(messages.consume(messages.size()));
-    fmt::print("Test got a reply: {}\n", result);
+    fmt::print("First Reply Message: {}\n", result);
     if (expectedEndpoint) {
         expect(eq(*expectedEndpoint, result.endpoint));
     }
+
+    const bool isConsumed = messages.consume(1UZ);
+    if (!isConsumed) {
+        expect(false) << fmt::format("Can not consume reply message. Requested at:{}\n", sourceLocation);
+    }
+
     return result;
 };
 
+inline std::vector<Message> getAllReplyMessages(gr::MsgPortIn& port) {
+    ReaderSpanLike auto  messages = port.streamReader().get();
+    std::vector<Message> result(messages.begin(), messages.end());
+    return result;
+};
+
+inline std::size_t getNReplyMessages(gr::MsgPortIn& port) { return port.streamReader().available(); };
+
+inline void consumeAllReplyMessages(gr::MsgPortIn& port, std::source_location sourceLocation = std::source_location::current()) {
+    ReaderSpanLike auto messages   = port.streamReader().get();
+    const bool          isConsumed = messages.consume(messages.size());
+    if (!isConsumed) {
+        expect(false) << fmt::format("Can not consume reply messages. Requested at:{}\n", sourceLocation);
+    }
+};
+
 template<bool processScheduledMessages = true>
-auto awaitReplyMsg(auto& graph, std::chrono::milliseconds timeout, gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location caller = std::source_location::current()) {
+Message awaitReplyMessage(auto& graph, std::chrono::milliseconds timeout, gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location sourceLocation = std::source_location::current()) {
     awaitCondition(timeout, [&port, &graph] {
         if constexpr (processScheduledMessages) {
             graph.processScheduledMessages();
@@ -65,43 +86,47 @@ auto awaitReplyMsg(auto& graph, std::chrono::milliseconds timeout, gr::MsgPortIn
         return port.streamReader().available() > 0;
     });
 
-    return returnReplyMsg(port, expectedEndpoint, caller);
+    return getAndConsumeFirstReplyMessage(port, expectedEndpoint, sourceLocation);
 };
 
-inline auto waitForAReply(gr::MsgPortIn& fromGraph, std::chrono::milliseconds maxWait = 1s, std::source_location currentSource = std::source_location::current()) {
+inline bool waitForReply(gr::MsgPortIn& fromGraph, std::size_t nReplies = 1UZ, std::chrono::milliseconds maxWaitTime = 1s) {
     auto startedAt = std::chrono::system_clock::now();
-    while (fromGraph.streamReader().available() == 0) {
+    while (fromGraph.streamReader().available() < nReplies) {
         std::this_thread::sleep_for(100ms);
-        if (std::chrono::system_clock::now() - startedAt > maxWait) {
+        if (std::chrono::system_clock::now() - startedAt > maxWaitTime) {
             break;
         }
     }
-    expect(fromGraph.streamReader().available() > 0) << "Caller at" << currentSource.file_name() << ":" << currentSource.line();
-    return fromGraph.streamReader().available() > 0;
+    return fromGraph.streamReader().available() >= nReplies;
 };
 
-inline auto sendEmplaceTestBlockMsg(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, std::string params, property_map properties) {
-    sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceBlock /* endpoint */, //
+inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, std::string params, property_map properties, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
+    expect(eq(getNReplyMessages(fromGraph), 0UZ)) << fmt::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
+    sendMessage<Set>(toGraph, serviceName, graph::property::kEmplaceBlock /* endpoint */, //
         {{"type", std::move(type)}, {"parameters", std::move(params)}, {"properties", std::move(properties)}} /* data */);
-    expect(waitForAReply(fromGraph)) << "didn't receive a reply message";
 
-    const Message reply = returnReplyMsg(fromGraph);
-    expect(reply.data.has_value()) << "emplace block failed and returned an error";
-    return reply.data.has_value() ? std::get<std::string>(reply.data.value().at("uniqueName"s)) : std::string{};
+    expect(waitForReply(fromGraph)) << fmt::format("Reply message not received. Requested at: {}\n", sourceLocation);
+
+    const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+    if (!reply.data.has_value()) {
+        expect(false) << fmt::format("Emplace block failed and returned an error. Requested at: {}. Error: {}\n", sourceLocation, reply.data.error());
+    }
+    return std::get<std::string>(reply.data.value().at("uniqueName"s));
 };
 
-inline auto sendEmplaceTestEdgeMsg(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort) {
-    gr::property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort}, //
-        {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort},  //
+inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
+    expect(eq(getNReplyMessages(fromGraph), 0UZ)) << fmt::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
+    gr::property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort}, {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort}, //
         {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
-    sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
-    if (!waitForAReply(fromGraph)) {
-        fmt::println("didn't receive a reply message for {}", data);
-        return false;
-    }
+    sendMessage<Set>(toGraph, serviceName, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
 
-    const Message reply = returnReplyMsg(fromGraph);
-    return reply.data.has_value();
+    expect(waitForReply(fromGraph)) << fmt::format("Reply message not received. Requested at: {}\n", sourceLocation);
+    expect(eq(getNReplyMessages(fromGraph), 1UZ)) << fmt::format("No messages available. Requested at: {}\n", sourceLocation);
+    const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+
+    if (!reply.data.has_value()) {
+        expect(false) << fmt::format("Emplace edge failed and returned an error. Requested at: {}. Error: {}\n", sourceLocation, reply.data.error());
+    }
 };
 
 } // namespace gr::testing

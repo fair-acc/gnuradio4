@@ -369,12 +369,14 @@ public:
      */
     [[nodiscard]] const Sequence& progress() noexcept { return *_progress.get(); }
 
-    BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
+    BlockModel& addBlock(std::unique_ptr<BlockModel> block, bool doEmitMessage = true) {
         auto& newBlock = _blocks.emplace_back(std::move(block));
         newBlock->init(_progress, _ioThreadPool);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
         setTopologyChanged();
-        this->emitMessage(graph::property::kBlockEmplaced, serializeBlock(newBlock.get()));
+        if (doEmitMessage) {
+            this->emitMessage(graph::property::kBlockEmplaced, serializeBlock(newBlock.get()));
+        }
         return *newBlock.get();
     }
 
@@ -393,7 +395,7 @@ public:
     [[maybe_unused]] auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
         if (auto block_load = loader.instantiate(type, parameters, std::move(initialSettings)); block_load) {
             setTopologyChanged();
-            auto& newBlock = addBlock(std::move(block_load));
+            auto& newBlock = addBlock(std::move(block_load), false); // false == do not emit message
 
             this->emitMessage(graph::property::kBlockEmplaced, serializeBlock(std::addressof(newBlock)));
 
@@ -579,7 +581,7 @@ public:
             throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
         }
 
-        addBlock(std::move(newBlock));
+        addBlock(std::move(newBlock), false); // false == do not emit message
 
         BlockModel* oldBlock = it->get();
         for (auto& edge : _edges) {
@@ -616,10 +618,6 @@ public:
 
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
-            fmt::println("gr::exception propertyCallbackEmplaceEdge sourceBlock: {}", sourceBlock);
-            for (const auto& block : _blocks) {
-                fmt::println("{}", block->uniqueName());
-            }
             throw gr::exception(fmt::format("Block {} was not found in {}", sourceBlock, this->unique_name));
         }
 
