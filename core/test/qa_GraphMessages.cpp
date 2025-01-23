@@ -70,23 +70,26 @@ const boost::ut::suite NonRunningGraphTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
 
         "Add a valid block"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceBlock /* endpoint */, //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceBlock /* endpoint */, //
                 {{"type", "gr::testing::Copy"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = awaitReplyMsg(testGraph, 100ms, fromGraph, graph::property::kBlockEmplaced);
-
-            expect(reply.data.has_value());
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph, graph::property::kBlockEmplaced);
+            if (!reply.data.has_value()) {
+                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+            }
             expect(eq(testGraph.blocks().size(), 1UZ));
         };
 
         "Add an invalid block"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceBlock /* endpoint */, //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceBlock /* endpoint */, //
                 {{"type", "doesnt_exist::multiply"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
-
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 0UZ));
             expect(!reply.data.has_value());
             expect(eq(testGraph.blocks().size(), 1UZ));
         };
@@ -97,33 +100,41 @@ const boost::ut::suite NonRunningGraphTests = [] {
         gr::Graph      testGraph;
         gr::MsgPortIn  fromGraph;
 
-        testGraph.emplaceBlock("gr::testing::Copy", "float", {});
-        expect(eq(testGraph.blocks().size(), 1UZ));
-
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
+
+        testGraph.emplaceBlock("gr::testing::Copy", "float", {});
+        expect(eq(testGraph.blocks().size(), 1UZ));
+        expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
+        consumeAllReplyMessages(fromGraph);
+        expect(eq(getNReplyMessages(fromGraph), 0UZ)); // all messages are consumed
 
         "Remove a known block"_test = [&] {
             auto& temporaryBlock = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
             expect(eq(testGraph.blocks().size(), 2UZ));
+            expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
+            consumeAllReplyMessages(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 0UZ)); // all messages are consumed
 
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kRemoveBlock /* endpoint */, //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kRemoveBlock /* endpoint */, //
                 {{"uniqueName", std::string(temporaryBlock.uniqueName())}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
-
-            expect(reply.data.has_value());
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+            if (!reply.data.has_value()) {
+                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+            }
             expect(eq(testGraph.blocks().size(), 1UZ));
         };
 
         "Remove an unknown block"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kRemoveBlock /* endpoint */, //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kRemoveBlock /* endpoint */, //
                 {{"uniqueName", "this_block_is_unknown"}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
-
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             expect(!reply.data.has_value());
             expect(eq(testGraph.blocks().size(), 1UZ));
         };
@@ -134,44 +145,54 @@ const boost::ut::suite NonRunningGraphTests = [] {
         gr::Graph      testGraph;
         gr::MsgPortIn  fromGraph;
 
-        auto& block = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
-        expect(eq(testGraph.blocks().size(), 1UZ));
-
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
+
+        auto& block = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
+        expect(eq(testGraph.blocks().size(), 1UZ));
+        expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
+        consumeAllReplyMessages(fromGraph);
+        expect(eq(getNReplyMessages(fromGraph), 0UZ)); // all messages are consumed
 
         "Replace a known block"_test = [&] {
             auto& temporaryBlock = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
             expect(eq(testGraph.blocks().size(), 2UZ));
+            expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
+            consumeAllReplyMessages(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 0UZ)); // all messages are consumed
 
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kReplaceBlock /* endpoint */, //
-                {{"uniqueName", std::string(temporaryBlock.uniqueName())},                                 //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kReplaceBlock /* endpoint */, //
+                {{"uniqueName", std::string(temporaryBlock.uniqueName())},                                  //
                     {"type", "gr::testing::Copy"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
-
-            expect(reply.data.has_value());
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+            if (!reply.data.has_value()) {
+                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+            }
         };
 
         "Replace an unknown block"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kReplaceBlock /* endpoint */, //
-                {{"uniqueName", "this_block_is_unknown"},                                                  //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kReplaceBlock /* endpoint */, //
+                {{"uniqueName", "this_block_is_unknown"},                                                   //
                     {"type", "gr::testing::Copy"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
 
             expect(!reply.data.has_value());
         };
 
         "Replace with an unknown block"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kReplaceBlock /* endpoint */, //
-                {{"uniqueName", std::string(block.uniqueName())},                                          //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kReplaceBlock /* endpoint */, //
+                {{"uniqueName", std::string(block.uniqueName())},                                           //
                     {"type", "doesnt_exist::multiply"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
 
             expect(!reply.data.has_value());
         };
@@ -182,55 +203,62 @@ const boost::ut::suite NonRunningGraphTests = [] {
         gr::Graph      testGraph;
         gr::MsgPortIn  fromGraph;
 
+        expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
+
         auto& blockOut       = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
         auto& blockIn        = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
         auto& blockWrongType = testGraph.emplaceBlock("gr::testing::Copy", "double", {});
 
-        expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
+        expect(eq(getNReplyMessages(fromGraph), 3UZ)); // emplaceBlock emits message
+        consumeAllReplyMessages(fromGraph);
+        expect(eq(getNReplyMessages(fromGraph), 0UZ)); // all messages are consumed
 
         "Add an edge"_test = [&] {
             property_map data = {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "out"}, //
                 {"destinationBlock", std::string(blockIn.uniqueName())}, {"destinationPort", "in"},          //
                 {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
 
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
-
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             if (!reply.data.has_value()) {
                 expect(false) << fmt::format("edge not being placed - error: {}", reply.data.error());
             }
         };
 
         "Fail to add an edge because source port is invalid"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, //
-                {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "OUTPUT"},           //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceEdge /* endpoint */, //
+                {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "OUTPUT"},            //
                     {"destinationBlock", std::string(blockIn.uniqueName())}, {"destinationPort", "in"}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             expect(!reply.data.has_value());
         };
 
         "Fail to add an edge because destination port is invalid"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, //
-                {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "in"},               //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceEdge /* endpoint */, //
+                {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "in"},                //
                     {"destinationBlock", std::string(blockIn.uniqueName())}, {"destinationPort", "INPUT"}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             expect(!reply.data.has_value());
         };
 
         "Fail to add an edge because ports are not compatible"_test = [&] {
-            sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kEmplaceEdge /* endpoint */, //
-                {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "out"},              //
+            sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceEdge /* endpoint */, //
+                {{"sourceBlock", std::string(blockOut.uniqueName())}, {"sourcePort", "out"},               //
                     {"destinationBlock", std::string(blockWrongType.uniqueName())}, {"destinationPort", "in"}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = returnReplyMsg(fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             expect(!reply.data.has_value());
         };
     };
@@ -244,10 +272,11 @@ const boost::ut::suite NonRunningGraphTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
 
         "Get available block types"_test = [&] {
-            sendMessage<Get>(toGraph, "" /* serviceName */, graph::property::kRegistryBlockTypes /* endpoint */, {} /* data */);
+            sendMessage<Get>(toGraph, testGraph.unique_name, graph::property::kRegistryBlockTypes /* endpoint */, {} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
-            const Message reply = awaitReplyMsg(testGraph, 100ms, fromGraph);
+            expect(eq(getNReplyMessages(fromGraph), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
 
             if (reply.data.has_value()) {
                 const auto& dataMap    = reply.data.value();
@@ -320,8 +349,8 @@ const boost::ut::suite RunningGraphTests = [] {
     fmt::println("executed basic graph");
 
     // Adding a few blocks
-    auto multiply1 = sendEmplaceTestBlockMsg(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
-    auto multiply2 = sendEmplaceTestBlockMsg(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
+    auto multiply1 = sendAndWaitMessageEmplaceBlock(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
+    auto multiply2 = sendAndWaitMessageEmplaceBlock(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
     scheduler.processScheduledMessages();
 
     for (const auto& block : scheduler.graph().blocks()) {
@@ -329,21 +358,25 @@ const boost::ut::suite RunningGraphTests = [] {
     }
     expect(eq(scheduler.graph().blocks().size(), 4UZ)) << "should contain sink->multiply1->multiply2->sink";
 
-    expect(sendEmplaceTestEdgeMsg(toGraph, fromGraph, source.unique_name, "out", multiply1, "in")) << "emplace edge source -> multiply1 failed and returned an error";
-    expect(sendEmplaceTestEdgeMsg(toGraph, fromGraph, multiply1, "out", multiply2, "in")) << "emplace edge multiply1 -> multiply2 failed and returned an error";
-    expect(sendEmplaceTestEdgeMsg(toGraph, fromGraph, multiply2, "out", sink.unique_name, "in")) << "emplace edge multiply2 -> sink failed and returned an error";
+    sendAndWaitMessageEmplaceEdge(toGraph, fromGraph, source.unique_name, "out", multiply1, "in");
+    sendAndWaitMessageEmplaceEdge(toGraph, fromGraph, multiply1, "out", multiply2, "in");
+    sendAndWaitMessageEmplaceEdge(toGraph, fromGraph, multiply2, "out", sink.unique_name, "in");
+    expect(eq(getNReplyMessages(fromGraph), 0UZ));
     scheduler.processScheduledMessages();
 
     // Get the whole graph
     {
         sendMessage<Set>(toGraph, "" /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */);
-        if (!waitForAReply(fromGraph)) {
-            fmt::println("didn't receive a reply message for kGraphInspect");
-            expect(false);
+        if (!waitForReply(fromGraph)) {
+            expect(false) << "Reply message not received for kGraphInspect.";
         }
 
-        const Message reply = returnReplyMsg(fromGraph);
-        expect(reply.data.has_value());
+        expect(eq(getNReplyMessages(fromGraph), 1UZ));
+        const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+        expect(eq(getNReplyMessages(fromGraph), 0UZ));
+        if (!reply.data.has_value()) {
+            expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+        }
 
         const auto& data     = reply.data.value();
         const auto& children = std::get<property_map>(data.at("children"s));
