@@ -376,7 +376,7 @@ inline std::optional<std::string> parseBytesFromHex(std::string_view sv) {
     for (std::size_t i = 0; i < sv.size(); i += 2) {
         std::string_view byte = sv.substr(i, 2);
         char             c;
-        if (auto [_, ec] = std::from_chars(byte.begin(), byte.end(), c, 16); ec == std::errc{}) {
+        if (auto [_, ec] = std::from_chars(std::to_address(byte.begin()), std::to_address(byte.end()), c, 16); ec == std::errc{}) {
             result.push_back(c);
         } else {
             return std::nullopt;
@@ -504,8 +504,8 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
     } else if constexpr (std::is_integral_v<T>) {
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
             T value;
-            const auto [ptr, ec] = std::from_chars(s.begin(), s.end(), value, base);
-            if (ec != std::errc{} || ptr != s.end()) {
+            const auto [ptr, ec] = std::from_chars(std::to_address(s.begin()), std::to_address(s.end()), value, base);
+            if (ec != std::errc{} || ptr != std::to_address(s.end())) {
                 return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
             }
             return value;
