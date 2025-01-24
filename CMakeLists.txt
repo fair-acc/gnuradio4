@@ -210,6 +210,8 @@ set_project_warnings(gnuradio-options)
 if(EMSCRIPTEN)
   set(CMAKE_EXECUTABLE_SUFFIX ".js")
   add_compile_options(-fwasm-exceptions -pthread -g)
+  add_compile_definitions(FMT_CONSTEVAL=) # disable consteval support in fmtlib which is broken with the compiler/stdlib
+                                          # of emscripten by setting the variable to empty
   add_link_options(
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     "SHELL:-s ASSERTIONS=1"
