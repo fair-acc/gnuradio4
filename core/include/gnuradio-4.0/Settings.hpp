@@ -20,6 +20,7 @@
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
+#include <gnuradio-4.0/PmtTypeHelpers.hpp>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
@@ -513,19 +514,41 @@ public:
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
                         const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                        if (fieldName == key && std::holds_alternative<Type>(value)) {
-                            if (currentAutoUpdateParameters.contains(key)) {
-                                currentAutoUpdateParameters.erase(key);
-                            }
-                            newParameters.insert_or_assign(key, value);
-                            isSet = true;
+                        if (fieldName != key) {
+                            return;
                         }
-                        if (fieldName == key && !std::holds_alternative<Type>(value)) {
-                            throw std::invalid_argument([&key, &value] { // lazy evaluation
-                                const std::size_t actual_index   = value.index();
-                                const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
-                                return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
-                            }());
+                        constexpr bool strictChecks = false;
+                        if constexpr (strictChecks) {
+                            if (std::holds_alternative<Type>(value)) {
+                                if (currentAutoUpdateParameters.contains(key)) {
+                                    currentAutoUpdateParameters.erase(key);
+                                }
+                                newParameters.insert_or_assign(key, value);
+                                isSet = true;
+                            }
+
+                            if (!std::holds_alternative<Type>(value)) {
+                                throw std::invalid_argument([&key, &value] { // lazy evaluation
+                                    const std::size_t actual_index   = value.index();
+                                    const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
+                                    return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
+                                }());
+                            }
+                        } else {
+                            if (auto convertedValue = pmtv::convert_safely<Type>(value); convertedValue) [[likely]] {
+                                if (currentAutoUpdateParameters.contains(key)) {
+                                    currentAutoUpdateParameters.erase(key);
+                                }
+                                newParameters.insert_or_assign(key, value);
+                                isSet = true;
+                            } else {
+                                throw std::invalid_argument([&key, &value, &convertedValue] { // lazy evaluation
+                                    const std::size_t actual_index   = value.index();
+                                    const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
+                                    return fmt::format("value for key '{}' has a wrong or not safely convertible type or value {}.\n Index of actual type: {} ({}), Index of expected type: {} ({})", //
+                                        key, convertedValue.error(), actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
+                                }());
+                            }
                         }
                     }
                 });
@@ -1029,16 +1052,47 @@ private:
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
                         const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                        if (fieldName == key && std::holds_alternative<Type>(value)) {
-                            _stagedParameters.insert_or_assign(key, value);
-                            isSet = true;
+                        // if (fieldName == key && std::holds_alternative<Type>(value)) {
+                        //     _stagedParameters.insert_or_assign(key, value);
+                        //     isSet = true;
+                        // }
+                        // if (fieldName == key && !std::holds_alternative<Type>(value)) {
+                        //     throw std::invalid_argument([&key, &value] { // lazy evaluation
+                        //         const std::size_t actual_index   = value.index();
+                        //         const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
+                        //         return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
+                        //     }());
+                        // }
+                        if (fieldName != key) {
+                            return;
                         }
-                        if (fieldName == key && !std::holds_alternative<Type>(value)) {
-                            throw std::invalid_argument([&key, &value] { // lazy evaluation
-                                const std::size_t actual_index   = value.index();
-                                const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
-                                return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
-                            }());
+                        constexpr bool strictChecks = false;
+                        if constexpr (strictChecks) {
+                            if (std::holds_alternative<Type>(value)) {
+                                _stagedParameters.insert_or_assign(key, value);
+                                isSet = true;
+                            }
+
+                            if (!std::holds_alternative<Type>(value)) {
+                                throw std::invalid_argument([&key, &value] { // lazy evaluation
+                                    const std::size_t actual_index   = value.index();
+                                    const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
+                                    return fmt::format("value for key '{}' has a wrong type. Index of actual type: {} ({}), Index of expected type: {} ({})", key, actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
+                                }());
+                            }
+                        } else {
+                            if (auto convertedValue = pmtv::convert_safely<Type>(value); convertedValue) [[likely]] {
+                                _stagedParameters.insert_or_assign(key, value);
+                                isSet = true;
+                                isSet = true;
+                            } else {
+                                throw std::invalid_argument([&key, &value, &convertedValue] { // lazy evaluation
+                                    const std::size_t actual_index   = value.index();
+                                    const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>(); // This too, as per your implementation.
+                                    return fmt::format("value for key '{}' has a wrong or not safely convertible type or value {}.\n Index of actual type: {} ({}), Index of expected type: {} ({})", //
+                                        key, convertedValue.error(), actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
+                                }());
+                            }
                         }
                     }
                 });
