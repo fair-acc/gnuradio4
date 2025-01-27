@@ -26,8 +26,8 @@
 namespace pmtv::yaml {
 
 struct ParseError {
-    std::size_t line;
-    std::size_t column;
+    std::size_t line   = std::numeric_limits<std::size_t>::max();
+    std::size_t column = std::numeric_limits<std::size_t>::max();
     std::string message;
 };
 
@@ -40,7 +40,7 @@ template<typename T>
 struct is_complex<std::complex<T>> : std::true_type {};
 
 template<typename T>
-inline constexpr bool is_complex_v = is_complex<T>::value;
+constexpr bool is_complex_v = is_complex<T>::value;
 
 // serialization
 
@@ -60,7 +60,7 @@ inline std::string escapeString(std::string_view str, bool escapeForQuotedString
             result.append("\\r");
         } else if (c == '\b') {
             result.append("\\b");
-        } else if (std::iscntrl(c) && c != '\n') {
+        } else if (std::iscntrl(static_cast<unsigned char>(c)) && c != '\n') {
             result.append(fmt::format("\\x{:02x}", static_cast<unsigned char>(c)));
         } else {
             result.push_back(c);
@@ -74,17 +74,17 @@ inline void indent(std::ostream& os, int level) { os << std::setw(level * 2) << 
 enum class TypeTagMode { None, Auto };
 
 template<TypeTagMode tagMode = TypeTagMode::Auto>
-inline void serialize(std::ostream& os, const pmtv::pmt& value, int level = 0);
+void serialize(std::ostream& os, const pmtv::pmt& value, int level = 0);
 
 inline void serializeString(std::ostream& os, std::string_view value, int level, bool useMultiline = false) noexcept {
     if (useMultiline) {
-        const auto endsWithNewline = value.ends_with('\n');
+        const bool endsWithNewline = value.ends_with('\n');
         os << "|";
         if (!endsWithNewline) {
             os << "-";
         }
         os << "\n";
-        std::istringstream stream(std::string(value.data()));
+        std::istringstream stream(std::string(value.data(), value.size()));
 
         std::string line;
         while (std::getline(stream, line)) {
@@ -134,7 +134,7 @@ constexpr std::string_view tag_for_type() noexcept {
 }
 
 template<TypeTagMode tagMode>
-inline void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
+void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
     std::visit(
         [&os, level]<typename T>(const T& value) {
             if constexpr (tagMode == TypeTagMode::Auto && !std::is_same_v<T, pmtv::map_t>) {
@@ -167,7 +167,7 @@ inline void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
                 os << "(" << value.real() << "," << value.imag() << ")\n";
             } else if constexpr (std::is_same_v<T, std::string>) {
                 // Use multiline for strings containing newlines and printable characters only
-                bool multiline = value.contains('\n') && std::ranges::all_of(value, [](char c) { return std::isprint(c) || c == '\n'; });
+                bool multiline = value.contains('\n') && std::ranges::all_of(value, [](unsigned char c) { return std::isprint(c) || c == '\n'; });
                 serializeString(os, value, level, multiline);
             } else if constexpr (std::same_as<T, pmtv::map_t>) {
                 // flow-style formatting
@@ -197,7 +197,7 @@ inline void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
                 for (const auto& item : value) {
                     indent(os, level + 1);
                     os << "- ";
-                    constexpr auto childTagMode = std::is_same_v<typename T::value_type, pmtv::pmt> ? TypeTagMode::Auto : TypeTagMode::None;
+                    constexpr TypeTagMode childTagMode = std::is_same_v<typename T::value_type, pmtv::pmt> ? TypeTagMode::Auto : TypeTagMode::None;
                     serialize<childTagMode>(os, item, level + 1);
                 }
             }
@@ -232,7 +232,7 @@ struct ParseContext {
         if (atEndOfLine()) {
             return false;
         }
-        if (columnIdx + sv.size() < lines[lineIdx].size() && !std::isspace(lines[lineIdx][columnIdx + sv.size()])) {
+        if (columnIdx + sv.size() < lines[lineIdx].size() && !std::isspace(static_cast<unsigned char>(lines[lineIdx][columnIdx + sv.size()]))) {
             return false;
         }
         return lines[lineIdx].substr(columnIdx).starts_with(sv);
@@ -287,7 +287,7 @@ struct ParseContext {
         if (atEndOfDocument() || atEndOfLine()) {
             return;
         }
-        const auto nextNonSpace = lines[lineIdx].find_first_not_of(' ', columnIdx);
+        const std::size_t nextNonSpace = lines[lineIdx].find_first_not_of(' ', columnIdx);
         if (nextNonSpace != std::string_view::npos) {
             columnIdx = nextNonSpace;
         } else {
@@ -336,7 +336,7 @@ inline std::vector<std::string_view> split(std::string_view str, std::string_vie
 }
 
 template<typename R, template<typename> class Fnc, typename... Args>
-inline R applyTag(std::string_view tag, Args&&... args) {
+R applyTag(std::string_view tag, Args&&... args) {
     if (tag == "!!bool") {
         return Fnc<bool>{}(std::forward<Args>(args)...);
     } else if (tag == "!!int8") {
@@ -386,11 +386,11 @@ inline std::optional<std::string> parseBytesFromHex(std::string_view sv) {
 }
 
 inline std::expected<std::string, ValueParseError> resolveYamlEscapes_multiline(ParseContext& ctx) {
-    auto        str = ctx.remainingLine();
-    std::string result;
+    std::string_view str = ctx.remainingLine();
+    std::string      result;
     result.reserve(str.size());
 
-    for (auto i = 0UZ; i < str.size(); ++i) {
+    for (std::size_t i = 0UZ; i < str.size(); ++i) {
         if (str[i] == '\\' && i + 1 < str.size()) {
             ++i;
             switch (str[i]) {
@@ -401,7 +401,7 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_multiline(
                     result.push_back(str[i]);
                     break;
                 }
-                const auto byte = parseBytesFromHex(str.substr(i + 1, 2));
+                const std::optional<std::string> byte = parseBytesFromHex(str.substr(i + 1, 2));
                 if (!byte) {
                     result.push_back('\\');
                     result.push_back(str[i]);
@@ -430,7 +430,7 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_multiline(
 inline std::expected<std::string, ValueParseError> resolveYamlEscapes_quoted(std::string_view str) {
     std::string result;
     result.reserve(str.size());
-    for (auto i = 0UZ; i < str.size(); ++i) {
+    for (std::size_t i = 0UZ; i < str.size(); ++i) {
         if (str[i] == '\\' && i + 1 < str.size()) {
             ++i;
             switch (str[i]) {
@@ -447,7 +447,7 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_quoted(std
                     result.push_back(str[i]);
                     break;
                 }
-                const auto byte = parseBytesFromHex(str.substr(i + 1, 2));
+                const std::optional<std::string> byte = parseBytesFromHex(str.substr(i + 1, 2));
                 if (!byte) {
                     result.push_back('\\');
                     result.push_back(str[i]);
@@ -474,17 +474,25 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_quoted(std
 
 template<typename T>
 std::expected<T, ValueParseError> parseAs(std::string_view sv) {
+    auto trim = [](std::string_view s) {
+        auto first = std::ranges::find_if_not(s, isspace);
+        auto last = std::ranges::find_if_not(s | std::views::reverse, isspace).base();
+        return s.substr(static_cast<std::size_t>(first - s.begin()), static_cast<std::size_t>(last - first));
+    };
+
     if constexpr (std::is_same_v<T, std::monostate>) {
         return std::monostate{};
     } else if constexpr (std::is_same_v<T, bool>) {
+        sv = trim(sv); // trim leading and trailing whitespace
         if (sv == "true" || sv == "True" || sv == "TRUE") {
             return true;
         }
         if (sv == "false" || sv == "False" || sv == "FALSE") {
             return false;
         }
-        return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
+        return std::unexpected(ValueParseError{0UZ, "Invalid value for bool-type"});
     } else if constexpr (std::is_floating_point_v<T>) {
+        sv = trim(sv); // trim leading and trailing whitespace
         if (sv == ".inf" || sv == ".Inf" || sv == ".INF") {
             return std::numeric_limits<T>::infinity();
         } else if (sv == "-.inf" || sv == "-.Inf" || sv == "-.INF") {
@@ -492,21 +500,27 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         } else if (sv == ".nan" || sv == ".NaN" || sv == ".NAN") {
             return std::numeric_limits<T>::quiet_NaN();
         }
+        std::string tempParse(sv.data(), sv.size());
         try {
             if constexpr (std::is_same_v<T, float>) {
-                return std::stof(sv.data());
+                return std::stof(tempParse);
             } else {
-                return std::stod(sv.data());
+                return std::stod(tempParse);
             }
-        } catch (...) {
-            return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
+        } catch (std::invalid_argument& e) { // specifically: std::invalid_argument or std::out_of_range
+            return std::unexpected(ValueParseError{0UZ, fmt::format("std::invalid_argument exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
+        } catch (std::out_of_range& e) { // specifically: std::invalid_argument or std::out_of_range
+            return std::unexpected(ValueParseError{0UZ, fmt::format("std::out_of_range exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
+        } catch (std::exception& e) { // specifically: std::invalid_argument or std::out_of_range
+            return std::unexpected(ValueParseError{0UZ, fmt::format("std::exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
         }
     } else if constexpr (std::is_integral_v<T>) {
+        sv = trim(sv); // trim leading and trailing whitespace
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
             T value;
             const auto [ptr, ec] = std::from_chars(s.begin(), s.end(), value, base);
             if (ec != std::errc{} || ptr != s.end()) {
-                return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
+                return std::unexpected(ValueParseError{0UZ, fmt::format("Invalid integral-type value '{}' (error: {})",  s, std::make_error_code(ec).message())});
             }
             return value;
         };
@@ -519,28 +533,18 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         }
         return parseWithBase(sv, 10);
     } else if constexpr (is_complex_v<T>) {
-        auto trim = [](std::string_view s) {
-            while (!s.empty() && std::isspace(s.front())) {
-                s.remove_prefix(1);
-            }
-            while (!s.empty() && std::isspace(s.back())) {
-                s.remove_suffix(1);
-            }
-            return s;
-        };
         sv = trim(sv);
         if (!sv.starts_with('(') || !sv.ends_with(')')) {
-            return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
+            return std::unexpected(ValueParseError{0UZ, "Invalid value for complex<>-type"});
         }
-        auto trimmed = sv;
-        trimmed.remove_prefix(1);
-        trimmed.remove_suffix(1);
-        const auto segments = split(trimmed, ",");
-        if (segments.size() != 2) {
-            return std::unexpected(ValueParseError{0UZ, "Invalid value for type"});
+        sv.remove_prefix(1UZ);
+        sv.remove_suffix(1UZ);
+        const std::vector<std::string_view> segments = split(sv, ",");
+        if (segments.size() != 2UZ) {
+            return std::unexpected(ValueParseError{0UZ, "Invalid value for complex<>-type"});
         }
         using value_type = typename T::value_type;
-        auto real        = parseAs<value_type>(trim(segments[0]));
+        auto real        = parseAs<value_type>(trim(segments[0UZ]));
         if (!real) {
             return real;
         }
@@ -550,6 +554,7 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         }
         return T{*real, *imag};
     } else if constexpr (std::is_same_v<T, std::string>) {
+        // present default behaviour: no trimming for strings i.e. keep spaces if any
         return resolveYamlEscapes_quoted(sv);
     } else {
         static_assert(false, "Unsupported type");
@@ -559,7 +564,7 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
 
 template<typename T>
 struct ParseAs {
-    auto operator()(std::string_view sv) { return parseAs<T>(sv); }
+    std::expected<T, ValueParseError> operator()(std::string_view sv) { return parseAs<T>(sv); }
 };
 
 inline bool isKnownTag(std::string_view tag) { return tag == "!!null" || tag == "!!bool" || tag == "!!uint8" || tag == "!!uint16" || tag == "!!uint32" || tag == "!!uint64" || tag == "!!int8" || tag == "!!int16" || tag == "!!int32" || tag == "!!int64" || tag == "!!float32" || tag == "!!float64" || tag == "!!complex32" || tag == "!!complex64" || tag == "!!str"; }
@@ -567,8 +572,8 @@ inline bool isKnownTag(std::string_view tag) { return tag == "!!null" || tag == 
 inline std::expected<std::string_view, ParseError> parseTag(ParseContext& ctx) {
     std::string_view tag;
     if (ctx.startsWith("!!")) {
-        auto line    = ctx.remainingLine();
-        auto tag_end = line.find(' ');
+        std::string_view line    = ctx.remainingLine();
+        std::size_t      tag_end = line.find(' ');
         if (tag_end != std::string_view::npos) {
             tag = line.substr(0, tag_end);
             if (!isKnownTag(tag)) {
@@ -612,22 +617,22 @@ inline std::pair<std::size_t, std::size_t> findString(std::string_view sv, std::
         return {0, 0};
     }
     const char firstChar = sv.front();
-    const auto quoted    = firstChar == '"' || firstChar == '\'';
+    const bool quoted    = firstChar == '"' || firstChar == '\'';
     if (!quoted) {
         // Check for extra delimiter first (',' for flow, ':' for keys)
-        auto delimPos = sv.find_first_of(extraDelimiters);
+        std::size_t delimPos = sv.find_first_of(extraDelimiters);
         if (delimPos != std::string_view::npos) {
             return {0, delimPos};
         }
         // Ignore trailing comments
-        auto commentPos = sv.find('#');
+        std::size_t commentPos = sv.find('#');
         if (commentPos != std::string_view::npos) {
             return {0, commentPos};
         }
         return {0, sv.size()};
     }
 
-    auto closePos = findClosingQuote(sv, firstChar);
+    std::size_t closePos = findClosingQuote(sv, firstChar);
     if (closePos != std::string_view::npos) {
         return {1, closePos - 1};
     }
@@ -635,7 +640,7 @@ inline std::pair<std::size_t, std::size_t> findString(std::string_view sv, std::
 }
 
 template<typename Fnc>
-inline std::expected<pmtv::pmt, ParseError> parseNextString(ParseContext& ctx, std::string_view extraDelimiters, Fnc fnc) {
+std::expected<pmtv::pmt, ParseError> parseNextString(ParseContext& ctx, std::string_view extraDelimiters, Fnc fnc) {
     auto [offset, length] = findString(ctx.remainingLine(), extraDelimiters);
     if (offset == std::string_view::npos) {
         return std::unexpected(ctx.makeError("Unterminated quote"));
@@ -677,10 +682,10 @@ inline std::expected<pmtv::pmt, ParseError> parsePlainScalar(ParseContext& ctx, 
         }
 
         // try numbers
-        if (const auto asInt = parseAs<int64_t>(sv)) {
+        if (const std::expected<std::int64_t, ValueParseError> asInt = parseAs<std::int64_t>(sv)) {
             return *asInt;
         }
-        if (const auto asDouble = parseAs<double>(sv)) {
+        if (const std::expected<double, ValueParseError> asDouble = parseAs<double>(sv)) {
             return *asDouble;
         }
 
@@ -690,13 +695,13 @@ inline std::expected<pmtv::pmt, ParseError> parsePlainScalar(ParseContext& ctx, 
 }
 
 inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::string_view typeTag, int currentIndentLevel) {
-    const auto initialLine = ctx.lineIdx;
+    const std::size_t initialLine = ctx.lineIdx;
     ctx.consumeWhitespaceAndComments();
 
     if (ctx.atEndOfDocument()) {
         return std::monostate{};
     }
-    const auto skippedLines = ctx.lineIdx > initialLine;
+    const bool skippedLines = ctx.lineIdx > initialLine;
     if (skippedLines && currentIndentLevel >= 0 && ctx.currentIndent() <= static_cast<std::size_t>(currentIndentLevel)) {
         return std::monostate{};
     }
@@ -705,21 +710,21 @@ inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::
         char indicator = ctx.front();
         ctx.consume(1);
 
-        const auto trailingNewline = !ctx.consumeIfStartsWith('-');
+        const bool trailingNewline = !ctx.consumeIfStartsWith('-');
 
         ctx.consumeSpaces();
-        const auto& [offset, length] = findString(ctx.remainingLine());
+        const auto [offset, length] = findString(ctx.remainingLine());
         if (length > 0) {
             return std::unexpected(ctx.makeError("Unexpected characters after multi-line indicator"));
         }
         std::ostringstream oss;
-        const auto         expectedIndent = static_cast<std::size_t>(currentIndentLevel + 2);
+        const std::size_t  expectedIndent = static_cast<std::size_t>(currentIndentLevel + 2);
 
         bool firstLine = true;
         ctx.skipToNextLine();
 
         for (; !ctx.atEndOfDocument(); ctx.skipToNextLine()) {
-            auto lineIndent = ctx.currentIndent();
+            std::size_t lineIndent = ctx.currentIndent();
             if (lineIndent == std::string_view::npos) {
                 // empty or whitespace-only line
                 // folded style ('|'): empty line becomes newline
@@ -737,7 +742,7 @@ inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::
             if (indicator == '>' && !firstLine) {
                 oss << ' ';
             }
-            auto resolved = resolveYamlEscapes_multiline(ctx);
+            std::expected<std::string, ValueParseError> resolved = resolveYamlEscapes_multiline(ctx);
             if (!resolved) {
                 return std::unexpected(ctx.makeError(resolved.error()));
             }
@@ -769,7 +774,7 @@ inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::
         return result;
     }
 
-    const auto result = parsePlainScalar(ctx, typeTag);
+    std::expected<pmtv::pmt, ParseError> result = parsePlainScalar(ctx, typeTag);
 
     if (!result) {
         return std::unexpected(result.error());
@@ -777,7 +782,7 @@ inline std::expected<pmtv::pmt, ParseError> parseScalar(ParseContext& ctx, std::
 
     ctx.consumeSpaces();
     if (!ctx.atEndOfLine()) {
-        const auto& [offset, length] = findString(ctx.remainingLine());
+        const auto [offset, length] = findString(ctx.remainingLine());
         if (offset > 0 || length > 0) {
             return std::unexpected(ctx.makeError("Unexpected characters after scalar value"));
         }
@@ -816,38 +821,38 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
     }
 
     // not quoted
-    auto colonPos = [](auto sv) {
-        for (auto pos = 0UZ; pos < sv.size(); ++pos) {
+    std::size_t colonPos = [](auto sv) {
+        for (std::size_t pos = 0UZ; pos < sv.size(); ++pos) {
             pos = sv.find(':', pos);
             if (pos == std::string_view::npos) {
                 return pos;
             }
-            if (pos == sv.size() - 1 || std::isspace(sv[pos + 1])) {
+            if (pos == sv.size() - 1 || std::isspace(static_cast<unsigned char>(sv[pos + 1]))) {
                 return pos;
             }
         }
         return std::string_view::npos;
     }(ctx.remainingLine());
 
-    auto commentPos = ctx.remainingLine().find('#');
+    std::size_t commentPos = ctx.remainingLine().find('#');
     if (colonPos == std::string_view::npos || (commentPos != std::string_view::npos && commentPos < colonPos)) {
         return std::unexpected(ctx.makeError("Could not find key/value separator ':'"));
     }
-    auto key = std::string(ctx.remainingLine().substr(0, colonPos));
+    std::string key = std::string(ctx.remainingLine().substr(0, colonPos));
     ctx.consume(colonPos + 1);
 
     return key;
 }
 
 inline ValueType peekToFindValueType(ParseContext ctx, int previousIndent) {
-    const auto initialLine = ctx.lineIdx;
+    const std::size_t initialLine = ctx.lineIdx;
     ctx.consumeWhitespaceAndComments();
 
     if (ctx.atEndOfDocument()) {
         return ValueType::Scalar;
     }
 
-    const auto skippedLines = ctx.lineIdx > initialLine;
+    const bool skippedLines = ctx.lineIdx > initialLine;
     if (skippedLines && previousIndent >= 0 && ctx.currentIndent() <= static_cast<std::size_t>(previousIndent)) {
         return ValueType::Scalar;
     }
@@ -859,7 +864,7 @@ inline ValueType peekToFindValueType(ParseContext ctx, int previousIndent) {
         return ValueType::Map;
     }
 
-    const auto key = parseKey(ctx);
+    const std::expected<std::string, ParseError> key = parseKey(ctx);
     return key.has_value() ? ValueType::Map : ValueType::Scalar;
 }
 
@@ -877,14 +882,15 @@ struct ConvertList {
 
 enum class FlowType { List, Map };
 template<FlowType Type>
-inline auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
+auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
     using ResultType          = std::conditional_t<Type == FlowType::List, pmtv::pmt, pmtv::map_t>;
     using TemporaryResultType = std::conditional_t<Type == FlowType::List, std::vector<pmtv::pmt>, pmtv::map_t>;
     using ReturnType          = std::expected<ResultType, ParseError>;
-    auto       makeError      = [&](std::string message) -> ReturnType { return std::unexpected(ctx.makeError(std::move(message))); };
-    const auto startLineIdx   = ctx.lineIdx;
 
-    constexpr auto closingChar = Type == FlowType::List ? ']' : '}';
+    auto              makeError    = [&](std::string message) -> ReturnType { return std::unexpected(ctx.makeError(std::move(message))); };
+    const std::size_t startLineIdx = ctx.lineIdx;
+
+    constexpr char closingChar = Type == FlowType::List ? ']' : '}';
 
     TemporaryResultType result;
 
@@ -903,17 +909,17 @@ inline auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentInd
         }
 
         auto parseElementValue = [&] -> std::expected<pmtv::pmt, ParseError> {
-            const auto maybeTag = parseTag(ctx);
+            const std::expected<std::string_view, ParseError> maybeTag = parseTag(ctx);
             if (!maybeTag.has_value()) {
                 return ReturnType{std::unexpected(maybeTag.error())};
             }
-            auto nestedTag = maybeTag.value();
+            std::string_view nestedTag = maybeTag.value();
 
             if (!typeTag.empty() && !nestedTag.empty()) {
                 return makeError("Cannot have type tag for both list and list item");
             }
 
-            const auto localTag = !nestedTag.empty() ? nestedTag : typeTag;
+            const std::string_view localTag = !nestedTag.empty() ? nestedTag : typeTag;
 
             ctx.consumeWhitespaceAndComments();
 
@@ -929,22 +935,23 @@ inline auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentInd
         };
 
         if constexpr (Type == FlowType::List) {
-            auto value = parseElementValue();
+            std::expected<pmtv::pmt, ParseError> value = parseElementValue();
             if (!value.has_value()) {
                 return ReturnType{std::unexpected(value.error())};
             }
-            result.push_back(std::move(value.value()));
+            result.emplace_back(value.value());
         } else {
-            auto key = parseKey(ctx, ",");
+            std::expected<std::string, ParseError> key = parseKey(ctx, ",");
             if (!key.has_value()) {
                 return ReturnType{std::unexpected(key.error())};
             }
             ctx.consumeWhitespaceAndComments();
-            auto value = parseElementValue();
+            std::expected<pmtv::pmt, ParseError> value = parseElementValue();
             if (!value.has_value()) {
                 return ReturnType{std::unexpected(value.error())};
             }
-            result[std::move(key.value())] = std::move(value.value());
+            // result is a std::map<std::string, pmt, ...>
+            result.insert_or_assign(key.value(), value.value());
         }
         ctx.consumeWhitespaceAndComments();
         if (ctx.consumeIfStartsWith(",")) {
@@ -987,7 +994,7 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
         }
         ctx.consumeWhitespaceAndComments();
 
-        const auto line_indent = firstLine ? ctx.currentIndent(" -") : ctx.currentIndent(); // Ignore "-" if map is in a list
+        const std::size_t line_indent = firstLine ? ctx.currentIndent(" -") : ctx.currentIndent(); // Ignore "-" if map is in a list
 
         if (parentIndentLevel >= 0 && line_indent <= static_cast<std::size_t>(parentIndentLevel)) {
             // indentation decreased; end of current map
@@ -996,50 +1003,50 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
 
         firstLine = false;
 
-        const auto maybeKey = parseKey(ctx);
+        const std::expected<std::string, ParseError> maybeKey = parseKey(ctx);
         if (!maybeKey.has_value()) {
             return std::unexpected(maybeKey.error());
         }
 
-        auto key = maybeKey.value();
+        std::string key = maybeKey.value();
 
         ctx.consumeSpaces();
-        auto       tagPos   = ctx.columnIdx;
-        const auto maybeTag = parseTag(ctx);
+        std::size_t                                       tagPos   = ctx.columnIdx;
+        const std::expected<std::string_view, ParseError> maybeTag = parseTag(ctx);
         if (!maybeTag.has_value()) {
             return std::unexpected(maybeTag.error());
         }
-        auto typeTag = maybeTag.value();
+        std::string_view typeTag = maybeTag.value();
         ctx.consumeSpaces();
 
         const auto peekedType = peekToFindValueType(ctx, static_cast<int>(line_indent));
 
         switch (peekedType) {
         case ValueType::List: {
-            auto parsedValue = parseList(ctx, typeTag, static_cast<int>(line_indent));
+            std::expected<pmtv::pmt, ParseError> parsedValue = parseList(ctx, typeTag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
-            map[key] = parsedValue.value();
+            map.insert_or_assign(key, parsedValue.value());
             break;
         }
         case ValueType::Map: {
             if (!typeTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", tagPos));
             }
-            auto parsedValue = parseMap(ctx, static_cast<int>(line_indent));
+            std::expected<pmtv::map_t, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
-            map[key] = parsedValue.value();
+            map.insert_or_assign(key, parsedValue.value());
             break;
         }
         case ValueType::Scalar: {
-            auto parsedValue = parseScalar(ctx, typeTag, static_cast<int>(line_indent));
+            std::expected<pmtv::pmt, ParseError> parsedValue = parseScalar(ctx, typeTag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
-            map[key] = parsedValue.value();
+            map.insert_or_assign(key, parsedValue.value());
             break;
         }
         }
@@ -1073,28 +1080,28 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
 
         ctx.consumeSpaces();
 
-        const auto itemIndent = ctx.columnIdx;
+        const std::size_t itemIndent = ctx.columnIdx;
 
-        const auto maybeLocalTag = parseTag(ctx);
+        const std::expected<std::string_view, ParseError> maybeLocalTag = parseTag(ctx);
         if (!maybeLocalTag.has_value()) {
             return std::unexpected(maybeLocalTag.error());
         }
-        auto localTag = maybeLocalTag.value();
+        std::string_view localTag = maybeLocalTag.value();
         if (!typeTag.empty() && !localTag.empty()) {
             return std::unexpected(ctx.makeError("Cannot have type tag for both list and list item"));
         }
 
-        const auto tag = !typeTag.empty() ? typeTag : localTag;
+        const std::string_view tag = !typeTag.empty() ? typeTag : localTag;
 
         ctx.consumeSpaces();
 
-        const auto peekedType = peekToFindValueType(ctx, static_cast<int>(line_indent));
+        const ValueType peekedType = peekToFindValueType(ctx, static_cast<int>(line_indent));
         switch (peekedType) {
         case ValueType::List: {
             if (!typeTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for list containing lists", itemIndent));
             }
-            auto parsedValue = parseList(ctx, tag, static_cast<int>(line_indent));
+            std::expected<pmtv::pmt, ParseError> parsedValue = parseList(ctx, tag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
@@ -1105,19 +1112,19 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
             if (!localTag.empty()) {
                 return std::unexpected(ctx.makeErrorAtColumn("Cannot have type tag for maps", itemIndent));
             }
-            auto parsedValue = parseMap(ctx, static_cast<int>(line_indent));
+            std::expected<pmtv::map_t, ParseError> parsedValue = parseMap(ctx, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
-            list.push_back(parsedValue.value());
+            list.emplace_back(parsedValue.value());
             break;
         }
         case ValueType::Scalar: {
-            auto parsedValue = parseScalar(ctx, tag, static_cast<int>(line_indent));
+            std::expected<pmtv::pmt, ParseError> parsedValue = parseScalar(ctx, tag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
-            list.push_back(parsedValue.value());
+            list.emplace_back(parsedValue.value());
             break;
         }
         }
@@ -1140,11 +1147,74 @@ inline std::string serialize(const pmtv::map_t& map) {
 }
 
 inline std::expected<pmtv::map_t, ParseError> deserialize(std::string_view yaml_str) {
-    auto                 lines = detail::split(yaml_str, "\n");
-    detail::ParseContext ctx{.lines = lines};
+    std::vector<std::string_view> lines = detail::split(yaml_str, "\n");
+    detail::ParseContext          ctx{.lines = lines};
     ctx.consumeWhitespaceAndComments();
     ctx.consumeIfStartsWith("---");
     return detail::parseMap(ctx, -1);
+}
+
+namespace detail {
+template<std::size_t N>
+struct fixed_string {
+    char data[N]{};
+    constexpr fixed_string(const char (&arr)[N]) {
+        for (std::size_t i = 0; i < N; ++i) {
+            data[i] = arr[i];
+        }
+    }
+};
+} // namespace detail
+
+template<detail::fixed_string lineEndMarker = "⏎", detail::fixed_string lineStartMarker = "│", detail::fixed_string chevron = "^">
+std::string formatAsLines(std::string_view input, std::size_t line = std::numeric_limits<std::size_t>::max(), std::size_t column = std::numeric_limits<std::size_t>::max(), std::string_view errorMsg = {}) {
+    std::size_t total = input.empty() ? 0UZ : 1UZ + static_cast<std::size_t>(std::ranges::count(input, '\n'));
+    if (!total) {
+        return std::string(input);
+    }
+
+    std::size_t width = std::to_string(total - 1UZ).size();
+    std::string out;
+    out.reserve(input.size() + total * 10UZ);
+
+    std::size_t start = 0UZ;
+    for (std::size_t i = 0UZ; i < total; ++i) {
+        auto pos = input.find('\n', start);
+        if (pos == std::string_view::npos) {
+            pos = input.size();
+        }
+        auto lineView = input.substr(start, pos - start);
+
+        fmt::format_to(std::back_inserter(out), "{:>{}}:{}{}{}\n", i, width, lineStartMarker.data, lineView, lineEndMarker.data);
+
+        if (i == line) {
+            std::size_t col = std::min(column, lineView.size());
+            fmt::format_to(std::back_inserter(out), "{:>{}}", "", width + 2UZ);
+            if (errorMsg.empty()) {
+                fmt::format_to(std::back_inserter(out), "{:>{}}{}\n", ' ', col, chevron.data);
+            } else if (errorMsg.size() < col + 1UZ) {
+                if (col - errorMsg.length() == 0UZ) {
+                    fmt::format_to(std::back_inserter(out), "{}{}\n", errorMsg, chevron.data);
+                } else {
+                    fmt::format_to(std::back_inserter(out), "{:>{}}{}{}\n", ' ', col - errorMsg.length(), errorMsg, chevron.data);
+                }
+            } else {
+                if (col == 0UZ) {
+                    fmt::format_to(std::back_inserter(out), "{}{}\n", chevron.data, errorMsg);
+                } else {
+                    fmt::format_to(std::back_inserter(out), "{:>{}}{}{}\n", ' ', col, chevron.data, errorMsg);
+                }
+            }
+            fmt::format_to(std::back_inserter(out), "{:>{}}\n", "", width + 2UZ);
+        }
+        start = (pos == input.size()) ? pos : pos + 1;
+    }
+    return out;
+}
+
+template<detail::fixed_string lineEndMarker = "⏎", detail::fixed_string lineStartMarker = "│", detail::fixed_string chevron = "^">
+constexpr std::string formatAsLines(std::string_view input, ParseError error = {}) {
+    return formatAsLines<lineEndMarker, lineStartMarker, chevron>(input, error.line, error.column, error.message);
 }
 
 } // namespace pmtv::yaml
