@@ -10,6 +10,7 @@
 #include <expected>
 #include <iomanip>
 #include <iostream>
+#include <magic_enum.hpp>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -24,6 +25,59 @@
 #include <fmt/format.h>
 
 namespace pmtv::yaml {
+
+template<typename... Ts>
+std::string printVariant(const std::variant<Ts...>& var) {
+    return std::visit(
+        [](auto&& v) -> std::string {
+            using T = std::decay_t<decltype(v)>;
+
+            if constexpr (std::is_same_v<T, std::monostate>) {
+                return "(monostate)";
+            } else if constexpr (std::is_same_v<T, bool>) {
+                return v ? "true" : "false";
+            } else if constexpr (std::is_same_v<T, unsigned char>) {
+                return fmt::format("u8({})", static_cast<unsigned int>(v));
+            } else if constexpr (std::is_same_v<T, unsigned short>) {
+                return fmt::format("u16({})", v);
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                return fmt::format("'{}'", v);
+            } else if constexpr (std::is_arithmetic_v<T> && !std::is_same_v<T, bool>) {
+                return fmt::format("{}", v);
+            } else if constexpr (std::is_same_v<T, std::complex<float>>) {
+                return fmt::format("({} + {}i)", v.real(), v.imag());
+            } else if constexpr (std::is_same_v<T, std::complex<double>>) {
+                return fmt::format("({} + {}i)", v.real(), v.imag());
+            } else if constexpr (std::is_same_v<T, pmtv::map_t>) { // map
+                std::string result = "{ ";
+                for (const auto& [key, val] : v) {
+                    result += fmt::format("{}: {}, ", key, printVariant(val));
+                }
+                if (result.size() > 2) {
+                    result.erase(result.end() - 2, result.end());
+                }
+                result += " }";
+                return result;
+            } else if constexpr (requires {
+                                     std::begin(v);
+                                     std::end(v);
+                                 } && !std::is_same_v<T, std::string>) { // vector/array
+                std::string out = "[";
+                for (auto&& elem : v) {
+                    out += fmt::format("type: {} ", typeid(elem).name());
+                }
+                if (!v.empty()) {
+                    out.back() = ']';
+                } else {
+                    out += ']';
+                }
+                return out;
+            } else { // fallback
+                return "<unknown>";
+            }
+        },
+        var);
+} // TODO remove
 
 struct ParseError {
     std::size_t line;
@@ -976,11 +1030,13 @@ auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLeve
 inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
     ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("{")) {
+        fmt::println("parseMap::parseFlow ctx = {}:{} size: {}", ctx.lineIdx, ctx.columnIdx, ctx.lines.size());
         auto map = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
         ctx.skipToNextLine();
         return map;
     }
 
+    fmt::println("parseMap::pmtv::map_t ctx = {}:{} size: {}", ctx.lineIdx, ctx.columnIdx, ctx.lines.size());
     pmtv::map_t map;
     bool        firstLine = true;
 
@@ -991,7 +1047,7 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
         ctx.consumeWhitespaceAndComments();
 
         const std::size_t line_indent = firstLine ? ctx.currentIndent(" -") : ctx.currentIndent(); // Ignore "-" if map is in a list
-
+        fmt::println("parentIndent: {} -> {} - firstLine: {}", parentIndentLevel, line_indent, firstLine);
         if (parentIndentLevel >= 0 && line_indent <= static_cast<std::size_t>(parentIndentLevel)) {
             // indentation decreased; end of current map
             break;
@@ -1007,7 +1063,8 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
         std::string key = maybeKey.value();
 
         ctx.consumeSpaces();
-        std::size_t                                       tagPos   = ctx.columnIdx;
+        std::size_t tagPos = ctx.columnIdx;
+        fmt::println("parseMap key: {} nextIndex = {}", key, tagPos);
         const std::expected<std::string_view, ParseError> maybeTag = parseTag(ctx);
         if (!maybeTag.has_value()) {
             return std::unexpected(maybeTag.error());
@@ -1016,14 +1073,16 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
         ctx.consumeSpaces();
 
         const auto peekedType = peekToFindValueType(ctx, static_cast<int>(line_indent));
-
+        fmt::println("parseMap - key: {} peekType: {}", key, magic_enum::enum_name(peekedType));
         switch (peekedType) {
         case ValueType::List: {
             std::expected<pmtv::pmt, ParseError> parsedValue = parseList(ctx, typeTag, static_cast<int>(line_indent));
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
+            fmt::println("parseMap-List - key: {} - data type: {}", key, printVariant(parsedValue.value()));
             map.insert_or_assign(key, parsedValue.value());
+            fmt::println("parseMap-List - key: {} -- DONE", key);
             break;
         }
         case ValueType::Map: {
@@ -1034,7 +1093,9 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
+            fmt::println("parseMap-Map - key: {}", key);
             map.insert_or_assign(key, parsedValue.value());
+            fmt::println("parseMap-Map - key: {} -- DONE", key);
             break;
         }
         case ValueType::Scalar: {
@@ -1046,6 +1107,12 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
             break;
         }
         }
+        fmt::println("parseMap::pmtv::map_t ctx = {}:{} size: {} -- DONE for key '{}' ***", ctx.lineIdx, ctx.columnIdx, ctx.lines.size(), key);
+        if (ctx.lineIdx < ctx.lines.size()) {
+            fmt::println("   -> next line: {}", ctx.lines[ctx.lineIdx]);
+        } else {
+            fmt::println("   -> last-line/finish");
+        }
     }
     return map;
 }
@@ -1053,23 +1120,28 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
 inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
     ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("[")) {
+        fmt::println("parse flow list starts with {}", typeTag);
         auto l = parseFlow<FlowType::List>(ctx, typeTag, parentIndentLevel);
         ctx.skipToNextLine();
         return l;
     }
 
+    fmt::println("parseList()- starts with {}", typeTag);
     std::vector<pmtv::pmt> list;
 
     while (!ctx.atEndOfDocument()) {
         ctx.consumeWhitespaceAndComments();
 
         const std::size_t line_indent = ctx.currentIndent();
+        fmt::println("parseList()- parentIndentLevel {} -> {}", parentIndentLevel, line_indent);
         if (parentIndentLevel >= 0 && line_indent <= static_cast<size_t>(parentIndentLevel)) {
             // indentation decreased; end of current list
             break;
         }
 
-        if (!ctx.consumeIfStartsWith("-")) {
+        auto ret = ctx.consumeIfStartsWith("-");
+        fmt::println("parseList()- ctx.consumeIfStartsWith(-) {}", ret);
+        if (!ret) {
             // not a list item
             return std::unexpected(ctx.makeError("Expected list item"));
         }
@@ -1092,6 +1164,7 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
         ctx.consumeSpaces();
 
         const ValueType peekedType = peekToFindValueType(ctx, static_cast<int>(line_indent));
+        fmt::println("parseList()-ValueType peekedType: {}", magic_enum::enum_name(peekedType));
         switch (peekedType) {
         case ValueType::List: {
             if (!typeTag.empty()) {
@@ -1101,7 +1174,12 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
+            fmt::println("parseList()-ValueType::List value: type: {}", typeid(parsedValue.value()).name());
+            // for (const auto& v : parsedValue.value()) {
+            //     fmt::println("value: {}", printVariant(v));
+            // }
             list.push_back(parsedValue.value());
+            fmt::println("parseList()-ValueType::List value -- DONE");
             break;
         }
         case ValueType::Map: {
@@ -1112,7 +1190,12 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
             if (!parsedValue.has_value()) {
                 return std::unexpected(parsedValue.error());
             }
+            fmt::println("parseList()-ValueType::Map value");
+            for (const auto& [k, v] : parsedValue.value()) {
+                fmt::println("k: {}: {}", k, printVariant(v));
+            }
             list.emplace_back(parsedValue.value());
+            fmt::println("parseList()-ValueType::Map value: - DONE");
             break;
         }
         case ValueType::Scalar: {
