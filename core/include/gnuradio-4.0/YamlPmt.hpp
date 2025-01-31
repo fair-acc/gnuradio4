@@ -25,6 +25,11 @@
 
 namespace pmtv::yaml {
 
+enum class TypeTagMode {
+    None, /// do not set !!<type>
+    Auto  /// set !!<type> type-tags explicitely
+};
+
 struct ParseError {
     std::size_t line   = std::numeric_limits<std::size_t>::max();
     std::size_t column = std::numeric_limits<std::size_t>::max();
@@ -71,11 +76,10 @@ inline std::string escapeString(std::string_view str, bool escapeForQuotedString
 
 inline void indent(std::ostream& os, int level) { os << std::setw(level * 2) << std::setfill(' ') << ""; }
 
-enum class TypeTagMode { None, Auto };
-
 template<TypeTagMode tagMode = TypeTagMode::Auto>
 void serialize(std::ostream& os, const pmtv::pmt& value, int level = 0);
 
+template<TypeTagMode tagMode>
 inline void serializeString(std::ostream& os, std::string_view value, int level, bool useMultiline = false) noexcept {
     if (useMultiline) {
         const bool endsWithNewline = value.ends_with('\n');
@@ -92,7 +96,11 @@ inline void serializeString(std::ostream& os, std::string_view value, int level,
             os << escapeString(line, false) << "\n";
         }
     } else {
-        os << '"' << escapeString(value, true) << '"' << "\n";
+        if constexpr (tagMode == TypeTagMode::Auto) {
+            os << fmt::format("\"{}\"\n", escapeString(value, true));
+        } else {
+            os << fmt::format("{}\n", escapeString(value, true));
+        }
     }
 }
 
@@ -168,7 +176,7 @@ void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
             } else if constexpr (std::is_same_v<T, std::string>) {
                 // Use multiline for strings containing newlines and printable characters only
                 bool multiline = value.contains('\n') && std::ranges::all_of(value, [](unsigned char c) { return std::isprint(c) || c == '\n'; });
-                serializeString(os, value, level, multiline);
+                serializeString<tagMode>(os, value, level, multiline);
             } else if constexpr (std::same_as<T, pmtv::map_t>) {
                 // flow-style formatting
                 if (value.empty()) {
@@ -180,11 +188,11 @@ void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
                 for (const auto& [key, val] : value) {
                     indent(os, level + 1);
                     if (key.contains(':') || !std::ranges::all_of(key, ::isprint)) {
-                        os << '"' << escapeString(key, true) << "\": ";
+                        os << fmt::format("\"{}\": ", escapeString(key, true));
                     } else {
                         os << key << ": ";
                     }
-                    serialize<TypeTagMode::Auto>(os, val, level + 1);
+                    serialize<tagMode>(os, val, level + 1);
                 }
             } else if constexpr (std::ranges::random_access_range<T>) {
                 // flow-style formatting
@@ -197,7 +205,7 @@ void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
                 for (const auto& item : value) {
                     indent(os, level + 1);
                     os << "- ";
-                    constexpr TypeTagMode childTagMode = std::is_same_v<typename T::value_type, pmtv::pmt> ? TypeTagMode::Auto : TypeTagMode::None;
+                    constexpr TypeTagMode childTagMode = tagMode == TypeTagMode::Auto ? std::is_same_v<typename T::value_type, pmtv::pmt> ? TypeTagMode::Auto : TypeTagMode::None : tagMode;
                     serialize<childTagMode>(os, item, level + 1);
                 }
             }
@@ -476,7 +484,7 @@ template<typename T>
 std::expected<T, ValueParseError> parseAs(std::string_view sv) {
     auto trim = [](std::string_view s) {
         auto first = std::ranges::find_if_not(s, isspace);
-        auto last = std::ranges::find_if_not(s | std::views::reverse, isspace).base();
+        auto last  = std::ranges::find_if_not(s | std::views::reverse, isspace).base();
         return s.substr(static_cast<std::size_t>(first - s.begin()), static_cast<std::size_t>(last - first));
     };
 
@@ -515,12 +523,12 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
             return std::unexpected(ValueParseError{0UZ, fmt::format("std::exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
         }
     } else if constexpr (std::is_integral_v<T>) {
-        sv = trim(sv); // trim leading and trailing whitespace
+        sv                 = trim(sv); // trim leading and trailing whitespace
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
             T value;
             const auto [ptr, ec] = std::from_chars(s.begin(), s.end(), value, base);
             if (ec != std::errc{} || ptr != s.end()) {
-                return std::unexpected(ValueParseError{0UZ, fmt::format("Invalid integral-type value '{}' (error: {})",  s, std::make_error_code(ec).message())});
+                return std::unexpected(ValueParseError{0UZ, fmt::format("Invalid integral-type value '{}' (error: {})", s, std::make_error_code(ec).message())});
             }
             return value;
         };
@@ -1138,10 +1146,11 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
 
 } // namespace detail
 
-inline std::string serialize(const pmtv::map_t& map) {
+template<TypeTagMode tagMode = TypeTagMode::Auto>
+std::string serialize(const pmtv::map_t& map) {
     std::ostringstream oss;
     if (!map.empty()) {
-        detail::serialize<detail::TypeTagMode::Auto>(oss, map, -1); // Start at level -1 to avoid indenting top-level keys
+        detail::serialize<tagMode>(oss, map, -1); // Start at level -1 to avoid indenting top-level keys
     }
     return oss.str();
 }
