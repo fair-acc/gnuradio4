@@ -75,7 +75,7 @@ public:
     GraphWrapper() {
         // We need to make sure nobody touches our dynamic ports
         // as this class will handle them
-        this->_dynamicPortsLoader = [] {};
+        this->_dynamicPortsLoader.instance = nullptr;
 
         this->_block.propertyCallbacks[graph::property::kSubgraphExportPort] = [this](auto& /*self*/, std::string_view /*property*/, Message message) -> std::optional<Message> {
             const auto&        data            = message.data.value();

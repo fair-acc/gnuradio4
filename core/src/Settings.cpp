@@ -7,6 +7,21 @@ template std::size_t hash_combine<std::size_t>(std::size_t seed, std::size_t con
 }
 
 namespace settings {
+template<typename T>
+[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value) {
+    constexpr bool strictChecks = false;
+
+    std::expected<T, std::string> convertedValue = pmtv::convert_safely<T, strictChecks>(value);
+    if (!convertedValue) { // error
+        const std::size_t actualIndex   = value.index();
+        const std::size_t requiredIndex = meta::to_typelist<pmtv::pmt>::index_of<T>();
+        return std::unexpected{fmt::format("value for key '{}' has a wrong or not safely convertible type or value {}.\n" //
+                                           "Index of actual type: {} ({}), Index of expected type: {} ({})",              //
+            key, convertedValue.error(), actualIndex, "<missing pmt type>", requiredIndex, gr::meta::type_name<T>())};
+    }
+
+    return convertedValue; // success
+}
 
 template std::expected<bool, std::string>                 convertParameter<bool>(std::string_view key, const pmtv::pmt& value);
 template std::expected<std::int8_t, std::string>          convertParameter<std::int8_t>(std::string_view key, const pmtv::pmt& value);

@@ -40,29 +40,24 @@ namespace gr {
 namespace settings {
 
 template<typename T>
-constexpr static bool isSupportedVectorType() {
+constexpr bool isSupportedVectorType() {
     if constexpr (gr::meta::vector_type<T>) {
-        return std::is_arithmetic_v<typename T::value_type> || std::is_same_v<typename T::value_type, std::string> //
-               || std::is_same_v<typename T::value_type, std::complex<double>> || std::is_same_v<typename T::value_type, std::complex<float>>;
+        using ValueType = typename T::value_type;
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>>;
     } else {
         return false;
     }
 }
 
 template<typename T>
-constexpr static bool isSupportedType() {
+constexpr bool isReadableMember() {
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
            || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>>;
 }
 
 template<typename T, typename TMember>
 constexpr bool isWritableMember() {
-    return !traits::port::AnyPort<T> && !std::is_const_v<T> && !std::is_const_v<TMember> && settings::isSupportedType<T>();
-}
-
-template<typename T, typename TMember>
-constexpr bool isReadableMember() {
-    return !traits::port::AnyPort<T> && settings::isSupportedType<T>();
+    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember>;
 }
 
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {
@@ -206,21 +201,7 @@ namespace settings {
  * @brief Convert the given `value` to type `T`. If conversion fails or return diagnostic text.
  */
 template<typename T>
-[[nodiscard]] constexpr std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value) {
-    constexpr bool strictChecks = false;
-
-    std::expected<T, std::string> convertedValue = pmtv::convert_safely<T, strictChecks>(value);
-    if (!convertedValue) { // error
-        // Build the detailed error message that your original snippet used
-        const std::size_t actualIndex   = value.index();
-        const std::size_t requiredIndex = meta::to_typelist<pmtv::pmt>::index_of<T>();
-        return std::unexpected{fmt::format("value for key '{}' has a wrong or not safely convertible type or value {}.\n" //
-                                           "Index of actual type: {} ({}), Index of expected type: {} ({})",              //
-            key, convertedValue.error(), actualIndex, "<missing pmt type>", requiredIndex, gr::meta::type_name<T>())};
-    }
-
-    return convertedValue; // success
-}
+[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value); // foward declaration, implementation defined in corresponding .cpp file
 } // namespace settings
 
 struct SettingsBase {
@@ -948,7 +929,7 @@ private:
         refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
             using MemberType = refl::data_member_type<TBlock, kIdx>;
             using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-            if constexpr (settings::isReadableMember<Type, MemberType>()) {
+            if constexpr (settings::isReadableMember<Type>()) {
                 _activeParameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), static_cast<Type>(refl::data_member<kIdx>(*_block)));
             }
         });
@@ -1173,7 +1154,7 @@ private:
             refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                if constexpr (settings::isReadableMember<Type, MemberType>()) {
+                if constexpr (settings::isReadableMember<Type>()) {
                     parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*_block)));
                 }
             });
