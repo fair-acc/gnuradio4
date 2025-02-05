@@ -126,7 +126,6 @@ public:
 
     using DynamicPortOrCollection = std::variant<gr::DynamicPort, NamedPortCollection>;
     using DynamicPorts            = std::vector<DynamicPortOrCollection>;
-    using FuncPtr                 = void (*)();
 
 protected:
     struct DynamicPortsLoader {
