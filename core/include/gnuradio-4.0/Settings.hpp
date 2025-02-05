@@ -40,29 +40,24 @@ namespace gr {
 namespace settings {
 
 template<typename T>
-inline constexpr static bool isSupportedVectorType() {
+constexpr bool isSupportedVectorType() {
     if constexpr (gr::meta::vector_type<T>) {
-        return std::is_arithmetic_v<typename T::value_type> || std::is_same_v<typename T::value_type, std::string> //
-               || std::is_same_v<typename T::value_type, std::complex<double>> || std::is_same_v<typename T::value_type, std::complex<float>>;
+        using ValueType = typename T::value_type;
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>>;
     } else {
         return false;
     }
 }
 
 template<typename T>
-inline constexpr static bool isSupportedType() {
+constexpr bool isReadableMember() {
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
            || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>>;
 }
 
 template<typename T, typename TMember>
 constexpr bool isWritableMember() {
-    return !traits::port::AnyPort<T> && !std::is_const_v<T> && !std::is_const_v<TMember> && settings::isSupportedType<T>();
-}
-
-template<typename T, typename TMember>
-constexpr bool isReadableMember() {
-    return !traits::port::AnyPort<T> && settings::isSupportedType<T>();
+    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember>;
 }
 
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {
@@ -102,7 +97,7 @@ struct ApplyStagedParametersResult {
 
 namespace detail {
 template<class T>
-inline constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
+constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
     std::hash<T> hasher;
     seed ^= hasher(v) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
     return seed;
@@ -200,6 +195,14 @@ template<typename TBlock>
 concept HasSettingsResetCallback = requires(TBlock* block) {
     { block->reset() };
 };
+
+namespace settings {
+/**
+ * @brief Convert the given `value` to type `T`. If conversion fails or return diagnostic text.
+ */
+template<typename T>
+[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value); // foward declaration, implementation defined in corresponding .cpp file
+} // namespace settings
 
 struct SettingsBase {
     virtual ~SettingsBase() = default;
@@ -517,20 +520,14 @@ public:
                         if (fieldName != key) {
                             return;
                         }
-                        constexpr bool strictChecks = false;
-                        if (auto convertedValue = pmtv::convert_safely<Type, strictChecks>(value); convertedValue) [[likely]] {
+                        if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
                             if (currentAutoUpdateParameters.contains(key)) {
                                 currentAutoUpdateParameters.erase(key);
                             }
                             newParameters.insert_or_assign(key, convertedValue.value());
                             isSet = true;
                         } else {
-                            throw std::invalid_argument([&key, &value, &convertedValue] { // lazy evaluation
-                                const std::size_t actual_index   = value.index();
-                                const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>();                                                                                // This too, as per your implementation.
-                                return fmt::format("value for key '{}' has a wrong or not safely convertible type or value {}.\n Index of actual type: {} ({}), Index of expected type: {} ({})", //
-                                    key, convertedValue.error(), actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
-                            }());
+                            throw gr::exception(convertedValue.error());
                         }
                     }
                 });
@@ -932,7 +929,7 @@ private:
         refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
             using MemberType = refl::data_member_type<TBlock, kIdx>;
             using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-            if constexpr (settings::isReadableMember<Type, MemberType>()) {
+            if constexpr (settings::isReadableMember<Type>()) {
                 _activeParameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), static_cast<Type>(refl::data_member<kIdx>(*_block)));
             }
         });
@@ -1037,19 +1034,12 @@ private:
                         if (fieldName != key) {
                             return;
                         }
-                        constexpr bool strictChecks = false;
 
-                        if (auto convertedValue = pmtv::convert_safely<Type, strictChecks>(value); convertedValue) [[likely]] {
+                        if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
                             _stagedParameters.insert_or_assign(key, convertedValue.value());
                             isSet = true;
-                            isSet = true;
                         } else {
-                            throw std::invalid_argument([&key, &value, &convertedValue] { // lazy evaluation
-                                const std::size_t actual_index   = value.index();
-                                const std::size_t required_index = meta::to_typelist<pmtv::pmt>::index_of<Type>();                                                                                // This too, as per your implementation.
-                                return fmt::format("value for key '{}' has a wrong or not safely convertible type or value {}.\n Index of actual type: {} ({}), Index of expected type: {} ({})", //
-                                    key, convertedValue.error(), actual_index, "<missing pmt type>", required_index, gr::meta::type_name<Type>());
-                            }());
+                            throw gr::exception(convertedValue.error());
                         }
                     }
                 });
@@ -1164,7 +1154,7 @@ private:
             refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                if constexpr (settings::isReadableMember<Type, MemberType>()) {
+                if constexpr (settings::isReadableMember<Type>()) {
                     parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*_block)));
                 }
             });
@@ -1181,6 +1171,53 @@ struct hash<gr::SettingsCtx> {
     [[nodiscard]] size_t operator()(const gr::SettingsCtx& ctx) const noexcept { return ctx.hash(); }
 };
 } // namespace std
+
+namespace gr {
+
+namespace detail {
+extern template std::size_t hash_combine<std::size_t>(std::size_t seed, std::size_t const& v) noexcept;
+
+}
+
+namespace settings {
+
+// specialisation for fundamental base-types
+extern template std::expected<bool, std::string>                 convertParameter<bool>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::int8_t, std::string>          convertParameter<std::int8_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::uint8_t, std::string>         convertParameter<std::uint8_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::int16_t, std::string>         convertParameter<std::int16_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::uint16_t, std::string>        convertParameter<std::uint16_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::int32_t, std::string>         convertParameter<std::int32_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::uint32_t, std::string>        convertParameter<std::uint32_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::int64_t, std::string>         convertParameter<std::int64_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::uint64_t, std::string>        convertParameter<std::uint64_t>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<float, std::string>                convertParameter<float>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<double, std::string>               convertParameter<double>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::complex<float>, std::string>  convertParameter<std::complex<float>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::complex<double>, std::string> convertParameter<std::complex<double>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::string, std::string>          convertParameter<std::string>(std::string_view key, const pmtv::pmt& value);
+
+// specialisation declarations for std::string and vectors
+extern template std::expected<std::string, std::string>                       convertParameter<std::string>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<bool>, std::string>                 convertParameter<std::vector<bool>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::int8_t>, std::string>          convertParameter<std::vector<std::int8_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::uint8_t>, std::string>         convertParameter<std::vector<std::uint8_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::int16_t>, std::string>         convertParameter<std::vector<std::int16_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::uint16_t>, std::string>        convertParameter<std::vector<std::uint16_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::int32_t>, std::string>         convertParameter<std::vector<std::int32_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::uint32_t>, std::string>        convertParameter<std::vector<std::uint32_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::int64_t>, std::string>         convertParameter<std::vector<std::int64_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::uint64_t>, std::string>        convertParameter<std::vector<std::uint64_t>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<float>, std::string>                convertParameter<std::vector<float>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<double>, std::string>               convertParameter<std::vector<double>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::complex<float>>, std::string>  convertParameter<std::vector<std::complex<float>>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::complex<double>>, std::string> convertParameter<std::vector<std::complex<double>>>(std::string_view key, const pmtv::pmt& value);
+extern template std::expected<std::vector<std::string>, std::string>          convertParameter<std::vector<std::string>>(std::string_view key, const pmtv::pmt& value);
+
+extern template std::expected<property_map, std::string> convertParameter<property_map>(std::string_view key, const pmtv::pmt& value);
+
+} // namespace settings
+} // namespace gr
 
 #undef NO_INLINE
 

@@ -1,17 +1,24 @@
 #ifndef PMTTYPEHELPERS_HPP
 #define PMTTYPEHELPERS_HPP
 
+#include <algorithm>
 #include <bit>
 #include <charconv>
 #include <cmath>
+#include <complex>
+#include <cstdint>
 #include <expected>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <variant>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
+
+#include <pmtv/pmt.hpp>
 
 #ifdef __GNUC__
 // ignore warning from external libraries we don't control
@@ -40,7 +47,15 @@ struct is_complex<std::complex<T>> : std::true_type {};
 template<typename T>
 inline constexpr bool is_complex_v = is_complex<T>::value;
 
-template<class Variant, class T>
+template<typename T>
+concept VariantLike = requires(T v) {
+    { std::variant_size_v<T> } -> std::convertible_to<std::size_t>;
+    {
+        std::visit([](auto&&) {}, v)
+    };
+};
+
+template<class, class>
 struct variant_contains : std::false_type {};
 
 template<class T, class... Ts>
@@ -122,11 +137,8 @@ static std::expected<T, std::string> parseStringToFloat(std::string_view trimmed
 
 } // namespace detail
 
-template<class T, bool strictCheck = false, class... Ts>
-[[nodiscard]] std::expected<T, std::string> convert_safely(const std::variant<Ts...>& v);
-
-template<class T, bool strictCheck, class... Ts>
-[[nodiscard]] std::expected<T, std::string> convert_safely(const std::variant<Ts...>& v) {
+template<class T, bool strictCheck = false, detail::VariantLike TVariant>
+[[nodiscard]] constexpr std::expected<T, std::string> convert_safely(const TVariant& v) {
     using namespace std::string_literals;
     return std::visit(
         [&](auto&& srcValue) -> std::expected<T, std::string> {
@@ -473,6 +485,41 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
         }
     }
 }
+
+// forward-declare helper functions -> implemented in the corresponding .cpp file.
+
+// ---- fundamental types ----
+extern template std::expected<bool, std::string>                 convert_safely<bool, false, pmt>(const pmt&);
+extern template std::expected<std::int8_t, std::string>          convert_safely<std::int8_t, false, pmt>(const pmt&);
+extern template std::expected<std::uint8_t, std::string>         convert_safely<std::uint8_t, false, pmt>(const pmt&);
+extern template std::expected<std::int16_t, std::string>         convert_safely<std::int16_t, false, pmt>(const pmt&);
+extern template std::expected<std::uint16_t, std::string>        convert_safely<std::uint16_t, false, pmt>(const pmt&);
+extern template std::expected<std::int32_t, std::string>         convert_safely<std::int32_t, false, pmt>(const pmt&);
+extern template std::expected<std::uint32_t, std::string>        convert_safely<std::uint32_t, false, pmt>(const pmt&);
+extern template std::expected<std::int64_t, std::string>         convert_safely<std::int64_t, false, pmt>(const pmt&);
+extern template std::expected<std::uint64_t, std::string>        convert_safely<std::uint64_t, false, pmt>(const pmt&);
+extern template std::expected<float, std::string>                convert_safely<float, false, pmt>(const pmt&);
+extern template std::expected<double, std::string>               convert_safely<double, false, pmt>(const pmt&);
+extern template std::expected<std::complex<float>, std::string>  convert_safely<std::complex<float>, false, pmt>(const pmt&);
+extern template std::expected<std::complex<double>, std::string> convert_safely<std::complex<double>, false, pmt>(const pmt&);
+extern template std::expected<std::string, std::string>          convert_safely<std::string, false, pmt>(const pmt&);
+
+// ---- vector-of-fundamentals ----
+extern template std::expected<std::vector<bool>, std::string>                 convert_safely<std::vector<bool>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::int8_t>, std::string>          convert_safely<std::vector<std::int8_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::uint8_t>, std::string>         convert_safely<std::vector<std::uint8_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::int16_t>, std::string>         convert_safely<std::vector<std::int16_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::uint16_t>, std::string>        convert_safely<std::vector<std::uint16_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::int32_t>, std::string>         convert_safely<std::vector<std::int32_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::uint32_t>, std::string>        convert_safely<std::vector<std::uint32_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::int64_t>, std::string>         convert_safely<std::vector<std::int64_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::uint64_t>, std::string>        convert_safely<std::vector<std::uint64_t>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<float>, std::string>                convert_safely<std::vector<float>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<double>, std::string>               convert_safely<std::vector<double>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::complex<float>>, std::string>  convert_safely<std::vector<std::complex<float>>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::complex<double>>, std::string> convert_safely<std::vector<std::complex<double>>, false, pmt>(const pmt&);
+extern template std::expected<std::vector<std::string>, std::string>          convert_safely<std::vector<std::string>, false, pmt>(const pmt&);
+extern template std::expected<map_t, std::string>                             convert_safely<map_t, false, pmt>(const pmt&);
 
 } // namespace pmtv
 

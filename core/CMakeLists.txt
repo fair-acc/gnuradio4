@@ -1,49 +1,53 @@
-add_library(
-  gnuradio-core
-  INTERFACE
-  include/gnuradio-4.0/Settings.hpp
-  include/gnuradio-4.0/annotated.hpp
-  include/gnuradio-4.0/AtomicBitset.hpp
-  include/gnuradio-4.0/Block.hpp
-  include/gnuradio-4.0/BlockModel.hpp
-  include/gnuradio-4.0/BlockRegistry.hpp
-  include/gnuradio-4.0/BlockTraits.hpp
-  include/gnuradio-4.0/Buffer.hpp
-  include/gnuradio-4.0/BufferSkeleton.hpp
-  include/gnuradio-4.0/CircularBuffer.hpp
-  include/gnuradio-4.0/ClaimStrategy.hpp
-  include/gnuradio-4.0/DataSet.hpp
-  include/gnuradio-4.0/Graph_yaml_importer.hpp
-  include/gnuradio-4.0/Graph.hpp
-  include/gnuradio-4.0/HistoryBuffer.hpp
-  include/gnuradio-4.0/LifeCycle.hpp
-  include/gnuradio-4.0/Message.hpp
-  include/gnuradio-4.0/plugin.hpp
-  include/gnuradio-4.0/PluginLoader.hpp
-  include/gnuradio-4.0/Port.hpp
-  include/gnuradio-4.0/PortTraits.hpp
-  include/gnuradio-4.0/Profiler.hpp
-  include/gnuradio-4.0/reader_writer_lock.hpp
-  include/gnuradio-4.0/Scheduler.hpp
-  include/gnuradio-4.0/Sequence.hpp
-  include/gnuradio-4.0/Settings.hpp
-  include/gnuradio-4.0/Tag.hpp
-  include/gnuradio-4.0/TriggerMatcher.hpp
-  include/gnuradio-4.0/WaitStrategy.hpp
-  include/gnuradio-4.0/YamlPmt.hpp)
+add_library(gnuradio-core STATIC src/PmtTypeHelpers.cpp src/Settings.cpp)
+
+set(public_headers
+    include/gnuradio-4.0/annotated.hpp
+    include/gnuradio-4.0/AtomicBitset.hpp
+    include/gnuradio-4.0/Block.hpp
+    include/gnuradio-4.0/BlockModel.hpp
+    include/gnuradio-4.0/BlockRegistry.hpp
+    include/gnuradio-4.0/BlockTraits.hpp
+    include/gnuradio-4.0/Buffer.hpp
+    include/gnuradio-4.0/BufferSkeleton.hpp
+    include/gnuradio-4.0/CircularBuffer.hpp
+    include/gnuradio-4.0/ClaimStrategy.hpp
+    include/gnuradio-4.0/DataSet.hpp
+    include/gnuradio-4.0/Graph_yaml_importer.hpp
+    include/gnuradio-4.0/Graph.hpp
+    include/gnuradio-4.0/HistoryBuffer.hpp
+    include/gnuradio-4.0/LifeCycle.hpp
+    include/gnuradio-4.0/Message.hpp
+    include/gnuradio-4.0/plugin.hpp
+    include/gnuradio-4.0/PluginLoader.hpp
+    include/gnuradio-4.0/Port.hpp
+    include/gnuradio-4.0/PortTraits.hpp
+    include/gnuradio-4.0/Profiler.hpp
+    include/gnuradio-4.0/reader_writer_lock.hpp
+    include/gnuradio-4.0/Scheduler.hpp
+    include/gnuradio-4.0/Sequence.hpp
+    include/gnuradio-4.0/Settings.hpp
+    include/gnuradio-4.0/Tag.hpp
+    include/gnuradio-4.0/TriggerMatcher.hpp
+    include/gnuradio-4.0/WaitStrategy.hpp
+    include/gnuradio-4.0/YamlPmt.hpp)
+
+set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}")
+
 target_include_directories(
   gnuradio-core
-  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/src>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-            $<INSTALL_INTERFACE:include/>)
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/src>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+         $<INSTALL_INTERFACE:include/>)
+
 target_link_libraries(
   gnuradio-core
-  INTERFACE gnuradio-options
-            gnuradio-meta
-            magic_enum
-            pmtv
-            vir)
+  PUBLIC fmt
+         gnuradio-options
+         gnuradio-meta
+         magic_enum
+         pmtv
+         vir)
 
 # configure a header file to pass the CMake settings to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cmake/config.hpp.in"
