@@ -24,8 +24,6 @@ class DataSink;
 template<typename T>
 class DataSetSink;
 
-// Until clang-format can handle concepts
-
 template<typename T, typename V>
 concept DataSetCallback = std::invocable<T, DataSet<V>>;
 
@@ -37,6 +35,12 @@ concept StreamCallback = std::invocable<T, std::span<const V>> || std::invocable
 
 template<typename T, typename V>
 concept DataSetMatcher = std::invocable<T, gr::DataSet<V>> && std::is_same_v<std::invoke_result_t<T, gr::DataSet<V>>, bool>;
+
+template<typename T>
+concept DataSinkOrDataSetSinkLike = gr::meta::is_instantiation_of<T, DataSink> || gr::meta::is_instantiation_of<T, DataSetSink>;
+
+static_assert(DataSinkOrDataSetSinkLike<DataSink<float>>);
+static_assert(DataSinkOrDataSetSinkLike<DataSetSink<float>>);
 
 namespace detail {
 constexpr std::size_t data_sink_buffer_size          = 65536;
@@ -128,66 +132,48 @@ public:
         return s_instance;
     }
 
-    template<typename T>
-    void registerSink(DataSink<T>* sink) {
+    template<DataSinkOrDataSetSinkLike TSink>
+    void registerSink(TSink* sink) {
         std::lock_guard lg{_mutex};
+
+        if (sink->signal_name == "") {
+            throw gr::exception("Failed to register sink. Sink signal_name is an empty string.");
+        }
+
+        if (_sink_by_signal_name.contains(sink->signal_name)) {
+            throw gr::exception(fmt::format("Failed to register sink. Sink with the name `{}` is already registered.", sink->signal_name));
+        }
+
         _sinks.push_back(sink);
         _sink_by_signal_name[sink->signal_name] = sink;
+        sink->_registered                       = true;
     }
 
-    template<typename T>
-    void unregisterSink(DataSink<T>* sink) {
+    template<DataSinkOrDataSetSinkLike TSink>
+    void unregisterSink(TSink* sink) {
         std::lock_guard lg{_mutex};
         std::erase_if(_sinks, [sink](const std::any& v) -> bool {
-            auto ptr = std::any_cast<DataSink<T>*>(v);
+            auto ptr = std::any_cast<TSink*>(v);
             return ptr && ptr == sink;
         });
         _sink_by_signal_name.erase(sink->signal_name);
+        sink->_registered = false;
     }
 
-    template<typename T>
-    void registerSink(DataSetSink<T>* sink) {
+    template<DataSinkOrDataSetSinkLike TSink>
+    void updateSignalName(TSink* sink, std::string_view oldName, std::string_view newName) {
         std::lock_guard lg{_mutex};
-        _sinks.push_back(sink);
-        for (const auto& name : sink->signal_names) {
-            _sink_by_signal_name[name] = sink;
+
+        if (oldName == "" || newName == "") {
+            throw gr::exception("Failed to update the sink name. Either the old name or the new name is an empty string.");
         }
-    }
 
-    template<typename T>
-    void unregisterSink(DataSetSink<T>* sink) {
-        std::lock_guard lg{_mutex};
-        std::erase_if(_sinks, [sink](const std::any& v) -> bool {
-            auto ptr = std::any_cast<DataSetSink<T>*>(v);
-            return ptr && ptr == sink;
-        });
-        for (const auto& name : sink->signal_names) {
-            _sink_by_signal_name.erase(name);
+        if (_sink_by_signal_name.contains(std::string{newName})) {
+            throw gr::exception(fmt::format("Failed to update sink name. Sink with the name `{}` is already registered.", newName));
         }
-    }
 
-    template<typename T>
-    void updateSignalName(DataSink<T>* sink, std::string_view oldName, std::string_view newName) {
-        std::lock_guard lg{_mutex};
         _sink_by_signal_name.erase(std::string(oldName));
         _sink_by_signal_name[std::string(newName)] = sink;
-    }
-
-    template<typename T>
-    void updateSignalNames(DataSetSink<T>* sink, std::span<const std::string> oldNames_, std::span<const std::string> newNames_) {
-        std::lock_guard          lg{_mutex};
-        std::vector<std::string> removedNames;
-        auto                     oldNames = std::vector(oldNames_.begin(), oldNames_.end());
-        auto                     newNames = std::vector(newNames_.begin(), newNames_.end());
-        std::ranges::sort(oldNames);
-        std::ranges::sort(newNames);
-        std::set_difference(oldNames.begin(), oldNames.end(), newNames.begin(), newNames.end(), std::back_inserter(removedNames));
-        for (const auto& name : removedNames) {
-            _sink_by_signal_name.erase(name);
-        }
-        for (const auto& name : newNames) {
-            _sink_by_signal_name[name] = sink;
-        }
     }
 
     template<typename T>
@@ -470,7 +456,6 @@ This block type is mean for non-data set input streams. For input streams of typ
     bool                                          _listeners_finished = false;
     std::mutex                                    _listener_mutex;
     std::optional<gr::HistoryBuffer<T>>           _history;
-    bool                                          _registered = false;
 
 public:
     PortIn<T, RequiredSamples<std::dynamic_extent, detail::data_sink_buffer_size>> in;
@@ -482,6 +467,8 @@ public:
     Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +1.0f;
 
     GR_MAKE_REFLECTABLE(DataSink, in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+
+    bool _registered = false; // status should be updated by DataSinkRegistry
 
     using Block<DataSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
@@ -559,14 +546,10 @@ public:
         addListener(std::make_unique<SnapshotListener<Callback, M>>(std::forward<M>(matcher), delay, std::forward<Callback>(callback)), false);
     }
 
-    void start() noexcept {
-        DataSinkRegistry::instance().registerSink(this);
-        _registered = true;
-    }
+    void start() noexcept { DataSinkRegistry::instance().registerSink(this); }
 
     void stop() noexcept {
         DataSinkRegistry::instance().unregisterSink(this);
-        _registered = false;
         std::lock_guard lg(_listener_mutex);
         for (auto& listener : _listeners) {
             listener->stop();
@@ -999,12 +982,21 @@ class DataSetSink : public Block<DataSetSink<T>> {
     std::mutex                                    _listener_mutex;
 
 public:
-    PortIn<DataSet<T>>       in;
-    std::vector<std::string> signal_names;
-    std::vector<std::string> signal_units;
-    GR_MAKE_REFLECTABLE(DataSetSink, in, signal_names, signal_units);
+    PortIn<DataSet<T>>                              in;
+    Annotated<std::string, "DataSet name", Visible> signal_name = "unknown DataSet";
+
+    GR_MAKE_REFLECTABLE(DataSetSink, in, signal_name);
+
+    bool _registered = false; // status should be updated by DataSinkRegistry
 
     using Block<DataSetSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
+
+    void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
+        const auto oldSignalName = detail::getProperty<std::string>(oldSettings, "signal_name");
+        if (oldSignalName != signal_name && _registered) {
+            DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), signal_name);
+        }
+    }
 
     template<DataSetMatcher<T> M>
     std::shared_ptr<DataSetPoller<T>> getPoller(M&& matcher, BlockingMode blockMode = BlockingMode::Blocking) {
@@ -1043,22 +1035,6 @@ public:
     }
 
     [[nodiscard]] work::Status processBulk(std::span<const DataSet<T>>& inData) noexcept {
-        bool        settingsChanged = false;
-        const auto& ds              = inData.back();
-        if (ds.signal_names != signal_names) {
-            DataSinkRegistry::instance().updateSignalNames(this, signal_names, ds.signal_names);
-            signal_names    = ds.signal_names;
-            settingsChanged = true;
-        }
-        if (ds.signal_units != signal_units) {
-            signal_units    = ds.signal_units;
-            settingsChanged = true;
-        }
-
-        if (settingsChanged) {
-            this->notifyListeners(block::property::kSetting, {{"signal_names", signal_names}, {"signal_units", signal_units}});
-        }
-
         std::lock_guard lg(_listener_mutex);
         for (auto& listener : _listeners) {
             listener->process(inData);
