@@ -1914,7 +1914,7 @@ constexpr std::string_view shortTypeName() {
 } // namespace detail
 
 template<typename TBlock, typename TDecayedBlock>
-inline void checkBlockContracts() {
+void checkBlockContracts() {
     // N.B. some checks could be evaluated during compile time but the expressed intent is to do this during runtime to allow
     // for more verbose feedback on method signatures etc.
     if constexpr (refl::reflectable<TDecayedBlock>) {
@@ -1927,7 +1927,7 @@ inline void checkBlockContracts() {
                     constexpr bool isAnnotated = !std::is_same_v<RawType, Type>;
                     // N.B. this function is compile-time ready but static_assert does not allow for configurable error
                     // messages
-                    if constexpr (!gr::settings::isSupportedType<Type>() && !traits::port::AnyPort<Type>) {
+                    if constexpr (!gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) {
                         throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
                             gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>()));
                     }
@@ -2077,8 +2077,8 @@ struct BlockParameters : meta::typelist<Types...> {
     static constexpr /*meta::constexpr_string*/ auto toString() { return detail::encodeListOfTypes<Types...>(); }
 };
 
-template<typename TBlock>
-inline int registerBlock(auto& registerInstance) {
+template<typename TBlock, fixed_string Name = "">
+int registerBlock(auto& registerInstance) {
     using namespace vir::literals;
     constexpr auto name     = refl::class_name<TBlock>;
     constexpr auto longname = refl::type_name<TBlock>;
@@ -2092,7 +2092,7 @@ inline int registerBlock(auto& registerInstance) {
 }
 
 template<typename TBlock0, typename TBlock1, typename... More>
-inline int registerBlock(auto& registerInstance) {
+int registerBlock(auto& registerInstance) {
     registerBlock<TBlock0>(registerInstance);
     return registerBlock<TBlock1, More...>(registerInstance);
 }

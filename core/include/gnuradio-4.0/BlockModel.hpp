@@ -128,10 +128,23 @@ public:
     using DynamicPorts            = std::vector<DynamicPortOrCollection>;
 
 protected:
-    bool                  _dynamicPortsLoaded = false;
-    std::function<void()> _dynamicPortsLoader;
-    DynamicPorts          _dynamicInputPorts;
-    DynamicPorts          _dynamicOutputPorts;
+    struct DynamicPortsLoader {
+        using LoaderFn = void (*)(BlockModel*);
+
+        LoaderFn    fn       = nullptr;
+        BlockModel* instance = nullptr;
+
+        void operator()() const {
+            if (instance) {
+                fn(instance);
+            }
+        }
+    };
+
+    bool               _dynamicPortsLoaded = false;
+    DynamicPortsLoader _dynamicPortsLoader;
+    DynamicPorts       _dynamicInputPorts;
+    DynamicPorts       _dynamicOutputPorts;
 
     BlockModel() = default;
 
@@ -468,11 +481,17 @@ protected:
         _dynamicPortsLoaded = true;
     }
 
+    static void blockWrapperDynamicPortsLoader(BlockModel* base) {
+        auto* wrapper = static_cast<BlockWrapper*>(base);
+        wrapper->dynamicPortsLoader();
+    }
+
 public:
     BlockWrapper() : BlockWrapper(gr::property_map()) {}
     explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
         initMessagePorts();
-        _dynamicPortsLoader = [this] { this->dynamicPortsLoader(); };
+        _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
+        _dynamicPortsLoader.instance = this;
     }
 
     BlockWrapper(const BlockWrapper& other)            = delete;
