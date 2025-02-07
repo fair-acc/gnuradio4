@@ -39,7 +39,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
         if constexpr (std::is_arithmetic_v<T>) {
             in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
             const T Ts     = T(1.0f) / T(sample_rate);
-            _historyBufferX.push_back(_historyBufferX[1] + static_cast<T>(Ts));
+            _historyBufferX.push_back(_historyBufferX.back() + static_cast<T>(Ts));
         }
         _historyBufferY.push_back(input);
 
