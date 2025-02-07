@@ -111,6 +111,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
             // sleep until next update period -- the following call blocks
             std::this_thread::sleep_until(_nextTimePoint);
         }
+        const auto now = ClockSourceType::now();
 
         const gr::Size_t remainingSamples = (n_samples_max > 0UZ) ? n_samples_max - n_samples_produced : std::numeric_limits<gr::Size_t>::max();
         gr::Size_t       samplesToProduce = std::min({remainingSamples, chunk_size.value, static_cast<gr::Size_t>(outSpan.size())});
@@ -154,10 +155,12 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
                 [[maybe_unused]] bool triggerContextNegated;
                 gr::basic::trigger::detail::parse(value, triggerName, triggerNameNegated, triggerContext, triggerContextNegated);
                 property_map triggerTag;
-                triggerTag[tag::TRIGGER_NAME.shortKey()]   = triggerName;
-                triggerTag[tag::TRIGGER_TIME.shortKey()]   = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(_beginSequenceTimePoint.time_since_epoch()).count());
-                triggerTag[tag::TRIGGER_OFFSET.shortKey()] = 0.f;
-                // triggerTag[tag::TRIGGER_META_INFO.shortKey()] = property_map{ { tag::CONTEXT.shortKey(), triggerContext } }; // TODO: change to this
+                uint64_t     triggerTime = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
+                triggerTime += static_cast<std::uint64_t>(samplesToNextTimeTag * 1e9f / sample_rate);
+                triggerTag[tag::TRIGGER_NAME.shortKey()]      = triggerName;
+                triggerTag[tag::TRIGGER_TIME.shortKey()]      = triggerTime;
+                triggerTag[tag::TRIGGER_OFFSET.shortKey()]    = 0.f;
+                triggerTag[tag::CONTEXT.shortKey()]           = triggerContext;
                 triggerTag[tag::TRIGGER_META_INFO.shortKey()] = property_map{{tag::CONTEXT.shortKey(), value}};
                 if (verbose_console) {
                     fmt::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times.value[_nextTimeTag]);
@@ -253,7 +256,7 @@ template<typename T>
 using DefaultClockSource = ClockSource<T, true, std::chrono::system_clock, true>;
 } // namespace gr::basic
 
-auto registerClockSource = gr::registerBlock<gr::basic::DefaultClockSource, std::uint8_t>(gr::globalBlockRegistry());
+inline auto registerClockSource = gr::registerBlock<gr::basic::DefaultClockSource, std::uint8_t>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::ClockSource<std::uint8_t>>);
 
 #endif // GNURADIO_CLOCK_SOURCE_HPP
