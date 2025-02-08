@@ -275,7 +275,7 @@ const boost::ut::suite DataSinkTests = [] {
         gr::Graph testGraph;
         auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test source"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
         auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}});
+        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test source"}});
         src._tags       = srcTags;
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
@@ -373,7 +373,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         gr::Graph  testGraph;
         const auto tags = makeTestTags(0, 1000);
-        auto&      src  = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test source"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
+        auto&      src  = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
         src._tags       = tags;
         auto& delay     = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink      = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
@@ -527,7 +527,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto tags = std::vector<Tag>{{39000000, {{"TYPE", "TRIGGER"}}}};
         src._tags       = tags;
         auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>();
+        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -587,7 +587,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"sample_rate", 10000.f}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", 0.f}, {"signal_max", static_cast<float>(kSamples - 1)}});
         src._tags     = {{3000, {{"TYPE", "TRIGGER"}}}, {8000, {{"TYPE", "NO_TRIGGER"}}}, {180000, {{"TYPE", "TRIGGER"}}}};
         auto& delay   = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}});
+        auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -657,7 +657,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto&            src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", n_samples}, {"mark_tag", false}});
         src._tags            = tags;
         auto& delay          = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", 2500u}});
-        auto& sink           = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}});
+        auto& sink           = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -714,7 +714,7 @@ const boost::ut::suite DataSinkTests = [] {
                             expect(eq(dataset.signal_names.size(), 1u));
                             expect(eq(dataset.signal_units.size(), 1u));
                             expect(eq(dataset.timing_events.size(), 1u));
-                            expect(eq(dataset.signal_names[0], "unknown signal"s));
+                            expect(eq(dataset.signal_names[0], "test signal"s));
                             expect(eq(dataset.signal_units[0], "a.u."s));
                             ranges.push_back(dataset.signal_values.front());
                             ranges.push_back(dataset.signal_values.back());
@@ -749,7 +749,7 @@ const boost::ut::suite DataSinkTests = [] {
         }
 
         auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}});
+        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -807,7 +807,7 @@ const boost::ut::suite DataSinkTests = [] {
         }
 
         auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}});
+        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -844,7 +844,7 @@ const boost::ut::suite DataSinkTests = [] {
         gr::Graph testGraph;
         auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
         auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}});
+        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -885,7 +885,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
         auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
-        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}});
+        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(delay)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));
@@ -934,7 +934,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
         auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
-        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}});
+        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(delay)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));

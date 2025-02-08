@@ -133,15 +133,15 @@ public:
     }
 
     template<DataSinkOrDataSetSinkLike TSink>
-    void registerSink(TSink* sink) {
+    void registerSink(TSink* sink, std::source_location location = std::source_location::current()) {
         std::lock_guard lg{_mutex};
 
-        if (sink->signal_name == "") {
-            throw gr::exception("Failed to register sink. Sink signal_name is an empty string.");
+        if (sink->_registered || sink->signal_name.value.empty()) {
+            return;
         }
 
         if (_sink_by_signal_name.contains(sink->signal_name)) {
-            throw gr::exception(fmt::format("Failed to register sink. Sink with the name `{}` is already registered.", sink->signal_name));
+            throw gr::exception(fmt::format("Failed to register sink `{}`. Sink with the signal_name `{}` is already registered.", sink->name, sink->signal_name), location);
         }
 
         _sinks.push_back(sink);
@@ -161,15 +161,19 @@ public:
     }
 
     template<DataSinkOrDataSetSinkLike TSink>
-    void updateSignalName(TSink* sink, std::string_view oldName, std::string_view newName) {
+    void updateSignalName(TSink* sink, std::string_view oldName, std::string_view newName, std::source_location location = std::source_location::current()) {
         std::lock_guard lg{_mutex};
 
-        if (oldName == "" || newName == "") {
-            throw gr::exception("Failed to update the sink name. Either the old name or the new name is an empty string.");
+        if (oldName.empty()) {
+            throw gr::exception(fmt::format("Failed to update signal_name of sink `{}`. The old signal_name is an empty string.", sink->name), location);
+        }
+
+        if (newName.empty()) {
+            throw gr::exception(fmt::format("Failed to update signal_name of sink `{}`. The new signal_name is an empty string.", sink->name), location);
         }
 
         if (_sink_by_signal_name.contains(std::string{newName})) {
-            throw gr::exception(fmt::format("Failed to update sink name. Sink with the name `{}` is already registered.", newName));
+            throw gr::exception(fmt::format("Failed to update signal_name of sink `{}`. Sink with signal_name `{}` is already registered.", sink->name, newName), location);
         }
 
         _sink_by_signal_name.erase(std::string(oldName));
@@ -324,19 +328,6 @@ private:
 
 namespace detail {
 
-template<typename U>
-[[nodiscard]] constexpr inline std::optional<U> getProperty(const property_map& m, std::string_view key) {
-    const auto it = m.find(std::string(key));
-    if (it == m.end()) {
-        return std::nullopt;
-    }
-    try {
-        return std::get<U>(it->second);
-    } catch (const std::bad_variant_access&) {
-        return std::nullopt;
-    }
-};
-
 struct Metadata {
     float       sampleRate;
     std::string signalName;
@@ -461,7 +452,7 @@ public:
     PortIn<T, RequiredSamples<std::dynamic_extent, detail::data_sink_buffer_size>> in;
 
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
+    Annotated<std::string, "signal name", Visible>                                   signal_name = ""; // DataSink cannot be registered with an empty string; it must be set either by the user or via a tag.
     Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
     Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -1.0f;
     Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +1.0f;
@@ -473,9 +464,13 @@ public:
     using Block<DataSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
     void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
-        const auto oldSignalName = detail::getProperty<std::string>(oldSettings, "signal_name");
-        if (oldSignalName != signal_name && _registered) {
-            DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), signal_name);
+        if (oldSettings.contains("signal_name")) {
+            const std::string oldSignalName = std::get<std::string>(oldSettings.at("signal_name"));
+            if (oldSignalName.empty()) {
+                DataSinkRegistry::instance().registerSink(this);
+            } else if (oldSignalName != signal_name && _registered) {
+                DataSinkRegistry::instance().updateSignalName(this, oldSignalName, signal_name);
+            }
         }
         std::lock_guard lg{_listener_mutex};
         for (auto& listener : _listeners) {
@@ -545,8 +540,6 @@ public:
         std::lock_guard lg(_listener_mutex);
         addListener(std::make_unique<SnapshotListener<Callback, M>>(std::forward<M>(matcher), delay, std::forward<Callback>(callback)), false);
     }
-
-    void start() noexcept { DataSinkRegistry::instance().registerSink(this); }
 
     void stop() noexcept {
         DataSinkRegistry::instance().unregisterSink(this);
@@ -983,7 +976,7 @@ class DataSetSink : public Block<DataSetSink<T>> {
 
 public:
     PortIn<DataSet<T>>                              in;
-    Annotated<std::string, "DataSet name", Visible> signal_name = "unknown DataSet";
+    Annotated<std::string, "DataSet name", Visible> signal_name = ""; // DataSetSink cannot be registered with an empty string; it must be set either by the user or via a tag.
 
     GR_MAKE_REFLECTABLE(DataSetSink, in, signal_name);
 
@@ -992,9 +985,13 @@ public:
     using Block<DataSetSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
     void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
-        const auto oldSignalName = detail::getProperty<std::string>(oldSettings, "signal_name");
-        if (oldSignalName != signal_name && _registered) {
-            DataSinkRegistry::instance().updateSignalName(this, oldSignalName.value_or(""), signal_name);
+        if (oldSettings.contains("signal_name")) {
+            const std::string oldSignalName = std::get<std::string>(oldSettings.at("signal_name"));
+            if (oldSignalName.empty()) {
+                DataSinkRegistry::instance().registerSink(this);
+            } else if (oldSignalName != signal_name && _registered) {
+                DataSinkRegistry::instance().updateSignalName(this, oldSignalName, signal_name);
+            }
         }
     }
 
@@ -1022,8 +1019,6 @@ public:
     void registerCallback(Callback&& callback) {
         registerCallback([](const auto&) { return true; }, std::forward<Callback>(callback));
     }
-
-    void start() noexcept { DataSinkRegistry::instance().registerSink(this); }
 
     void stop() noexcept {
         DataSinkRegistry::instance().unregisterSink(this);
