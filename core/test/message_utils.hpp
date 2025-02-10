@@ -100,10 +100,10 @@ inline bool waitForReply(gr::MsgPortIn& fromGraph, std::size_t nReplies = 1UZ, s
     return fromGraph.streamReader().available() >= nReplies;
 };
 
-inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, std::string params, property_map properties, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
+inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, property_map properties, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << fmt::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
     sendMessage<Set>(toGraph, serviceName, graph::property::kEmplaceBlock /* endpoint */, //
-        {{"type", std::move(type)}, {"parameters", std::move(params)}, {"properties", std::move(properties)}} /* data */);
+        {{"type", std::move(type)}, {"properties", std::move(properties)}} /* data */);
 
     expect(waitForReply(fromGraph)) << fmt::format("Reply message not received. Requested at: {}\n", sourceLocation);
 

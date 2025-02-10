@@ -276,7 +276,7 @@ static_assert(std::is_constructible_v<SoapySimpleSource<std::complex<float>>, gr
 
 } // namespace gr::blocks::soapy
 
-const inline auto registerSoapy = gr::registerBlock<gr::blocks::soapy::SoapySimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry()) //
-                                  | gr::registerBlock<gr::blocks::soapy::SoapyDualSimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry());
+const inline auto registerSoapy = gr::registerBlock<"gr::blocks::soapy::SoapySimpleSource", gr::blocks::soapy::SoapySimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry()) //
+                                  | gr::registerBlock<"gr::blocks::soapy::SoapyDualSimpleSource", gr::blocks::soapy::SoapyDualSimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry());
 
 #endif // SOAPY_HPP

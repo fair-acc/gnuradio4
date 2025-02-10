@@ -2109,16 +2109,21 @@ int registerBlock(auto& registerInstance) {
  *    set these to the values of NTTPs you want to register
  *  - TBlockParameters -- types that the block can be instantiated with
  */
-template<template<typename...> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
+template<fixed_string Alias, template<typename...> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
 inline int registerBlock(auto& registerInstance) {
     using List0     = std::conditional_t<meta::is_instantiation_of<TBlockParameter0, BlockParameters>, TBlockParameter0, BlockParameters<TBlockParameter0>>;
     using ThisBlock = typename List0::template apply<TBlock>;
-    registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, List0::toString());
+    registerInstance.template addBlockType<ThisBlock>(Alias, List0::toString());
     if constexpr (sizeof...(TBlockParameters) != 0) {
-        return registerBlock<TBlock, TBlockParameters...>(registerInstance);
+        return registerBlock<Alias, TBlock, TBlockParameters...>(registerInstance);
     } else {
         return {};
     }
+}
+
+template<template<typename...> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
+inline int registerBlock(auto& registerInstance) {
+    return registerBlock<"", TBlock, TBlockParameter0, TBlockParameters...>(registerInstance);
 }
 
 /**
@@ -2157,8 +2162,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            refl::type_name<Type> + meta::constexpr_string<",">() + refl::nttp_name<Value0>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2170,8 +2174,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            Type::toString() + meta::constexpr_string<",">() + refl::nttp_name<Value0>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2182,8 +2185,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            refl::type_name<Type> + meta::constexpr_string<",">() + refl::nttp_name<Value0> + meta::constexpr_string<",">() + refl::nttp_name<Value1>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -2195,8 +2197,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            Type::toString() + meta::constexpr_string<",">() + refl::nttp_name<Value0> + meta::constexpr_string<",">() + refl::nttp_name<Value1>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};

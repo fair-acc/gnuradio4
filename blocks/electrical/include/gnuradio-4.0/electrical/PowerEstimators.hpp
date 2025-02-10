@@ -239,11 +239,11 @@ using ThreePhaseSystemUnbalanceCalculator = SystemUnbalance<T, 3>;
 
 } // namespace gr::electrical
 
-inline static auto registerPowerMetrics = gr::registerBlock<gr::electrical::ThreePhasePowerMetrics, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())              //
-                                          + gr::registerBlock<gr::electrical::SinglePhasePowerMetrics, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())           //
-                                          + gr::registerBlock<gr::electrical::SinglePhasePowerFactorCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())  //
-                                          + gr::registerBlock<gr::electrical::ThreePhasePowerFactorCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())   //
-                                          + gr::registerBlock<gr::electrical::TwoPhaseSystemUnbalanceCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry()) //
-                                          + gr::registerBlock<gr::electrical::ThreePhaseSystemUnbalanceCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry());
+inline static auto registerPowerMetrics = gr::registerBlock<"gr::electrical::ThreePhasePowerMetrics", gr::electrical::ThreePhasePowerMetrics, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())                         //
+                                          + gr::registerBlock<"gr::electrical::SinglePhasePowerMetrics", gr::electrical::SinglePhasePowerMetrics, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())                     //
+                                          + gr::registerBlock<"gr::electrical::SinglePhasePowerFactorCalculator", gr::electrical::SinglePhasePowerFactorCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())   //
+                                          + gr::registerBlock<"gr::electrical::ThreePhasePowerFactorCalculator", gr::electrical::ThreePhasePowerFactorCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())     //
+                                          + gr::registerBlock<"gr::electrical::TwoPhaseSystemUnbalanceCalculator", gr::electrical::TwoPhaseSystemUnbalanceCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry()) //
+                                          + gr::registerBlock<"gr::electrical::ThreePhaseSystemUnbalanceCalculator", gr::electrical::ThreePhaseSystemUnbalanceCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry());
 
 #endif // POWERESTIMATORS_HPP

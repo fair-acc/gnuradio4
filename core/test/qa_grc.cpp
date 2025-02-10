@@ -26,8 +26,8 @@ struct ArraySource : public gr::Block<ArraySource<T>> {
     }
 };
 
-template<typename T>
-struct ArraySink : public gr::Block<ArraySink<T>> {
+template<typename T, bool SomeFlag, int SomeInt>
+struct ArraySinkImpl : public gr::Block<ArraySinkImpl<T, SomeFlag, SomeInt>> {
     std::array<gr::PortIn<T>, 2>                                                    inA;
     std::array<gr::PortIn<T>, 2>                                                    inB;
     gr::Annotated<bool, "bool setting">                                             bool_setting{false};
@@ -39,13 +39,17 @@ struct ArraySink : public gr::Block<ArraySink<T>> {
     gr::Annotated<std::vector<int16_t>, "int16_t vector setting">                   int16_vector;
     gr::Annotated<std::vector<std::complex<double>>, "std::complex vector setting"> complex_vector;
 
-    GR_MAKE_REFLECTABLE(ArraySink, inA, inB, bool_setting, string_setting, complex_setting, bool_vector, string_vector, double_vector, int16_vector, complex_vector);
+    GR_MAKE_REFLECTABLE(ArraySinkImpl, inA, inB, bool_setting, string_setting, complex_setting, bool_vector, string_vector, double_vector, int16_vector, complex_vector);
 
     template<gr::InputSpanLike TInputSpan1, gr::InputSpanLike TInputSpan2, gr::InputSpanLike TInputSpan3, gr::InputSpanLike TInputSpan4>
     gr::work::Status processBulk(TInputSpan1&, TInputSpan2&, TInputSpan3&, TInputSpan4&) {
         return gr::work::Status::OK;
     }
 };
+
+// Extra template arguments to test using-declaration plus alias
+template<typename T>
+using ArraySink = ArraySinkImpl<T, true, 42>;
 
 struct TestContext {
     explicit TestContext(std::vector<std::filesystem::path> paths) : loader(registry, std::move(paths)) {}
@@ -110,7 +114,7 @@ auto getContext() {
         auto context = std::make_shared<TestContext>(std::vector<std::filesystem::path>{TESTS_BINARY_PATH "/plugins"});
         gr::registerBlock<builtin_counter, double>(context->loader.registry());
         gr::registerBlock<ArraySource, double>(context->loader.registry());
-        gr::registerBlock<ArraySink, double>(context->loader.registry());
+        gr::registerBlock<"ArraySink", ArraySink, double>(context->loader.registry());
         return context;
     }();
     return ctx;
@@ -124,23 +128,23 @@ namespace gr::qa_grc_test {
 
 constexpr std::string_view testGrc = R"(
 blocks:
-  - name: ArraySink<double>
-    id: ArraySink
+  - name: ArraySink<float64>
+    id: ArraySink<float64>
     parameters:
-      name: ArraySink<double>
-  - name: ArraySource<double>
-    id: ArraySource
+      name: ArraySink<float64>
+  - name: ArraySource<float64>
+    id: ArraySource<float64>
     parameters:
-      name: ArraySource<double>
-  - name: ArraySource<double>
-    id: ArraySource
+      name: ArraySource<float64>
+  - name: ArraySource<float64>
+    id: ArraySource<float64>
     parameters:
-      name: ArraySource<double>
+      name: ArraySource<float64>
 connections:
-  - [ArraySource<double>, [0, 0], ArraySink<double>, [1, 1]]
-  - [ArraySource<double>, [0, 1], ArraySink<double>, [1, 0]]
-  - [ArraySource<double>, [1, 0], ArraySink<double>, [0, 0]]
-  - [ArraySource<double>, [1, 1], ArraySink<double>, [0, 1]]
+  - [ArraySource<float64>, [0, 0], ArraySink<float64>, [1, 1]]
+  - [ArraySource<float64>, [0, 1], ArraySink<float64>, [1, 0]]
+  - [ArraySource<float64>, [1, 0], ArraySink<float64>, [0, 0]]
+  - [ArraySource<float64>, [1, 1], ArraySink<float64>, [0, 1]]
 )";
 
 template<pmtv::yaml::TypeTagMode tagMode = pmtv::yaml::TypeTagMode::Auto>
@@ -160,7 +164,7 @@ const boost::ut::suite GrcTests = [] {
             const auto context       = getContext();
             const auto graphSrc      = ymlDecodeEncode(testGrc);
             auto       graph         = gr::loadGrc(context->loader, graphSrc);
-            auto       graphSavedSrc = gr::saveGrc(graph);
+            auto       graphSavedSrc = gr::saveGrc(context->loader, graph);
             expect(checkAndPrintMissingLines(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
             fmt::println(std::cerr, "Unexpected exception: {}", e);
@@ -176,16 +180,16 @@ const boost::ut::suite GrcTests = [] {
             constexpr std::string_view pluginsTestGrc = R"(
 blocks:
   - name: main_source
-    id: good::fixed_source
+    id: good::fixed_source<float64>
     parameters:
       event_count: 100
       unknown_property: 42
   - name: multiplier
-    id: good::multiply
+    id: good::multiply<float64>
   - name: counter
-    id: builtin_counter
+    id: builtin_counter<float64>
   - name: sink
-    id: good::cout_sink
+    id: good::cout_sink<float64>
     parameters:
       total_count: 100
       unknown_property: 42
@@ -206,7 +210,7 @@ connections:
 
             expect(eq(graph.blocks().size(), 4UZ));
 
-            auto graphSavedSrc = gr::saveGrc(graph);
+            auto graphSavedSrc = gr::saveGrc(context->loader, graph);
 
             // expect(checkAndPrintMissingLines(graphSrc2, graphSavedSrc)); // TODO: change imprecise unit-test check
 
@@ -225,16 +229,16 @@ connections:
             constexpr std::string_view pluginsTestGrc = R"(
 blocks:
   - name: main_source
-    id: good::fixed_source
+    id: good::fixed_source<float64>
     parameters:
       event_count: 100
       unknown_property: 42
   - name: multiplier
-    id: good::multiply
+    id: good::multiply<float64>
   - name: counter
-    id: builtin_counter
+    id: builtin_counter<float64>
   - name: sink
-    id: good::cout_sink
+    id: good::cout_sink<float64>
     parameters:
       total_count: 100
       unknown_property: 42
@@ -243,9 +247,9 @@ blocks:
     graph:
       blocks:
         - name: multiplier1
-          id: good::multiply
+          id: good::multiply<float64>
         - name: multiplier2
-          id: good::multiply
+          id: good::multiply<float64>
       connections:
         - [multiplier1, 0, multiplier2, 0]
       exported_ports:
@@ -265,7 +269,7 @@ connections:
 
             expect(eq(graph.blocks().size(), 5UZ));
 
-            auto graphSavedSrc = gr::saveGrc(graph);
+            auto graphSavedSrc = gr::saveGrc(context->loader, graph);
 
             // expect(checkAndPrintMissingLines(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
@@ -283,7 +287,7 @@ connections:
         try {
             const auto context       = getContext();
             auto       graph1        = gr::loadGrc(context->loader, testGrc);
-            auto       graphSavedSrc = gr::saveGrc(graph1);
+            auto       graphSavedSrc = gr::saveGrc(context->loader, graph1);
             auto       graph2        = gr::loadGrc(context->loader, graphSavedSrc);
             expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
             expect(eq(collectEdges(graph1), collectEdges(graph2)));
@@ -310,7 +314,7 @@ connections:
 
             expect(graph1.reconnectAllEdges());
 
-            const auto graph1Saved = gr::saveGrc(graph1);
+            const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
             expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
@@ -339,7 +343,7 @@ connections:
             std::ignore = graph1.emplaceBlock<ArraySink<double>>({{"bool_setting", bool(expectedBool)}, {"string_setting", expectedString}, {"complex_setting", expectedComplex}, //
                 {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});
 
-            const auto graph1Saved = gr::saveGrc(graph1);
+            const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
             graph2.forEachBlock([&](const auto& node) {
                 const auto settings = node.settings().get();
@@ -375,7 +379,7 @@ connections:
             expect(block.settings().set({{"name", "ArraySink2"}}, SettingsCtx{now, "2"}).empty());
             expect(block.settings().set({{"name", "ArraySink3"}}, SettingsCtx{now, 3}).empty()); // int as context name
 
-            const auto graph1Saved = gr::saveGrc(graph1);
+            const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
             graph2.forEachBlock([&](const auto& node) {
