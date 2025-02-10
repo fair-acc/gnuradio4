@@ -904,14 +904,14 @@ const boost::ut::suite TransactionTests = [] {
         constexpr std::string_view grc = R"(
 blocks:
   - name: source
-    id: gr::setting_test::Source
+    id: gr::setting_test::Source<float64>
     parameters:
       n_samples_max: !!uint32 100
       sample_rate: !!float32 123456
   - name: test_block
-    id: gr::testing::SettingsChangeRecorder
+    id: gr::testing::SettingsChangeRecorder<float64>
   - name: sink
-    id: gr::setting_test::Sink
+    id: gr::setting_test::Sink<float64>
 connections:
   - [source, 0, test_block, 0]
   - [test_block, 0, sink, 0]

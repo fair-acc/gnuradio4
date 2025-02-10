@@ -361,7 +361,7 @@ using StreamFilter = StreamFilterImpl<T, true>;
 
 static_assert(gr::HasProcessBulkFunction<gr::basic::StreamFilterImpl<float>>);
 
-inline static auto registerStreamFilters = gr::registerBlock<gr::basic::StreamToDataSet, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry()) //
-                                           | gr::registerBlock<gr::basic::StreamFilter, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());
+inline static auto registerStreamFilters = gr::registerBlock<"gr::basic::StreamToDataSet", gr::basic::StreamToDataSet, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry()) //
+                                           | gr::registerBlock<"gr::basic::StreamFilter", gr::basic::StreamFilter, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_STREAMTODATASET_HPP

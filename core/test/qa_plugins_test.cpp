@@ -45,15 +45,6 @@ TestContext& context() {
     return instance;
 }
 
-namespace names {
-constexpr auto fixed_source     = "good::fixed_source"sv;
-constexpr auto cout_sink        = "good::cout_sink"sv;
-constexpr auto multiply         = "good::multiply"sv;
-constexpr auto divide           = "good::divide"sv;
-constexpr auto convert          = "good::convert"sv;
-constexpr auto builtin_multiply = "builtin_multiply"sv;
-} // namespace names
-
 const boost::ut::suite PluginLoaderTests = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -74,7 +65,7 @@ const boost::ut::suite PluginLoaderTests = [] {
 
     "KnownBlocksList"_test = [] {
         auto       known = context().loader.knownBlocks();
-        std::array requireds{names::cout_sink, names::fixed_source, names::divide, names::multiply};
+        std::array requireds{"good::cout_sink<float64>", "good::cout_sink<float32>", "good::fixed_source<float64>", "good::fixed_source<float32>", "good::divide<float64>", "good::divide<float32>", "builtin_multiply<float64>", "builtin_multiply<float32>"};
 
         for (const auto& required : requireds) {
             expect(std::ranges::find(known, required) != known.end());
@@ -86,28 +77,21 @@ const boost::ut::suite BlockInstantiationTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
-    "KnownBlocksParameterizations"_test = [] {
-        const auto blockParams1 = context().loader.knownBlockParameterizations(names::fixed_source);
-        expect(std::ranges::find(blockParams1, "double") != blockParams1.end());
-        const auto blockParams2 = context().loader.knownBlockParameterizations(names::convert);
-        expect(std::ranges::find(blockParams2, "double,float") != blockParams2.end());
-    };
-
     "KnownBlocksInstantiate"_test = [] {
-        expect(context().loader.instantiate(names::fixed_source, "double") != nullptr);
-        expect(context().loader.instantiate(names::cout_sink, "double") != nullptr);
-        expect(context().loader.instantiate(names::multiply, "double") != nullptr);
-        expect(context().loader.instantiate(names::divide, "double") != nullptr);
-        expect(context().loader.instantiate(names::convert, "double,float") != nullptr);
+        expect(context().loader.instantiate("good::fixed_source<float64>") != nullptr);
+        expect(context().loader.instantiate("good::cout_sink<float64>") != nullptr);
+        expect(context().loader.instantiate("good::multiply<float64>") != nullptr);
+        expect(context().loader.instantiate("good::divide<float64>") != nullptr);
+        expect(context().loader.instantiate("good::convert<float64, float32>") != nullptr);
 
-        expect(context().loader.instantiate(names::fixed_source, "something") == nullptr);
-        expect(context().loader.instantiate(names::cout_sink, "something") == nullptr);
-        expect(context().loader.instantiate(names::multiply, "something") == nullptr);
-        expect(context().loader.instantiate(names::divide, "something") == nullptr);
-        expect(context().loader.instantiate(names::convert, "float,float") == nullptr);
+        expect(context().loader.instantiate("good::fixed_source<something>") == nullptr);
+        expect(context().loader.instantiate("good::cout_sink<something>") == nullptr);
+        expect(context().loader.instantiate("good::multiply<something>") == nullptr);
+        expect(context().loader.instantiate("good::divide<something>") == nullptr);
+        expect(context().loader.instantiate("good::convert<float32, float32>") == nullptr);
     };
 
-    "UnknownBlocks"_test = [] { expect(context().loader.instantiate("ThisBlockDoesNotExist", "double") == nullptr); };
+    "UnknownBlocks"_test = [] { expect(context().loader.instantiate("ThisBlockDoesNotExist<float64>") == nullptr); };
 };
 
 const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
@@ -115,23 +99,23 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
     using namespace gr;
 
     "FixedSourceToSink"_test = [] {
-        auto block_source = context().loader.instantiate(names::fixed_source, "double");
-        auto block_sink   = context().loader.instantiate(names::cout_sink, "double");
+        auto block_source = context().loader.instantiate("good::fixed_source<float64>");
+        auto block_sink   = context().loader.instantiate("good::cout_sink<float64>");
         auto connection_1 = block_source->dynamicOutputPort(0).connect(block_sink->dynamicInputPort(0));
         expect(connection_1 == gr::ConnectionResult::SUCCESS);
     };
 
     "LongerPipeline"_test = [] {
-        auto block_source = context().loader.instantiate(names::fixed_source, "double");
+        auto block_source = context().loader.instantiate("good::fixed_source<float64>");
 
         gr::property_map block_multiply_params;
         block_multiply_params["factor"] = 2.0;
-        auto block_multiply             = context().loader.instantiate(names::multiply, "double", block_multiply_params);
+        auto block_multiply             = context().loader.instantiate("good::multiply<float64>", block_multiply_params);
 
         std::size_t      repeats = 10;
         gr::property_map block_sink_params;
         block_sink_params["total_count"] = gr::Size_t(100);
-        auto block_sink                  = context().loader.instantiate(names::cout_sink, "double");
+        auto block_sink                  = context().loader.instantiate("good::cout_sink<float64>");
 
         auto connection_1 = block_source->dynamicOutputPort(0).connect(block_multiply->dynamicInputPort(0));
         auto connection_2 = block_multiply->dynamicOutputPort(0).connect(block_sink->dynamicInputPort(0));
@@ -150,7 +134,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         gr::Graph testGraph;
 
         // Instantiate the node that is defined in a plugin
-        auto& block_source = testGraph.emplaceBlock(names::fixed_source, "double", {}, context().loader);
+        auto& block_source = testGraph.emplaceBlock("good::fixed_source<float64>", {}, context().loader);
 
         // Instantiate a built-in node in a static way
         gr::property_map block_multiply_1_params;
@@ -158,16 +142,16 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto& block_multiply_double       = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
 
         // Instantiate a built-in node via the plugin loader
-        auto& block_multiply_float = testGraph.emplaceBlock(names::builtin_multiply, "float", {}, context().loader);
+        auto& block_multiply_float = testGraph.emplaceBlock("builtin_multiply<float32>", {}, context().loader);
 
-        auto& block_convert_to_float  = testGraph.emplaceBlock(names::convert, "double,float", {}, context().loader);
-        auto& block_convert_to_double = testGraph.emplaceBlock(names::convert, "float,double", {}, context().loader);
+        auto& block_convert_to_float  = testGraph.emplaceBlock("good::convert<float64, float32>", {}, context().loader);
+        auto& block_convert_to_double = testGraph.emplaceBlock("good::convert<float32, float64>", {}, context().loader);
 
         //
         std::size_t      repeats = 10;
         gr::property_map block_sink_params;
         block_sink_params["total_count"] = gr::Size_t(100);
-        auto  block_sink_load            = context().loader.instantiate(names::cout_sink, "double", block_sink_params);
+        auto  block_sink_load            = context().loader.instantiate("good::cout_sink<float64>", block_sink_params);
         auto& block_sink                 = testGraph.addBlock(std::move(block_sink_load));
 
         auto connection_1 = testGraph.connect(block_source, 0, block_multiply_double, 0);

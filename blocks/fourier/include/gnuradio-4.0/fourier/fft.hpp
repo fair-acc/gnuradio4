@@ -215,6 +215,6 @@ using DefaultFFT = FFT<T, typename OutputDataSet<T>::type, gr::algorithm::FFT>;
 
 } // namespace gr::blocks::fft
 
-auto registerFFT = gr::registerBlock<gr::blocks::fft::DefaultFFT, float, double>(gr::globalBlockRegistry());
+auto registerFFT = gr::registerBlock<"gr::blocks::fft::DefaultFFT", gr::blocks::fft::DefaultFFT, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_FFT_HPP

@@ -182,22 +182,9 @@ public:
         return result;
     }
 
-    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
-        if (_registry->isBlockKnown(block)) {
-            return _registry->knownBlockParameterizations(block);
-        }
-
-        gr_plugin_base* handler = handlerForName(block);
-        if (handler) {
-            return handler->knownBlockParameterizations(block);
-        } else {
-            return {};
-        }
-    }
-
-    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) {
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
         // Try to create a node from the global registry
-        if (auto result = _registry->createBlock(name, type, params)) {
+        if (auto result = _registry->createBlock(name, params)) {
             return result;
         }
 
@@ -206,7 +193,7 @@ public:
             return {};
         }
 
-        return handler->createBlock(name, type, params);
+        return handler->createBlock(name, params);
     }
 
     bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block) || handlerForName(block) != nullptr; }
@@ -223,20 +210,9 @@ public:
 
     BlockRegistry& registry() { return *_registry; }
 
-    auto knownBlocks() const {
-        std::vector<std::string_view> knownBlocks = _registry->knownBlocks();
-        return std::vector<std::string>(knownBlocks.begin(), knownBlocks.end());
-    }
+    auto knownBlocks() const { return _registry->knownBlocks(); }
 
-    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
-        if (_registry->isBlockKnown(block)) {
-            return _registry->knownBlockParameterizations(block);
-        }
-
-        return {};
-    }
-
-    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) { return _registry->createBlock(name, type, params); }
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->createBlock(name, params); }
 
     bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block); }
 };

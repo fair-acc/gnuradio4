@@ -657,11 +657,11 @@ key#Comment: foo
         constexpr std::string_view src = R"(
 blocks:
   - name: ArraySink<double>
-    id: ArraySink
+    id: ArraySink<double>
     parameters:
       name: ArraySink<double>
   - name: ArraySource<double>
-    id: ArraySource
+    id: ArraySource<double>
     parameters:
       name: ArraySource<double>
 connections:
@@ -674,11 +674,11 @@ connections:
         pmtv::map_t expected;
         pmtv::map_t block1;
         block1["name"]       = "ArraySink<double>";
-        block1["id"]         = "ArraySink";
+        block1["id"]         = "ArraySink<double>";
         block1["parameters"] = pmtv::map_t{{"name", "ArraySink<double>"}};
         pmtv::map_t block2;
         block2["name"]       = "ArraySource<double>";
-        block2["id"]         = "ArraySource";
+        block2["id"]         = "ArraySource<double>";
         block2["parameters"] = pmtv::map_t{{"name", "ArraySource<double>"}};
         expected["blocks"]   = std::vector<pmtv::pmt>{block1, block2};
         const auto zero      = pmtv::pmt{static_cast<int64_t>(0)};

@@ -392,8 +392,8 @@ public:
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
-        if (auto block_load = loader.instantiate(type, parameters, std::move(initialSettings)); block_load) {
+    [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
+        if (auto block_load = loader.instantiate(type, std::move(initialSettings)); block_load) {
             setTopologyChanged();
             auto& newBlock = addBlock(std::move(block_load), false); // false == do not emit message
 
@@ -401,7 +401,7 @@ public:
 
             return newBlock;
         }
-        throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+        throw gr::exception(fmt::format("Can not create block {}", type));
     }
 
     static property_map serializeEdge(const auto& edge) {
@@ -502,7 +502,6 @@ public:
         using namespace std::string_literals;
         const auto&         data       = message.data.value();
         const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
         const property_map& properties = [&] {
             if (auto it = data.find("properties"s); it != data.end()) {
                 return std::get<property_map>(it->second);
@@ -511,7 +510,7 @@ public:
             }
         }();
 
-        emplaceBlock(type, parameters, properties);
+        emplaceBlock(type, properties);
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
@@ -561,7 +560,6 @@ public:
         const auto&         data       = message.data.value();
         const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
         const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
         const property_map& properties = [&] {
             if (auto it = data.find("properties"s); it != data.end()) {
                 return std::get<property_map>(it->second);
@@ -575,10 +573,10 @@ public:
             throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
-        auto newBlock    = gr::globalPluginLoader().instantiate(type, parameters, properties);
+        auto newBlock    = gr::globalPluginLoader().instantiate(type, properties);
         auto newBlockRaw = newBlock.get();
         if (!newBlock) {
-            throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+            throw gr::exception(fmt::format("Can not create block {}", type));
         }
 
         addBlock(std::move(newBlock), false); // false == do not emit message
@@ -696,15 +694,8 @@ public:
 
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kRegistryBlockTypes);
-        PluginLoader&                   loader      = gr::globalPluginLoader();
-        const std::vector<std::string>& knownBlocks = loader.knownBlocks();
-
-        property_map result{};
-        for (const auto& blockType : knownBlocks) {
-            std::vector<std::string_view> knownBlockParams = loader.knownBlockParameterizations(blockType);
-            result[blockType]                              = property_map{{"parametrizations", std::vector<std::string>(knownBlockParams.begin(), knownBlockParams.end())}};
-        }
-        message.data = property_map{{"types", std::move(result)}};
+        PluginLoader& loader = gr::globalPluginLoader();
+        message.data         = property_map{{"types", loader.knownBlocks()}};
         return message;
     }
 
