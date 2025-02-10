@@ -69,6 +69,10 @@ add_ut_test(qa_PerformanceMonitor)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PmtTypeHelpers)
 
+if(ENABLE_BLOCK_REGISTRY)
+  add_ut_test(qa_BlockRegistry)
+endif()
+
 if(ENABLE_BLOCK_REGISTRY AND ENABLE_BLOCK_PLUGINS)
   add_app_test(qa_grc)
   add_ut_test(qa_GraphMessages)
