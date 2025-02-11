@@ -16,7 +16,23 @@
 
 namespace gr::basic {
 
-enum class BlockingMode { NonBlocking, Blocking };
+enum class OverflowPolicy : std::uint8_t {
+    Backpressure = 0U, /// creates backpressure on the upstream flow-graph, guaranteeing reliable delivery at the expense of potential stalling.
+    Drop               /// drop arriving samples to avoid blocking upstream flow-graph, potentially losing some data (e.g. UI use-case).
+};
+
+struct PollerConfig {
+    OverflowPolicy overflowPolicy     = OverflowPolicy::Backpressure;
+    std::size_t    minRequiredSamples = 1UZ;                                     // Minimum number of samples required before `process` call. Higher values optimize throughput by reducing frequent small `process` calls.
+    std::size_t    maxRequiredSamples = std::numeric_limits<std::size_t>::max(); // Maximum number of samples that can be processed in a single `process` call. Lower values optimize latency by allowing faster processing of small batches.
+
+    std::size_t preSamples  = 100; // Only used in trigger mode. Number of samples to keep before a trigger.
+    std::size_t postSamples = 100; // Only used in trigger mode. Number of samples to keep after a trigger.
+
+    std::size_t maximumWindowSize = 1000; // Only used in multiplexed mode.
+
+    std::chrono::nanoseconds delay = std::chrono::milliseconds{10}; // Only used in snapshot mode. Defines the time interval for snapshot.
+};
 
 template<typename T>
 class DataSink;
@@ -44,66 +60,91 @@ static_assert(DataSinkOrDataSetSinkLike<DataSetSink<float>>);
 
 namespace detail {
 constexpr std::size_t data_sink_buffer_size          = 65536;
+constexpr std::size_t data_sink_tag_buffer_size      = 1024;
 constexpr std::size_t data_sink_data_set_buffer_size = 1024;
+
+inline std::size_t calculateNSamplesToProcess(std::size_t available, std::size_t requested, std::size_t minRequired, std::size_t maxRequired) {
+    const std::size_t clampRequested = std::clamp(requested, minRequired, maxRequired);
+    return std::min(available, clampRequested);
+}
+
 } // namespace detail
 
 template<typename T>
 struct StreamingPoller {
     // TODO consider whether reusing port<T> here makes sense
-    gr::CircularBuffer<T>             buffer       = gr::CircularBuffer<T>(detail::data_sink_buffer_size);
-    decltype(buffer.new_reader())     reader       = buffer.new_reader();
-    decltype(buffer.new_writer())     writer       = buffer.new_writer();
-    gr::CircularBuffer<Tag>           tag_buffer   = gr::CircularBuffer<Tag>(1024);
-    decltype(tag_buffer.new_reader()) tag_reader   = tag_buffer.new_reader();
-    decltype(tag_buffer.new_writer()) tag_writer   = tag_buffer.new_writer();
-    std::size_t                       samples_read = 0; // reader thread
-    std::atomic<bool>                 finished     = false;
-    std::atomic<std::size_t>          drop_count   = 0;
+    gr::CircularBuffer<T>            buffer      = gr::CircularBuffer<T>(detail::data_sink_buffer_size);
+    decltype(buffer.new_reader())    reader      = buffer.new_reader();
+    decltype(buffer.new_writer())    writer      = buffer.new_writer();
+    gr::CircularBuffer<Tag>          tagBuffer   = gr::CircularBuffer<Tag>(detail::data_sink_tag_buffer_size);
+    decltype(tagBuffer.new_reader()) tagReader   = tagBuffer.new_reader();
+    decltype(tagBuffer.new_writer()) tagWriter   = tagBuffer.new_writer();
+    std::size_t                      samplesRead = 0; // reader thread
+    std::atomic<bool>                finished    = false;
+    std::atomic<std::size_t>         dropCount   = 0;
+    std::size_t                      minRequiredSamples; // the number of samples to process must be in a range [minRequiredSamples, maxRequiredSamples]
+    std::size_t                      maxRequiredSamples;
+
+    StreamingPoller(std::size_t minRequiredSamples_, std::size_t maxRequiredSamples_) : minRequiredSamples(minRequiredSamples_), maxRequiredSamples(maxRequiredSamples_) {
+        if (minRequiredSamples > maxRequiredSamples) {
+            throw gr::exception(fmt::format("Failed to create StreamingPoller: minRequiredSamples ({}) > maxRequiredSamples ({})", minRequiredSamples, maxRequiredSamples));
+        }
+    }
 
     template<typename Handler>
     [[nodiscard]] bool process(Handler fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
-        const auto nProcess = std::min(reader.available(), requested);
-        if (nProcess == 0) {
+        const std::size_t nProcess = detail::calculateNSamplesToProcess(reader.available(), requested, minRequiredSamples, maxRequiredSamples);
+        if (nProcess < minRequiredSamples) {
             return false;
         }
 
-        auto readData = reader.get(nProcess);
+        ReaderSpanLike auto readData = reader.get(nProcess);
         if constexpr (requires { fnc(std::span<const T>(), std::span<const Tag>()); }) {
-            auto       tags             = tag_reader.get();
-            const auto it               = std::ranges::find_if_not(tags, [until = samples_read + nProcess](const auto& tag) { return tag.index < until; });
-            auto       relevantTagsView = std::span(tags.begin(), it) | std::views::transform([this](const auto& v) { return Tag{v.index - samples_read, v.map}; });
-            auto       relevantTags     = std::vector(relevantTagsView.begin(), relevantTagsView.end());
+            ReaderSpanLike auto tags             = tagReader.get();
+            const auto          it               = std::ranges::find_if_not(tags, [until = samplesRead + nProcess](const auto& tag) { return tag.index < until; });
+            auto                relevantTagsView = std::span(tags.begin(), it) | std::views::transform([this](const auto& v) { return Tag{v.index - samplesRead, v.map}; });
+            auto                relevantTags     = std::vector(relevantTagsView.begin(), relevantTagsView.end());
 
             fnc(readData, relevantTags);
             std::ignore = tags.consume(relevantTags.size());
         } else {
-            auto tags   = tag_reader.get();
-            std::ignore = tags.consume(tags.size());
+            ReaderSpanLike auto tags = tagReader.get();
+            std::ignore              = tags.consume(tags.size());
             fnc(readData);
         }
 
         std::ignore = readData.consume(nProcess);
-        samples_read += nProcess;
+        samplesRead += nProcess;
         return true;
     }
 };
 
 template<typename T>
 struct DataSetPoller {
-    gr::CircularBuffer<DataSet<T>> buffer = gr::CircularBuffer<DataSet<T>>(detail::data_sink_data_set_buffer_size);
-    decltype(buffer.new_reader())  reader = buffer.new_reader();
-    decltype(buffer.new_writer())  writer = buffer.new_writer();
+    gr::CircularBuffer<DataSet<T>> buffer    = gr::CircularBuffer<DataSet<T>>(detail::data_sink_data_set_buffer_size);
+    decltype(buffer.new_reader())  reader    = buffer.new_reader();
+    decltype(buffer.new_writer())  writer    = buffer.new_writer();
+    std::atomic<bool>              finished  = false;
+    std::atomic<std::size_t>       dropCount = 0;
+    std::size_t                    minRequiredSamples; // the number of samples (DataSets) to process must be in a range [minRequiredSamples, maxRequiredSamples]
+    std::size_t                    maxRequiredSamples;
 
-    std::atomic<bool>        finished   = false;
-    std::atomic<std::size_t> drop_count = 0;
+    DataSetPoller(std::size_t minRequiredSamples_, std::size_t maxRequiredSamples_) : minRequiredSamples(minRequiredSamples_), maxRequiredSamples(maxRequiredSamples_) {
+        if (minRequiredSamples > maxRequiredSamples) {
+            throw gr::exception(fmt::format("Failed to create DataSetPoller: minRequiredSamples ({}) > maxRequiredSamples ({})", minRequiredSamples, maxRequiredSamples));
+        }
+    }
 
     [[nodiscard]] bool process(std::invocable<std::span<DataSet<T>>> auto fnc, std::size_t requested = std::numeric_limits<std::size_t>::max()) {
-        const auto nProcess = std::min(reader.available(), requested);
-        if (nProcess == 0) {
+        const std::size_t nProcess = detail::calculateNSamplesToProcess(reader.available(), requested, minRequiredSamples, maxRequiredSamples);
+        if (nProcess < minRequiredSamples) {
+            return false;
+        }
+        if (nProcess < minRequiredSamples) {
             return false;
         }
 
-        auto readData = reader.get(nProcess);
+        ReaderSpanLike auto readData = reader.get(nProcess);
         fnc(readData);
         std::ignore = readData.consume(nProcess);
         return true;
@@ -181,45 +222,45 @@ public:
     }
 
     template<typename T>
-    std::shared_ptr<StreamingPoller<T>> getStreamingPoller(const DataSinkQuery& query, BlockingMode block = BlockingMode::Blocking) {
+    std::shared_ptr<StreamingPoller<T>> getStreamingPoller(const DataSinkQuery& query, PollerConfig config = {}) {
         std::lock_guard lg{_mutex};
         auto            sink = find<DataSink<T>>(query);
-        return sink ? sink->getStreamingPoller(block) : nullptr;
+        return sink ? sink->getStreamingPoller(config) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getTriggerPoller(const DataSinkQuery& query, M&& matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode block = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller<T>> getTriggerPoller(const DataSinkQuery& query, M&& matcher, PollerConfig config = {}) {
         std::lock_guard lg{_mutex};
         auto            sink = find<DataSink<T>>(query);
-        return sink ? sink->getTriggerPoller(std::forward<M>(matcher), preSamples, postSamples, block) : nullptr;
+        return sink ? sink->getTriggerPoller(std::forward<M>(matcher), config) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getMultiplexedPoller(const DataSinkQuery& query, M&& matcher, std::size_t maximumWindowSize, BlockingMode block = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller<T>> getMultiplexedPoller(const DataSinkQuery& query, M&& matcher, PollerConfig config = {}) {
         std::lock_guard lg{_mutex};
         auto            sink = find<DataSink<T>>(query);
-        return sink ? sink->getMultiplexedPoller(std::forward<M>(matcher), maximumWindowSize, block) : nullptr;
+        return sink ? sink->getMultiplexedPoller(std::forward<M>(matcher), config) : nullptr;
     }
 
     template<typename T, trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getSnapshotPoller(const DataSinkQuery& query, M&& matcher, std::chrono::nanoseconds delay, BlockingMode block = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller<T>> getSnapshotPoller(const DataSinkQuery& query, M&& matcher, PollerConfig config = {}) {
         std::lock_guard lg{_mutex};
         auto            sink = find<DataSink<T>>(query);
-        return sink ? sink->getSnapshotPoller(std::forward<M>(matcher), delay, block) : nullptr;
+        return sink ? sink->getSnapshotPoller(std::forward<M>(matcher), config) : nullptr;
     }
 
     template<typename T, DataSetMatcher<T> M>
-    std::shared_ptr<DataSetPoller<T>> getDataSetPoller(const DataSinkQuery& query, M&& matcher, BlockingMode block = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller<T>> getDataSetPoller(const DataSinkQuery& query, M&& matcher, PollerConfig config = {}) {
         std::lock_guard lg{_mutex};
         auto            sink = find<DataSetSink<T>>(query);
-        return sink ? sink->getPoller(std::forward<M>(matcher), block) : nullptr;
+        return sink ? sink->getPoller(std::forward<M>(matcher), config) : nullptr;
     }
 
     template<typename T>
-    std::shared_ptr<DataSetPoller<T>> getDataSetPoller(const DataSinkQuery& query, BlockingMode block = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller<T>> getDataSetPoller(const DataSinkQuery& query, PollerConfig config = {}) {
         std::lock_guard lg{_mutex};
         auto            sink = find<DataSetSink<T>>(query);
-        return sink ? sink->getPoller(block) : nullptr;
+        return sink ? sink->getPoller(config) : nullptr;
     }
 
     template<typename T, StreamCallback<T> Callback>
@@ -478,41 +519,41 @@ public:
         }
     }
 
-    std::shared_ptr<StreamingPoller<T>> getStreamingPoller(BlockingMode blockMode = BlockingMode::Blocking) {
-        const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<StreamingPoller<T>>();
+    std::shared_ptr<StreamingPoller<T>> getStreamingPoller(PollerConfig config) {
+        const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
+        auto            handler          = std::make_shared<StreamingPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
         std::lock_guard lg(_listener_mutex);
         handler->finished = _listeners_finished;
-        addListener(std::make_unique<ContinuousListener<gr::meta::null_type>>(handler, block, *this), block);
+        addListener(std::make_unique<ContinuousListener<gr::meta::null_type>>(handler, withBackpressure, *this), withBackpressure);
         return handler;
     }
 
     template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getTriggerPoller(M&& matcher, std::size_t preSamples, std::size_t postSamples, BlockingMode blockMode = BlockingMode::Blocking) {
-        const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<DataSetPoller<T>>();
+    std::shared_ptr<DataSetPoller<T>> getTriggerPoller(M&& matcher, PollerConfig config = {}) {
+        const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
         std::lock_guard lg(_listener_mutex);
         handler->finished = _listeners_finished;
-        addListener(std::make_unique<TriggerListener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, preSamples, postSamples, block), block);
-        ensureHistorySize(preSamples);
+        addListener(std::make_unique<TriggerListener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, config.preSamples, config.postSamples, withBackpressure), withBackpressure);
+        ensureHistorySize(config.preSamples);
         return handler;
     }
 
     template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getMultiplexedPoller(M&& matcher, std::size_t maximumWindowSize, BlockingMode blockMode = BlockingMode::Blocking) {
+    std::shared_ptr<DataSetPoller<T>> getMultiplexedPoller(M&& matcher, PollerConfig config = {}) {
         std::lock_guard lg(_listener_mutex);
-        const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<DataSetPoller<T>>();
-        addListener(std::make_unique<MultiplexedListener<gr::meta::null_type, M>>(std::forward<M>(matcher), maximumWindowSize, handler, block), block);
+        const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
+        addListener(std::make_unique<MultiplexedListener<gr::meta::null_type, M>>(std::forward<M>(matcher), config.maximumWindowSize, handler, withBackpressure), withBackpressure);
         return handler;
     }
 
     template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getSnapshotPoller(M&& matcher, std::chrono::nanoseconds delay, BlockingMode blockMode = BlockingMode::Blocking) {
-        const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<DataSetPoller<T>>();
+    std::shared_ptr<DataSetPoller<T>> getSnapshotPoller(M&& matcher, PollerConfig config = {}) {
+        const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
         std::lock_guard lg(_listener_mutex);
-        addListener(std::make_unique<SnapshotListener<gr::meta::null_type, M>>(std::forward<M>(matcher), delay, handler, block), block);
+        addListener(std::make_unique<SnapshotListener<gr::meta::null_type, M>>(std::forward<M>(matcher), config.delay, handler, withBackpressure), withBackpressure);
         return handler;
     }
 
@@ -590,9 +631,9 @@ private:
         _history = std::move(new_history);
     }
 
-    void addListener(std::unique_ptr<AbstractListener>&& l, bool block) {
+    void addListener(std::unique_ptr<AbstractListener>&& l, bool withBackpressure) {
         l->setMetadata(detail::Metadata{sample_rate, signal_name, signal_unit, signal_min, signal_max});
-        if (block) {
+        if (withBackpressure) {
             _listeners.push_back(std::move(l));
         } else {
             _listeners.push_front(std::move(l));
@@ -638,7 +679,7 @@ private:
                     writeData[0]   = std::move(data);
                     writeData.publish(1);
                 } else {
-                    pollerPtr->drop_count++;
+                    pollerPtr->dropCount++;
                 }
             }
         }
@@ -743,7 +784,7 @@ private:
 
                 if (toWrite > 0) {
                     if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
-                        auto tw = poller->tag_writer.reserve(1);
+                        auto tw = poller->tagWriter.reserve(1);
                         tw[0]   = {samples_written, std::move(*tag)};
                         tw.publish(1);
                     }
@@ -752,7 +793,7 @@ private:
                     std::ranges::copy(data | std::views::take(toWrite), writeData.begin());
                     writeData.publish(writeData.size());
                 }
-                poller->drop_count += data.size() - toWrite;
+                poller->dropCount += data.size() - toWrite;
                 samples_written += toWrite;
             }
         }
@@ -996,17 +1037,17 @@ public:
     }
 
     template<DataSetMatcher<T> M>
-    std::shared_ptr<DataSetPoller<T>> getPoller(M&& matcher, BlockingMode blockMode = BlockingMode::Blocking) {
-        const auto      block   = blockMode == BlockingMode::Blocking;
-        auto            handler = std::make_shared<DataSetPoller<T>>();
+    std::shared_ptr<DataSetPoller<T>> getPoller(M&& matcher, PollerConfig config = {}) {
+        const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
         std::lock_guard lg(_listener_mutex);
         handler->finished = _listeners_finished;
-        addListener(std::make_unique<Listener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, block), block);
+        addListener(std::make_unique<Listener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, withBackpressure), withBackpressure);
         return handler;
     }
 
-    std::shared_ptr<DataSetPoller<T>> getPoller(BlockingMode blockMode = BlockingMode::Blocking) {
-        return getPoller([](const auto&) { return true; }, blockMode);
+    std::shared_ptr<DataSetPoller<T>> getPoller(PollerConfig config = {}) {
+        return getPoller([](const auto&) { return true; }, config);
     }
 
     template<DataSetMatcher<T> M, DataSetCallback<T> Callback>
@@ -1087,7 +1128,7 @@ private:
                     writeData[0]   = std::move(data);
                     writeData.publish(1);
                 } else {
-                    poller->drop_count++;
+                    poller->dropCount++;
                 }
             }
         }
