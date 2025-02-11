@@ -384,7 +384,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto runner1 = std::async([] {
             std::shared_ptr<StreamingPoller<float>> poller;
             expect(spinUntil(4s, [&poller] {
-                poller = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"), BlockingMode::Blocking);
+                poller = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"));
                 return poller != nullptr;
             })) << boost::ut::fatal;
 
@@ -402,7 +402,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto runner2 = std::async([] {
             std::shared_ptr<StreamingPoller<float>> poller;
             expect(spinUntil(4s, [&poller] {
-                poller = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::signalName("test signal"), BlockingMode::Blocking);
+                poller = DataSinkRegistry::instance().getStreamingPoller<float>(DataSinkQuery::signalName("test signal"));
                 return poller != nullptr;
             })) << boost::ut::fatal;
             std::vector<float> received;
@@ -440,7 +440,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto& [metadataTags, nonMetadataTags]           = extractMetadataTags(receivedTags);
         expect(eq(received1.size(), expected.size()));
         expect(eq(received1, expected));
-        expect(eq(pollerDataOnly->drop_count.load(), 0UZ));
+        expect(eq(pollerDataOnly->dropCount.load(), 0UZ));
         expect(eq(received2.size(), expected.size()));
         expect(eq(received2, expected));
         expect(eq(nonMetadataTags.size(), tags.size()));
@@ -452,7 +452,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(metadata.signal_unit.value_or("<unset>"), "test unit"s));
         expect(eq(metadata.signal_min.value_or(-1234567.f), -42.f));
         expect(eq(metadata.signal_max.value_or(-1234567.f), 42.f));
-        expect(eq(pollerWithTags->drop_count.load(), 0UZ));
+        expect(eq(pollerWithTags->dropCount.load(), 0UZ));
     };
 
     "blocking polling trigger mode non-overlapping"_test = [] {
@@ -478,7 +478,7 @@ const boost::ut::suite DataSinkTests = [] {
             std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
                 // lookup by signal name
-                poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 3, 2, BlockingMode::Blocking);
+                poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, {.preSamples = 3, .postSamples = 2});
                 return poller != nullptr;
             })) << boost::ut::fatal;
             std::vector<int32_t>                                 receivedData;
@@ -516,7 +516,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(receivedData, std::vector<int32_t>{2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001}));
         expect(eq(receivedTags.size(), expected_tags.size()));
 
-        expect(eq(poller->drop_count.load(), 0UZ));
+        expect(eq(poller->dropCount.load(), 0UZ));
     };
 
     "propagation of signal metadata per data set"_test = [] {
@@ -543,7 +543,7 @@ const boost::ut::suite DataSinkTests = [] {
             };
             std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
-                poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, 0UZ, 2UZ, BlockingMode::Blocking);
+                poller = DataSinkRegistry::instance().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, {.preSamples = 0UZ, .postSamples = 2UZ});
                 return poller != nullptr;
             })) << boost::ut::fatal;
 
@@ -608,7 +608,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto poller_result = std::async([isTrigger, kDelay] {
             std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
-                poller = DataSinkRegistry::instance().getSnapshotPoller<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, BlockingMode::Blocking);
+                poller = DataSinkRegistry::instance().getSnapshotPoller<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, {.delay = kDelay});
                 return poller != nullptr;
             })) << boost::ut::fatal;
 
@@ -645,7 +645,7 @@ const boost::ut::suite DataSinkTests = [] {
         const auto& [poller, receivedData] = poller_result.get();
         expect(eq(receivedDataCb, receivedData));
         expect(eq(receivedData, std::vector<int32_t>{8000, 185000}));
-        expect(eq(poller->drop_count.load(), 0UZ));
+        expect(eq(poller->dropCount.load(), 0UZ));
     };
 
     "blocking multiplexed mode"_test = [] {
@@ -701,7 +701,7 @@ const boost::ut::suite DataSinkTests = [] {
             auto f = std::async([i, &matchers]() {
                 std::shared_ptr<DataSetPoller<int32_t>> poller;
                 expect(spinUntil(4s, [&] {
-                    poller = DataSinkRegistry::instance().getMultiplexedPoller<int32_t>(DataSinkQuery::sinkName("test_sink"), Matcher(matchers[i]), 100000, BlockingMode::Blocking);
+                    poller = DataSinkRegistry::instance().getMultiplexedPoller<int32_t>(DataSinkQuery::sinkName("test_sink"), Matcher(matchers[i]), {.maximumWindowSize = 100000});
                     return poller != nullptr;
                 })) << boost::ut::fatal;
                 std::vector<int32_t> ranges;
@@ -759,7 +759,7 @@ const boost::ut::suite DataSinkTests = [] {
 
             std::shared_ptr<DataSetPoller<float>> poller;
             expect(spinUntil(4s, [&] {
-                poller = DataSinkRegistry::instance().getTriggerPoller<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, 3000, 2000, BlockingMode::Blocking);
+                poller = DataSinkRegistry::instance().getTriggerPoller<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, {.preSamples = 3000, .postSamples = 2000});
                 return poller != nullptr;
             })) << boost::ut::fatal;
             std::vector<float> receivedData;
@@ -789,7 +789,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto& [poller, receivedData, receivedTags] = polling.get();
         auto expectedStart                               = std::vector<float>{57000, 61999, 57001, 62000, 57002};
-        expect(eq(poller->drop_count.load(), 0u));
+        expect(eq(poller->dropCount.load(), 0u));
         expect(eq(receivedData.size(), 2 * kTriggers) >> fatal);
         expect(eq(std::vector(receivedData.begin(), receivedData.begin() + 5), expectedStart));
         expect(eq(receivedTags.size(), kTriggers));
@@ -877,7 +877,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(sched.runAndWait().has_value());
 
         const auto& [poller, samplesSeen] = polling.get();
-        expect(eq(samplesSeen + poller->drop_count, static_cast<std::size_t>(kSamples)));
+        expect(eq(samplesSeen + poller->dropCount, static_cast<std::size_t>(kSamples)));
     };
 
     "data set poller"_test = [] {
@@ -901,7 +901,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto polling = std::async([] {
             std::shared_ptr<DataSetPoller<float>> poller;
             expect(spinUntil(4s, [&poller] {
-                poller = DataSinkRegistry::instance().getDataSetPoller<float>(DataSinkQuery::sinkName("test_sink"), BlockingMode::Blocking);
+                poller = DataSinkRegistry::instance().getDataSetPoller<float>(DataSinkQuery::sinkName("test_sink"));
                 return poller != nullptr;
             })) << boost::ut::fatal;
             std::vector<DataSet<float>> receivedDataSets;
