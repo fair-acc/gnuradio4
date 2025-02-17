@@ -31,9 +31,8 @@ public:
 
     virtual std::uint8_t abi_version() const = 0;
 
-    virtual std::span<const std::string_view> providedBlocks() const                                                                    = 0;
-    virtual std::unique_ptr<gr::BlockModel>   createBlock(std::string_view name, std::string_view type, const gr::property_map& params) = 0;
-    virtual std::vector<std::string_view>     knownBlockParameterizations(std::string_view block) const                                 = 0;
+    virtual std::span<const std::string>    providedBlocks() const                                             = 0;
+    virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const gr::property_map& params) = 0;
 };
 
 namespace gr {
@@ -47,15 +46,13 @@ public:
 
     std::uint8_t abi_version() const override { return ABI_VERSION; }
 
-    std::span<const std::string_view> providedBlocks() const override { return registry.providedBlocks(); }
+    std::span<const std::string> providedBlocks() const override { return registry.providedBlocks(); }
 
-    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, const property_map& params) override { return registry.createBlock(name, type, params); }
-
-    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const override { return registry.knownBlockParameterizations(block); }
+    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const property_map& params) override { return registry.createBlock(name, params); }
 
     template<typename TBlock>
-    void addBlockType(std::string_view blockType = {}, std::string_view blockParams = {}) {
-        registry.addBlockType<TBlock>(blockType, blockParams);
+    void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
+        registry.addBlockType<TBlock>(alias, aliasParameters);
     }
 };
 

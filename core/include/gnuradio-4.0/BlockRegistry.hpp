@@ -26,44 +26,54 @@ std::unique_ptr<gr::BlockModel> blockFactory(property_map params) {
 } // namespace detail
 
 class BlockRegistry {
-    using TBlockTypeHandler = std::function<std::unique_ptr<gr::BlockModel>(property_map)>;
+    struct TBlockTypeHandler {
+        std::string                                                  alias;
+        std::function<std::unique_ptr<gr::BlockModel>(property_map)> createFunction;
+    };
 
-    std::vector<std::string_view> _blockTypes;
-
-    std::unordered_map<std::string_view, std::unordered_map<std::string_view, TBlockTypeHandler>> _blockTypeHandlers;
-
-    auto& findBlockTypeHandlersMap(std::string_view blockType) {
-        if (auto it = _blockTypeHandlers.find(blockType); it != _blockTypeHandlers.end()) {
-            return it->second;
-        }
-        _blockTypes.emplace_back(blockType);
-        return _blockTypeHandlers[blockType];
-    }
+    std::vector<std::string>                              _blockTypes;
+    std::map<std::string, TBlockTypeHandler, std::less<>> _blockTypeHandlers;
 
 public:
 #ifdef ENABLE_BLOCK_REGISTRY
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
-    void addBlockType(std::string_view blockType, std::string_view blockParams) {
-        auto& block_handlers        = findBlockTypeHandlersMap(blockType);
-        block_handlers[blockParams] = detail::blockFactory<TBlock>;
+    void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
+        const std::string name      = gr::meta::type_name<TBlock>();
+        const std::string fullAlias = [&] {
+            if (alias.empty()) {
+                return std::string{};
+            }
+            if (aliasParameters.empty()) {
+                return meta::detail::makePortableTypeName(alias);
+            }
+            return meta::detail::makePortableTypeName(std::string{alias} + "<" + std::string{aliasParameters} + ">");
+        }();
+        _blockTypes.push_back(name);
+        auto handler             = TBlockTypeHandler{.alias = fullAlias, .createFunction = detail::blockFactory<TBlock>};
+        _blockTypeHandlers[name] = handler;
+        if (!fullAlias.empty()) {
+            _blockTypes.push_back(fullAlias);
+            handler.alias.clear();
+            _blockTypeHandlers[fullAlias] = handler;
+        }
     }
 #else
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
-    void addBlockType(std::string_view, std::string_view) {
+    void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
+        std::ignore = alias;
+        std::ignore = aliasParameters;
         // disables plugin system in favour of faster compile-times and when runtime or Python wrapping APIs are not requrired
         // e.g. for compile-time only flow-graphs or for CI runners
     }
 #endif
 
-    [[nodiscard]] std::span<const std::string_view> providedBlocks() const { return _blockTypes; }
+    [[nodiscard]] std::span<const std::string> providedBlocks() const { return _blockTypes; }
 
-    [[nodiscard]] std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, property_map params) const {
+    [[nodiscard]] std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, property_map params) const {
         if (auto blockIt = _blockTypeHandlers.find(name); blockIt != _blockTypeHandlers.end()) {
-            if (auto handlerIt = blockIt->second.find(type); handlerIt != blockIt->second.end()) {
-                return handlerIt->second(std::move(params));
-            }
+            return blockIt->second.createFunction(std::move(params));
         }
         return nullptr;
     }
@@ -72,17 +82,14 @@ public:
 
     bool isBlockKnown(std::string_view block) const { return _blockTypeHandlers.find(block) != _blockTypeHandlers.end(); }
 
-    auto knownBlockParameterizations(std::string_view block) const {
-        std::vector<std::string_view> result;
-        if (auto it = _blockTypeHandlers.find(block); it != _blockTypeHandlers.end()) {
-            const auto& map = it->second;
-            result.reserve(map.size());
-            for (const auto& [key, _] : map) {
-                result.emplace_back(key);
-            }
+    template<typename TBlock>
+    std::string blockTypeName(const TBlock& block) {
+        auto name = block.typeName();
+        auto it   = _blockTypeHandlers.find(name);
+        if (it != _blockTypeHandlers.end() && !it->second.alias.empty()) {
+            return it->second.alias;
         }
-
-        return result;
+        return std::string(name);
     }
 
     friend inline BlockRegistry& globalBlockRegistry();

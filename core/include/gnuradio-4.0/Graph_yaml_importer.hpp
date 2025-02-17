@@ -23,12 +23,6 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         const auto blockName = std::get<std::string>(grcBlock["name"]);
         const auto blockType = std::get<std::string>(grcBlock["id"]);
 
-        std::string blockParametrization = "double";
-        /// TODO: when using saveGrc template_args is not saved, this has to be implemented
-        if (auto it = grcBlock.find("template_args"); it != grcBlock.end()) {
-            blockParametrization = std::get<std::string>(it->second);
-        }
-
         if (blockType == "SUBGRAPH") {
             auto& subGraph           = resultGraph.addBlock(std::make_unique<GraphWrapper<gr::Graph>>());
             createdBlocks[blockName] = &subGraph;
@@ -55,7 +49,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     /* port name */ std::get<std::string>(exportedPort[2]));
             }
         } else {
-            auto currentBlock = loader.instantiate(blockType, blockParametrization);
+            auto currentBlock = loader.instantiate(blockType);
             if (!currentBlock) {
                 throw fmt::format("Unable to create block of type '{}'", blockType);
             }
@@ -126,7 +120,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
     } // for connections
 }
 
-inline gr::property_map saveGraphToMap(const gr::Graph& rootGraph) {
+inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& rootGraph) {
     pmtv::map_t result;
 
     {
@@ -135,14 +129,14 @@ inline gr::property_map saveGraphToMap(const gr::Graph& rootGraph) {
             pmtv::map_t map;
             map["name"] = std::string(block.name());
 
-            const auto& fullTypeName = block.typeName();
+            const auto& fullTypeName = loader.registry().blockTypeName(block);
             if (fullTypeName == "gr::Graph") {
                 map.emplace("id", "SUBGRAPH");
                 auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(std::addressof(block));
                 if (subGraphDirect == nullptr) {
                     throw gr::Error(fmt::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block.uniqueName(), rootGraph.unique_name));
                 }
-                property_map graphYaml = detail::saveGraphToMap(subGraphDirect->blockRef());
+                property_map graphYaml = detail::saveGraphToMap(loader, subGraphDirect->blockRef());
 
                 std::vector<pmtv::pmt> exportedPortsData;
                 for (const auto& [blockName, portName] : subGraphDirect->exportedInputPortsForBlock()) {
@@ -156,8 +150,7 @@ inline gr::property_map saveGraphToMap(const gr::Graph& rootGraph) {
                 map.emplace("graph", std::move(graphYaml));
 
             } else {
-                std::string typeName(fullTypeName.cbegin(), std::find(fullTypeName.cbegin(), fullTypeName.cend(), '<'));
-                map.emplace("id", std::move(typeName));
+                map.emplace("id", fullTypeName);
 
                 // Helper function to write parameters
                 auto writeParameters = [&](const property_map& settingsMap, const property_map& metaInformation = {}) {
@@ -268,7 +261,7 @@ inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc) {
     return resultGraph;
 }
 
-inline std::string saveGrc(const gr::Graph& rootGraph) { return pmtv::yaml::serialize(detail::saveGraphToMap(rootGraph)); }
+inline std::string saveGrc(PluginLoader& loader, const gr::Graph& rootGraph) { return pmtv::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
 
 } // namespace gr
 

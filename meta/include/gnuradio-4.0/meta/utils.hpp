@@ -391,6 +391,24 @@ consteval auto fixed_string_from_number_impl() {
     }
     return ret;
 }
+
+template<typename T>
+[[nodiscard]] std::string local_type_name() noexcept {
+    std::string type_name = typeid(T).name();
+    int         status;
+    char*       demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
+    if (status == 0) {
+        std::string ret(demangled_name);
+        free(demangled_name);
+        return ret;
+    } else {
+        free(demangled_name);
+        return typeid(T).name();
+    }
+}
+
+std::string makePortableTypeName(std::string_view name);
+
 } // namespace detail
 
 template<std::integral auto N>
@@ -421,17 +439,7 @@ static_assert((fixed_string("out") + fixed_string_from_number<123>) == fixed_str
 
 template<typename T>
 [[nodiscard]] std::string type_name() noexcept {
-    std::string type_name = typeid(T).name();
-    int         status;
-    char*       demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
-    if (status == 0) {
-        std::string ret(demangled_name);
-        free(demangled_name);
-        return ret;
-    } else {
-        free(demangled_name);
-        return typeid(T).name();
-    }
+    return detail::makePortableTypeName(detail::local_type_name<T>());
 }
 
 template<fixed_string val>

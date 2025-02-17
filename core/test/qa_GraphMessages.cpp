@@ -71,7 +71,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
 
         "Add a valid block"_test = [&] {
             sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceBlock /* endpoint */, //
-                {{"type", "gr::testing::Copy"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
+                {{"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
@@ -84,7 +84,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
 
         "Add an invalid block"_test = [&] {
             sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kEmplaceBlock /* endpoint */, //
-                {{"type", "doesnt_exist::multiply"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
+                {{"type", "doesnt_exist::multiply<float32>"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
@@ -103,14 +103,14 @@ const boost::ut::suite NonRunningGraphTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
 
-        testGraph.emplaceBlock("gr::testing::Copy", "float", {});
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
         expect(eq(testGraph.blocks().size(), 1UZ));
         expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
         consumeAllReplyMessages(fromGraph);
         expect(eq(getNReplyMessages(fromGraph), 0UZ)); // all messages are consumed
 
         "Remove a known block"_test = [&] {
-            auto& temporaryBlock = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
+            auto& temporaryBlock = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
             expect(eq(testGraph.blocks().size(), 2UZ));
             expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
             consumeAllReplyMessages(fromGraph);
@@ -148,14 +148,14 @@ const boost::ut::suite NonRunningGraphTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
 
-        auto& block = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
+        auto& block = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
         expect(eq(testGraph.blocks().size(), 1UZ));
         expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
         consumeAllReplyMessages(fromGraph);
         expect(eq(getNReplyMessages(fromGraph), 0UZ)); // all messages are consumed
 
         "Replace a known block"_test = [&] {
-            auto& temporaryBlock = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
+            auto& temporaryBlock = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
             expect(eq(testGraph.blocks().size(), 2UZ));
             expect(eq(getNReplyMessages(fromGraph), 1UZ)); // emplaceBlock emits message
             consumeAllReplyMessages(fromGraph);
@@ -163,7 +163,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
 
             sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kReplaceBlock /* endpoint */, //
                 {{"uniqueName", std::string(temporaryBlock.uniqueName())},                                  //
-                    {"type", "gr::testing::Copy"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
+                    {"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
@@ -176,7 +176,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
         "Replace an unknown block"_test = [&] {
             sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kReplaceBlock /* endpoint */, //
                 {{"uniqueName", "this_block_is_unknown"},                                                   //
-                    {"type", "gr::testing::Copy"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
+                    {"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
@@ -188,7 +188,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
         "Replace with an unknown block"_test = [&] {
             sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kReplaceBlock /* endpoint */, //
                 {{"uniqueName", std::string(block.uniqueName())},                                           //
-                    {"type", "doesnt_exist::multiply"}, {"parameters", "float"}, {"properties", property_map{}}} /* data */);
+                    {"type", "doesnt_exist::multiply<float32>"}, {"properties", property_map{}}} /* data */);
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
@@ -206,9 +206,9 @@ const boost::ut::suite NonRunningGraphTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
 
-        auto& blockOut       = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
-        auto& blockIn        = testGraph.emplaceBlock("gr::testing::Copy", "float", {});
-        auto& blockWrongType = testGraph.emplaceBlock("gr::testing::Copy", "double", {});
+        auto& blockOut       = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto& blockIn        = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto& blockWrongType = testGraph.emplaceBlock("gr::testing::Copy<float64>", {});
 
         expect(eq(getNReplyMessages(fromGraph), 3UZ)); // emplaceBlock emits message
         consumeAllReplyMessages(fromGraph);
@@ -281,33 +281,13 @@ const boost::ut::suite NonRunningGraphTests = [] {
             if (reply.data.has_value()) {
                 const auto& dataMap    = reply.data.value();
                 auto        foundTypes = dataMap.find("types");
-                if (foundTypes != dataMap.end() || !std::holds_alternative<property_map>(foundTypes->second)) {
+                if (foundTypes != dataMap.end() || !std::holds_alternative<std::vector<std::string>>(foundTypes->second)) {
                     PluginLoader& loader             = gr::globalPluginLoader();
-                    const auto    expectedBlockTypes = loader.knownBlocks();
-                    const auto&   blockTypes         = std::get<property_map>(foundTypes->second);
-                    expect(eq(expectedBlockTypes.size(), blockTypes.size()));
-
-                    for (const auto& expectedBlockType : expectedBlockTypes) {
-                        auto foundBlockType = blockTypes.find(expectedBlockType);
-                        if (foundBlockType != blockTypes.end() && std::holds_alternative<property_map>(foundBlockType->second)) {
-                            const property_map& blockMap = std::get<property_map>(foundBlockType->second);
-
-                            if (std::holds_alternative<std::vector<std::string>>(blockMap.at("parametrizations"))) {
-                                const std::vector<std::string>      blockParams         = std::get<std::vector<std::string>>(blockMap.at("parametrizations"));
-                                const std::vector<std::string_view> expectedBlockParams = loader.knownBlockParameterizations(expectedBlockType);
-
-                                if (blockParams.size() == expectedBlockParams.size()) {
-                                    expect(std::ranges::equal(expectedBlockParams, blockParams));
-                                } else {
-                                    expect(false) << std::format("different number of parametrizations for block `{}`: {} vs. {}", foundBlockType->first, blockParams.size(), expectedBlockParams.size());
-                                }
-                            } else {
-                                expect(false) << std::format("block type ({}) parametrizations is not a std::vector<std::string>", foundBlockType->first);
-                            }
-                        } else {
-                            expect(false) << std::format("block type ({}) not found or pmt type is not correct", foundBlockType->first);
-                        }
-                    }
+                    auto          expectedBlockTypes = loader.knownBlocks();
+                    std::ranges::sort(expectedBlockTypes);
+                    auto blockTypes = std::get<std::vector<std::string>>(foundTypes->second);
+                    std::ranges::sort(blockTypes);
+                    expect(eq(expectedBlockTypes, blockTypes));
                 } else {
                     expect(false) << "`types` key not found or data type is not a `property_map`";
                 }
@@ -349,8 +329,8 @@ const boost::ut::suite RunningGraphTests = [] {
     fmt::println("executed basic graph");
 
     // Adding a few blocks
-    auto multiply1 = sendAndWaitMessageEmplaceBlock(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
-    auto multiply2 = sendAndWaitMessageEmplaceBlock(toGraph, fromGraph, "gr::testing::Copy"s, "float"s, property_map{});
+    auto multiply1 = sendAndWaitMessageEmplaceBlock(toGraph, fromGraph, "gr::testing::Copy<float32>"s, property_map{});
+    auto multiply2 = sendAndWaitMessageEmplaceBlock(toGraph, fromGraph, "gr::testing::Copy<float32>"s, property_map{});
     scheduler.processScheduledMessages();
 
     for (const auto& block : scheduler.graph().blocks()) {

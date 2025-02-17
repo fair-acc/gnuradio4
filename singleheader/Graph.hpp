@@ -4139,6 +4139,24 @@ consteval auto fixed_string_from_number_impl() {
     }
     return ret;
 }
+
+template<typename T>
+[[nodiscard]] std::string local_type_name() noexcept {
+    std::string type_name = typeid(T).name();
+    int         status;
+    char*       demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
+    if (status == 0) {
+        std::string ret(demangled_name);
+        free(demangled_name);
+        return ret;
+    } else {
+        free(demangled_name);
+        return typeid(T).name();
+    }
+}
+
+std::string makePortableTypeName(std::string_view name);
+
 } // namespace detail
 
 template<std::integral auto N>
@@ -4169,17 +4187,7 @@ static_assert((fixed_string("out") + fixed_string_from_number<123>) == fixed_str
 
 template<typename T>
 [[nodiscard]] std::string type_name() noexcept {
-    std::string type_name = typeid(T).name();
-    int         status;
-    char*       demangled_name = abi::__cxa_demangle(type_name.c_str(), nullptr, nullptr, &status);
-    if (status == 0) {
-        std::string ret(demangled_name);
-        free(demangled_name);
-        return ret;
-    } else {
-        free(demangled_name);
-        return typeid(T).name();
-    }
+    return detail::makePortableTypeName(detail::local_type_name<T>());
 }
 
 template<fixed_string val>
@@ -20246,16 +20254,21 @@ int registerBlock(auto& registerInstance) {
  *    set these to the values of NTTPs you want to register
  *  - TBlockParameters -- types that the block can be instantiated with
  */
-template<template<typename...> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
+template<fixed_string Alias, template<typename...> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
 inline int registerBlock(auto& registerInstance) {
     using List0     = std::conditional_t<meta::is_instantiation_of<TBlockParameter0, BlockParameters>, TBlockParameter0, BlockParameters<TBlockParameter0>>;
     using ThisBlock = typename List0::template apply<TBlock>;
-    registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, List0::toString());
+    registerInstance.template addBlockType<ThisBlock>(Alias, List0::toString());
     if constexpr (sizeof...(TBlockParameters) != 0) {
-        return registerBlock<TBlock, TBlockParameters...>(registerInstance);
+        return registerBlock<Alias, TBlock, TBlockParameters...>(registerInstance);
     } else {
         return {};
     }
+}
+
+template<template<typename...> typename TBlock, typename TBlockParameter0, typename... TBlockParameters>
+inline int registerBlock(auto& registerInstance) {
+    return registerBlock<"", TBlock, TBlockParameter0, TBlockParameters...>(registerInstance);
 }
 
 /**
@@ -20294,8 +20307,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            refl::type_name<Type> + meta::constexpr_string<",">() + refl::nttp_name<Value0>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -20307,8 +20319,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            Type::toString() + meta::constexpr_string<",">() + refl::nttp_name<Value0>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -20319,8 +20330,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     auto addBlockType = [&]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            refl::type_name<Type> + meta::constexpr_string<",">() + refl::nttp_name<Value0> + meta::constexpr_string<",">() + refl::nttp_name<Value1>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -20332,8 +20342,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;
-        registerInstance.template addBlockType<ThisBlock>(refl::class_name<ThisBlock>, //
-            Type::toString() + meta::constexpr_string<",">() + refl::nttp_name<Value0> + meta::constexpr_string<",">() + refl::nttp_name<Value1>);
+        registerInstance.template addBlockType<ThisBlock>();
     };
     ((addBlockType.template operator()<TBlockParameters>()), ...);
     return {};
@@ -21066,44 +21075,54 @@ std::unique_ptr<gr::BlockModel> blockFactory(property_map params) {
 } // namespace detail
 
 class BlockRegistry {
-    using TBlockTypeHandler = std::function<std::unique_ptr<gr::BlockModel>(property_map)>;
+    struct TBlockTypeHandler {
+        std::string                                                  alias;
+        std::function<std::unique_ptr<gr::BlockModel>(property_map)> createFunction;
+    };
 
-    std::vector<std::string_view> _blockTypes;
-
-    std::unordered_map<std::string_view, std::unordered_map<std::string_view, TBlockTypeHandler>> _blockTypeHandlers;
-
-    auto& findBlockTypeHandlersMap(std::string_view blockType) {
-        if (auto it = _blockTypeHandlers.find(blockType); it != _blockTypeHandlers.end()) {
-            return it->second;
-        }
-        _blockTypes.emplace_back(blockType);
-        return _blockTypeHandlers[blockType];
-    }
+    std::vector<std::string>                              _blockTypes;
+    std::map<std::string, TBlockTypeHandler, std::less<>> _blockTypeHandlers;
 
 public:
 #ifdef ENABLE_BLOCK_REGISTRY
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
-    void addBlockType(std::string_view blockType, std::string_view blockParams) {
-        auto& block_handlers        = findBlockTypeHandlersMap(blockType);
-        block_handlers[blockParams] = detail::blockFactory<TBlock>;
+    void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
+        const std::string name      = gr::meta::type_name<TBlock>();
+        const std::string fullAlias = [&] {
+            if (alias.empty()) {
+                return std::string{};
+            }
+            if (aliasParameters.empty()) {
+                return meta::detail::makePortableTypeName(alias);
+            }
+            return meta::detail::makePortableTypeName(std::string{alias} + "<" + std::string{aliasParameters} + ">");
+        }();
+        _blockTypes.push_back(name);
+        auto handler             = TBlockTypeHandler{.alias = fullAlias, .createFunction = detail::blockFactory<TBlock>};
+        _blockTypeHandlers[name] = handler;
+        if (!fullAlias.empty()) {
+            _blockTypes.push_back(fullAlias);
+            handler.alias.clear();
+            _blockTypeHandlers[fullAlias] = handler;
+        }
     }
 #else
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
-    void addBlockType(std::string_view, std::string_view) {
+    void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
+        std::ignore = alias;
+        std::ignore = aliasParameters;
         // disables plugin system in favour of faster compile-times and when runtime or Python wrapping APIs are not requrired
         // e.g. for compile-time only flow-graphs or for CI runners
     }
 #endif
 
-    [[nodiscard]] std::span<const std::string_view> providedBlocks() const { return _blockTypes; }
+    [[nodiscard]] std::span<const std::string> providedBlocks() const { return _blockTypes; }
 
-    [[nodiscard]] std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, property_map params) const {
+    [[nodiscard]] std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, property_map params) const {
         if (auto blockIt = _blockTypeHandlers.find(name); blockIt != _blockTypeHandlers.end()) {
-            if (auto handlerIt = blockIt->second.find(type); handlerIt != blockIt->second.end()) {
-                return handlerIt->second(std::move(params));
-            }
+            return blockIt->second.createFunction(std::move(params));
         }
         return nullptr;
     }
@@ -21112,17 +21131,14 @@ public:
 
     bool isBlockKnown(std::string_view block) const { return _blockTypeHandlers.find(block) != _blockTypeHandlers.end(); }
 
-    auto knownBlockParameterizations(std::string_view block) const {
-        std::vector<std::string_view> result;
-        if (auto it = _blockTypeHandlers.find(block); it != _blockTypeHandlers.end()) {
-            const auto& map = it->second;
-            result.reserve(map.size());
-            for (const auto& [key, _] : map) {
-                result.emplace_back(key);
-            }
+    template<typename TBlock>
+    std::string blockTypeName(const TBlock& block) {
+        auto name = block.typeName();
+        auto it   = _blockTypeHandlers.find(name);
+        if (it != _blockTypeHandlers.end() && !it->second.alias.empty()) {
+            return it->second.alias;
         }
-
-        return result;
+        return std::string(name);
     }
 
     friend inline BlockRegistry& globalBlockRegistry();
@@ -21176,9 +21192,8 @@ public:
 
     virtual std::uint8_t abi_version() const = 0;
 
-    virtual std::span<const std::string_view> providedBlocks() const                                                                    = 0;
-    virtual std::unique_ptr<gr::BlockModel>   createBlock(std::string_view name, std::string_view type, const gr::property_map& params) = 0;
-    virtual std::vector<std::string_view>     knownBlockParameterizations(std::string_view block) const                                 = 0;
+    virtual std::span<const std::string>    providedBlocks() const                                             = 0;
+    virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const gr::property_map& params) = 0;
 };
 
 namespace gr {
@@ -21192,15 +21207,13 @@ public:
 
     std::uint8_t abi_version() const override { return ABI_VERSION; }
 
-    std::span<const std::string_view> providedBlocks() const override { return registry.providedBlocks(); }
+    std::span<const std::string> providedBlocks() const override { return registry.providedBlocks(); }
 
-    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, std::string_view type, const property_map& params) override { return registry.createBlock(name, type, params); }
-
-    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const override { return registry.knownBlockParameterizations(block); }
+    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const property_map& params) override { return registry.createBlock(name, params); }
 
     template<typename TBlock>
-    void addBlockType(std::string_view blockType = {}, std::string_view blockParams = {}) {
-        registry.addBlockType<TBlock>(blockType, blockParams);
+    void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
+        registry.addBlockType<TBlock>(alias, aliasParameters);
     }
 };
 
@@ -21409,22 +21422,9 @@ public:
         return result;
     }
 
-    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
-        if (_registry->isBlockKnown(block)) {
-            return _registry->knownBlockParameterizations(block);
-        }
-
-        gr_plugin_base* handler = handlerForName(block);
-        if (handler) {
-            return handler->knownBlockParameterizations(block);
-        } else {
-            return {};
-        }
-    }
-
-    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) {
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
         // Try to create a node from the global registry
-        if (auto result = _registry->createBlock(name, type, params)) {
+        if (auto result = _registry->createBlock(name, params)) {
             return result;
         }
 
@@ -21433,7 +21433,7 @@ public:
             return {};
         }
 
-        return handler->createBlock(name, type, params);
+        return handler->createBlock(name, params);
     }
 
     bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block) || handlerForName(block) != nullptr; }
@@ -21450,20 +21450,9 @@ public:
 
     BlockRegistry& registry() { return *_registry; }
 
-    auto knownBlocks() const {
-        std::vector<std::string_view> knownBlocks = _registry->knownBlocks();
-        return std::vector<std::string>(knownBlocks.begin(), knownBlocks.end());
-    }
+    auto knownBlocks() const { return _registry->knownBlocks(); }
 
-    std::vector<std::string_view> knownBlockParameterizations(std::string_view block) const {
-        if (_registry->isBlockKnown(block)) {
-            return _registry->knownBlockParameterizations(block);
-        }
-
-        return {};
-    }
-
-    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, std::string_view type, const property_map& params = {}) { return _registry->createBlock(name, type, params); }
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->createBlock(name, params); }
 
     bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block); }
 };
@@ -21899,8 +21888,8 @@ public:
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] auto& emplaceBlock(std::string_view type, std::string_view parameters, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
-        if (auto block_load = loader.instantiate(type, parameters, std::move(initialSettings)); block_load) {
+    [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
+        if (auto block_load = loader.instantiate(type, std::move(initialSettings)); block_load) {
             setTopologyChanged();
             auto& newBlock = addBlock(std::move(block_load), false); // false == do not emit message
 
@@ -21908,7 +21897,7 @@ public:
 
             return newBlock;
         }
-        throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+        throw gr::exception(fmt::format("Can not create block {}", type));
     }
 
     static property_map serializeEdge(const auto& edge) {
@@ -22009,7 +21998,6 @@ public:
         using namespace std::string_literals;
         const auto&         data       = message.data.value();
         const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
         const property_map& properties = [&] {
             if (auto it = data.find("properties"s); it != data.end()) {
                 return std::get<property_map>(it->second);
@@ -22018,7 +22006,7 @@ public:
             }
         }();
 
-        emplaceBlock(type, parameters, properties);
+        emplaceBlock(type, properties);
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
@@ -22068,7 +22056,6 @@ public:
         const auto&         data       = message.data.value();
         const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
         const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const std::string&  parameters = std::get<std::string>(data.at("parameters"s));
         const property_map& properties = [&] {
             if (auto it = data.find("properties"s); it != data.end()) {
                 return std::get<property_map>(it->second);
@@ -22082,10 +22069,10 @@ public:
             throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
-        auto newBlock    = gr::globalPluginLoader().instantiate(type, parameters, properties);
+        auto newBlock    = gr::globalPluginLoader().instantiate(type, properties);
         auto newBlockRaw = newBlock.get();
         if (!newBlock) {
-            throw gr::exception(fmt::format("Can not create block {}<{}>", type, parameters));
+            throw gr::exception(fmt::format("Can not create block {}", type));
         }
 
         addBlock(std::move(newBlock), false); // false == do not emit message
@@ -22203,15 +22190,8 @@ public:
 
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kRegistryBlockTypes);
-        PluginLoader&                   loader      = gr::globalPluginLoader();
-        const std::vector<std::string>& knownBlocks = loader.knownBlocks();
-
-        property_map result{};
-        for (const auto& blockType : knownBlocks) {
-            std::vector<std::string_view> knownBlockParams = loader.knownBlockParameterizations(blockType);
-            result[blockType]                              = property_map{{"parametrizations", std::vector<std::string>(knownBlockParams.begin(), knownBlockParams.end())}};
-        }
-        message.data = property_map{{"types", std::move(result)}};
+        PluginLoader& loader = gr::globalPluginLoader();
+        message.data         = property_map{{"types", loader.knownBlocks()}};
         return message;
     }
 
