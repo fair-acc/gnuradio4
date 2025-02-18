@@ -560,6 +560,10 @@ struct Port {
     private:
         template<PropertyMapType PropertyMap>
         inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
+            // Do not publish tags if port is not connected, as it can lead to a tag buffer overflow.
+            if (!isConnected) {
+                return;
+            }
             const auto index = streamIndex + tagOffset;
 
             if (tagsPublished > 0) {
