@@ -372,11 +372,12 @@ namespace detail {
 struct Metadata {
     float       sampleRate;
     std::string signalName;
+    std::string signalQuantity;
     std::string signalUnit;
     float       signalMin;
     float       signalMax;
 
-    property_map toTagMap() const { return {{std::string(tag::SIGNAL_RATE.shortKey()), sampleRate}, {std::string(tag::SIGNAL_NAME.shortKey()), signalName}, {std::string(tag::SIGNAL_UNIT.shortKey()), signalUnit}, {std::string(tag::SIGNAL_MIN.shortKey()), signalMin}, {std::string(tag::SIGNAL_MAX.shortKey()), signalMax}}; }
+    property_map toTagMap() const { return {{std::string(tag::SIGNAL_RATE.shortKey()), sampleRate}, {std::string(tag::SIGNAL_NAME.shortKey()), signalName}, {std::string(tag::SIGNAL_QUANTITY.shortKey()), signalQuantity}, {std::string(tag::SIGNAL_UNIT.shortKey()), signalUnit}, {std::string(tag::SIGNAL_MIN.shortKey()), signalMin}, {std::string(tag::SIGNAL_MAX.shortKey()), signalMax}}; }
 };
 
 inline std::optional<property_map> tagAndMetadata(const std::optional<property_map>& tagData, const std::optional<Metadata>& metadata) {
@@ -492,11 +493,12 @@ This block type is mean for non-data set input streams. For input streams of typ
 public:
     PortIn<T, RequiredSamples<std::dynamic_extent, detail::data_sink_buffer_size>> in;
 
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                   signal_name = ""; // DataSink cannot be registered with an empty string; it must be set either by the user or via a tag.
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
-    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -1.0f;
-    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +1.0f;
+    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                                           sample_rate = 1.f;
+    Annotated<std::string, "signal name", Visible>                                                                   signal_name = ""; // DataSink cannot be registered with an empty string; it must be set either by the user or via a tag.
+    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
+    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{"a.u."};
+    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>                                     signal_min = -1.0f;
+    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_max = +1.0f;
 
     GR_MAKE_REFLECTABLE(DataSink, in, sample_rate, signal_name, signal_unit, signal_min, signal_max);
 
@@ -515,7 +517,7 @@ public:
         }
         std::lock_guard lg{_listener_mutex};
         for (auto& listener : _listeners) {
-            listener->setMetadata(detail::Metadata{sample_rate, signal_name, signal_unit, signal_min, signal_max});
+            listener->setMetadata(detail::Metadata{sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max});
         }
     }
 
@@ -632,7 +634,7 @@ private:
     }
 
     void addListener(std::unique_ptr<AbstractListener>&& l, bool withBackpressure) {
-        l->setMetadata(detail::Metadata{sample_rate, signal_name, signal_unit, signal_min, signal_max});
+        l->setMetadata(detail::Metadata{sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max});
         if (withBackpressure) {
             _listeners.push_back(std::move(l));
         } else {
