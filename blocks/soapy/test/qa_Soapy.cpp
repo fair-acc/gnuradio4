@@ -21,7 +21,7 @@ const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
     using namespace gr;
     using namespace gr::blocks::soapy;
 
-    "helper functions"_test = [] { "range printer"_test = [] { expect(eq(fmt::format("{}", Range{1.0, 10.0, 0.5}), std::string("Range{min: 1, max: 10, step: 0.5}"))); }; };
+    "helper functions"_test = [] { "range printer"_test = [] { expect(eq(fmt::format("{}", gr::blocks::soapy::Range{1.0, 10.0, 0.5}), std::string("Range{min: 1, max: 10, step: 0.5}"))); }; };
 
     "ModulesCheck"_test = [] {
         std::vector<std::string> modules = getSoapySDRModules();
@@ -157,8 +157,8 @@ const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
             };
 
             "center RF frequency"_test = [&device] {
-                std::vector<Range> ranges          = device.getOverallFrequencyRange(SOAPY_SDR_RX, 0);
-                double             centerFrequency = device.getCenterFrequency(SOAPY_SDR_RX, 0);
+                std::vector<gr::blocks::soapy::Range> ranges          = device.getOverallFrequencyRange(SOAPY_SDR_RX, 0);
+                double                                centerFrequency = device.getCenterFrequency(SOAPY_SDR_RX, 0);
                 fmt::println("Rx freq ranges: [{}] - active: {} Hz", fmt::join(ranges, ", "), centerFrequency);
 
                 device.setCenterFrequency(SOAPY_SDR_RX, 0, 106e6);

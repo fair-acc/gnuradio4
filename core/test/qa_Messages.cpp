@@ -397,12 +397,12 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains("context"));
-                expect(eq(""s, std::get<std::string>(reply.data.value().at("context"))));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
+                expect(eq(""s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
 
             "create active test_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "test_context"}, {"time", 1UZ}} /* data  */);
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "test_context"}, {gr::tag::CONTEXT_TIME.shortKey(), 1UZ}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -421,7 +421,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "create active new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "new_context"}, {"time", 2UZ}} /* data  */);
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), 2UZ}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -440,7 +440,7 @@ const boost::ut::suite MessagesTests = [] {
             };
 
             "activate new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {{"context", "new_context"}, {"time", 2UZ}} /* data  */);
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), 2UZ}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -453,9 +453,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains("context"));
-                expect(reply.data.value().contains("time"));
-                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at("context"))));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
+                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
+                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
 
             "get active new_context - w/o explicit serviceName"_test = [&] {
@@ -469,9 +469,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains("context"));
-                expect(reply.data.value().contains("time"));
-                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at("context"))));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
+                expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
+                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
 
             "get all contexts - w/o explicit serviceName"_test = [&] {
@@ -509,7 +509,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(allStored.size(), 3UZ));
                 const std::uint64_t internalTimeForWasm = allStored.at("new_context")[0].first.time;
 
-                sendMessage<Disconnect>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{"context", "new_context"}, {"time", internalTimeForWasm}} /* data  */);
+                sendMessage<Disconnect>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), internalTimeForWasm}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -529,8 +529,8 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.clientRequestID, ""s));
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
-                expect(reply.data.value().contains("context"));
-                expect(eq(""s, std::get<std::string>(reply.data.value().at("context"))));
+                expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
+                expect(eq(""s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
         };
     };

@@ -831,8 +831,8 @@ const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
 
     "constructor test"_test = [] {
         // Test the initializer list constructor
-        PortMetaInfo portMetaInfo({{"sample_rate", 48000.f}, //
-            {"signal_name", "TestSignal"}, {"signal_quantity", "voltage"}, {"signal_unit", "V"}, {"signal_min", -1.f}, {"signal_max", 1.f}});
+        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, //
+            {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}, {gr::tag::SIGNAL_QUANTITY.shortKey(), "voltage"}, {gr::tag::SIGNAL_UNIT.shortKey(), "V"}, {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
 
         expect(eq(48000.f, portMetaInfo.sample_rate.value));
         expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
@@ -849,18 +849,18 @@ const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
 
         portMetaInfo.reset();
 
-        expect(portMetaInfo.auto_update.contains("sample_rate"));
-        expect(portMetaInfo.auto_update.contains("signal_name"));
-        expect(portMetaInfo.auto_update.contains("signal_quantity"));
-        expect(portMetaInfo.auto_update.contains("signal_unit"));
-        expect(portMetaInfo.auto_update.contains("signal_min"));
-        expect(portMetaInfo.auto_update.contains("signal_max"));
-        expect(eq(portMetaInfo.auto_update.size(), 6UZ));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_NAME.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_QUANTITY.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_UNIT.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
+        expect(eq(portMetaInfo.auto_update.size(), 16UZ));
     };
 
     "update test"_test = [] {
         PortMetaInfo portMetaInfo;
-        property_map updateProps{{"sample_rate", 96000.f}, {"signal_name", "UpdatedSignal"}};
+        property_map updateProps{{gr::tag::SAMPLE_RATE.shortKey(), 96000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "UpdatedSignal"}};
         portMetaInfo.update(updateProps);
 
         expect(eq(96000.f, portMetaInfo.sample_rate));
@@ -868,11 +868,11 @@ const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
     };
 
     "get test"_test = [] {
-        PortMetaInfo portMetaInfo({{"sample_rate", 48000.f}, {"signal_name", "TestSignal"}});
+        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}});
         const auto   props = portMetaInfo.get();
 
-        expect(eq(48000.f, std::get<float>(props.at("sample_rate"))));
-        expect(eq("TestSignal"s, std::get<std::string>(props.at("signal_name"))));
+        expect(eq(48000.f, std::get<float>(props.at(gr::tag::SAMPLE_RATE.shortKey()))));
+        expect(eq("TestSignal"s, std::get<std::string>(props.at(gr::tag::SIGNAL_NAME.shortKey()))));
     };
 };
 
@@ -947,7 +947,7 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
 
         gr::Graph flow;
         // ClockSource has a BlockingIO attribute
-        auto& source  = flow.emplaceBlock<ClockSource<float>>({{"sample_rate", 10.f}, {"n_samples_max", gr::Size_t(0)}});
+        auto& source  = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 10.f}, {"n_samples_max", gr::Size_t(0)}});
         auto& monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
         auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));

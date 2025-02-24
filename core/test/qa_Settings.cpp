@@ -123,7 +123,7 @@ const boost::ut::suite SettingsTests = [] {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->SettingsChangeRecorder->Sink flow graph
-        auto& src = testGraph.emplaceBlock<Source<float>>({{"sample_rate", 42.f}, {"n_samples_max", n_samples}});
+        auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
         expect(eq(src.settings().defaultParameters().size(), 9UZ)); // 7 base + 2 derived
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getStored().value().size(), 9UZ));
@@ -132,7 +132,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(src._nSamplesProduced, gr::Size_t(0))) << "default value";
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ));
         expect(eq(src.settings().autoUpdateParameters().size(), 3UL));  // 3 base + 0 derived
-        expect(eq(src.settings().autoForwardParameters().size(), 1UL)); // "sample_rate"
+        expect(eq(src.settings().autoForwardParameters().size(), 1UL)); // sample_rate
 
         auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#1"}});
         auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#2"}});
@@ -142,7 +142,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.name, "SettingsChangeRecorder#1"s));
         expect(eq(block1.settings().getNAutoUpdateParameters(), 1UZ));
         expect(eq(block1.settings().autoUpdateParameters().size(), 8UL));  // 2 base + 6 derived
-        expect(eq(block1.settings().autoForwardParameters().size(), 2UL)); // "sample_rate", "context"
+        expect(eq(block1.settings().autoForwardParameters().size(), 2UL)); // sample_rate, context
 
         auto& sink = testGraph.emplaceBlock<Sink<float>>();
         expect(eq(sink.settings().defaultParameters().size(), 9UZ)); // 7 base + 2 derived
@@ -150,7 +150,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(sink.settings().getStored().value().size(), 9UZ));
         expect(eq(sink.settings().getNAutoUpdateParameters(), 1UZ));
         expect(eq(sink.settings().autoUpdateParameters().size(), 5UL));  // 3 base + 2 derived
-        expect(eq(sink.settings().autoForwardParameters().size(), 1UL)); // "sample_rate"
+        expect(eq(sink.settings().autoForwardParameters().size(), 1UL)); // sample_rate
 
         // need to add 'n_samples_max' to forwarding list for the block to automatically forward it as the 'n_samples_max' tag is not part of the canonical 'gr::tag::kDefaultTags' list
         block1.settings().autoForwardParameters().emplace("n_samples_max");
@@ -162,12 +162,12 @@ const boost::ut::suite SettingsTests = [] {
 
         block1.context = "Test Context";
         expect(eq(block1.settings().activeParameters().size(), 13UL)); // 7 base + 6 derived
-        expect(block1.settings().get("context").has_value());
-        expect(block1.settings().get({"context"}).has_value());
+        expect(block1.settings().get(gr::tag::CONTEXT.shortKey()).has_value());
+        expect(block1.settings().get({gr::tag::CONTEXT.shortKey()}).has_value());
         expect(not block1.settings().get({"test"}).has_value());
-        expect(not eq(std::get<std::string>(block1.settings().get("context").value()), "Test Context"s));
+        expect(not eq(std::get<std::string>(block1.settings().get(gr::tag::CONTEXT.shortKey()).value()), "Test Context"s));
         block1.settings().updateActiveParameters();
-        expect(eq(std::get<std::string>(block1.settings().get("context").value()), "Test Context"s));
+        expect(eq(std::get<std::string>(block1.settings().get(gr::tag::CONTEXT.shortKey()).value()), "Test Context"s));
 
         std::vector<std::string>   keys1{"key1", "key2", "key3"};
         std::span<std::string>     keys2{keys1};
@@ -185,15 +185,15 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
 
         expect(not block1.settings().changed());
-        auto ret2 = block1.settings().set({{"context", "alt context"}});
+        auto ret2 = block1.settings().set({{gr::tag::CONTEXT.shortKey(), "alt context"}});
         expect(ret2.empty()) << "setting one known parameter";
         expect(block1.settings().stagedParameters().empty());          // set(...) does not change stagedParameters
         expect(not block1.settings().changed()) << "settings changed"; // set(...) does not change changed()
         std::ignore = block1.settings().activateContext();
-        expect(eq(block1.settings().stagedParameters().size(), 2UZ)); // "context", "name"
+        expect(eq(block1.settings().stagedParameters().size(), 2UZ)); // context, "name"
         expect(block1.settings().changed()) << "settings changed";
         auto applyResult = block1.settings().applyStagedParameters();
-        expect(eq(applyResult.forwardParameters.size(), 1u)) << "initial forward declarations"; // "context"
+        expect(eq(applyResult.forwardParameters.size(), 1u)) << "initial forward declarations"; // context
         block1.settings().updateActiveParameters();
 
         // src -> block1 -> block2 -> sink
@@ -201,15 +201,15 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
-        expect(!src.settings().autoUpdateParameters().contains("sample_rate")) << "manual setting disable auto-update";
+        expect(!src.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "manual setting disable auto-update";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(src.settings().set({{"sample_rate", 49000.0f}}).empty()) << "successful set returns empty map";
+        expect(src.settings().set({{gr::tag::SAMPLE_RATE.shortKey(), 49000.0f}}).empty()) << "successful set returns empty map";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));     // old parameters are removed from stored
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ)); // old parameters are removed from autoUpdate
         expect(eq(src.settings().stagedParameters().size(), 0UZ));
         expect(src.settings().activateContext() != std::nullopt);  // activateContext() fills staged parameters
-        expect(eq(src.settings().stagedParameters().size(), 2UZ)); // "n_samples_max", "sample_rate"
+        expect(eq(src.settings().stagedParameters().size(), 2UZ)); // "n_samples_max", sample_rate
 
         auto                  thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
         gr::scheduler::Simple sched{std::move(testGraph), thread_pool};
@@ -246,14 +246,14 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(sink.sample_rate, 49000.0f)) << "sink matching src sample_rate";
 
         // check auto-update flags
-        expect(!src.settings().autoUpdateParameters().contains("sample_rate")) << "src should not retain auto-update flag (was manually set)";
-        expect(block1.settings().autoUpdateParameters().contains("sample_rate")) << "block1 retained auto-update flag";
+        expect(!src.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "src should not retain auto-update flag (was manually set)";
+        expect(block1.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "block1 retained auto-update flag";
         expect(block1.settings().autoUpdateParameters().contains("n_samples_max")) << "block2 retained auto-update flag";
         expect(block1.settings().autoForwardParameters().contains("n_samples_max")) << "block2 retained auto-forward flag";
-        expect(block2.settings().autoUpdateParameters().contains("sample_rate")) << "block2 retained auto-update flag";
+        expect(block2.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "block2 retained auto-update flag";
         expect(block2.settings().autoUpdateParameters().contains("n_samples_max")) << "block2 retained auto-update flag";
         expect(block2.settings().autoForwardParameters().contains("n_samples_max")) << "block2 retained auto-forward flag";
-        expect(sink.settings().autoUpdateParameters().contains("sample_rate")) << "sink retained auto-update flag";
+        expect(sink.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "sink retained auto-update flag";
         expect(sink.settings().autoUpdateParameters().contains("n_samples_max")) << "sink retained auto-update flag";
     };
 
@@ -264,7 +264,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 0UL));
-            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // "context", "sample_rate"
+            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // context, sample_rate
             block.init(block.progress, block.ioThreadPool);                   // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().getNStoredParameters(), 1UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
@@ -281,7 +281,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 0UL));
-            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // "context", "sample_rate"
+            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // context, sample_rate
             block.init(block.progress, block.ioThreadPool);                   // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().getNStoredParameters(), 1UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
@@ -302,7 +302,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 9UL));  // all isWritable settings (enable reflections)
-            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // "context", "sample_rate"
+            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // context, sample_rate
             expect(eq(block.settings().get().size(), 13UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
@@ -315,7 +315,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 8UL));  // "scaling_factor" removed from auto updates
-            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // "context", "sample_rate"
+            expect(eq(block.settings().autoForwardParameters().size(), 2UL)); // context, sample_rate
             expect(eq(block.settings().get().size(), 13UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
@@ -369,7 +369,7 @@ const boost::ut::suite SettingsTests = [] {
         wrapped1.setName("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped1.uniqueName().empty()) << "unique name";
-        expect(wrapped1.settings().set({{"context", "a string"}}).empty()) << "successful set returns empty map";
+        expect(wrapped1.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped1.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         (wrapped1.metaInformation())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped1.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
@@ -378,11 +378,11 @@ const boost::ut::suite SettingsTests = [] {
         auto wrapped2 = BlockWrapper<SettingsChangeRecorder<float>>({{"name", "test_name"}});
         wrapped2.init(progress, ioThreadPool);
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ));
-        expect(wrapped2.settings().set({{"context", "a string"}}).empty()) << "successful set returns empty map";
+        expect(wrapped2.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         expect(eq(wrapped2.name(), "test_name"sv)) << "BlockModel wrapper name";
         expect(not wrapped2.uniqueName().empty()) << "unique name";
-        expect(wrapped2.settings().set({{"context", "a string"}}).empty()) << "successful set returns empty map";
+        expect(wrapped2.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         (wrapped2.metaInformation())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped2.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
@@ -391,7 +391,7 @@ const boost::ut::suite SettingsTests = [] {
     "basic decimation test"_test = []() {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
-        auto&                src       = testGraph.emplaceBlock<Source<float>>({{"n_samples_max", n_samples}, {"sample_rate", 1000.0f}});
+        auto&                src       = testGraph.emplaceBlock<Source<float>>({{"n_samples_max", n_samples}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.0f}});
         auto&                block1    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate1"}, {"input_chunk_size", gr::Size_t(2)}});
         auto&                block2    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate2"}, {"input_chunk_size", gr::Size_t(5)}});
         auto&                sink      = testGraph.emplaceBlock<Sink<float>>();
@@ -422,7 +422,7 @@ const boost::ut::suite SettingsTests = [] {
         auto& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "TestName"}, {"scaling_factor", 2.f}});
         expect(block.name == "TestName");
         expect(eq(block.scaling_factor, 2.f));
-        expect(eq(block.settings().autoForwardParameters().size(), 2UZ)); // "context" , "sample_rate"
+        expect(eq(block.settings().autoForwardParameters().size(), 2UZ)); // context , sample_rate
         expect(eq(block.settings().getNStoredParameters(), 1UZ));
         expect(block.settings().set({{"name", "TestNameAlt"}, {"scaling_factor", 42.f}}).empty()) << "successful set returns empty map\n";
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
@@ -514,12 +514,12 @@ const boost::ut::suite AnnotationTests = [] {
         Annotated<int, "power of two", Limits<0, 0, [](const int& val) { return (val > 0) && (val & (val - 1)) == 0; }>> needPowerOfTwoAlt = 2;
         expect(needPowerOfTwoAlt.validate_and_set(4));
         expect(not needPowerOfTwoAlt.validate_and_set(5));
-        expect(block.settings().set({{"sample_rate", -1.0f}}).empty()) << "successful set returns empty map";
+        expect(block.settings().set({{gr::tag::SAMPLE_RATE.shortKey(), -1.0f}}).empty()) << "successful set returns empty map";
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
-        expect(eq(std::get<float>(block.settings().getStored("sample_rate").value()), -1.f));
+        expect(eq(std::get<float>(block.settings().getStored(gr::tag::SAMPLE_RATE.shortKey()).value()), -1.f));
         expect(block.settings().activateContext() != std::nullopt);
-        expect(eq(block.settings().stagedParameters().size(), 1UZ));                        // "sample_rate"
-        expect(eq(block.settings().applyStagedParameters().forwardParameters.size(), 1UZ)); // "sample_rate"
+        expect(eq(block.settings().stagedParameters().size(), 1UZ));                        // sample_rate
+        expect(eq(block.settings().applyStagedParameters().forwardParameters.size(), 1UZ)); // sample_rate
         // should print out a warning -> TODO: replace with pmt error message on msgOut port
     };
 
@@ -806,12 +806,12 @@ const boost::ut::suite TransactionTests = [] {
         const auto         timeNow      = std::chrono::system_clock::now();
 
         for (std::size_t i = 0; i < 10; i++) {
-            src._tags.push_back(gr::Tag(i, {{"sample_rate", static_cast<float>(i)}}));
+            src._tags.push_back(gr::Tag(i, {{gr::tag::SAMPLE_RATE.shortKey(), static_cast<float>(i)}}));
         }
         // this sample_rates should not be applied
-        src._tags.push_back({15, {{"sample_rate", 15.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //
+        src._tags.push_back({15, {{gr::tag::SAMPLE_RATE.shortKey(), 15.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //
                                      {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name20"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
-        src._tags.push_back({18, {{"sample_rate", 18.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
+        src._tags.push_back({18, {{gr::tag::SAMPLE_RATE.shortKey(), 18.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
                                      {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name10"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
 
         auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
@@ -861,7 +861,7 @@ const boost::ut::suite TransactionTests = [] {
             expect(eq(vec.size(), 1UZ)) << block.name.value;            // no stored parameters were added via Tag
             expect(eq(vec[0].second.size(), 13UZ)) << block.name.value; // always store all parameters
 
-            expect(eq(std::get<float>(vec[0].second.at("sample_rate")), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
+            expect(eq(std::get<float>(vec[0].second.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
 
             const auto& autoUpdate = block.settings().autoUpdateParameters();
             expect(eq(autoUpdate.size(), 6UZ)) << block.name.value;
@@ -924,7 +924,7 @@ connections:
         try {
             scheduler::Simple sched{loadGrc(loader, std::string(grc))};
             expect(sched.runAndWait().has_value());
-            sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get("sample_rate")), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
+            sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
         } catch (const std::string& e) {
             expect(false) << fmt::format("GRC loading failed: {}\n", e);
         }
