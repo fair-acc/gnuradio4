@@ -1103,41 +1103,37 @@ private:
         }
     }
 
-    [[nodiscard]] NO_INLINE bool isContextPresentInTag(const Tag& tag) const {
-        if (tag.map.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
-            const pmtv::pmt& pmtMetaInfo = tag.map.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
-            if (std::holds_alternative<property_map>(pmtMetaInfo)) {
-                const property_map& metaInfo = std::get<property_map>(pmtMetaInfo);
-                if (metaInfo.contains(std::string(gr::tag::CONTEXT.shortKey()))) {
-                    return true;
-                }
+    [[nodiscard]] NO_INLINE std::optional<std::string> contextInTag(const Tag& tag) const {
+        if (tag.map.contains(gr::tag::CONTEXT.shortKey())) {
+            const pmtv::pmt& ctxInfo = tag.map.at(std::string(gr::tag::CONTEXT.shortKey()));
+            if (std::holds_alternative<std::string>(ctxInfo)) {
+                return std::get<std::string>(ctxInfo);
             }
         }
-        return false;
+        return std::nullopt;
     }
 
-    [[nodiscard]] NO_INLINE bool isTriggeredTimePresentInTag(const Tag& tag) const {
+    [[nodiscard]] NO_INLINE std::optional<std::uint64_t> triggeredTimeInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
             const pmtv::pmt& pmtTimeUtcNs = tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
             if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
-                return true;
+                return std::get<uint64_t>(pmtTimeUtcNs);
             }
         }
-        return false;
+        return std::nullopt;
     }
 
     [[nodiscard]] NO_INLINE std::optional<SettingsCtx> createSettingsCtxFromTag(const Tag& tag) const {
-        // If TRIGGER_META_INFO or CONTEXT is not present then return std::nullopt
+        // If CONTEXT is not present then return std::nullopt
         // IF TRIGGER_TIME is not present then time = now()
 
-        if (isContextPresentInTag(tag)) {
-            SettingsCtx      ctx{};
-            const pmtv::pmt& pmtMetaInfo = tag.map.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
-            ctx.context                  = std::get<property_map>(pmtMetaInfo).at(std::string(gr::tag::CONTEXT.shortKey()));
+        if (auto ctxValue = contextInTag(tag); ctxValue.has_value()) {
+            SettingsCtx ctx{};
+            ctx.context = ctxValue.value();
 
             // update trigger time if present
-            if (isTriggeredTimePresentInTag(tag)) {
-                ctx.time = std::get<uint64_t>(tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey())));
+            if (auto triggerTime = triggeredTimeInTag(tag); triggerTime.has_value()) {
+                ctx.time = triggerTime.value();
             }
             if (ctx.time == 0ULL) {
                 ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());

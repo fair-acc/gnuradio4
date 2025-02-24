@@ -33,27 +33,27 @@ const boost::ut::suite TagTests = [] {
 
         // all times are in nanoseconds
         constexpr std::uint64_t ms = 1'000'000; // ms -> ns conversion factor (wish we had a proper C++ units-lib integration)
-        addTimeTagEntry(clockSrc, 10 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1");
-        addTimeTagEntry(clockSrc, 100 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2");
-        addTimeTagEntry(clockSrc, 300 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3");
-        addTimeTagEntry(clockSrc, 350 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=4");
-        addTimeTagEntry(clockSrc, 550 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=5");
-        addTimeTagEntry(clockSrc, 650 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=6");
-        addTimeTagEntry(clockSrc, 800 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=7");
-        addTimeTagEntry(clockSrc, 850 * ms, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=8");
+        addTimeTagEntry(clockSrc, 10 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1");
+        addTimeTagEntry(clockSrc, 100 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2");
+        addTimeTagEntry(clockSrc, 300 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3");
+        addTimeTagEntry(clockSrc, 350 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4");
+        addTimeTagEntry(clockSrc, 550 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5");
+        addTimeTagEntry(clockSrc, 650 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6");
+        addTimeTagEntry(clockSrc, 800 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7");
+        addTimeTagEntry(clockSrc, 850 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8");
         clockSrc.repeat_period      = 1000 * ms;
         clockSrc.do_zero_order_hold = true;
 
         const auto now     = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
         auto&      funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}});
-        expect(funcGen.settings().set(createConstPropertyMap(5.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap(5.f, 30.f, .2f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap(20.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap(20.f, 10.f, .1f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap(10.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
+        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
+        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
 
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
 

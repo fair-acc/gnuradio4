@@ -43,7 +43,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
     A<float, "avg. sample rate", Visible>                                                                          sample_rate = 1000.f;
     A<gr::Size_t, "chunk_size", Visible, Doc<"number of samples per update">>                                      chunk_size  = 100;
     A<std::vector<std::uint64_t>, "tag times", Doc<"times when tags should be emitted [ns]">>                      tag_times;
-    A<std::vector<std::string>, "tag values", Doc<"list of '<trigger name>::<ctx>' formatted tags">>               tag_values;
+    A<std::vector<std::string>, "tag values", Doc<"list of '<trigger name>/<ctx>' formatted tags">>                tag_values;
     A<std::uint64_t, "repeat period", Visible, Doc<"if repeat_period > last tag_time -> restart tags, in [ns]">>   repeat_period{0U}; //
     A<bool, "perform zero-order-hold", Doc<"if tag_times>tag_values: true=publish last tag, false=publish empty">> do_zero_order_hold{false};
     A<bool, "verbose console">                                                                                     verbose_console = false;
@@ -156,12 +156,12 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
                 gr::basic::trigger::detail::parse(value, triggerName, triggerNameNegated, triggerContext, triggerContextNegated);
                 property_map triggerTag;
                 uint64_t     triggerTime = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
-                triggerTime += static_cast<std::uint64_t>(samplesToNextTimeTag * 1e9f / sample_rate);
+                triggerTime += static_cast<std::uint64_t>(static_cast<float>(samplesToNextTimeTag) * 1e9f / sample_rate);
                 triggerTag[tag::TRIGGER_NAME.shortKey()]      = triggerName;
                 triggerTag[tag::TRIGGER_TIME.shortKey()]      = triggerTime;
                 triggerTag[tag::TRIGGER_OFFSET.shortKey()]    = 0.f;
                 triggerTag[tag::CONTEXT.shortKey()]           = triggerContext;
-                triggerTag[tag::TRIGGER_META_INFO.shortKey()] = property_map{{tag::CONTEXT.shortKey(), value}};
+                triggerTag[tag::TRIGGER_META_INFO.shortKey()] = property_map{};
                 if (verbose_console) {
                     fmt::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times.value[_nextTimeTag]);
                 }

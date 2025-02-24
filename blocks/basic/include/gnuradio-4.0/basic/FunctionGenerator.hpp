@@ -15,7 +15,7 @@ using namespace gr;
 namespace function_generator {
 enum class SignalType : int { Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse };
 // TODO: Enum values should be capitalized CamelStyle, for the moment they are the same as FunctionGenerator class members
-enum class ParameterType : int { signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1 };
+enum class ParameterType : int { signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1 };
 
 using enum SignalType;
 using enum ParameterType;
@@ -48,28 +48,28 @@ constexpr T parse(std::string_view name) {
 }
 
 template<typename T>
-[[nodiscard]] property_map createConstPropertyMap(T startValue) {
-    return {createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue)};
+[[nodiscard]] property_map createConstPropertyMap(std::string_view triggerName, T startValue) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map createLinearRampPropertyMap(T startValue, T finalValue, T durationValue) {
-    return {createPropertyMapEntry(signal_type, LinearRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
+[[nodiscard]] property_map createLinearRampPropertyMap(std::string_view triggerName, T startValue, T finalValue, T durationValue) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, LinearRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map createParabolicRampPropertyMap(T startValue, T finalValue, T durationValue, T roundOffTime) {
-    return {createPropertyMapEntry(signal_type, ParabolicRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime)};
+[[nodiscard]] property_map createParabolicRampPropertyMap(std::string_view triggerName, T startValue, T finalValue, T durationValue, T roundOffTime) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, ParabolicRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime)};
 }
 
 template<typename T>
-[[nodiscard]] property_map createCubicSplinePropertyMap(T startValue, T finalValue, T durationValue) {
-    return {createPropertyMapEntry(signal_type, CubicSpline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
+[[nodiscard]] property_map createCubicSplinePropertyMap(std::string_view triggerName, T startValue, T finalValue, T durationValue) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, CubicSpline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
-[[nodiscard]] property_map createImpulseResponsePropertyMap(T startValue, T finalValue, T time0, T time1) {
-    return {createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1)};
+[[nodiscard]] property_map createImpulseResponsePropertyMap(std::string_view triggerName, T startValue, T finalValue, T time0, T time1) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1)};
 }
 
 } // namespace function_generator
@@ -77,8 +77,7 @@ template<typename T>
 template<typename T>
 requires(std::floating_point<T>)
 struct FunctionGenerator : public gr::Block<FunctionGenerator<T>, BlockingIO<true>> {
-    using Description = Doc<R""(
-@brief The `FunctionGenerator` class generates a variety of functions and their combinations.
+    using Description = Doc<R""(@brief The `FunctionGenerator` class generates a variety of functions and their combinations.
 It supports multiple function types, including Constant, Linear Ramp, Parabolic Ramp, Cubic Spline, and Impulse Response.
 Each function type is configurable with specific parameters, enabling precise tailoring to meet the user's requirements.
 Users can create sequences of various functions using tags.
@@ -128,7 +127,7 @@ funcGen.settings().set(createLinearRampPropertyMap(5.f, 30.f, .2f), SettingsCtx{
 funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3"});
 @endcode
 
-The parameters will automatically update when a Tag containing the "context" field arrives.
+The parameters will automatically update when a Tag containing the 'context' field arrives.
 )"">;
 
     PortIn<std::uint8_t> in; // ClockSource input
@@ -138,7 +137,8 @@ The parameters will automatically update when a Tag containing the "context" fie
     using SampleRate       = Annotated<float, "sample_rate", Visible, Doc<"stream sampling rate in [Hz]">>;
     SampleRate sample_rate = 1000.f;
 
-    Annotated<std::string, "signal_type", Visible, Doc<"see function_generator::SignalType">> signal_type = function_generator::toString(function_generator::Const);
+    Annotated<std::string, "signal_trigger", Visible, Doc<"required trigger name (empty -> being ignored): ">> signal_trigger;
+    Annotated<std::string, "signal_type", Visible, Doc<"see function_generator::SignalType">>                  signal_type = function_generator::toString(function_generator::Const);
 
     // Parameters for different functions, not all parameters are used for all functions
     Annotated<T, "start_value">                                               start_value    = T(0.);
@@ -148,9 +148,14 @@ The parameters will automatically update when a Tag containing the "context" fie
     Annotated<T, "impulse_time0", Doc<"Specific to ImpulseResponse, in sec">> impulse_time0  = T(0.);
     Annotated<T, "impulse_time1", Doc<"Specific to ImpulseResponse, in sec">> impulse_time1  = T(0.);
 
+    Annotated<std::string, "trigger name">       trigger_name;
+    Annotated<std::uint64_t, "trigger time">     trigger_time;
+    Annotated<float, "trigger offset">           trigger_offset;
+    Annotated<std::string, "context name">       context;
     Annotated<property_map, "trigger_meta_info"> trigger_meta_info{};
 
-    GR_MAKE_REFLECTABLE(FunctionGenerator, in, out, sample_rate, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, trigger_meta_info);
+    GR_MAKE_REFLECTABLE(FunctionGenerator, in, out, sample_rate, signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, //
+        trigger_name, trigger_time, trigger_offset, context, trigger_meta_info);
 
     T   _currentTime   = T(0.);
     int _sampleCounter = 0;
@@ -160,8 +165,17 @@ The parameters will automatically update when a Tag containing the "context" fie
 
     void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) {
         if (new_settings.contains(function_generator::toString(function_generator::signal_type))) {
-            _currentTime = T(0.);
-            _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
+            if (signal_trigger.value.empty()) {
+                _currentTime = T(0.);
+            } else if (new_settings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
+                std::string newTrigger = std::get<std::string>(new_settings.at(gr::tag::TRIGGER_NAME.shortKey()));
+                if (newTrigger == signal_trigger.value) {
+                    _currentTime = T(0.);
+                } else {
+                    // trigger does not match required signal_trigger
+                }
+            }
+            _signalType = function_generator::parse<function_generator::SignalType>(signal_type);
         }
         _timeTick = T(1.) / static_cast<T>(sample_rate);
     }

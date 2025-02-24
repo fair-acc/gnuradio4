@@ -63,10 +63,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
     "BasicTriggerNameCtxMatcher Tests"_test = [] {
         using namespace std::string_literals;
         using enum gr::trigger::MatchResult;
-        constexpr auto createTag = [](std::string triggerName, std::string cxt) noexcept {
-            auto meta = property_map{{tag::CONTEXT.shortKey(), cxt}};
-            return Tag(0, {{tag::TRIGGER_NAME.shortKey(), triggerName}, {tag::TRIGGER_META_INFO.shortKey(), meta}});
-        };
+        constexpr auto createTag = [](std::string triggerName, std::string cxt) noexcept { return Tag(0, {{tag::TRIGGER_NAME.shortKey(), triggerName}, {tag::CONTEXT.shortKey(), cxt}, {tag::TRIGGER_META_INFO.shortKey(), property_map{}}}); };
 
         "trigger on room1-room3 (exclusive)"_test = [&] {
             auto&          matcher = trigger::BasicTriggerNameCtxMatcher::filter;

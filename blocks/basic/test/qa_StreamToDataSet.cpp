@@ -49,14 +49,14 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
         using gr::tag::CONTEXT;
 
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-        expect(funcGen.settings().set(createConstPropertyMap(5.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap(5.f, 30.f, .2f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap(20.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap(20.f, 10.f, .1f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap(10.f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f), SettingsCtx{now, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
+        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
+        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
 
         expect(eq(funcGen.settings().getNStoredParameters(), 9UZ));
 
@@ -115,7 +115,8 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 
 gr::Tag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
     return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
-                       {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
+                       {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
+                       {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
 };
 
 const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
@@ -131,13 +132,13 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
         auto& tagSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", sample_rate}, //
             {"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", false}, {"mark_tag", false}});
         tagSrc._tags = {
-            genTrigger(5, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"),  // start
-            genTrigger(8, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"),                  // it is also used to split samples processing into 2 iterations
-            genTrigger(10, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"), // stop
-            genTrigger(12, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"),                 // it is also used as end trigger for "including" mode
-            genTrigger(15, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"), // start
-            genTrigger(20, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"), // stop
-            genTrigger(22, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1")                  // it is also used as end trigger for "including" mode
+            genTrigger(5, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1"),  // start
+            genTrigger(8, "CMD_DIAG_TRIGGER1", ""),                      // it is also used to split samples processing into 2 iterations
+            genTrigger(10, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=2"), // stop
+            genTrigger(12, "CMD_DIAG_TRIGGER1", ""),                     // it is also used as end trigger for "including" mode
+            genTrigger(15, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1"), // start
+            genTrigger(20, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=2"), // stop
+            genTrigger(22, "CMD_DIAG_TRIGGER1", "")                      // it is also used as end trigger for "including" mode
         };
 
         const property_map blockSettings        = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}};
@@ -199,16 +200,16 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
         auto& tagSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", sample_rate}, //
             {"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", false}, {"mark_tag", false}});
         tagSrc._tags = {
-            genTrigger(5, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"),  // start
-            genTrigger(8, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"),                  // it is also used to split samples processing into 2 iterations
-            genTrigger(10, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"), // stop
-            genTrigger(12, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"),                 // it is also used as end trigger for "including" mode
-            genTrigger(15, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"), // start
-            genTrigger(20, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"), // start
-            genTrigger(25, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"), // stop
-            genTrigger(27, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"),                 // it is also used as end trigger for "including" mode
-            genTrigger(30, "CMD_BP_START", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"), // stop
-            genTrigger(32, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1")                  // it is also used as end trigger for "including" mode
+            genTrigger(5, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1"),  // start
+            genTrigger(8, "CMD_DIAG_TRIGGER1", ""),                      // it is also used to split samples processing into 2 iterations
+            genTrigger(10, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=2"), // stop
+            genTrigger(12, "CMD_DIAG_TRIGGER1", ""),                     // it is also used as end trigger for "including" mode
+            genTrigger(15, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1"), // start
+            genTrigger(20, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1"), // start
+            genTrigger(25, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=2"), // stop
+            genTrigger(27, "CMD_DIAG_TRIGGER1", ""),                     // it is also used as end trigger for "including" mode
+            genTrigger(30, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=2"), // stop
+            genTrigger(32, "CMD_DIAG_TRIGGER1", "")                      // it is also used as end trigger for "including" mode
         };
 
         const property_map blockSettings         = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};

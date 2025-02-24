@@ -67,8 +67,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 auto parametersCtx = std::get<std::vector<pmtv::pmt>>(it->second);
                 for (const auto& ctxPmt : parametersCtx) {
                     auto       ctxPar        = std::get<property_map>(ctxPmt);
-                    const auto ctxName       = std::get<std::string>(ctxPar["context"]);
-                    const auto ctxTime       = std::get<std::uint64_t>(ctxPar["time"]); // in ns
+                    const auto ctxName       = std::get<std::string>(ctxPar[gr::tag::CONTEXT.shortKey()]);
+                    const auto ctxTime       = std::get<std::uint64_t>(ctxPar[gr::tag::CONTEXT_TIME.shortKey()]); // in ns
                     const auto ctxParameters = std::get<property_map>(ctxPar["parameters"]);
 
                     currentBlock->settings().loadParametersFromPropertyMap(ctxParameters, SettingsCtx{ctxTime, ctxName});
@@ -198,9 +198,9 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                             },
                             ctxTime.context);
 
-                        ctxParam["context"]    = contextStr;
-                        ctxParam["time"]       = ctxTime.time;
-                        ctxParam["parameters"] = writeParameters(settingsMap);
+                        ctxParam[gr::tag::CONTEXT.shortKey()]      = contextStr;
+                        ctxParam[gr::tag::CONTEXT_TIME.shortKey()] = ctxTime.time;
+                        ctxParam["parameters"]                     = writeParameters(settingsMap);
                         ctxParamsSeq.emplace_back(std::move(ctxParam));
                     }
                 }

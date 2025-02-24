@@ -229,13 +229,11 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
 
     std::string triggerName;
     std::string triggerCtx;
-    if (tag.map.contains(tag::TRIGGER_NAME.shortKey())) {
+    if (tag.map.contains(tag::TRIGGER_NAME.shortKey()) && std::holds_alternative<std::string>(tag.map.at(tag::TRIGGER_NAME.shortKey()))) {
         triggerName = std::get<std::string>(tag.map.at(tag::TRIGGER_NAME.shortKey()));
     }
-    if (tag.map.contains(tag::TRIGGER_META_INFO.shortKey())) {
-        if (auto meta = std::get_if<property_map>(&tag.map.at(tag::TRIGGER_META_INFO.shortKey())); meta && meta->contains(tag::CONTEXT.shortKey())) {
-            triggerCtx = std::get<std::string>(meta->at(tag::CONTEXT.shortKey()));
-        }
+    if (tag.map.contains(tag::CONTEXT.shortKey()) && std::holds_alternative<std::string>(tag.map.at(tag::CONTEXT.shortKey()))) {
+        triggerCtx = std::get<std::string>(tag.map.at(tag::CONTEXT.shortKey()));
     }
 
     if (isSingleTrigger(filterState)) {
