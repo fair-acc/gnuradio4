@@ -628,10 +628,13 @@ std::vector<std::complex<T>> sortComplexWithConjugates(const std::vector<std::co
 } // namespace details
 
 template<typename T, std::ranges::input_range Range>
-[[nodiscard]] inline std::vector<T> expandRootsToPolynomial(Range&& roots, std::size_t desiredOrder) {
+[[nodiscard]] std::vector<T> expandRootsToPolynomial(Range&& roots, std::size_t desiredOrder) {
     if (roots.empty()) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference" // gcc13 false positive
         std::vector<T> coefficients(desiredOrder + 1UZ, static_cast<T>(0));
-        coefficients[0] = 1.0;
+        coefficients[0UZ] = static_cast<T>(1);
+#pragma GCC diagnostic pop
         return coefficients;
     }
 

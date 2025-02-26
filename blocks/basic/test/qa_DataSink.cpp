@@ -731,9 +731,12 @@ const boost::ut::suite DataSinkTests = [] {
         expect(sched.runAndWait().has_value());
         registerThread.join();
 
-        for (std::size_t i = 0; i < results.size(); ++i) {
+        for (std::size_t i = 0UZ; i < results.size(); ++i) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference" // false positive for GCC13
             expect(eq(results[i].get(), expected[i]));
             expect(eq(resultsCb[i], expected[i]));
+#pragma GCC diagnostic pop
         }
     };
 

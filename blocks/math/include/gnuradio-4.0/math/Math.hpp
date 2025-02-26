@@ -21,39 +21,43 @@ T defaultValue() noexcept {
 }
 } // namespace detail
 
-template<typename T, char op>
-struct MathOpImpl : public gr::Block<MathOpImpl<T, op>> {
-    PortIn<T>  in;
-    PortOut<T> out;
+template<typename T, typename op>
+struct MathOpImpl : gr::Block<MathOpImpl<T, op>> {
+    PortIn<T>  in{};
+    PortOut<T> out{};
     T          value = detail::defaultValue<T>();
 
     GR_MAKE_REFLECTABLE(MathOpImpl, in, out, value);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V processOne(const V& a) const noexcept {
-        if constexpr (op == '*') {
-            return a * value;
-        } else if constexpr (op == '/') {
-            return a / value;
-        } else if constexpr (op == '+') {
-            return a + value;
-        } else if constexpr (op == '-') {
-            return a - value;
-        } else {
-            static_assert(gr::meta::always_false<T>, "unknown op");
-            return V{};
+        if constexpr (gr::meta::any_simd<V, T>) {
+            if constexpr (std::same_as<op, std::multiplies<T>>) {
+                return a * value;
+            } else if constexpr (std::same_as<op, std::divides<T>>) {
+                return a / value;
+            } else if constexpr (std::same_as<op, std::plus<T>>) {
+                return a + value;
+            } else if constexpr (std::same_as<op, std::minus<T>>) {
+                return a - value;
+            } else {
+                static_assert(gr::meta::always_false<T>, "unknown op");
+                return V{};
+            }
+        } else { // non-simd branch
+            return op()(a, value);
         }
     }
 };
 
 template<typename T>
-using AddConst = MathOpImpl<T, '+'>;
+using AddConst = MathOpImpl<T, std::plus<T>>;
 template<typename T>
-using SubtractConst = MathOpImpl<T, '-'>;
+using SubtractConst = MathOpImpl<T, std::minus<T>>;
 template<typename T>
-using MultiplyConst = MathOpImpl<T, '*'>;
+using MultiplyConst = MathOpImpl<T, std::multiplies<T>>;
 template<typename T>
-using DivideConst = MathOpImpl<T, '/'>;
+using DivideConst = MathOpImpl<T, std::divides<T>>;
 
 template<typename T, typename op>
 requires(std::is_arithmetic_v<T>)

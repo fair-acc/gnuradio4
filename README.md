@@ -5,14 +5,15 @@
 [![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
 ![CMake](https://github.com/fair-acc/gnuradio4/workflows/CMake/badge.svg) <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-12-orange.svg?style=flat-square)](#contributors-)
+
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 # GNU Radio 4.0 prototype
 
 > [!IMPORTANT]
-> This is the GNU Radio 4.0 (GR4) prototype and is currently in a beta state. For production use, 
+> This is the GNU Radio 4.0 (GR4) prototype and is currently in a beta state. For production use,
 > please use the GNU Radio 3.X (GR3) version found [here](https://github.com/gnuradio/gnuradio).
-> Bug reports related to this beta should be submitted [here](https://github.com/fair-acc/gnuradio4/issues), 
+> Bug reports related to this beta should be submitted [here](https://github.com/fair-acc/gnuradio4/issues),
 > and bug reports for GNU Radio 3.X should be submitted [here](https://github.com/gnuradio/gnuradio/issues)
 
 GNU Radio is a free & open-source signal processing runtime and signal processing
@@ -22,20 +23,78 @@ led to adoption in hobbyist, academic, and commercial environments. GNU Radio ha
 found use in software-defined radio, digital communications, nuclear physics, high-
 energy particle physics, astrophysics, radio astronomy and more!
 
-## Development
+## Building
 
-If you want to start working on the GNURadio 4.0 source, the [DEVELOPMENT.md](DEVELOPMENT.md) file describes how to set up a local development environment.
+GNU Radio 4.0 uses modern C++ (C++23), and is tested for
+
+- CMake (>= 3.25),
+- GCC (>=13.3, better: >=14.2)
+- Clang (>=18, recommended), and
+- Emscripten (3.1.66).
+
+**To build**:
+
+```bash
+git clone https://github.com/gnuradio/gnuradio4.git
+cd gnuradio4
+
+# (Optional) If you experience excessive gcc memory usage during builds (needs sudo):
+sudo ./enableZRAM.sh
+
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=RelWithAssert -DENABLE_BLOCK_PLUGINS=ON -DENABLE_BLOCK_REGISTRY=ON ..
+cmake --build . -- -j$(nproc)
+```
+
+**Cleaning up zram** if used:
+
+```bash
+sudo swapoff /dev/zram0
+echo 1 | sudo tee /sys/block/zram0/reset
+```
+
+### Key CMake Flags `-D...=<ON|OFF>`
+
+- **`ENABLE_BLOCK_PLUGINS`** (default: ON): builds the plugin system, allowing dynamic loading of blocks.
+- **`ENABLE_BLOCK_REGISTRY`** (default: ON): enables a runtime registry of blocks.
+  Turning this off (along with `ENABLE_BLOCK_PLUGINS`) gives fully static builds.
+- **`EMBEDDED`** (default: OFF): reduces code size and runtime features for constrained systems.
+  Also implicitly enabled by `-DCMAKE_BUILD_TYPE=MinSizeRel`.
+- **`WARNINGS_AS_ERRORS`** (default: ON): treats all compiler warnings as errors (`-Werror`).
+- **`TIMETRACE`** (default: OFF): activates Clang’s `-ftime-trace` for per-file compilation timing.
+- **`ADDRESS_SANITIZER`** (default: OFF): enables AddressSanitizer (can’t be combined with the other sanitiser options).
+- **`UB_SANITIZER`** (default: OFF): enables 'Undefined Behavior' checks.
+- **`THREAD_SANITIZER`** (default: OFF): enables threadding checks (N.B. strong impact on performance).
+
+### Example Combined Command
+
+```bash
+cmake -B build -S . \
+  -DCMAKE_BUILD_TYPE=RelWithAssert \
+  -DENABLE_BLOCK_PLUGINS=ON \
+  -DENABLE_BLOCK_REGISTRY=ON \
+  -DWARNINGS_AS_ERRORS=ON \
+  -DTIMETRACE=OFF \
+  -DADDRESS_SANITIZER=OFF \
+  -DUB_SANITIZER=OFF \
+  -DTHREAD_SANITIZER=OFF
+cmake --build build -- -j$(nproc)
+```
+
+Feel free to tweak these flags based on your needs (embedded targets, debugging, sanitising, etc.).
+For more details, see [DEVELOPMENT.md](DEVELOPMENT.md) or comments in the `CMakeLists.txt` file that
+describe how to set up a local development environment.
 
 ## Helpful Links
 
-* [GNU Radio Website](https://gnuradio.org)
-* [GNU Radio Wiki](https://wiki.gnuradio.org/)
-* [Github issue tracker for bug reports and feature requests](https://github.com/fair-acc/gnuradio4/issues)
-* [View the GNU Radio Mailing List Archive](https://lists.gnu.org/archive/html/discuss-gnuradio/)
-* [Subscribe to the GNU Radio Mailing List](https://lists.gnu.org/mailman/listinfo/discuss-gnuradio)
-* [GNU Radio Chatroom on Matrix](https://chat.gnuradio.org/)
-  * Specifically for discussions related to GNURadio 4.0 join the [#architecture channel](https://matrix.to/#/#architecture:gnuradio.org)
-* [Contributors and Affiliated Organizations](https://github.com/gnuradio/gnuradio/blob/main/CONTRIBUTORS.md)
+- [GNU Radio Website](https://gnuradio.org)
+- [GNU Radio Wiki](https://wiki.gnuradio.org/)
+- [Github issue tracker for bug reports and feature requests](https://github.com/fair-acc/gnuradio4/issues)
+- [View the GNU Radio Mailing List Archive](https://lists.gnu.org/archive/html/discuss-gnuradio/)
+- [Subscribe to the GNU Radio Mailing List](https://lists.gnu.org/mailman/listinfo/discuss-gnuradio)
+- [GNU Radio Chatroom on Matrix](https://chat.gnuradio.org/)
+  - Specifically for discussions related to GNURadio 4.0 join the [#architecture channel](https://matrix.to/#/#architecture:gnuradio.org)
+- [Contributors and Affiliated Organizations](https://github.com/gnuradio/gnuradio/blob/main/CONTRIBUTORS.md)
 
 ## What's New in GNU Radio 4.0?
 
@@ -54,14 +113,13 @@ Unless otherwise noted: SPDX-License-Identifier: LGPL-3.0-linking-exception
 All code contributions to GNU Radio will be integrated into a library under the LGPL, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
 For details on how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-Copyright (C) 2001-September 2020 GNU Radio Project -- managed by Free Software Foundation, Inc.  
-Copyright (C) September 2020-2024 GNU Radio Project -- managed by SETI Institute  
+Copyright (C) 2001-September 2020 GNU Radio Project -- managed by Free Software Foundation, Inc.
+Copyright (C) September 2020-2024 GNU Radio Project -- managed by SETI Institute
 Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany
-
 
 ## Acknowledgements
 
-The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology. 
+The GNU Radio project appreciates the contributions from FAIR in the co-development of GNU Radio 4.0. Their dedicated efforts have played a key role in enhancing the capabilities of our open-source SDR technology.
 We would like to recognize the following contributors for their roles in redesigning the core that has evolved into GR 4.0:
 
 ## Contributors

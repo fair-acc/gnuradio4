@@ -129,9 +129,9 @@ private:
 
         // implement reference algorithm from [0] (fast, low-group delay)
         // Step 3: compute accumulator A, B, and C
-        T A = 0;
-        T B = 0;
-        T C = 0;
+        T accA = 0;
+        T accB = 0;
+        T accC = 0;
 
         auto         bufferStart = _outputHistory.begin();
         std::span<T> data(bufferStart, std::next(bufferStart, _n_period_estimate));
@@ -149,17 +149,17 @@ private:
             T b_n = data[n];
 
             // Equations (8)
-            A += a_n * a_n;
-            B += b_n * b_n;
-            C += T(2) * a_n * b_n;
+            accA += a_n * a_n;
+            accB += b_n * b_n;
+            accC += T(2) * a_n * b_n;
         }
 
-        if (B <= epsilon) {
+        if (accB <= epsilon) {
             return _prevFrequency; // Return previous frequency if B is too small
         }
 
         // Step 4: Calculate z and ensure it's within [-1, 1]
-        T z = (C / B) - T(1);
+        T z = (accC / accB) - T(1);
         if (z >= T(1) || z <= -T(1)) {
             return _prevFrequency; // Return previous frequency if conditions are not met
         }

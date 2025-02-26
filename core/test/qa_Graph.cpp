@@ -109,7 +109,7 @@ const boost::ut::suite GraphTests = [] {
         expect(eq(src.out[0].bufferSize(), customBufferSize));
         expect(eq(sink1.in.bufferSize(), customBufferSize));
         expect(eq(src._nSamplesProduced, nMaxSamples));
-        expect(eq(src._processBulkCount, 20)); // it is 20 and not 10 because the not connected buffers are also included in calculation of ports limit
+        expect(eq(src._processBulkCount, 20UZ)); // it is 20 and not 10 because the not connected buffers are also included in calculation of ports limit
 
         expect(eq(src.out[1].bufferSize(), 4096UZ)); // port default buffer size
         expect(eq(src.out[2].bufferSize(), 4096UZ)); // port default buffer size

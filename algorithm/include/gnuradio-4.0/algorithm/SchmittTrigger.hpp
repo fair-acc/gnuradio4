@@ -113,9 +113,9 @@ struct SchmittTrigger {
 
             auto computeEdgePosition = [&](const EdgeType& y1, const EdgeType& y2) -> std::pair<std::int32_t, EdgeType> {
                 if (y1 == y2) {
-                    return {static_cast<std::int32_t>(0U), static_cast<EdgeType>(0)};
+                    return {0, EdgeType{0}};
                 }
-                const EdgeType offset   = (EdgeType(_offset) - y1) / (y2 - y1);
+                const EdgeType offset   = (EdgeType(static_cast<float>(_offset)) - y1) / (y2 - y1);
                 std::int32_t   intPart  = static_cast<std::int32_t>(std::floor(gr::value(offset)));
                 EdgeType       fracPart = offset - static_cast<float>(intPart);
                 return {intPart, fracPart};
@@ -123,7 +123,7 @@ struct SchmittTrigger {
 
             if (!_lastState && input >= _upperThreshold) { // Rising edge detected
                 lastEdge                 = EdgeDetection::RISING;
-                auto [intPart, fracPart] = computeEdgePosition(yPrev, yCurr);
+                auto [intPart, fracPart] = computeEdgePosition(EdgeType(static_cast<float>(gr::value(yPrev))), EdgeType(static_cast<float>(gr::value(yCurr))));
                 lastEdgeIdx              = -1 + intPart; // edge occurred intPart samples before the current sample
                 lastEdgeOffset           = fracPart;     // fractional part in [0, 1)
                 _lastState               = true;
@@ -132,7 +132,7 @@ struct SchmittTrigger {
 
             if (_lastState && input <= _lowerThreshold) { // Falling edge detected
                 lastEdge                 = EdgeDetection::FALLING;
-                auto [intPart, fracPart] = computeEdgePosition(yPrev, yCurr);
+                auto [intPart, fracPart] = computeEdgePosition(EdgeType(static_cast<float>(gr::value(yPrev))), EdgeType(static_cast<float>(gr::value(yCurr))));
                 lastEdgeIdx              = -1 + intPart; // edge occurred intPart samples before the current sample
                 lastEdgeOffset           = fracPart;     // fractional part in [0, 1)
                 _lastState               = false;
@@ -180,7 +180,7 @@ struct SchmittTrigger {
                         if constexpr (UncertainValueLike<T>) {
                             lastEdgeOffset = T{relativeIndex - static_cast<float>(gr::value(lastEdgeIdx)), static_cast<float>(gr::uncertainty(*crossing))};
                         } else {
-                            lastEdgeOffset = EdgeType{relativeIndex - static_cast<float>(lastEdgeIdx)};
+                            lastEdgeOffset = EdgeType{static_cast<float>(relativeIndex) - static_cast<float>(lastEdgeIdx)}; // ADDED CAST
                         }
 
                         // update state and reset accumulation
@@ -207,66 +207,67 @@ struct SchmittTrigger {
     }
 
     std::optional<T> findCrossingIndexLinearRegression(const auto& samples, std::size_t nSamples, value_t offset) {
-        if (nSamples < 2) { // not enough samples to perform linear regression
+        using comp_t = std::conditional_t<std::is_floating_point_v<value_t>, value_t, float>; // temporary compute type to avoid conversion losses/errors/warnings
+        if (nSamples < 2) {                                                                   // not enough samples to perform linear regression
             return std::nullopt;
         }
 
-        const auto n_val = static_cast<value_t>(nSamples);
+        const comp_t n_val = static_cast<comp_t>(nSamples);
         // sum of squares of the first (nSamples - 1) natural numbers
-        const value_t sumX2 = (n_val * (n_val - value_t(1)) * (value_t(2) * n_val - value_t(1))) / value_t(6);
-        const auto    meanX = value_t(0.5f) * (n_val - value_t(1));
+        const comp_t sumX2 = (n_val * (n_val - comp_t{1}) * (comp_t{2} * n_val - comp_t{1})) / comp_t{6};
+        const comp_t meanX = comp_t{0.5} * (n_val - comp_t{1});
 
-        value_t sumY  = 0;
-        value_t sumXY = 0;
+        comp_t sumY  = comp_t{0};
+        comp_t sumXY = comp_t{0};
         for (std::size_t i = 0; i < nSamples; ++i) {
-            const auto xi = static_cast<value_t>(nSamples - 1 - i); // rationale: reversed indexing samples
-            const auto yi = gr::value(samples[i]);
+            const comp_t xi = static_cast<comp_t>((nSamples - 1) - i); // rationale: reversed indexing samples
+            const comp_t yi = static_cast<comp_t>(gr::value(samples[i]));
             sumY += yi;
             sumXY += xi * yi;
         }
 
-        const value_t meanY       = sumY / n_val;
-        const value_t numerator   = sumXY - n_val * meanX * meanY;
-        const value_t denominator = sumX2 - n_val * meanX * meanX;
+        const comp_t meanY       = sumY / n_val;
+        const comp_t numerator   = sumXY - n_val * meanX * meanY;
+        const comp_t denominator = sumX2 - n_val * meanX * meanX;
 
-        if (denominator == 0.0f) {
+        if (denominator == comp_t{0}) {
             return std::nullopt;
         }
 
-        const value_t slope         = numerator / denominator; // slope of the regression line
-        const value_t intercept     = meanY - slope * meanX;   // intercept point of the regression line
-        const value_t crossingIndex = (offset - intercept) / slope;
+        const comp_t slope         = numerator / denominator; // slope of the regression line
+        const comp_t intercept     = meanY - slope * meanX;   // intercept point of the regression line
+        const comp_t crossingIndex = (static_cast<comp_t>(offset) - intercept) / slope;
 
-        if constexpr (UncertainValueLike<T>) {   // propagation of uncertainty
-            const value_t x_uncertainty = 1e-5f; // fixed uncertainty for x-axis for common ADC clock stability
+        if constexpr (UncertainValueLike<T>) {  // propagation of uncertainty
+            const comp_t x_uncertainty = 1e-5f; // fixed uncertainty for x-axis for common ADC clock stability
 
-            value_t varianceY = 0.0f; // variance of the mean
+            comp_t varianceY = comp_t{0}; // variance of the mean
             for (std::size_t i = 0; i < nSamples; ++i) {
-                value_t u = gr::uncertainty(samples[i]);
-                varianceY += u * u;
+                const comp_t u = static_cast<comp_t>(gr::uncertainty(samples[i]));
+                varianceY += (u * u);
             }
             varianceY /= (n_val * n_val);
             varianceY += slope * slope * x_uncertainty * x_uncertainty;
 
             // variance of slope (m) and intercept (b)
-            const value_t var_m = varianceY / denominator;
-            const value_t var_b = varianceY * sumX2 / (n_val * denominator);
+            const comp_t var_m = varianceY / denominator;
+            const comp_t var_b = varianceY * sumX2 / (n_val * denominator);
 
             // covariance between slope and intercept
-            value_t cov_mb = -varianceY * meanX / denominator;
+            const comp_t cov_mb = -varianceY * meanX / denominator;
 
             // partial derivatives for crossing index = (offset - b) / m
             // d(crossingIndex)/db = -1/m
             // d(crossingIndex)/dm = -(offset - b)/m^2
-            value_t d_ci_db = -value_t(1) / slope;
-            value_t d_ci_dm = -(gr::value(offset) - intercept) / (slope * slope);
+            const comp_t d_ci_db = -comp_t{1} / slope;
+            const comp_t d_ci_dm = -(static_cast<comp_t>(offset) - intercept) / (slope * slope);
 
             // error propagation
-            value_t var_ci = (d_ci_db * d_ci_db * var_b) + (d_ci_dm * d_ci_dm * var_m) + (value_t(2) * d_ci_db * d_ci_dm * cov_mb);
+            const comp_t var_ci = d_ci_db * d_ci_db * var_b + d_ci_dm * d_ci_dm * var_m + comp_t{2} * d_ci_db * d_ci_dm * cov_mb;
 
-            return T{crossingIndex, var_ci < 0 ? value_t(0) : std::sqrt(var_ci) /* uncertainty */};
+            return T{static_cast<value_t>(crossingIndex), static_cast<float>((var_ci < comp_t{0}) ? comp_t{0} : std::sqrt(var_ci))};
         } else { // fundamental type ->  no uncertainty
-            return std::make_optional(crossingIndex);
+            return std::make_optional(static_cast<value_t>(crossingIndex));
         }
     }
 };
