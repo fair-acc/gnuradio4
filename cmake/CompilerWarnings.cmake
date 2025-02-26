@@ -3,7 +3,6 @@
 # https://github.com/lefticus/cppbestpractices/blob/master/02-Use_the_Tools_Available.md
 
 function(set_project_warnings project_name)
-  option(WARNINGS_AS_ERRORS "Treat compiler warnings as errors" FALSE)
 
   set(MSVC_WARNINGS
       /W4 # Baseline reasonable warnings
@@ -32,7 +31,6 @@ function(set_project_warnings project_name)
   )
 
   set(CLANG_WARNINGS
-      # -Werror # avoid warnings since they are often indicative of immature API and/or potential sources of bugs # TODO: enable
       -Wall
       -Wextra # reasonable and standard
       -Wshadow # warn the user if a variable declaration shadows one from a parent context
@@ -52,8 +50,9 @@ function(set_project_warnings project_name)
   )
 
   if(WARNINGS_AS_ERRORS)
-    set(CLANG_WARNINGS ${CLANG_WARNINGS} -Werror)
+    set(CLANG_WARNINGS ${CLANG_WARNINGS} -Werror)  # avoid warnings since they are often indicative of immature API and/or potential sources of bugs
     set(MSVC_WARNINGS ${MSVC_WARNINGS} /WX)
+    message(STATUS "Setting compiler warning as errors: ${WARNINGS_AS_ERRORS}")
   endif()
 
   set(GCC_WARNINGS

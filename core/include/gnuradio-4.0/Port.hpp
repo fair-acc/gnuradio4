@@ -453,9 +453,9 @@ struct Port {
         bool              isConnected = true; // true if Port is connected
         bool              isSync      = true; // true if  Port is Sync
 
-        InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
-            : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)),               //
-              rawTags(getTags(nSamples, tagReader, reader.position())),                                          //
+        InputSpan(std::size_t nSamples_, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
+            : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples_)),               //
+              rawTags(getTags(nSamples_, tagReader, reader.position())),                                          //
               streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
         InputSpan(const InputSpan&)            = default;
@@ -536,10 +536,10 @@ struct Port {
               tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
               streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), //
-              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)), //
+              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
               streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)            = default;
