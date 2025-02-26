@@ -1051,7 +1051,7 @@ protected:
             const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
 
             std::string contextStr;
-            if (auto it = dataMap.find("context"); it != dataMap.end()) {
+            if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
                 if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                     contextStr = *stringPtr;
                 } else {
@@ -1062,7 +1062,7 @@ protected:
             }
 
             std::uint64_t time = 0;
-            if (auto it = dataMap.find("time"); it != dataMap.end()) {
+            if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
                 if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
                     time = *timePtr;
                 }
@@ -1080,7 +1080,7 @@ protected:
 
         if (message.cmd == Get || message.cmd == Set) {
             const auto& ctx = settings().activeContext();
-            message.data    = {{"context", ctx.context}, {"time", ctx.time}};
+            message.data    = {{gr::tag::CONTEXT.shortKey(), ctx.context}, {gr::tag::CONTEXT_TIME.shortKey(), ctx.time}};
             return message;
         }
 
@@ -1098,7 +1098,7 @@ protected:
         const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
 
         std::string contextStr;
-        if (auto it = dataMap.find("context"); it != dataMap.end()) {
+        if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
             if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                 contextStr = *stringPtr;
             } else {
@@ -1109,7 +1109,7 @@ protected:
         }
 
         std::uint64_t time = 0;
-        if (auto it = dataMap.find("time"); it != dataMap.end()) {
+        if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
             if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
                 time = *timePtr;
             }

@@ -52,11 +52,11 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
 
             auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}, {"start_value", 0.1f}});
             using namespace function_generator;
-            expect(funcGen.settings().set(createConstPropertyMap(0.1f), SettingsCtx{.context = "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=0"}).empty());
-            expect(funcGen.settings().set(createParabolicRampPropertyMap(0.1f, 1.1f, .3f, 0.02f), SettingsCtx{.context = "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-            expect(funcGen.settings().set(createConstPropertyMap(1.1f), SettingsCtx{.context = "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-            expect(funcGen.settings().set(createParabolicRampPropertyMap(1.1f, 0.1f, .3f, 0.02f), SettingsCtx{.context = "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-            expect(funcGen.settings().set(createConstPropertyMap(0.1f), SettingsCtx{.context = "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
+            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=0"}).empty());
+            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 0.1f, 1.1f, .3f, 0.02f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 1.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 1.1f, 0.1f, .3f, 0.02f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
 
             auto& schmittTrigger = graph.emplaceBlock<gr::blocks::basic::SchmittTrigger<float, Method::value>>({
                 {"name", "SchmittTrigger"},                      //

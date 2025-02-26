@@ -88,10 +88,11 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
 
 template<typename T>
 struct DataSet {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+    using value_type           = T;
+    using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map              = pmtv::map_t;
+    T            default_value = T(); // default value for padding, ZOH etc.
+    std::int64_t timestamp     = 0;   // UTC timestamp [ns]
 
     // axis layout:
     std::vector<std::string>    axis_names{};  // axis quantity, e.g. time, frequency, …
@@ -167,10 +168,11 @@ static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity"
 
 template<typename T>
 struct Tensor {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+    using value_type           = T;
+    using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map              = pmtv::map_t;
+    T            default_value = T(); // default value for padding, ZOH etc.
+    std::int64_t timestamp     = 0;   // UTC timestamp [ns]
 
     std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
     tensor_layout_type        layout{};  // row-major, column-major, “special”
@@ -190,7 +192,8 @@ static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity"
 template<typename T>
 struct Packet {
     using value_type = T;
-    using pmt_map    = std::map<std::string, pmtv::pmt>;
+    using pmt_map    = pmtv::map_t;
+    T default_value  = T(); // default value for padding, ZOH etc.
 
     std::int64_t         timestamp = 0;   // UTC timestamp [ns]
     std::vector<T>       signal_values{}; // size = \PI_i extents[i

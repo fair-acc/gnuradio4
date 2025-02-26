@@ -189,13 +189,13 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
     // controls automatic (if set) or manual update of above parameters
-    std::set<std::string, std::less<>> auto_update{"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"};
+    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
 
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
 
-    void reset() { auto_update = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"}; }
+    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
 
     template<bool isNoexcept = false>
     void update(const property_map& metaInfo) noexcept(isNoexcept) {
@@ -217,17 +217,17 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
         };
 
         for (const auto& key : auto_update) {
-            if (key == "sample_rate") {
+            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
                 updateValue(key, sample_rate);
-            } else if (key == "signal_name") {
+            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
                 updateValue(key, signal_name);
-            } else if (key == "signal_quantity") {
+            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
                 updateValue(key, signal_quantity);
-            } else if (key == "signal_unit") {
+            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
                 updateValue(key, signal_unit);
-            } else if (key == "signal_min") {
+            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
                 updateValue(key, signal_min);
-            } else if (key == "signal_max") {
+            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
                 updateValue(key, signal_max);
             }
         }
@@ -235,12 +235,12 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
-        metaInfo["sample_rate"]     = sample_rate;
-        metaInfo["signal_name"]     = signal_name;
-        metaInfo["signal_quantity"] = signal_quantity;
-        metaInfo["signal_unit"]     = signal_unit;
-        metaInfo["signal_min"]      = signal_min;
-        metaInfo["signal_max"]      = signal_max;
+        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
+        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
+        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
+        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
+        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
+        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
 
         return metaInfo;
     }

@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
     // parameters of generated Tags
     std::size_t nSamplesPerTag    = 10000UZ;
     bool        tagWithAutoUpdate = false;
-    std::string tagName           = tagWithAutoUpdate ? "sample_rate" : "some_random_name_1234";
+    std::string tagName           = tagWithAutoUpdate ? gr::tag::SAMPLE_RATE.shortKey() : "some_random_name_1234";
     std::string outputCsvFilePath = "";
 
     if (outFilePath != "") {

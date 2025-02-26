@@ -9254,11 +9254,12 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based
 inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
 inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_meta_info", property_map, "", "maps containing additional trigger information"> TRIGGER_META_INFO;
 inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
+inline EM_CONSTEXPR_STATIC DefaultTag<"time", std::uint64_t, "", "multiplexing UTC-time in [ns] when ctx should be applied"> CONTEXT_TIME; // TODO: for backward compatibility -> rename to `ctx_time'
 inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
 
-inline constexpr std::array<std::string_view, 15> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "reset_default", "store_default", "end_of_stream"};
+inline constexpr std::array<std::string_view, 16> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "time", "reset_default", "store_default", "end_of_stream"};
 
 } // namespace tag
 
@@ -9557,10 +9558,11 @@ concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) 
 
 template<typename T>
 struct DataSet {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+    using value_type           = T;
+    using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map              = pmtv::map_t;
+    T            default_value = T(); // default value for padding, ZOH etc.
+    std::int64_t timestamp     = 0;   // UTC timestamp [ns]
 
     // axis layout:
     std::vector<std::string>    axis_names{};  // axis quantity, e.g. time, frequency, …
@@ -9636,10 +9638,11 @@ static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity"
 
 template<typename T>
 struct Tensor {
-    using value_type         = T;
-    using tensor_layout_type = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map            = std::map<std::string, pmtv::pmt>;
-    std::int64_t timestamp   = 0; // UTC timestamp [ns]
+    using value_type           = T;
+    using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
+    using pmt_map              = pmtv::map_t;
+    T            default_value = T(); // default value for padding, ZOH etc.
+    std::int64_t timestamp     = 0;   // UTC timestamp [ns]
 
     std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
     tensor_layout_type        layout{};  // row-major, column-major, “special”
@@ -9659,7 +9662,8 @@ static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity"
 template<typename T>
 struct Packet {
     using value_type = T;
-    using pmt_map    = std::map<std::string, pmtv::pmt>;
+    using pmt_map    = pmtv::map_t;
+    T default_value  = T(); // default value for padding, ZOH etc.
 
     std::int64_t         timestamp = 0;   // UTC timestamp [ns]
     std::vector<T>       signal_values{}; // size = \PI_i extents[i
@@ -10314,13 +10318,13 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
     // controls automatic (if set) or manual update of above parameters
-    std::set<std::string, std::less<>> auto_update{"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"};
+    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
 
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
 
-    void reset() { auto_update = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max"}; }
+    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
 
     template<bool isNoexcept = false>
     void update(const property_map& metaInfo) noexcept(isNoexcept) {
@@ -10342,17 +10346,17 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
         };
 
         for (const auto& key : auto_update) {
-            if (key == "sample_rate") {
+            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
                 updateValue(key, sample_rate);
-            } else if (key == "signal_name") {
+            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
                 updateValue(key, signal_name);
-            } else if (key == "signal_quantity") {
+            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
                 updateValue(key, signal_quantity);
-            } else if (key == "signal_unit") {
+            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
                 updateValue(key, signal_unit);
-            } else if (key == "signal_min") {
+            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
                 updateValue(key, signal_min);
-            } else if (key == "signal_max") {
+            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
                 updateValue(key, signal_max);
             }
         }
@@ -10360,12 +10364,12 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
-        metaInfo["sample_rate"]     = sample_rate;
-        metaInfo["signal_name"]     = signal_name;
-        metaInfo["signal_quantity"] = signal_quantity;
-        metaInfo["signal_unit"]     = signal_unit;
-        metaInfo["signal_min"]      = signal_min;
-        metaInfo["signal_max"]      = signal_max;
+        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
+        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
+        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
+        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
+        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
+        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
 
         return metaInfo;
     }
@@ -17792,41 +17796,37 @@ private:
         }
     }
 
-    [[nodiscard]] NO_INLINE bool isContextPresentInTag(const Tag& tag) const {
-        if (tag.map.contains(gr::tag::TRIGGER_META_INFO.shortKey())) {
-            const pmtv::pmt& pmtMetaInfo = tag.map.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
-            if (std::holds_alternative<property_map>(pmtMetaInfo)) {
-                const property_map& metaInfo = std::get<property_map>(pmtMetaInfo);
-                if (metaInfo.contains(std::string(gr::tag::CONTEXT.shortKey()))) {
-                    return true;
-                }
+    [[nodiscard]] NO_INLINE std::optional<std::string> contextInTag(const Tag& tag) const {
+        if (tag.map.contains(gr::tag::CONTEXT.shortKey())) {
+            const pmtv::pmt& ctxInfo = tag.map.at(std::string(gr::tag::CONTEXT.shortKey()));
+            if (std::holds_alternative<std::string>(ctxInfo)) {
+                return std::get<std::string>(ctxInfo);
             }
         }
-        return false;
+        return std::nullopt;
     }
 
-    [[nodiscard]] NO_INLINE bool isTriggeredTimePresentInTag(const Tag& tag) const {
+    [[nodiscard]] NO_INLINE std::optional<std::uint64_t> triggeredTimeInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
             const pmtv::pmt& pmtTimeUtcNs = tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
             if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
-                return true;
+                return std::get<uint64_t>(pmtTimeUtcNs);
             }
         }
-        return false;
+        return std::nullopt;
     }
 
     [[nodiscard]] NO_INLINE std::optional<SettingsCtx> createSettingsCtxFromTag(const Tag& tag) const {
-        // If TRIGGER_META_INFO or CONTEXT is not present then return std::nullopt
+        // If CONTEXT is not present then return std::nullopt
         // IF TRIGGER_TIME is not present then time = now()
 
-        if (isContextPresentInTag(tag)) {
-            SettingsCtx      ctx{};
-            const pmtv::pmt& pmtMetaInfo = tag.map.at(std::string(gr::tag::TRIGGER_META_INFO.shortKey()));
-            ctx.context                  = std::get<property_map>(pmtMetaInfo).at(std::string(gr::tag::CONTEXT.shortKey()));
+        if (auto ctxValue = contextInTag(tag); ctxValue.has_value()) {
+            SettingsCtx ctx{};
+            ctx.context = ctxValue.value();
 
             // update trigger time if present
-            if (isTriggeredTimePresentInTag(tag)) {
-                ctx.time = std::get<uint64_t>(tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey())));
+            if (auto triggerTime = triggeredTimeInTag(tag); triggerTime.has_value()) {
+                ctx.time = triggerTime.value();
             }
             if (ctx.time == 0ULL) {
                 ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
@@ -19201,7 +19201,7 @@ protected:
             const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
 
             std::string contextStr;
-            if (auto it = dataMap.find("context"); it != dataMap.end()) {
+            if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
                 if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                     contextStr = *stringPtr;
                 } else {
@@ -19212,7 +19212,7 @@ protected:
             }
 
             std::uint64_t time = 0;
-            if (auto it = dataMap.find("time"); it != dataMap.end()) {
+            if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
                 if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
                     time = *timePtr;
                 }
@@ -19230,7 +19230,7 @@ protected:
 
         if (message.cmd == Get || message.cmd == Set) {
             const auto& ctx = settings().activeContext();
-            message.data    = {{"context", ctx.context}, {"time", ctx.time}};
+            message.data    = {{gr::tag::CONTEXT.shortKey(), ctx.context}, {gr::tag::CONTEXT_TIME.shortKey(), ctx.time}};
             return message;
         }
 
@@ -19248,7 +19248,7 @@ protected:
         const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
 
         std::string contextStr;
-        if (auto it = dataMap.find("context"); it != dataMap.end()) {
+        if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
             if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                 contextStr = *stringPtr;
             } else {
@@ -19259,7 +19259,7 @@ protected:
         }
 
         std::uint64_t time = 0;
-        if (auto it = dataMap.find("time"); it != dataMap.end()) {
+        if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
             if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
                 time = *timePtr;
             }

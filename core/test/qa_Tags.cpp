@@ -151,7 +151,7 @@ const boost::ut::suite TagPropagation = [] {
     auto runTest = []<auto srcType>(bool verbose = true) {
         gr::Size_t         n_samples = 1024;
         Graph              testGraph;
-        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"signal_name", "tagStream"}, {"verbose_console", true && verbose}};
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true && verbose}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
         src._tags                       = {
             // TODO: allow parameter settings to include maps?!?
@@ -199,7 +199,7 @@ const boost::ut::suite TagPropagation = [] {
         expect(!sinkBulk.log_samples || eq(sinkBulk._samples.size(), n_samples)) << "sinkBulk did not log enough input samples";
         expect(!sinkOne.log_samples || eq(sinkOne._samples.size(), n_samples)) << "sinkOne did not log enough input samples";
 
-        const std::vector<std::string> ignoreKeys = {"sample_rate", "signal_name"};
+        const std::vector<std::string> ignoreKeys = {gr::tag::SIGNAL_RATE.shortKey(), gr::tag::SIGNAL_NAME.shortKey()};
         expect(equal_tag_lists(src._tags, monitorBulk._tags, ignoreKeys)) << "monitorBulk did not receive the required tags";
         expect(equal_tag_lists(src._tags, monitorOne._tags, ignoreKeys)) << "monitorOne did not receive the required tags";
         expect(equal_tag_lists(src._tags, sinkBulk._tags, ignoreKeys)) << "sinkBulk did not receive the required tags";
@@ -213,7 +213,7 @@ const boost::ut::suite TagPropagation = [] {
     "CustomTagHandling"_test = []() {
         gr::Size_t         n_samples = 1024;
         Graph              testGraph;
-        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"signal_name", "tagStream"}, {"verbose_console", true}};
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
         src._tags                       = {
             {0, {{"key", "value@0"}, {"key0", "value@0"}}},          //

@@ -584,7 +584,7 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"sample_rate", 10000.f}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", 0.f}, {"signal_max", static_cast<float>(kSamples - 1)}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {gr::tag::SAMPLE_RATE.shortKey(), 10000.f}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", 0.f}, {"signal_max", static_cast<float>(kSamples - 1)}});
         src._tags     = {{3000, {{"TYPE", "TRIGGER"}}}, {8000, {{"TYPE", "NO_TRIGGER"}}}, {180000, {{"TYPE", "TRIGGER"}}}};
         auto& delay   = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
@@ -892,11 +892,12 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
             return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
-                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
+                                  {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
+                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
         };
 
-        source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
-        source._tags.push_back(genTrigger(800, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
+        source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", ""));
+        source._tags.push_back(genTrigger(800, "CMD_DIAG_TRIGGER1", ""));
 
         auto polling = std::async([] {
             std::shared_ptr<DataSetPoller<float>> poller;
@@ -941,11 +942,12 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
             return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
-                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{{gr::tag::CONTEXT.shortKey(), triggerCtx}}}}};
+                                  {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
+                                  {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
         };
 
-        source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
-        source._tags.push_back(genTrigger(800, "CMD_DIAG_TRIGGER1", "CMD_DIAG_TRIGGER1"));
+        source._tags.push_back(genTrigger(400, "CMD_DIAG_TRIGGER1", ""));
+        source._tags.push_back(genTrigger(800, "CMD_DIAG_TRIGGER1", ""));
 
         std::vector<DataSet<float>> receivedDataSets;
         auto                        callback = [&receivedDataSets](const auto& ds) { receivedDataSets.push_back(ds); };
