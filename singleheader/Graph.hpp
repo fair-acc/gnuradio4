@@ -19971,7 +19971,6 @@ public:
         if constexpr (!useIoThread) {
             const bool blockIsActive = lifecycle::isActive(this->state());
             if (!blockIsActive) {
-                publishEoS();
                 ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);
             }
         }
