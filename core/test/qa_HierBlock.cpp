@@ -230,8 +230,8 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         auto&                 graph = scheduler.graph();
 
         // Basic source and sink
-        auto& source = graph.emplaceBlock<SlowSource<float>>();
-        auto& sink   = graph.emplaceBlock<CountingSink<float>>();
+        [[maybe_unused]] auto& source = graph.emplaceBlock<SlowSource<float>>();
+        [[maybe_unused]] auto& sink   = graph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
         using SubGraphType   = GraphWrapper<DemoSubGraphWithSettings<float>>;

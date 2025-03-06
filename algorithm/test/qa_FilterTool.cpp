@@ -257,9 +257,9 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         constexpr std::array frequencies{3.0, 3.5, 5., 6.5, 7.0};
         const auto           digitalBandPass = iir::designFilter<double>(Type::BANDPASS, {.order = order, .fLow = 4., .fHigh = 6., .fs = fs}, filterDesign);
         for (const auto& frequency : frequencies) {
-            auto         filter       = FilterType(digitalBandPass);
-            const double expectedGain = calculateResponse<Normalised, Magnitude>(frequency / fs, digitalBandPass);
-            double       actualGain   = 0.0;
+            auto                          filter       = FilterType(digitalBandPass);
+            [[maybe_unused]] const double expectedGain = calculateResponse<Normalised, Magnitude>(frequency / fs, digitalBandPass);
+            double                        actualGain   = 0.0;
             for (std::size_t i = 0UZ; i < 10'000; ++i) {
                 double value = filter.processOne(std::sin(2. * std::numbers::pi * frequency / fs * static_cast<double>(i)));
                 if (i > 5'000UZ) { // skip initial transient

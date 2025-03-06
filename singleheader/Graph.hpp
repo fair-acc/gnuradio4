@@ -4128,7 +4128,7 @@ consteval auto fixed_string_from_number_impl() {
     auto   x = N;
     size_t i = buf_len;
     while (x != 0) {
-        ret[--i] = char('0' + (negative ? -1 : 1) * (x % 10));
+        ret[--i] = static_cast<char>('0' + (negative ? -1 : 1) * static_cast<int>(x % 10));
         x /= 10;
     }
     if (negative) {
@@ -8405,7 +8405,14 @@ static_assert(BufferLike<CircularBuffer<int32_t>>);
 #include <chrono>
 #include <complex>
 #include <expected>
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wshorten-64-to-32"
+#endif // error in fmt::chrono for latest clang version/WASM builds
 #include <fmt/chrono.h>
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 #include <fmt/format.h>
 #include <fmt/std.h>
 #include <source_location>
@@ -8821,7 +8828,7 @@ namespace gr {
 namespace time {
 [[nodiscard]] inline std::string getIsoTime() noexcept {
     std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-    return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:06}",               // ms-precision ISO time-format
+    return fmt::format(fmt::runtime("{:%Y-%m-%dT%H:%M:%S}.{:06}"), // ms-precision ISO time-format
         fmt::localtime(std::chrono::system_clock::to_time_t(now)), //
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1'000);
 }
@@ -10582,9 +10589,9 @@ struct Port {
         bool              isConnected = true; // true if Port is connected
         bool              isSync      = true; // true if  Port is Sync
 
-        InputSpan(std::size_t nSamples, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
-            : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples)),               //
-              rawTags(getTags(nSamples, tagReader, reader.position())),                                          //
+        InputSpan(std::size_t nSamples_, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
+            : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples_)),               //
+              rawTags(getTags(nSamples_, tagReader, reader.position())),                                          //
               streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
         InputSpan(const InputSpan&)            = default;
@@ -10665,10 +10672,10 @@ struct Port {
               tags(tagsWriter.template reserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
               streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
-        constexpr OutputSpan(std::size_t nSamples, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
+        constexpr OutputSpan(std::size_t nSamples_, WriterType& streamWriter, TagWriterType& tagsWriter, std::size_t streamOffset, bool connected, bool sync) noexcept //
         requires(spanReservePolicy == WriterSpanReservePolicy::TryReserve)
-            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples)), //
-              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),     //
+            : WriterSpanType<spanReleasePolicy>(streamWriter.template tryReserve<spanReleasePolicy>(nSamples_)), //
+              tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
               streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
         OutputSpan(const OutputSpan&)            = default;

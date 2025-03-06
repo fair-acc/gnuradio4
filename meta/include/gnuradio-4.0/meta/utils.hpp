@@ -380,7 +380,7 @@ consteval auto fixed_string_from_number_impl() {
     auto   x = N;
     size_t i = buf_len;
     while (x != 0) {
-        ret[--i] = char('0' + (negative ? -1 : 1) * (x % 10));
+        ret[--i] = static_cast<char>('0' + (negative ? -1 : 1) * static_cast<int>(x % 10));
         x /= 10;
     }
     if (negative) {

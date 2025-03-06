@@ -709,7 +709,7 @@ private:
         template<typename CallbackFW>
         explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW&& c, const DataSink<T>& parent) : parent_sink(parent), buffer(maxChunkSize), callback{std::forward<CallbackFW>(c)} {}
 
-        explicit ContinuousListener(std::shared_ptr<StreamingPoller<T>> poller, bool doBlock, const DataSink<T>& parent) : parent_sink(parent), block(doBlock), polling_handler{std::move(poller)} {}
+        explicit ContinuousListener(std::shared_ptr<StreamingPoller<T>> poller_, bool doBlock, const DataSink<T>& parent) : parent_sink(parent), block(doBlock), polling_handler{std::move(poller_)} {}
 
         inline void callCallback(std::span<const T> data, std::span<const Tag> tags) {
             if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>) {
@@ -831,7 +831,7 @@ private:
         std::deque<PendingWindow> pending_trigger_windows; // triggers that still didn't receive all their data
 
         template<trigger::Matcher Matcher>
-        explicit TriggerListener(Matcher&& matcher, std::shared_ptr<DataSetPoller<T>> poller, std::size_t pre, std::size_t post, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller), doBlock), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)) {}
+        explicit TriggerListener(Matcher&& matcher, std::shared_ptr<DataSetPoller<T>> poller_, std::size_t pre, std::size_t post, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller_), doBlock), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)) {}
 
         template<typename CallbackFW, trigger::Matcher Matcher>
         explicit TriggerListener(Matcher&& matcher, std::size_t pre, std::size_t post, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)) {}
@@ -890,7 +890,7 @@ private:
         explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize) {}
 
         template<trigger::Matcher Matcher>
-        explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, std::shared_ptr<DataSetPoller<T>> poller, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller), doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize) {}
+        explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, std::shared_ptr<DataSetPoller<T>> poller_, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller_), doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize) {}
 
         void setMetadata(detail::Metadata metadata) override { dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata)); }
 
@@ -951,7 +951,7 @@ private:
         std::deque<PendingSnapshot> pending;
 
         template<trigger::Matcher Matcher>
-        explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, std::shared_ptr<DataSetPoller<T>> poller, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller), doBlock), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)) {}
+        explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, std::shared_ptr<DataSetPoller<T>> poller_, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller_), doBlock), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)) {}
 
         template<typename CallbackFW, trigger::Matcher Matcher>
         explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)) {}

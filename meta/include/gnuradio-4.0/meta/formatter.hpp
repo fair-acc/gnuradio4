@@ -4,7 +4,14 @@
 #include <chrono>
 #include <complex>
 #include <expected>
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wshorten-64-to-32"
+#endif // error in fmt::chrono for latest clang version/WASM builds
 #include <fmt/chrono.h>
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 #include <fmt/format.h>
 #include <fmt/std.h>
 #include <source_location>
@@ -17,7 +24,7 @@ namespace gr {
 namespace time {
 [[nodiscard]] inline std::string getIsoTime() noexcept {
     std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-    return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:06}",               // ms-precision ISO time-format
+    return fmt::format(fmt::runtime("{:%Y-%m-%dT%H:%M:%S}.{:06}"), // ms-precision ISO time-format
         fmt::localtime(std::chrono::system_clock::to_time_t(now)), //
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1'000);
 }
