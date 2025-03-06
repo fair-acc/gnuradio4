@@ -1,30 +1,18 @@
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/Message.hpp>
-#include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
-#include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-#include <magic_enum.hpp>
-#include <magic_enum_utility.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 #include "message_utils.hpp"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
-using namespace gr::message;
-
-namespace gr::testing {
-
-using namespace boost::ut;
-using namespace gr;
-
 const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
     using namespace boost::ut;
     using namespace gr;
+    using namespace gr::testing;
 
     "Edge formatter tests"_test = [] {
         Graph                  graph;
@@ -59,7 +47,15 @@ const boost::ut::suite NonRunningGraphTests = [] {
     using namespace std::string_literals;
     using namespace boost::ut;
     using namespace gr;
+    using namespace gr::testing;
     using enum gr::message::Command;
+
+    [[maybe_unused]] auto registerCopyBlock = gr::registerBlock<gr::testing::Copy, float, double>(gr::globalPluginLoader().registry());
+    expect(fatal(gt(gr::globalPluginLoader().registry().knownBlocks().size(), 0UZ))) << "didn't register any blocks";
+    fmt::println("registered blocks:");
+    for (const auto& blockName : gr::globalPluginLoader().registry().knownBlocks()) {
+        fmt::println("    block: {}", blockName);
+    }
 
     "Block addition tests"_test = [] {
         gr::MsgPortOut toGraph;
@@ -302,6 +298,7 @@ const boost::ut::suite RunningGraphTests = [] {
     using namespace std::string_literals;
     using namespace boost::ut;
     using namespace gr;
+    using namespace gr::testing;
     using enum gr::message::Command;
 
     gr::scheduler::Simple scheduler{gr::Graph()};
@@ -404,7 +401,5 @@ const boost::ut::suite RunningGraphTests = [] {
         expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
     }
 };
-
-} // namespace gr::testing
 
 int main() { /* tests are statically executed */ }

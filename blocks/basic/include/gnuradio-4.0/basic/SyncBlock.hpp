@@ -7,12 +7,15 @@ namespace gr::basic {
 
 using namespace gr;
 
-using SyncBlockDoc = Doc<R""(
+GR_REGISTER_BLOCK(gr::basic::SyncBlock, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
-The SyncBlock synchronizes data streams across multiple inputs.
-It addresses key scenarios including initial time shifts, clock drift, and significant delays.
-The SyncBlock synchronises input samples based on synchronization tags and
-publishes desynchronization tags with information about number of samples that were dropped.
+template<typename T>
+struct SyncBlock : Block<SyncBlock<T>, NoDefaultTagForwarding> {
+    using Description = Doc<R""(@brief SyncBlock synchronises data streams across multiple inputs.
+
+The SyncBlock addresses key scenarios including initial time shifts, clock drift, and significant delays.
+It synchronises input samples based on synchronization tags and publishes desynchronization tags with
+information about number of samples that were dropped.
 
 ### Important Prerequisites
 The sample rate must be the same across all input ports.
@@ -117,8 +120,6 @@ New synchronization occurs with `s8`, prior samples (`s6-s7`) are NOT included t
 Note: We assume that desynchronization should not exceed the buffer size of the SyncBlock; if it does, the samples will be dropped.
 )"">;
 
-template<typename T>
-struct SyncBlock : public gr::Block<SyncBlock<T>, NoDefaultTagForwarding, SyncBlockDoc> {
     std::vector<gr::PortIn<T, gr::Async>> inputs;
     std::vector<gr::PortOut<T>>           outputs;
 

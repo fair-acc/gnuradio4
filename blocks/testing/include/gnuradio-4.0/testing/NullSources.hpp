@@ -8,8 +8,10 @@
 
 namespace gr::testing {
 
+GR_REGISTER_BLOCK(gr::testing::NullSource, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
+
 template<typename T>
-struct NullSource : public gr::Block<NullSource<T>> {
+struct NullSource : Block<NullSource<T>> {
     using Description = Doc<R""(A source block that emits zeros or type-specified default value continuously.
 Used mainly for testing and benchmarking where a consistent and predictable output is essential.
 Ideal for scenarios that require a simple, low-overhead source of consistent values.)"">;
@@ -23,8 +25,10 @@ Ideal for scenarios that require a simple, low-overhead source of consistent val
 
 static_assert(gr::BlockLike<NullSource<float>>);
 
+GR_REGISTER_BLOCK(gr::testing::ConstantSource, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
+
 template<typename T>
-struct ConstantSource : public gr::Block<ConstantSource<T>> {
+struct ConstantSource : Block<ConstantSource<T>> {
     using value_t     = std::conditional_t<std::is_same_v<T, std::string>, std::string, meta::fundamental_base_value_type_t<T>>; // use base-type for types not supported by settings
     using Description = Doc<R""(A source block that emits a constant default value for each output sample.
 This block counts the number of samples emitted and optionally halts after reaching a specified maximum.
@@ -51,8 +55,10 @@ Commonly used for testing and simulations where consistent output and finite exe
 
 static_assert(gr::BlockLike<ConstantSource<float>>);
 
+GR_REGISTER_BLOCK(gr::testing::SlowSource, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
+
 template<typename T>
-struct SlowSource : public gr::Block<SlowSource<T>> {
+struct SlowSource : Block<SlowSource<T>> {
     using value_t     = std::conditional_t<std::is_same_v<T, std::string>, std::string, meta::fundamental_base_value_type_t<T>>; // use base-type for types not supported by settings
     using Description = Doc<R""(A source block that emits a constant default value every n miliseconds)"">;
 
@@ -78,11 +84,11 @@ struct SlowSource : public gr::Block<SlowSource<T>> {
     }
 };
 
-static_assert(gr::BlockLike<SlowSource<float>>);
+GR_REGISTER_BLOCK(gr::testing::CountingSource, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
 
 template<typename T>
 requires(std::is_arithmetic_v<T>)
-struct CountingSource : public gr::Block<CountingSource<T>> {
+struct CountingSource : Block<CountingSource<T>> {
     using Description = Doc<R""(A source block that emits an increasing sequence starting from a specified default value.
 This block counts the number of samples emitted and optionally halts after reaching a specified maximum.
 Commonly used for testing and simulations where consistent output and finite execution are required.)"">;
@@ -106,10 +112,10 @@ Commonly used for testing and simulations where consistent output and finite exe
     }
 };
 
-static_assert(gr::BlockLike<CountingSource<float>>);
+GR_REGISTER_BLOCK(gr::testing::Copy, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
 
 template<typename T>
-struct Copy : public gr::Block<Copy<T>> {
+struct Copy : Block<Copy<T>> {
     using Description = Doc<R""(A block that passes/copies input samples directly to its output without modification.
 Commonly used used to isolate parts of a flowgraph, manage buffer sizes, or simply duplicate the signal path.)"">;
 
@@ -124,10 +130,10 @@ Commonly used used to isolate parts of a flowgraph, manage buffer sizes, or simp
     }
 };
 
-static_assert(gr::BlockLike<Copy<float>>);
+GR_REGISTER_BLOCK(gr::testing::HeadBlock, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
 
 template<typename T>
-struct HeadBlock : public gr::Block<HeadBlock<T>> { // TODO confirm naming: while known in GR3, the semantic name seems to be odd. (Maybe add an alias?!)
+struct HeadBlock : Block<HeadBlock<T>> { // TODO confirm naming: while known in GR3, the semantic name seems to be odd. (Maybe add an alias?!)
     using Description = Doc<R""(Limits the number of output samples by copying the first N items from the input to the output and then signaling completion.
 Commonly used to control data flow in systems where precise sample counts are critical, such as in file recording or when executing flow graphs without a GUI.)"">;
 
@@ -150,10 +156,10 @@ Commonly used to control data flow in systems where precise sample counts are cr
     }
 };
 
-static_assert(gr::BlockLike<HeadBlock<float>>);
+GR_REGISTER_BLOCK(gr::testing::NullSink, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
 
 template<typename T>
-struct NullSink : public gr::Block<NullSink<T>> {
+struct NullSink : Block<NullSink<T>> {
     using Description = Doc<R""(A sink block that consumes and discards all input samples without producing any output.
 Used primarily for absorbing data in a flow graph where output processing is unnecessary.
 Commonly used for testing, performance benchmarking, and in scenarios where signal flow needs to be terminated without external effects.)"">;
@@ -165,10 +171,10 @@ Commonly used for testing, performance benchmarking, and in scenarios where sign
     void processOne(V) const noexcept {}
 };
 
-static_assert(gr::BlockLike<NullSink<float>>);
+GR_REGISTER_BLOCK(gr::testing::CountingSink, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
 
 template<typename T>
-struct CountingSink : public gr::Block<CountingSink<T>> {
+struct CountingSink : Block<CountingSink<T>> {
     using Description = Doc<R""(A sink block that consumes and discards a fixed number of input samples, after which it signals the flow graph to halt.
 This block is used to control execution in systems requiring precise input processing without data output, similar to how a 'HeadBlock' manages output samples.
 Commonly used for testing scenarios and signal termination where output is unnecessary but precise input count control is needed.)"">;
@@ -190,11 +196,6 @@ Commonly used for testing scenarios and signal termination where output is unnec
     }
 };
 
-static_assert(gr::BlockLike<CountingSink<float>>);
-
 } // namespace gr::testing
-
-const inline auto registerNullSources = gr::registerBlock<gr::testing::NullSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::ConstantSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::CountingSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::Copy, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::HeadBlock, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::NullSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry()) |
-                                        gr::registerBlock<gr::testing::CountingSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_NULLSOURCES_HPP

@@ -10,11 +10,13 @@
 
 namespace gr::basic {
 
+GR_REGISTER_BLOCK("gr::basic::StreamToDataSet", gr::basic::StreamFilterImpl, (<T>, false), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ]);
+GR_REGISTER_BLOCK("gr::basic::StreamFilter", gr::basic::StreamFilterImpl, (<T>, true), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ]);
+
 template<typename T, bool streamOut = false, trigger::Matcher TMatcher = trigger::BasicTriggerNameCtxMatcher::Filter>
 requires(std::is_arithmetic_v<T> || gr::meta::complex_like<T>)
 struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>> {
-    using Description = Doc<R"(
-@brief Converts stream of input data into chunked discrete DataSet<T> based on tag-based pre- / post-conditions
+    using Description = Doc<R"(@brief Converts stream of input data into chunked discrete DataSet<T> based on tag-based pre- / post-conditions
 Notes:
 * n_pre must be less than the size of the output port's CircularBuffer. The block waits until all n_pre samples can be written to the output in a single iteration.
 * In stream-to-stream mode, the 'stop' Tag is not included in the output stream.
@@ -358,10 +360,5 @@ template<typename T>
 using StreamFilter = StreamFilterImpl<T, true>;
 
 } // namespace gr::basic
-
-static_assert(gr::HasProcessBulkFunction<gr::basic::StreamFilterImpl<float>>);
-
-inline static auto registerStreamFilters = gr::registerBlock<"gr::basic::StreamToDataSet", gr::basic::StreamToDataSet, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry()) //
-                                           | gr::registerBlock<"gr::basic::StreamFilter", gr::basic::StreamFilter, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_STREAMTODATASET_HPP

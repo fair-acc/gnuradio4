@@ -16,6 +16,11 @@
 #include <gnuradio-4.0/soapy/Soapy.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
+namespace gr::blocks::soapy {
+static_assert(std::is_constructible_v<SoapyBlock<std::complex<float>>, gr::property_map>, "SoapyBlock not default constructible w/ property_map");
+static_assert(std::is_constructible_v<SoapySimpleSource<std::complex<float>>, gr::property_map>, "SoapyBlock not default constructible w/ property_map");
+} // namespace gr::blocks::soapy
+
 const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
     using namespace boost::ut;
     using namespace gr;

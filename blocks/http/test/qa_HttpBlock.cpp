@@ -13,6 +13,8 @@
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>
 
+static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
+
 template<typename T>
 class FixedSource : public gr::Block<FixedSource<T>> {
     using super_t = gr::Block<FixedSource<T>>;

@@ -29,8 +29,11 @@ template<typename T, gr::meta::fixed_string description = "", typename... Argume
 using A = gr::Annotated<T, description, Arguments...>;
 using namespace gr;
 
+GR_REGISTER_BLOCK("gr::basic::SystemClockSource", gr::basic::ClockSource < std::uint8_t, true, std::chrono::system_clock, true)
+GR_REGISTER_BLOCK("gr::basic::SystemClockSourceNonBlocking", gr::basic::ClockSource < std::uint8_t, false, std::chrono::system_clock, true)
+
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
-struct ClockSource : public gr::Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>> {
+struct ClockSource : Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>> {
     using Description = Doc<R""(A source block that generates clock signals with specified timing intervals.
 This block can generate periodic signals based on a system clock and allows for customization of the sample rate and chunk size.
 The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with a single 'context' keys at specified times after the block started.)"">;
@@ -256,7 +259,6 @@ template<typename T>
 using DefaultClockSource = ClockSource<T, true, std::chrono::system_clock, true>;
 } // namespace gr::basic
 
-inline auto registerClockSource = gr::registerBlock<"gr::basic::DefaultClockSource", gr::basic::DefaultClockSource, std::uint8_t>(gr::globalBlockRegistry());
 static_assert(gr::HasProcessBulkFunction<gr::basic::ClockSource<std::uint8_t>>);
 
 #endif // GNURADIO_CLOCK_SOURCE_HPP
