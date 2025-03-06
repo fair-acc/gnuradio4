@@ -14,6 +14,9 @@
 
 namespace gr::electrical {
 
+GR_REGISTER_BLOCK("gr::electrical::ThreePhasePowerMetrics", gr::basic::StreamFilterImpl, (<T>, 3UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::electrical::SinglePhasePowerMetrics", gr::basic::StreamFilterImpl, (<T>, 1UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+
 template<typename T, std::size_t nPhases>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
 struct PowerMetrics : Block<PowerMetrics<T, nPhases>, Resampling<100U, 1UZ, false>> {
@@ -62,8 +65,8 @@ applies low-pass filters to calculate average values, and outputs decimated resu
 
         const auto hp_filter_init = [&](auto) { //
             if (high_pass > 0.f) {
-                return FilterImpl(iir::designFilter<ValueType>(Type::HIGHPASS,                                  //
-                    FilterParameters{.order = 2UZ, .fHigh = high_pass, .fs = static_cast<double>(sample_rate)}, //
+                return FilterImpl(iir::designFilter<ValueType>(Type::HIGHPASS,                                                       //
+                    FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(high_pass), .fs = static_cast<double>(sample_rate)}, //
                     iir::Design::BUTTERWORTH));
             }
             return FilterImpl();
@@ -130,15 +133,12 @@ template<typename T>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
 using ThreePhasePowerMetrics = PowerMetrics<T, 3UZ>;
 
-static_assert(BlockLike<ThreePhasePowerMetrics<float>>, "block constraints not satisfied");
-static_assert(BlockLike<ThreePhasePowerMetrics<UncertainValue<float>>>, "block constraints not satisfied");
-static_assert(gr::HasProcessBulkFunction<ThreePhasePowerMetrics<float>>);
-static_assert(gr::HasProcessBulkFunction<ThreePhasePowerMetrics<UncertainValue<float>>>);
-
 template<typename T>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
 using SinglePhasePowerMetrics = PowerMetrics<T, 1UZ>;
-static_assert(BlockLike<SinglePhasePowerMetrics<float>>, "block constraints not satisfied");
+
+GR_REGISTER_BLOCK("gr::electrical::SinglePhasePowerFactorCalculator", gr::electrical::PowerFactor, ([T], 1UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::electrical::ThreePhasePowerFactorCalculator", gr::electrical::PowerFactor, ([T], 3UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
 template<typename T, std::size_t nPhases>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
@@ -185,6 +185,9 @@ using SinglePhasePowerFactorCalculator = PowerFactor<T, 1>;
 
 template<typename T>
 using ThreePhasePowerFactorCalculator = PowerFactor<T, 3>;
+
+GR_REGISTER_BLOCK("gr::electrical::TwoPhaseSystemUnbalanceCalculator", gr::electrical::SystemUnbalance, ([T], 2UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::electrical::ThreePhaseSystemUnbalanceCalculator", gr::electrical::SystemUnbalance, ([T], 3UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
 template<typename T, std::size_t nPhases>
 requires((std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>) && (nPhases > 1)) // unbalance calculation requires at least two phases
@@ -259,12 +262,5 @@ template<typename T>
 using ThreePhaseSystemUnbalanceCalculator = SystemUnbalance<T, 3>;
 
 } // namespace gr::electrical
-
-inline static auto registerPowerMetrics = gr::registerBlock<"gr::electrical::ThreePhasePowerMetrics", gr::electrical::ThreePhasePowerMetrics, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())                         //
-                                          + gr::registerBlock<"gr::electrical::SinglePhasePowerMetrics", gr::electrical::SinglePhasePowerMetrics, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())                     //
-                                          + gr::registerBlock<"gr::electrical::SinglePhasePowerFactorCalculator", gr::electrical::SinglePhasePowerFactorCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())   //
-                                          + gr::registerBlock<"gr::electrical::ThreePhasePowerFactorCalculator", gr::electrical::ThreePhasePowerFactorCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())     //
-                                          + gr::registerBlock<"gr::electrical::TwoPhaseSystemUnbalanceCalculator", gr::electrical::TwoPhaseSystemUnbalanceCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry()) //
-                                          + gr::registerBlock<"gr::electrical::ThreePhaseSystemUnbalanceCalculator", gr::electrical::ThreePhaseSystemUnbalanceCalculator, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry());
 
 #endif // POWERESTIMATORS_HPP

@@ -14,6 +14,8 @@
 
 namespace gr::testing {
 
+GR_REGISTER_BLOCK(gr::testing::ImChartMonitor, [ float, double, gr::DataSet<float>, gr::DataSet<double> ])
+
 template<typename T>
 requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
 struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawable<UICategory::ChartPane, "console">> {
@@ -92,7 +94,5 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 };
 
 } // namespace gr::testing
-
-inline const auto registerImChartMonitor = gr::registerBlock<gr::testing::ImChartMonitor, float, double, gr::DataSet<float>, gr::DataSet<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_IMCHARTMONITOR_HPP

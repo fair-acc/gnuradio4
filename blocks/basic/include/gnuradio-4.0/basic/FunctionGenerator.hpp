@@ -74,9 +74,11 @@ template<typename T>
 
 } // namespace function_generator
 
+GR_REGISTER_BLOCK(gr::basic::FunctionGenerator, [ float, double ])
+
 template<typename T>
 requires(std::floating_point<T>)
-struct FunctionGenerator : public gr::Block<FunctionGenerator<T>, BlockingIO<true>> {
+struct FunctionGenerator : Block<FunctionGenerator<T>, BlockingIO<true>> {
     using Description = Doc<R""(@brief The `FunctionGenerator` class generates a variety of functions and their combinations.
 It supports multiple function types, including Constant, Linear Ramp, Parabolic Ramp, Cubic Spline, and Impulse Response.
 Each function type is configurable with specific parameters, enabling precise tailoring to meet the user's requirements.
@@ -230,7 +232,5 @@ private:
 };
 
 } // namespace gr::basic
-
-auto registerFunctionGenerator = gr::registerBlock<gr::basic::FunctionGenerator, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_FUNCTION_GENERATOR_HPP

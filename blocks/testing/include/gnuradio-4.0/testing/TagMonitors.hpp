@@ -84,8 +84,10 @@ inline constexpr bool equal_tag_lists(const std::vector<Tag>& tags1, const std::
     return true;
 }
 
+GR_REGISTER_BLOCK("gr::testing::TagSource", gr::testing::TagSource, ([T], ProcessFunction::USE_PROCESS_ONE), [ float, double ])
+
 template<typename T, ProcessFunction UseProcessVariant = ProcessFunction::USE_PROCESS_BULK>
-struct TagSource : public Block<TagSource<T, UseProcessVariant>> {
+struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     PortOut<T> out;
 
     // settings
@@ -231,6 +233,8 @@ private:
     [[nodiscard]] bool isInfinite() const { return n_samples_max == 0U; }
 };
 
+GR_REGISTER_BLOCK("gr::testing::TagMonitor", gr::testing::TagMonitor, ([T], ProcessFunction::USE_PROCESS_ONE), [ float, double ])
+
 template<typename T, ProcessFunction UseProcessVariant>
 struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     PortIn<T>  in;
@@ -303,6 +307,8 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
         return work::Status::OK;
     }
 };
+
+GR_REGISTER_BLOCK("gr::testing::TagSink", gr::testing::TagSink, ([T], ProcessFunction::USE_PROCESS_ONE), [ float, double ])
 
 template<typename T, ProcessFunction UseProcessVariant>
 struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
@@ -383,9 +389,5 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 };
 
 } // namespace gr::testing
-
-auto registerTagSource  = gr::registerBlock<gr::testing::TagSource, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::TagSource, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
-auto registerTagMonitor = gr::registerBlock<gr::testing::TagMonitor, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::TagMonitor, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
-auto registerTagSink    = gr::registerBlock<gr::testing::TagSink, gr::testing::ProcessFunction::USE_PROCESS_ONE, float, double>(gr::globalBlockRegistry()) | gr::registerBlock<gr::testing::TagSink, gr::testing::ProcessFunction::USE_PROCESS_BULK, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_TAGMONITORS_HPP

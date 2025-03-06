@@ -8,8 +8,10 @@
 
 namespace gr::testing {
 
+GR_REGISTER_BLOCK(gr::testing::Delay, [float double])
+
 template<typename T>
-struct Delay : public gr::Block<Delay<T>> {
+struct Delay : Block<Delay<T>> {
     using clock = std::chrono::steady_clock;
 
     PortIn<T>  in;
@@ -45,7 +47,5 @@ struct Delay : public gr::Block<Delay<T>> {
 };
 
 } // namespace gr::testing
-
-auto registerTestingDelay = gr::registerBlock<gr::testing::Delay, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_TESTING_DELAY_HPP

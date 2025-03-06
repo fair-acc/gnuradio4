@@ -12,6 +12,8 @@
 
 namespace gr::blocks::math {
 
+GR_REGISTER_BLOCK(gr::blocks::math::Rotator, [ std::complex<float>, std::complex<double> ])
+
 template<pmtv::Complex T>
 struct Rotator : gr::Block<Rotator<T>> {
     using value_type  = typename T::value_type;
@@ -60,7 +62,5 @@ given 'sample_rate' in Hz (N.B sample_rate is normalised to '1' by default).
 };
 
 } // namespace gr::blocks::math
-
-inline static auto registerRotator = gr::registerBlock<gr::blocks::math::Rotator, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_ROTATOR_HPP

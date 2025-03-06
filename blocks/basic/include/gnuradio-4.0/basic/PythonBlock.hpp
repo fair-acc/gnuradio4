@@ -14,9 +14,11 @@ namespace gr::basic {
 
 using namespace gr;
 
+GR_REGISTER_BLOCK(gr::basic::PythonBlock, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
+
 template<typename T>
 requires std::is_arithmetic_v<T> /* || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>> */
-struct PythonBlock : public Block<PythonBlock<T>> {
+struct PythonBlock : Block<PythonBlock<T>> {
     using Description = Doc<R""(@brief PythonBlock enabling Python scripts to be executed in GR flow-graphs.
 
 This Block encapsulates Python-based scripts that can be executed within the GR flow-graph.

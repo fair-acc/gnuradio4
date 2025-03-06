@@ -62,6 +62,8 @@ struct vector_access_rtc : public exprtk::vector_access_runtime_check {
 
 } // namespace detail
 
+GR_REGISTER_BLOCK(gr::blocks::math::ExpressionSISO, [ float, double ]);
+
 template<typename T>
 requires std::floating_point<T>
 struct ExpressionSISO : Block<ExpressionSISO<T>> {
@@ -136,7 +138,8 @@ For full syntax, conditionals, loops, and advanced features:
         return _out;
     }
 };
-static_assert(std::is_constructible_v<ExpressionSISO<float>, property_map>, "Block type ExpressionSISO must be constructible from property_map");
+
+GR_REGISTER_BLOCK(gr::blocks::math::ExpressionDISO, [ float, double ]);
 
 template<typename T>
 requires std::floating_point<T>
@@ -217,7 +220,8 @@ For full syntax, conditionals, loops, and advanced features:
         return _out;
     }
 };
-static_assert(std::is_constructible_v<ExpressionDISO<float>, property_map>, "Block type ExpressionDISO must be constructible from property_map");
+
+GR_REGISTER_BLOCK(gr::blocks::math::ExpressionBulk, [ float, double ]);
 
 template<typename T>
 requires std::floating_point<T>
@@ -341,12 +345,7 @@ For full syntax, conditionals, loops, and advanced features:
         return work::Status::OK;
     }
 };
-static_assert(std::is_constructible_v<ExpressionBulk<float>, property_map>, "Block type ExpressionBulk must be constructible from property_map");
 
 } // namespace gr::blocks::math
-
-const inline static auto registerConstMath = gr::registerBlock<gr::blocks::math::ExpressionSISO, float, double>(gr::globalBlockRegistry())   //
-                                             + gr::registerBlock<gr::blocks::math::ExpressionDISO, float, double>(gr::globalBlockRegistry()) //
-                                             + gr::registerBlock<gr::blocks::math::ExpressionBulk, float, double>(gr::globalBlockRegistry());
 
 #endif // EXPRESSIONBLOCKS_HPP

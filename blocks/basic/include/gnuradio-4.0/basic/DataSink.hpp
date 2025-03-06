@@ -407,6 +407,7 @@ template<typename T>
 
 } // namespace detail
 
+GR_REGISTER_BLOCK(gr::basic::DataSink, [ float, double ])
 /**
  * @brief generic data sink for exporting streams to non-GR C++ APIs.
  *
@@ -993,6 +994,7 @@ private:
     };
 };
 
+GR_REGISTER_BLOCK(gr::basic::DataSetSink, [ float, double ])
 /**
  * @brief data sink for exporting data set streams to non-GR C++ APIs.
  *
@@ -1152,8 +1154,5 @@ private:
 };
 
 } // namespace gr::basic
-
-auto registerDataSink    = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
-auto registerDataSetSink = gr::registerBlock<gr::basic::DataSetSink, float, double>(gr::globalBlockRegistry());
 
 #endif

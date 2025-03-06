@@ -61,8 +61,10 @@ inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::st
 
 enum class Mode { overwrite, append, multi };
 
+GR_REGISTER_BLOCK(gr::blocks::fileio::BasicFileSink, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+
 template<typename T>
-struct BasicFileSink : public gr::Block<BasicFileSink<T>> {
+struct BasicFileSink : Block<BasicFileSink<T>> {
     using Description = Doc<R""(A sink block for writing a stream to a binary file.
 The file can be played back using a 'BasicFileSource' or read by any program that supports binary files (e.g. Python, C, C++, MATLAB).
 For complex types, the binary file contains [float, double]s in IQIQIQ order. No metadata is included with the binary data.)
@@ -167,8 +169,10 @@ private:
     }
 };
 
+GR_REGISTER_BLOCK(gr::blocks::fileio::BasicFileSource, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+
 template<typename T>
-struct BasicFileSource : public gr::Block<BasicFileSource<T>> {
+struct BasicFileSource : Block<BasicFileSource<T>> {
     using Description = Doc<R""(A source block for reading a binary file and outputting the data.
 This source is the counterpart to 'BasicFileSink'.
 For complex types, the binary file contains [float, double]s in IQIQIQ order. No metadata is expected in the binary data.
@@ -295,8 +299,5 @@ private:
 };
 
 } // namespace gr::blocks::fileio
-
-const inline auto registerBasicFileIo = gr::registerBlock<gr::blocks::fileio::BasicFileSink, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry()) //
-                                        | gr::registerBlock<gr::blocks::fileio::BasicFileSource, uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>(gr::globalBlockRegistry());
 
 #endif // BASICFILEIO_HPP

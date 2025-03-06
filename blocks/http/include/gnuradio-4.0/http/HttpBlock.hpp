@@ -42,9 +42,10 @@ enum class RequestType : char {
     POST      = 3,
 };
 
+GR_REGISTER_BLOCK(gr::http::HttpBlock, [ float, double ])
+
 template<typename T>
-class HttpBlock : public gr::Block<HttpBlock<T>, BlockingIO<false>> {
-public:
+struct HttpBlock : Block<HttpBlock<T>, BlockingIO<false>> {
     using Description = Doc<R""(
 The HttpBlock allows to use the responses from HTTP APIs (e.g. REST APIs) as the value for this block's output port.
 The block can be used either on-demand to do single requests, or can use long polling to subscribe to an event stream.
@@ -54,7 +55,17 @@ The result is provided on a single output port as a map with the following keys:
 - mime-type: The mime-type of the response
 )"">;
 
-private:
+    using Block<HttpBlock<T>, BlockingIO<false>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
+
+    PortOut<pmtv::map_t> out;
+
+    std::string url;
+    std::string endpoint = "/";
+    std::string type     = std::string(magic_enum::enum_name(gr::http::RequestType::GET));
+    std::string parameters; // x-www-form-urlencoded encoded POST parameters
+
+    GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
+
     // used for queuing GET responses for the consumer
     std::queue<pmtv::map_t> _backlog;
     std::mutex              _backlog_mutex;
@@ -63,6 +74,7 @@ private:
     std::atomic_size_t           _pendingRequests = 0;
     std::atomic_bool             _shutdownThread  = false;
     std::binary_semaphore        _ready{0};
+    gr::http::RequestType        _type = gr::http::RequestType::GET;
 
 #ifndef __EMSCRIPTEN__
     std::unique_ptr<httplib::Client> _client;
@@ -225,20 +237,6 @@ private:
 
     void stopThread() { _thread.reset(); }
 
-    gr::http::RequestType _type = gr::http::RequestType::GET;
-
-public:
-    using Block<HttpBlock<T>, BlockingIO<false>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
-
-    PortOut<pmtv::map_t> out;
-
-    std::string url;
-    std::string endpoint = "/";
-    std::string type     = std::string(magic_enum::enum_name(_type));
-    std::string parameters; // x-www-form-urlencoded encoded POST parameters
-
-    GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
-
     ~HttpBlock() { stopThread(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings) {
@@ -296,9 +294,6 @@ public:
     }
 };
 
-static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
-
 } // namespace gr::http
-auto registerHttpBlock = gr::registerBlock<gr::http::HttpBlock, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_HTTP_BLOCK_HPP

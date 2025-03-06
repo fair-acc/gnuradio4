@@ -12,6 +12,15 @@
 #include <gnuradio-4.0/electrical/PowerEstimators.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
+namespace gr::electrical {
+static_assert(BlockLike<ThreePhasePowerMetrics<float>>, "block constraints not satisfied");
+static_assert(BlockLike<ThreePhasePowerMetrics<UncertainValue<float>>>, "block constraints not satisfied");
+static_assert(gr::HasProcessBulkFunction<ThreePhasePowerMetrics<float>>);
+static_assert(gr::HasProcessBulkFunction<ThreePhasePowerMetrics<UncertainValue<float>>>);
+
+static_assert(BlockLike<SinglePhasePowerMetrics<float>>, "block constraints not satisfied");
+} // namespace gr::electrical
+
 const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
     using namespace boost::ut;
     using namespace gr::electrical;
