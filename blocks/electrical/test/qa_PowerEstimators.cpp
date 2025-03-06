@@ -25,6 +25,8 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
     constexpr static float                I_rms          = 10.0f;
     constexpr static float                V_peak         = V_rms * std::numbers::sqrt2_v<float>;
     constexpr static float                I_peak         = I_rms * std::numbers::sqrt2_v<float>;
+    constexpr static float                V_offset       = +1.0f; // should be suppressed by input AC-coupling
+    constexpr static float                I_offset       = -1.0f; // should be suppressed by input AC-coupling
     constexpr static std::array<float, 3> phaseShift     = {+0.0f, -2.0f * std::numbers::pi_v<float> / 3.0f, +2.0f * std::numbers::pi_v<float> / 3.0f};
     constexpr static std::array<float, 3> phaseOffset{0.1f, 0.2f, 0.3f};
 
@@ -55,8 +57,8 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
 
                 for (std::size_t n = 0; n < nSamplesIn; ++n) {
                     const float t       = static_cast<float>(n) / sample_rate;
-                    float       voltage = V_peak * (std::sin(2.0f * std::numbers::pi_v<float> * freq * t + voltage_phase) + noise(rng));
-                    float       current = I_peak * (std::sin(2.0f * std::numbers::pi_v<float> * freq * t + current_phase) + noise(rng));
+                    float       voltage = V_offset + V_peak * (std::sin(2.0f * std::numbers::pi_v<float> * freq * t + voltage_phase) + noise(rng));
+                    float       current = I_offset + I_peak * (std::sin(2.0f * std::numbers::pi_v<float> * freq * t + current_phase) + noise(rng));
 
                     if constexpr (std::is_same_v<T, float>) {
                         voltageIn[phase][n] = voltage;
@@ -71,7 +73,7 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
             // prepare actual unit-test
             const std::string         testName = fmt::format("{}", gr::meta::type_name<PowerMetrics<T, kNPhases>>());
             PowerMetrics<T, kNPhases> block;
-            block.decim = sample_rate / output_rate;
+            block.decimate = sample_rate / output_rate;
             block.initFilters();
 
             // prepare input spans
@@ -87,7 +89,7 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
             std::span<std::span<const T>> spanInCurrent(currentSpans);
 
             // prepare output vectors
-            std::size_t                 nSamplesOut = nSamplesIn / block.decim;
+            std::size_t                 nSamplesOut = nSamplesIn / block.decimate;
             std::vector<std::vector<T>> activePowerVec(kNPhases, std::vector<T>(nSamplesOut));
             std::vector<std::vector<T>> reactivePowerVec(kNPhases, std::vector<T>(nSamplesOut));
             std::vector<std::vector<T>> apparentPowerVec(kNPhases, std::vector<T>(nSamplesOut));
