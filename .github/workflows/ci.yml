@@ -90,11 +90,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install ccache
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ccache
-
       - name: Cache ccache
         uses: actions/cache@v4
         with:
