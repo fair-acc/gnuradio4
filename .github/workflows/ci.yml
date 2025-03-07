@@ -67,6 +67,8 @@ jobs:
       cancel-in-progress: true
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
+    env:
+      CCACHE_DIR: /home/runner/work/ccache
     strategy:
       fail-fast: false
       matrix:
@@ -93,7 +95,7 @@ jobs:
       - name: Cache ccache
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
+          path: /home/runner/work/ccache
           key: ${{ runner.os }}-ccache-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-ccache-
