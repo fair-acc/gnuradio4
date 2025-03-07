@@ -67,6 +67,8 @@ jobs:
       cancel-in-progress: true
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
+    env:
+      CCACHE_DIR: /home/runner/work/ccache
     strategy:
       fail-fast: false
       matrix:
@@ -90,15 +92,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install ccache
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ccache
-
       - name: Cache ccache
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
+          path: /home/runner/work/ccache
           key: ${{ runner.os }}-ccache-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-ccache-
@@ -124,7 +121,7 @@ jobs:
           CXX: "${{ matrix.compiler.cxx }}"
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=$(( ${{ matrix.cmake-build-type == 'Debug' && matrix.compiler.cc == 'gcc-14' }} )) -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.cmake-build-type == 'Debug' && matrix.compiler.cc == 'gcc-14' }} ${{ matrix.compiler.cmake_flags }}
 
       - name: Configure CMake Emscripten
         if: matrix.compiler.cmake_wrapper == 'emcmake'
@@ -140,8 +137,6 @@ jobs:
             -DCMAKE_COLOR_DIAGNOSTICS=ON \
             -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             ${{ matrix.compiler.cmake_flags }}
 
       - name: Build
