@@ -23,6 +23,9 @@ inline bool equalWithinOnePercent(const std::vector<double>& a, const std::vecto
 }
 } // namespace detail
 
+GR_REGISTER_BLOCK("gr::blocks::soapy::SoapySimpleSource", gr::blocks::soapy::SoapySimpleSource, ([T], 1UZ), [ uint8_t, int16_t, std::complex<float> ])
+GR_REGISTER_BLOCK("gr::blocks::soapy::SoapyDualSimpleSource", gr::blocks::soapy::SoapySimpleSource, ([T], 2UZ), [ uint8_t, int16_t, std::complex<float> ])
+
 template<typename T, std::size_t nPorts = std::dynamic_extent>
 struct SoapyBlock : public Block<SoapyBlock<T, nPorts> /*, BlockingIO<false>*/> {
     using Description = Doc<R""(A Soapy source block that interfaces with SDR hardware using the SoapySDR library.
@@ -271,12 +274,6 @@ using SoapySimpleSource = SoapyBlock<T, 1UZ>;
 template<typename T>
 using SoapyDualSimpleSource = SoapyBlock<T, 2UZ>;
 
-static_assert(std::is_constructible_v<SoapyBlock<std::complex<float>>, gr::property_map>, "SoapyBlock not default constructible w/ property_map");
-static_assert(std::is_constructible_v<SoapySimpleSource<std::complex<float>>, gr::property_map>, "SoapyBlock not default constructible w/ property_map");
-
 } // namespace gr::blocks::soapy
-
-const inline auto registerSoapy = gr::registerBlock<"gr::blocks::soapy::SoapySimpleSource", gr::blocks::soapy::SoapySimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry()) //
-                                  | gr::registerBlock<"gr::blocks::soapy::SoapyDualSimpleSource", gr::blocks::soapy::SoapyDualSimpleSource, uint8_t, int16_t, std::complex<float>>(gr::globalBlockRegistry());
 
 #endif // SOAPY_HPP

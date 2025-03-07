@@ -27,11 +27,13 @@ struct OutputDataSet<T> {
     using type = DataSet<typename T::value_type>;
 };
 
+GR_REGISTER_BLOCK("gr::blocks::FFT", gr::blocks::FFT, [ float, double ])
+GR_REGISTER_BLOCK("gr::blocks::FFTw", gr::blocks::FFT, ([T], typename OutputDataSet<[T]>::type >, gr::algorithm::FFTw), [ float, double ])
+
 template<typename T, typename U = OutputDataSet<T>::type, template<typename, typename> typename FourierAlgorithm = gr::algorithm::FFT>
 requires((gr::meta::complex_like<T> || std::floating_point<T>) && (std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>))
-struct FFT : public Block<FFT<T, U, FourierAlgorithm>, Resampling<1024LU, 1LU>> {
-    using Description = Doc<R""(
-@brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
+struct FFT : Block<FFT<T, U, FourierAlgorithm>, Resampling<1024LU, 1LU>> {
+    using Description = Doc<R""(@brief Performs a (Fast) Fourier Transform (FFT) on the given input data.
 
 The FFT block is capable of performing Fourier Transform computations on real or complex data,
 and populates a DataSet with the results, including real, imaginary, magnitude, and phase
@@ -214,7 +216,5 @@ template<typename T>
 using DefaultFFT = FFT<T, typename OutputDataSet<T>::type, gr::algorithm::FFT>;
 
 } // namespace gr::blocks::fft
-
-auto registerFFT = gr::registerBlock<"gr::blocks::fft::DefaultFFT", gr::blocks::fft::DefaultFFT, float, double>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_FFT_HPP

@@ -21070,6 +21070,28 @@ struct fmt::formatter<gr::Edge> {
 // #include "BlockModel.hpp"
 
 
+/**
+ *  namespace gr {
+ *  template<typename T> struct AlgoImpl1 {};
+ *  template<typename T> struct AlgoImpl2 {};
+ *
+ *  // register block with arbitrary NTTPs (here: 3UZ) and expand T in [float,double], U in [short, int, long, long long]
+ *  GR_REGISTER_BLOCK(gr::basic::BlockN, ([T], [U], 3UZ), [ float, double ], [ short, int, long, long long ])
+ *  // register block with arbitrary NTTPs (here: 4UZ) and expand T for [short], U for [short] only
+ *  GR_REGISTER_BLOCK("CustomBlockNameN", gr::basic::BlockN, ([T], [U], 4UZ, gr::basic::AlgoImpl2<[T]>), [ short ], [ short ])
+ *
+ *  template<typename T, typename U, std::size_t N, typename Alog = AlgoImpl1<T>>
+ *  struct BlockN : public gr::IBlock { ... };
+ *
+ *  } // namespace gr::basic
+ *
+ * other macro variants options:
+ * GR_REGISTER_BLOCK("MyBlockName", gr::basic::Block1, ([T], [U]), [ float, double ], [int])
+ * GR_REGISTER_BLOCK(gr::basic::Block0)
+ * GR_REGISTER_BLOCK("blockN.hpp", gr::basic::BlockN, ([T],[U],3UZ,SomeAlgo<[T]>), [ short, int], [double])
+ */
+#define GR_REGISTER_BLOCK(...) /* Marker macro for parse_registrations */
+
 namespace gr {
 
 using namespace std::string_literals;

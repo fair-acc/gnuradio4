@@ -7,6 +7,12 @@
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+namespace gr::blocks::math {
+static_assert(std::is_constructible_v<ExpressionSISO<float>, property_map>, "Block type ExpressionSISO must be constructible from property_map");
+static_assert(std::is_constructible_v<ExpressionDISO<float>, property_map>, "Block type ExpressionDISO must be constructible from property_map");
+static_assert(std::is_constructible_v<ExpressionBulk<float>, property_map>, "Block type ExpressionBulk must be constructible from property_map");
+} // namespace gr::blocks::math
+
 const boost::ut::suite<"basic expression block tests"> basicMath = [] {
     using namespace boost::ut;
     using namespace gr;

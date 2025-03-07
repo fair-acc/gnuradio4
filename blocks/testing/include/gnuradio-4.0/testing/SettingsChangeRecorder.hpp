@@ -52,12 +52,12 @@ void printChanges(const property_map& oldMap, const property_map& newMap) noexce
 };
 } // namespace utils
 
+GR_REGISTER_BLOCK(gr::testing::SettingsChangeRecorder, [ int32_t, float, double, gr::DataSetLike<T>, gr::DataSet<T> ])
+
 template<typename T>
 // struct SettingsChangeRecorder : public Block<SettingsChangeRecorder<T>, BlockingIO<true>, SupportedTypes<float, double>> { // TODO: reenable BlockingIO
-struct SettingsChangeRecorder : public Block<SettingsChangeRecorder<T>, SupportedTypes<float, double>> {
-    using Description = Doc<R""(
-some test doc documentation
-)"">;
+struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
+    using Description = Doc<R""(some test doc documentation)"">;
     PortIn<T>  in{};
     PortOut<T> out{};
 
@@ -101,8 +101,5 @@ some test doc documentation
     }
 };
 
-static_assert(BlockLike<SettingsChangeRecorder<int>>);
-static_assert(BlockLike<SettingsChangeRecorder<float>>);
-static_assert(BlockLike<SettingsChangeRecorder<double>>);
 } // namespace gr::testing
-#endif // include guard
+#endif // GNURADIO_TESTING_SETTINGS_CHANGE_RECORDER_H

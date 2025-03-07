@@ -20,6 +20,9 @@
 
 namespace gr::filter {
 
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorTimeDomain", gr::filter::FrequencyEstimatorTimeDomain, [ float, double ])
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorTimeDomainDecimating", gr::filter::FrequencyEstimatorTimeDomain, ([T], Resampling<10U>), [ float, double ])
+
 template<typename T, typename... Args>
 requires std::floating_point<T>
 struct FrequencyEstimatorTimeDomain : Block<FrequencyEstimatorTimeDomain<T, Args...>, Args...> {
@@ -172,6 +175,9 @@ private:
 
 template<typename T>
 using FrequencyEstimatorTimeDomainDecimating = FrequencyEstimatorTimeDomain<T, Resampling<10U>>;
+
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorFrequencyDomain", gr::filter::FrequencyEstimatorFrequencyDomain, [ float, double ])
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorFrequencyDomainDecimating", gr::filter::FrequencyEstimatorFrequencyDomain, ([T], Resampling<10U>), [ float, double ])
 
 template<typename T, typename... Args>
 requires std::floating_point<T>
@@ -346,10 +352,5 @@ template<typename T>
 using FrequencyEstimatorFrequencyDomainDecimating = FrequencyEstimatorFrequencyDomain<T, Resampling<1U>, Stride<0U>>;
 
 } // namespace gr::filter
-
-inline static auto registerFrequencyEstimators = gr::registerBlock<gr::filter::FrequencyEstimatorTimeDomain, float, double>(gr::globalBlockRegistry())             //
-                                                 + gr::registerBlock<gr::filter::FrequencyEstimatorTimeDomainDecimating, float, double>(gr::globalBlockRegistry()) //
-                                                 + gr::registerBlock<gr::filter::FrequencyEstimatorFrequencyDomain, float, double>(gr::globalBlockRegistry())      //
-                                                 + gr::registerBlock<gr::filter::FrequencyEstimatorFrequencyDomainDecimating, float, double>(gr::globalBlockRegistry());
 
 #endif // FREQUENCY_ESTIMATOR_HPP

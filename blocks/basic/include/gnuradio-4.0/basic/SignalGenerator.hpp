@@ -26,10 +26,11 @@ constexpr Type parse(std::string_view name) {
 
 } // namespace signal_generator
 
+GR_REGISTER_BLOCK(gr::basic::SignalGenerator, [ float, double ])
+
 template<std::floating_point T>
-struct SignalGenerator : public gr::Block<SignalGenerator<T>, BlockingIO<true>> {
-    using Description = Doc<R""(
-@brief The SignalGenerator class generates various types of signal waveforms, including sine, cosine, square, constant, saw, and triangle signals.
+struct SignalGenerator : Block<SignalGenerator<T>, BlockingIO<true>> {
+    using Description = Doc<R""(@brief The SignalGenerator class generates various types of signal waveforms, including sine, cosine, square, constant, saw, and triangle signals.
 Users can set parameters such as amplitude, frequency, offset, and phase for the desired waveform.
 Note that not all parameters are supported for all signals.
 
@@ -116,7 +117,5 @@ s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
 };
 
 } // namespace gr::basic
-
-auto registerSignalGenerator = gr::registerBlock<gr::basic::SignalGenerator, double, float>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_SIGNAL_GENERATOR_HPP

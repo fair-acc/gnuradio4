@@ -18,11 +18,12 @@ namespace gr::filter {
 
 using namespace gr;
 
+GR_REGISTER_BLOCK(gr::filter::fir_filter, [ float, double ])
+
 template<typename T>
 requires std::floating_point<T>
 struct fir_filter : Block<fir_filter<T>> {
-    using Description = Doc<R""(
-@brief Finite Impulse Response (FIR) filter class
+    using Description = Doc<R""(@brief Finite Impulse Response (FIR) filter class
 
 The transfer function of an FIR filter is given by:
 H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
@@ -53,6 +54,11 @@ enum class IIRForm {
     DF_I_TRANSPOSED,
     DF_II_TRANSPOSED,
 };
+
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I), [ float, double ])
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II), [ float, double ])
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_I_TRANSPOSED), [ float, double ])
+GR_REGISTER_BLOCK(gr::filter::iir_filter, ([T], gr::filter::IIRForm::DF_II_TRANSPOSED), [ float, double ])
 
 template<typename T, IIRForm form = std::is_floating_point_v<T> ? IIRForm::DF_II : IIRForm::DF_I>
 requires std::floating_point<T>
@@ -115,6 +121,9 @@ a are the feedback coefficients
         }
     }
 };
+
+GR_REGISTER_BLOCK(gr::filter::BasicFilter, ([T]), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK(gr::filter::BasicDecimatingFilter, ([T], Resampling<1UZ, 1UZ, false>), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
 template<typename T, typename... Args>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
@@ -221,6 +230,8 @@ using BasicFilter = BasicFilterProto<T>;
 template<typename T>
 using BasicDecimatingFilter = BasicFilterProto<T, Resampling<1UZ, 1UZ, false>>;
 
+GR_REGISTER_BLOCK(gr::filter::Decimator, ([T], gr::filter::IIRForm::DF_I_TRANSPOSED), [ uint8_t, int8_t, uint16_t, int16_t, uint32_t, int32_t, uint64_t, int64_t, float, double, std::complex<float>, std::complex<double>, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+
 template<typename T>
 struct Decimator : Block<Decimator<T>, Resampling<1UZ, 1UZ, false>> {
     using TParent     = Block<Decimator<T>, Resampling<1UZ, 1UZ, false>>;
@@ -254,13 +265,5 @@ aliasing and sub-sampling related effects.
 };
 
 } // namespace gr::filter
-
-inline static auto registerFilter = gr::registerBlock<gr::filter::fir_filter, double, float>(gr::globalBlockRegistry())                                                                                                                                                                      //
-                                    + gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_I, double, float>(gr::globalBlockRegistry())                                                                                                                                         //
-                                    + gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_II, double, float>(gr::globalBlockRegistry())                                                                                                                                        //
-                                    + gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_I_TRANSPOSED, double, float>(gr::globalBlockRegistry()) + gr::registerBlock<gr::filter::iir_filter, gr::filter::IIRForm::DF_II_TRANSPOSED, double, float>(gr::globalBlockRegistry()) //
-                                    + gr::registerBlock<gr::filter::BasicFilter, double, float, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())                                                                                                            //
-                                    + gr::registerBlock<gr::filter::BasicDecimatingFilter, double, float, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry())                                                                                                  //
-                                    + gr::registerBlock<gr::filter::Decimator, uint8_t, int8_t, uint16_t, int16_t, uint32_t, int32_t, uint64_t, int64_t, float, double, std::complex<float>, std::complex<double>, gr::UncertainValue<float>, gr::UncertainValue<double>>(gr::globalBlockRegistry());
 
 #endif // GNURADIO_TIME_DOMAIN_FILTER_HPP

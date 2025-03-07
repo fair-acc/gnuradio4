@@ -4,8 +4,15 @@
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/Selector.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
-#include <gnuradio-4.0/basic/clock_source.hpp>
 #include <gnuradio-4.0/basic/common_blocks.hpp>
+
+auto registerMultiply          = gr::registerBlock<builtin_multiply, double, float>(gr::globalBlockRegistry());
+auto registerCounter           = gr::registerBlock<builtin_counter, double, float>(gr::globalBlockRegistry());
+auto registerDataSink          = gr::registerBlock<gr::basic::DataSink, float, double>(gr::globalBlockRegistry());
+auto registerDataSetSink       = gr::registerBlock<gr::basic::DataSetSink, float, double>(gr::globalBlockRegistry());
+auto registerFunctionGenerator = gr::registerBlock<gr::basic::FunctionGenerator, float, double>(gr::globalBlockRegistry());
+auto registerSelector          = gr::registerBlock<gr::basic::Selector, float, double>(gr::globalBlockRegistry());
+auto registerSignalGenerator   = gr::registerBlock<gr::basic::SignalGenerator, double, float>(gr::globalBlockRegistry());
 
 const boost::ut::suite KnownBlockTests = [] {
     using namespace boost::ut;
