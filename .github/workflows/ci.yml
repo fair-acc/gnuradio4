@@ -67,6 +67,8 @@ jobs:
       cancel-in-progress: true
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
+    env:
+      CCACHE_DIR: /home/runner/work/ccache
     strategy:
       fail-fast: false
       matrix:
@@ -77,7 +79,7 @@ jobs:
           - cc: gcc-13
             cxx: g++-13
             cmake_flags: "-DADDRESS_SANITIZER=OFF"
-          - cc: clang-18,
+          - cc: clang-18
             cxx: clang++-18
             cmake_flags: "-DCMAKE_LINKER=/usr/bin/clang-18"
           - cmake_wrapper: emcmake
@@ -90,7 +92,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Cache
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/work/ccache
+          key: ${{ runner.os }}-ccache-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=12G
+          ccache --show-stats
+
+      - name: Cache fetchContent
         uses: actions/cache@v4
         env:
           cache-name: cache-fetchContent-cache
@@ -106,16 +121,25 @@ jobs:
           CXX: "${{ matrix.compiler.cxx }}"
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.cmake-build-type == 'Debug' && matrix.compiler.cc == 'gcc-14' }} ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_COVERAGE=$([ "${{ matrix.compiler.cc }}" = "gcc-14" ] && [ "${{ matrix.cmake-build-type }}" = "Debug" ] && echo ON || echo OFF)
 
       - name: Configure CMake Emscripten
         if: matrix.compiler.cmake_wrapper == 'emcmake'
         shell: bash
         run: |
-          export SYSTEM_NODE=`which node` # use system node instead of old version distributed with emsdk for threading support
+          export SYSTEM_NODE=`which node` # use system node instead of old version distributed with emsdk
           $EMSDK_HOME/emsdk activate $EMSDK_VERSION
           source $EMSDK_HOME/emsdk_env.sh
-          ${{ matrix.compiler.cmake_wrapper }} cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} ${{ matrix.compiler.cmake_flags }}
+          # ccache + emscripten can work, but you may need to pass:
+          # -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          # If you see issues, you can remove these from Emscripten config:
+          ${{ matrix.compiler.cmake_wrapper }} cmake -S . -B ../build \
+            -DCMAKE_COLOR_DIAGNOSTICS=ON \
+            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} \
+            ${{ matrix.compiler.cmake_flags }}
 
       - name: Build
         shell: bash
@@ -159,3 +183,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: sonar-scanner
+
+      - name: Show final ccache stats
+        run: ccache --show-stats
