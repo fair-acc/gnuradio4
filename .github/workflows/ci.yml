@@ -121,7 +121,7 @@ jobs:
           CXX: "${{ matrix.compiler.cxx }}"
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DENABLE_COVERAGE=${{ matrix.cmake-build-type == 'Debug' && matrix.compiler.cc == 'gcc-14' }} ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_COVERAGE=$([ "${{ matrix.compiler.cc }}" = "gcc-14" ] && [ "${{ matrix.cmake-build-type }}" = "Debug" ] && echo ON || echo OFF)
 
       - name: Configure CMake Emscripten
         if: matrix.compiler.cmake_wrapper == 'emcmake'
@@ -136,6 +136,8 @@ jobs:
           ${{ matrix.compiler.cmake_wrapper }} cmake -S . -B ../build \
             -DCMAKE_COLOR_DIAGNOSTICS=ON \
             -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} \
             ${{ matrix.compiler.cmake_flags }}
 
