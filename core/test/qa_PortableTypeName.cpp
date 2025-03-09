@@ -40,6 +40,7 @@ const boost::ut::suite<"Portable Type names"> typeNameTests = [] {
         expect(eq(gr::meta::type_name<std::complex<float>>(), "complex<float32>"sv));
         expect(eq(gr::meta::type_name<std::complex<double>>(), "complex<float64>"sv));
         expect(eq(gr::meta::type_name<std::string>(), "string"sv));
+        expect(eq(gr::meta::type_name<std::chrono::system_clock>(), "std::chrono::system_clock"sv));
         expect(eq(gr::meta::type_name<NoBlock<uint8_t>>(), "gr::testing::NoBlock<uint8>"sv));
         expect(eq(gr::meta::type_name<NoBlock<uint16_t>>(), "gr::testing::NoBlock<uint16>"sv));
         expect(eq(gr::meta::type_name<NoBlock<uint32_t>>(), "gr::testing::NoBlock<uint32>"sv));
@@ -53,6 +54,7 @@ const boost::ut::suite<"Portable Type names"> typeNameTests = [] {
         expect(eq(gr::meta::type_name<NoBlock<std::complex<float>>>(), "gr::testing::NoBlock<complex<float32>>"sv));
         expect(eq(gr::meta::type_name<NoBlock<std::complex<double>>>(), "gr::testing::NoBlock<complex<float64>>"sv));
         expect(eq(gr::meta::type_name<NoBlock<std::string>>(), "gr::testing::NoBlock<string>"sv));
+        expect(eq(gr::meta::type_name<NoBlock<std::chrono::system_clock>>(), "gr::testing::NoBlock<std::chrono::system_clock>"sv));
         expect(eq(gr::meta::type_name<NoBlock<Packet<float>>>(), "gr::testing::NoBlock<gr::Packet<float32>>"sv));
         expect(eq(gr::meta::type_name<NoBlock<Packet<double>>>(), "gr::testing::NoBlock<gr::Packet<float64>>"sv));
         expect(eq(gr::meta::type_name<NoBlock<Tensor<float>>>(), "gr::testing::NoBlock<gr::Tensor<float32>>"sv));
