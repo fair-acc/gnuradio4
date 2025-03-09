@@ -982,6 +982,8 @@ private:
         [[nodiscard]] virtual std::size_t nReaders() const   = 0;
         [[nodiscard]] virtual std::size_t nWriters() const   = 0;
         [[nodiscard]] virtual std::size_t bufferSize() const = 0;
+
+        [[nodiscard]] virtual std::string typeName() const = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1067,6 +1069,8 @@ private:
                 return FAILED;
             }
         }
+
+        [[nodiscard]] std::string typeName() const override { return meta::type_name<T>(); }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -1115,6 +1119,8 @@ public:
     [[nodiscard]] PortDirection direction() const noexcept { return _accessor->direction(); }
 
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
+
+    [[nodiscard]] std::string typeName() const noexcept { return _accessor->typeName(); }
 
     [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 
