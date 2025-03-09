@@ -1070,7 +1070,7 @@ private:
             }
         }
 
-        [[nodiscard]] std::string typeName() const override { return meta::type_name<T>(); }
+        [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
