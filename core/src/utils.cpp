@@ -2,6 +2,8 @@
 
 #include <fmt/format.h>
 
+#include <regex>
+
 std::string gr::meta::detail::makePortableTypeName(std::string_view name) {
     auto trimmed = [](std::string_view view) {
         while (view.front() == ' ') {
@@ -20,7 +22,7 @@ std::string gr::meta::detail::makePortableTypeName(std::string_view name) {
         {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
         {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
         {local_type_name<std::string>(), "string"s},                                                                                                                                              //
-        {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s}                                                             //
+        {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s},                                                            //
     }};
 
     const auto it = std::ranges::find_if(typeMapping, [&](const auto& pair) { return pair.first == name; });
@@ -28,16 +30,21 @@ std::string gr::meta::detail::makePortableTypeName(std::string_view name) {
         return it->second;
     }
 
+    auto stripStdPrivates = [](std::string_view _name) {
+        static const std::regex stdPrivate("::_[A-Z_][^:]*");
+        return std::regex_replace(std::string(_name), stdPrivate, std::string());
+    };
+
     std::string_view view   = name;
     auto             cursor = view.find("<");
     if (cursor == std::string_view::npos) {
-        return std::string{name};
+        return stripStdPrivates(std::string{name});
     }
     auto base = view.substr(0, cursor);
 
     view.remove_prefix(cursor + 1);
     if (!view.ends_with(">")) {
-        return std::string{name};
+        return stripStdPrivates(std::string{name});
     }
     view.remove_suffix(1);
     while (view.back() == ' ') {
