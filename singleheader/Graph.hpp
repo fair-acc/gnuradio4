@@ -11118,6 +11118,8 @@ private:
         [[nodiscard]] virtual std::size_t nReaders() const   = 0;
         [[nodiscard]] virtual std::size_t nWriters() const   = 0;
         [[nodiscard]] virtual std::size_t bufferSize() const = 0;
+
+        [[nodiscard]] virtual std::string typeName() const = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -11203,6 +11205,8 @@ private:
                 return FAILED;
             }
         }
+
+        [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -11251,6 +11255,8 @@ public:
     [[nodiscard]] PortDirection direction() const noexcept { return _accessor->direction(); }
 
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
+
+    [[nodiscard]] std::string typeName() const noexcept { return _accessor->typeName(); }
 
     [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 
@@ -21971,14 +21977,14 @@ public:
                     [](const gr::DynamicPort& port) {
                         return property_map{
                             {"name"s, std::string(port.name)},
-                            {"type"s, port.defaultValue().type().name()}
+                            {"type"s, port.typeName()}
                         };
                     },
                     [](const BlockModel::NamedPortCollection& namedCollection) {
                         return property_map{
                             {"name"s, std::string(namedCollection.name)},
                             {"size"s, namedCollection.ports.size()},
-                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].defaultValue().type().name()) }
+                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()) }
                         };
                     }},
                 portOrCollection);
@@ -22156,7 +22162,7 @@ public:
         auto& sourcePortRef      = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
         auto& destinationPortRef = (*destinationBlockIt)->dynamicInputPort(destinationPort);
 
-        if (sourcePortRef.defaultValue().type() != destinationPortRef.defaultValue().type()) {
+        if (sourcePortRef.typeName() != destinationPortRef.typeName()) {
             throw gr::exception(fmt::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
@@ -22301,7 +22307,7 @@ public:
             auto& sourcePort      = edge._sourceBlock->dynamicOutputPort(edge._sourcePortDefinition);
             auto& destinationPort = edge._destinationBlock->dynamicInputPort(edge._destinationPortDefinition);
 
-            if (sourcePort.defaultValue().type().name() != destinationPort.defaultValue().type().name()) {
+            if (sourcePort.typeName() != destinationPort.typeName()) {
                 edge._state = Edge::EdgeState::IncompatiblePorts;
             } else {
                 const bool hasConnectedEdges = std::ranges::any_of(_edges, [&](const Edge& e) { return edge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected; });

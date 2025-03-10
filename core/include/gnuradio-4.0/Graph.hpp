@@ -442,14 +442,14 @@ public:
                     [](const gr::DynamicPort& port) {
                         return property_map{
                             {"name"s, std::string(port.name)},
-                            {"type"s, port.defaultValue().type().name()}
+                            {"type"s, port.typeName()}
                         };
                     },
                     [](const BlockModel::NamedPortCollection& namedCollection) {
                         return property_map{
                             {"name"s, std::string(namedCollection.name)},
                             {"size"s, namedCollection.ports.size()},
-                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].defaultValue().type().name()) }
+                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()) }
                         };
                     }},
                 portOrCollection);
@@ -627,7 +627,7 @@ public:
         auto& sourcePortRef      = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
         auto& destinationPortRef = (*destinationBlockIt)->dynamicInputPort(destinationPort);
 
-        if (sourcePortRef.defaultValue().type() != destinationPortRef.defaultValue().type()) {
+        if (sourcePortRef.typeName() != destinationPortRef.typeName()) {
             throw gr::exception(fmt::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
@@ -772,7 +772,7 @@ public:
             auto& sourcePort      = edge._sourceBlock->dynamicOutputPort(edge._sourcePortDefinition);
             auto& destinationPort = edge._destinationBlock->dynamicInputPort(edge._destinationPortDefinition);
 
-            if (sourcePort.defaultValue().type().name() != destinationPort.defaultValue().type().name()) {
+            if (sourcePort.typeName() != destinationPort.typeName()) {
                 edge._state = Edge::EdgeState::IncompatiblePorts;
             } else {
                 const bool hasConnectedEdges = std::ranges::any_of(_edges, [&](const Edge& e) { return edge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected; });
