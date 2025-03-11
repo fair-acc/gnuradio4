@@ -9,7 +9,7 @@
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/YamlPmt.hpp>
-#include <gnuradio-4.0/basic/common_blocks.hpp>
+#include <gnuradio-4.0/basic/CommonBlocks.hpp>
 
 #include <boost/ut.hpp>
 
