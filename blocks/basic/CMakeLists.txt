@@ -1,7 +1,7 @@
 add_library(
   gr-basic
   INTERFACE
-  include/gnuradio-4.0/basic/clock_source.hpp
+  include/gnuradio-4.0/basic/ClockSource.hpp
   include/gnuradio-4.0/basic/common_blocks.hpp
   include/gnuradio-4.0/basic/ConverterBlocks.hpp
   include/gnuradio-4.0/basic/DataSink.hpp
