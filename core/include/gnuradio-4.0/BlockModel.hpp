@@ -358,7 +358,7 @@ public:
      * @brief change Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
      * See enum description for details.
      */
-    [[nodiscard]] virtual std::expected<void, Error> changeState(lifecycle::State newState) noexcept = 0;
+    [[nodiscard]] virtual std::expected<void, Error> changeStateTo(lifecycle::State newState) noexcept = 0;
 
     /**
      * @brief Block state (N.B. IDLE, INITIALISED, RUNNING, REQUESTED_STOP, REQUESTED_PAUSE, STOPPED, PAUSED, ERROR)
@@ -537,7 +537,7 @@ public:
 
     [[nodiscard]] constexpr bool isBlocking() const noexcept override { return blockRef().isBlocking(); }
 
-    [[nodiscard]] std::expected<void, Error> changeState(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
+    [[nodiscard]] std::expected<void, Error> changeStateTo(lifecycle::State newState) noexcept override { return blockRef().changeStateTo(newState); }
     [[nodiscard]] lifecycle::State           state() const noexcept override { return blockRef().state(); }
     [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
     void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
