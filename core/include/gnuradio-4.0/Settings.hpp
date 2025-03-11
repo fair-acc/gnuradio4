@@ -871,6 +871,8 @@ public:
                 }
             }
 
+            updateActiveParametersImpl();
+
             if (_stagedParameters.contains(gr::tag::STORE_DEFAULTS)) {
                 storeDefaults();
             }
