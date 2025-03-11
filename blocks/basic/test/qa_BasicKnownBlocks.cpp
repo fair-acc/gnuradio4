@@ -1,10 +1,10 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/basic/CommonBlocks.hpp>
 #include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/Selector.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
-#include <gnuradio-4.0/basic/common_blocks.hpp>
 
 auto registerMultiply          = gr::registerBlock<builtin_multiply, double, float>(gr::globalBlockRegistry());
 auto registerCounter           = gr::registerBlock<builtin_counter, double, float>(gr::globalBlockRegistry());

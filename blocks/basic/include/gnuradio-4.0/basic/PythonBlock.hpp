@@ -367,12 +367,22 @@ DEFINE_PYTHON_TYPE_FUNCTIONS_AND_METHODS(float)
 
 template<typename T>
 inline PyModuleDef* myBlockPythonDefinitions(void) {
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#ifndef __clang__
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
+#endif
     static std::string  pyBlockName    = gr::python::sanitizedPythonBlockName<gr::basic::PythonBlock<T>>();
     static PyMethodDef* pyBlockMethods = blockMethods<T>();
 
     constexpr auto            blockDescription = static_cast<std::string_view>(gr::basic::PythonBlock<T>::Description::value);
     static struct PyModuleDef myBlockModule    = {.m_base = PyModuleDef_HEAD_INIT, .m_name = pyBlockName.c_str(), .m_doc = blockDescription.data(), .m_size = -1, .m_methods = pyBlockMethods, .m_slots = nullptr, .m_traverse = nullptr, .m_clear = nullptr, .m_free = nullptr};
     return &myBlockModule;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 }
 
 #endif // GNURADIO_PYTHONBLOCK_HPP

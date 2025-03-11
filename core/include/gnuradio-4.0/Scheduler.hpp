@@ -272,7 +272,7 @@ protected:
     }
 
     void reset() {
-        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeState(lifecycle::INITIALISED)); });
+        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
     }
 
@@ -286,7 +286,7 @@ protected:
 
         std::lock_guard lock(_jobListsMutex);
         forAllUnmanagedBlocks([this](auto& block) { //
-            this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeState(lifecycle::RUNNING));
+            this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
         });
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
@@ -390,9 +390,9 @@ protected:
 
     void stop() {
         forAllUnmanagedBlocks([this](auto& block) {
-            this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeState(lifecycle::State::REQUESTED_STOP));
+            this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeState(lifecycle::State::STOPPED));
+                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::STOPPED));
             }
         });
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
@@ -401,9 +401,9 @@ protected:
 
     void pause() {
         forAllUnmanagedBlocks([this](auto& block) {
-            this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeState(lifecycle::State::REQUESTED_PAUSE));
+            this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_PAUSE));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeState(lifecycle::State::PAUSED));
+                this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::PAUSED));
             }
         });
         this->emitErrorMessageIfAny("pause() -> LifecycleState", this->changeStateTo(lifecycle::State::PAUSED));
@@ -414,7 +414,7 @@ protected:
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
-        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeState(lifecycle::RUNNING)); });
+        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
     }
 };
 
