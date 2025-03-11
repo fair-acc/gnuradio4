@@ -4,7 +4,7 @@
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/basic/common_blocks.hpp>
+#include <gnuradio-4.0/basic/CommonBlocks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite DynamicBlocktests = [] {
