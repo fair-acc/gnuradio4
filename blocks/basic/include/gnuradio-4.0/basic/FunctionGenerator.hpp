@@ -165,19 +165,27 @@ The parameters will automatically update when a Tag containing the 'context' fie
     function_generator::SignalType _signalType = function_generator::parse<function_generator::SignalType>(signal_type);
     T                              _timeTick   = T(1.) / static_cast<T>(sample_rate);
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) {
-        if (new_settings.contains(function_generator::toString(function_generator::signal_type))) {
+    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
+        if (newSettings.contains(function_generator::toString(function_generator::signal_type))) {
             if (signal_trigger.value.empty()) {
                 _currentTime = T(0.);
-            } else if (new_settings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
-                std::string newTrigger = std::get<std::string>(new_settings.at(gr::tag::TRIGGER_NAME.shortKey()));
+                _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
+            } else if (newSettings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
+                std::string newTrigger = std::get<std::string>(newSettings.at(gr::tag::TRIGGER_NAME.shortKey()));
                 if (newTrigger == signal_trigger.value) {
                     _currentTime = T(0.);
+                    _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
                 } else {
-                    // trigger does not match required signal_trigger
+                    // trigger does not match required signal_trigger -- revert signal_type and others to previous ones
+                    signal_type    = function_generator::toString(_signalType);
+                    start_value    = std::get<T>(oldSettings.at("start_value"));
+                    final_value    = std::get<T>(oldSettings.at("final_value"));
+                    duration       = std::get<T>(oldSettings.at("duration"));
+                    round_off_time = std::get<T>(oldSettings.at("round_off_time"));
+                    impulse_time0  = std::get<T>(oldSettings.at("impulse_time0"));
+                    impulse_time1  = std::get<T>(oldSettings.at("impulse_time1"));
                 }
             }
-            _signalType = function_generator::parse<function_generator::SignalType>(signal_type);
         }
         _timeTick = T(1.) / static_cast<T>(sample_rate);
     }
