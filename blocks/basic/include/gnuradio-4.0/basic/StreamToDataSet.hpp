@@ -282,7 +282,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
             if (!_tempDataSets.empty() && !_accState.front().isActive) {
                 auto& ds = _tempDataSets.front();
                 assert(!ds.extents.empty());
-                ds.extents[1] = static_cast<std::int32_t>(ds.signal_values.size());
+                ds.extents[0UZ] = static_cast<std::int32_t>(ds.signal_values.size());
                 if (!ds.signal_values.empty()) { // TODO: do we need to publish empty  DataSet at all, empty DataSet can occur when n_max is set.
                     gr::dataset::updateMinMax(ds);
                 }
@@ -336,7 +336,6 @@ private:
         dataSet.axis_names.emplace_back("time");
         dataSet.axis_units.emplace_back("s");
         dataSet.axis_values.resize(1UZ);
-        dataSet.extents.emplace_back(1); // 1-dim data
         dataSet.extents.emplace_back(0); // size of 1-dim data
 
         dataSet.signal_names.emplace_back(signal_name);

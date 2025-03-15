@@ -57,7 +57,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
         }
     }
 
-    work::Status draw(const property_map& config = {}) noexcept {
+    work::Status draw(const property_map& config = {}, std::source_location location = std::source_location::current()) noexcept {
         [[maybe_unused]] const work::Status status = this->invokeWork(); // calls work(...) -> processOne(...) (all in the same thread as this 'draw()'
 
         if constexpr (std::is_arithmetic_v<T>) {
@@ -86,7 +86,7 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
             if (_historyBufferY.empty()) {
                 return status;
             }
-            gr::dataset::draw(_historyBufferY[0], {.reset_view = config.contains("reset_view") ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP});
+            gr::dataset::draw(_historyBufferY[0], {.reset_view = config.contains("reset_view") ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP}, std::numeric_limits<std::size_t>::max(), location);
         }
 
         return status;

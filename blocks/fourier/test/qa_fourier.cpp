@@ -1,12 +1,13 @@
 #include <numbers>
 
-#include <boost/ut.hpp>
-
-#include <fmt/format.h>
-
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetEstimators.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetHelper.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetMath.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
@@ -16,64 +17,17 @@
 #include <gnuradio-4.0/fourier/fft.hpp>
 
 template<typename T>
-std::vector<T> generateSinSample(std::size_t N, double sample_rate, double frequency, double amplitude) {
+std::vector<T> generateSineSample(std::size_t N, float sample_rate, float frequency, float amplitude) {
     std::vector<T> signal(N);
     for (std::size_t i = 0; i < N; i++) {
-        if constexpr (gr::meta::complex_like<T>) {
-            signal[i] = {static_cast<typename T::value_type>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sample_rate)), 0.};
-        } else {
-            signal[i] = static_cast<T>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sample_rate));
+        if constexpr (gr::meta::complex_like<T>) { // generate complex-valued sine wave -> should appear above 0 Hz (no negative component)
+            float phase = 2.f * std::numbers::pi_v<float> * frequency * static_cast<float>(i) / sample_rate;
+            signal[i]   = {static_cast<typename T::value_type>(amplitude * std::sin(phase)), static_cast<typename T::value_type>(-amplitude * std::cos(phase))};
+        } else { // generate real-valued sine wave -> should appear above 0 Hz
+            signal[i] = static_cast<T>(amplitude * std::sin(2.f * std::numbers::pi_v<float> * frequency * static_cast<float>(i) / sample_rate));
         }
     }
     return signal;
-}
-
-template<typename T, typename U = T>
-bool equalVectors(const std::vector<T>& v1, const std::vector<U>& v2, double tolerance = std::is_same_v<T, double> ? 1.e-5 : 1e-4) {
-    if (v1.size() != v2.size()) {
-        return false;
-    }
-    if constexpr (gr::meta::complex_like<T>) {
-        return std::equal(v1.begin(), v1.end(), v2.begin(), [&tolerance](const auto& l, const auto& r) { return std::abs(l.real() - r.real()) < static_cast<typename T::value_type>(tolerance) && std::abs(l.imag() - r.imag()) < static_cast<typename T::value_type>(tolerance); });
-    } else {
-        return std::equal(v1.begin(), v1.end(), v2.begin(), [&tolerance](const auto& l, const auto& r) { return std::abs(static_cast<double>(l) - static_cast<double>(r)) < tolerance; });
-    }
-}
-
-template<typename T, typename U>
-void equalDataset(const gr::blocks::fft::FFT<T, gr::DataSet<U>>& fftBlock, const gr::DataSet<U>& ds1, float sample_rate) {
-    using namespace boost::ut;
-    using namespace boost::ut::reflection;
-
-    const U tolerance = U(0.0001);
-
-    const auto N    = fftBlock._magnitudeSpectrum.size();
-    auto const freq = static_cast<U>(sample_rate) / static_cast<U>(fftBlock.fftSize);
-    expect(ge(ds1.signal_values.size(), N)) << fmt::format("<{}> DataSet signal length {} vs. magnitude size {}", type_name<T>(), ds1.signal_values.size(), N);
-    if (N == fftBlock.fftSize) { // complex input
-        expect(approx(ds1.signal_values[0], -(static_cast<U>(N) / U(2.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
-        expect(approx(ds1.signal_values[N - 1], (static_cast<U>(N) / U(2.f) - U(1.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
-    } else { // real input
-        expect(approx(ds1.signal_values[0], 0 * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
-        expect(approx(ds1.signal_values[N - 1], (static_cast<U>(N) - U(1.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
-    };
-    bool       isEqualFFTOut = true;
-    const auto NSize         = static_cast<std::size_t>(N);
-    for (std::size_t i = 0U; i < NSize; i++) {
-        if (std::abs(ds1.signal_values[i + NSize] - static_cast<U>(fftBlock._outData[i].real())) > tolerance || std::abs(ds1.signal_values[i + 2U * NSize] - static_cast<U>(fftBlock._outData[i].imag())) > tolerance) {
-            isEqualFFTOut = false;
-            break;
-        }
-    }
-    expect(eq(isEqualFFTOut, true)) << fmt::format("<{}> equal DataSet FFT output", type_name<T>());
-    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(3U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N)), fftBlock._magnitudeSpectrum)) << fmt::format("<{}> equal DataSet magnitude", type_name<T>());
-    expect(equalVectors<U>(std::vector(ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(4U * N), ds1.signal_values.begin() + static_cast<std::ptrdiff_t>(5U * N)), fftBlock._phaseSpectrum)) << fmt::format("<{}> equal DataSet phase", type_name<T>());
-
-    for (std::size_t i = 0U; i < 5; i++) {
-        const auto mm = std::minmax_element(std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N)), std::next(ds1.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N)));
-        expect(approx(*mm.first, ds1.signal_ranges[i].min, tolerance));
-        expect(approx(*mm.second, ds1.signal_ranges[i].max, tolerance));
-    }
 }
 
 template<typename TInput, typename TOutput>
@@ -98,32 +52,70 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         TestTypes<float, DataSet<double>>, TestTypes<double, DataSet<float>>>;
 
     "FFT processBulk tests"_test = []<typename T>() {
-        using InType  = T::InType;
-        using OutType = T::OutType;
+        using InType    = T::InType;
+        using OutType   = T::OutType;
+        using ValueType = typename OutType::value_type;
 
-        constexpr gr::Size_t N{16};
+        constexpr gr::Size_t N{256};
         constexpr float      sample_rate{1.f};
-        FFT<InType, OutType> fftBlock({{"fftSize", N}, {"sample_rate", sample_rate}});
+        constexpr float      testFrequency{0.1f * sample_rate};
+        FFT<InType, OutType> fftBlock({{"fftSize", N}, {"sample_rate", sample_rate}, {"outputInDb", true}});
         fftBlock.init(fftBlock.progress, fftBlock.ioThreadPool);
 
         expect(eq(fftBlock.algorithm, gr::meta::type_name<algorithm::FFT<InType, std::complex<typename OutType::value_type>>>()));
 
-        std::vector<InType> signal(N);
-        std::iota(signal.begin(), signal.end(), 1);
+        std::vector<InType>  signal = generateSineSample<InType>(N, sample_rate, testFrequency, 1.f);
         std::vector<OutType> v{OutType()};
         std::span<OutType>   outSpan(v);
 
         expect(gr::work::Status::OK == fftBlock.processBulk(signal, outSpan));
-        equalDataset(fftBlock, v[0], sample_rate);
+        std::expected<void, gr::Error> dsCheck = dataset::detail::checkDataSetConsistency(v[0], fmt::format("TestDataSet({} -> {})", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>()));
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+
+        // check for DataSet equality
+        const auto& dataSet = v[0];
+
+        const ValueType tolerance = ValueType(0.0001);
+
+        const auto N_mag = fftBlock._magnitudeSpectrum.size();
+        auto const freq  = static_cast<ValueType>(sample_rate) / static_cast<ValueType>(fftBlock.fftSize);
+        expect(ge(dataSet.axisValues(0UZ).size(), dataSet.signalValues(0UZ).size())) << fmt::format("<{}> DataSet axis size {} vs. signal size {}", type_name<T>(), dataSet.axisValues(0UZ).size(), dataSet.signalValues(0UZ).size());
+        expect(ge(dataSet.signalValues(0UZ).size(), N_mag)) << fmt::format("<{}> DataSet signal length {} vs. magnitude size {}", type_name<T>(), dataSet.signalValues(0UZ).size(), N_mag);
+        if (N_mag == fftBlock.fftSize) { // complex input
+            expect(approx(dataSet.axisValues(0UZ).front(), -(static_cast<ValueType>(N_mag) / ValueType(2.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
+            expect(approx(dataSet.axisValues(0UZ).back(), (static_cast<ValueType>(N_mag) / ValueType(2.f) - ValueType(1.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
+        } else { // real input
+            expect(approx(dataSet.axisValues(0UZ).front(), 0 * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
+            expect(approx(dataSet.axisValues(0UZ).back(), (static_cast<ValueType>(N_mag) - ValueType(1.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
+        };
+
+        expect(gr::test::eq_collections(dataSet.signalValues(0UZ), fftBlock._magnitudeSpectrum)) << fmt::format("<{}> equal DataSet magnitude", type_name<T>());
+        expect(gr::test::eq_collections(dataSet.signalValues(1UZ), fftBlock._phaseSpectrum)) << fmt::format("<{}> equal DataSet phase", type_name<T>());
+        expect(gr::test::approx_collections(dataSet.signalValues(2UZ), std::span{fftBlock._outData}.last(N_mag) | std::views::transform([](const auto& c) { return c.real(); }), tolerance)) << fmt::format("<{}> equal DataSet FFT real output", type_name<T>());
+        expect(gr::test::approx_collections(dataSet.signalValues(3UZ), std::span{fftBlock._outData}.last(N_mag) | std::views::transform([](const auto& c) { return c.imag(); }), tolerance)) << fmt::format("<{}> equal DataSet FFT imaginary output", type_name<T>());
+
+        for (std::size_t i = 0UZ; i < dataSet.size(); i++) {
+            const auto [min, max] = std::ranges::minmax_element(dataSet.signalValues(i));
+            expect(approx(*min, dataSet.signalRange(i).min, tolerance)) << fmt::format("signal '{}' min mismatch: LHS={} vs RHS={}", dataSet.signalName(i), *min, dataSet.signalRange(i).min);
+            expect(approx(*max, dataSet.signalRange(i).max, tolerance)) << fmt::format("signal '{}' max mismatch: LHS={} vs RHS={}", dataSet.signalName(i), *max, dataSet.signalRange(i).max);
+        }
+
+        // check for matching test frequency peak
+        ValueType peak = gr::dataset::estimators::getLocationMaximumGaussInterpolated(dataSet);
+        expect(approx(peak, ValueType(testFrequency), ValueType(1) / ValueType(N_mag))) << "detected test frequency mismatch";
+
+        // plot magnitude spectrum
+        fmt::println("\nplot magnitude spectrum for case: {}->{}", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>());
+        gr::dataset::draw(dataSet, {.chart_width = 130UZ, .chart_height = 28UZ}, 0UZ);
     } | AllTypesToTest{};
 
     "FFT block types tests"_test = [] {
-        expect(std::is_same_v<FFT<std::complex<float>>::value_type, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<std::complex<double>>::value_type, double>) << "output type must be float";
-        expect(std::is_same_v<FFT<float>::value_type, float>) << "output type must be float";
-        expect(std::is_same_v<FFT<double>::value_type, double>) << "output type must be float";
-        expect(std::is_same_v<FFT<std::complex<float>, gr::DataSet<double>>::value_type, double>) << "output type must be double";
-        expect(std::is_same_v<FFT<float, gr::DataSet<double>>::value_type, double>) << "output type must be double";
+        static_assert(std::is_same_v<FFT<std::complex<float>>::value_type, float>, "output type must be float");
+        static_assert(std::is_same_v<FFT<std::complex<double>>::value_type, double>, "output type must be float");
+        static_assert(std::is_same_v<FFT<float>::value_type, float>, "output type must be float");
+        static_assert(std::is_same_v<FFT<double>::value_type, double>, "output type must be float");
+        static_assert(std::is_same_v<FFT<std::complex<float>, gr::DataSet<double>>::value_type, double>, "output type must be double");
+        static_assert(std::is_same_v<FFT<float, gr::DataSet<double>>::value_type, double>, "output type must be double");
     };
 
     "FFT flow graph example"_test = [] {

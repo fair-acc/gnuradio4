@@ -51,7 +51,7 @@ requires std::convertible_to<std::ranges::range_value_t<RangeValues>, TValue> &&
     ds.signal_values.resize(count);
     ds.meta_information.resize(1);
     ds.timing_events.resize(1);
-    ds.extents = {1, static_cast<std::int32_t>(count)};
+    ds.extents = {static_cast<std::int32_t>(count)};
 
     for (std::size_t i = 0; i < count; ++i) {
         ds.axis_values[0][i] = static_cast<TValue>(i);
@@ -85,7 +85,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     ds.signal_values.resize(count);
     ds.meta_information.resize(1UZ);
     ds.timing_events.resize(1UZ);
-    ds.extents = {1, static_cast<std::int32_t>(count)};
+    ds.extents = {static_cast<std::int32_t>(count)};
 
     for (std::size_t i = 0UZ; i < count; ++i) {
         ds.axis_values[0][i] = static_cast<TValue>(i);
@@ -118,7 +118,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     ds.signal_values.resize(count);
     ds.meta_information.resize(1UZ);
     ds.timing_events.resize(1UZ);
-    ds.extents = {1, static_cast<std::int32_t>(count)};
+    ds.extents = {static_cast<std::int32_t>(count)};
 
     for (std::size_t i = 0; i < count; i++) {
         ds.axis_values[0][i] = gr::cast<T>(i);
@@ -150,7 +150,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     ds.signal_values.resize(count);
     ds.meta_information.resize(1UZ);
     ds.timing_events.resize(1UZ);
-    ds.extents = {1, static_cast<std::int32_t>(count)};
+    ds.extents = {static_cast<std::int32_t>(count)};
 
     auto gauss = [](U x, U mu, U sig) -> TValue { return std::exp(-std::pow((TValue(x) - TValue(mu)) / TValue(sig), 2) / U(2)) / (TValue(sig) * std::sqrt(TValue(2) * std::numbers::pi_v<TValue>)); };
 
@@ -186,7 +186,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     ds.signal_values.resize(count);
     ds.meta_information.resize(1);
     ds.timing_events.resize(1);
-    ds.extents = {1, static_cast<std::int32_t>(count)};
+    ds.extents = {static_cast<std::int32_t>(count)};
 
     for (std::size_t i = 0; i < count; ++i) {
         ds.axis_values[0][i] = static_cast<TValue>(i);
@@ -216,7 +216,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
     ds.signal_values.resize(count);
     ds.meta_information.resize(1);
     ds.timing_events.resize(1);
-    ds.extents = {1, static_cast<std::int32_t>(count)};
+    ds.extents = {static_cast<std::int32_t>(count)};
 
     std::random_device                         rd;
     std::mt19937_64                            rng(seed == 0 ? rd() : seed);
