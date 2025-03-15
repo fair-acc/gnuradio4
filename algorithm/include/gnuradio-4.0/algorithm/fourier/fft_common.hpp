@@ -14,17 +14,18 @@ namespace gr::algorithm::fft {
 struct ConfigMagnitude {
     bool computeHalfSpectrum = false;
     bool outputInDb          = false;
+    bool shiftSpectrum       = false;
 };
 
 template<std::ranges::input_range TContainerIn, std::ranges::output_range<typename TContainerIn::value_type::value_type> TContainerOut = std::vector<typename TContainerIn::value_type::value_type>, typename T = TContainerIn::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
 auto computeMagnitudeSpectrum(const TContainerIn& fftIn, TContainerOut&& magOut = {}, ConfigMagnitude config = {}) {
-    const std::size_t fftSize = fftIn.size();
-    if (fftSize == 0) {
+    const std::size_t N = fftIn.size();
+    if (N == 0) {
         throw std::invalid_argument("fftIn cannot be empty.");
     }
-    const std::size_t magSize = config.computeHalfSpectrum ? (fftSize / 2UZ) : fftSize;
-    ;
+
+    const std::size_t magSize = config.computeHalfSpectrum ? (N / 2UZ) : N;
     if constexpr (requires(std::size_t n) { magOut.resize(n); }) {
         if (magOut.size() != magSize) {
             magOut.resize(magSize);
@@ -34,8 +35,8 @@ auto computeMagnitudeSpectrum(const TContainerIn& fftIn, TContainerOut&& magOut 
     }
 
     using PrecisionType = typename T::value_type;
-    std::transform(fftIn.begin(), std::next(fftIn.begin(), static_cast<std::ptrdiff_t>(magSize)), magOut.begin(), [fftSize, outputInDb = config.outputInDb](const auto& c) {
-        const auto mag{std::hypot(c.real(), c.imag()) * PrecisionType(2.) / static_cast<PrecisionType>(fftSize)};
+    std::transform(fftIn.begin(), std::next(fftIn.begin(), static_cast<std::ptrdiff_t>(magSize)), magOut.begin(), [N, outputInDb = config.outputInDb](const auto& c) {
+        const auto mag{std::hypot(c.real(), c.imag()) * PrecisionType(2.) / static_cast<PrecisionType>(N)};
         if (outputInDb && mag > PrecisionType(0)) { // avoids log of zero
             return PrecisionType(20.) * std::log10(mag);
         } else if (outputInDb) {
@@ -43,6 +44,13 @@ auto computeMagnitudeSpectrum(const TContainerIn& fftIn, TContainerOut&& magOut 
         }
         return mag;
     });
+
+    if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
+        if (!config.computeHalfSpectrum && config.shiftSpectrum) {
+            auto halfN = std::ssize(magOut) / 2;
+            std::ranges::rotate(magOut, std::ranges::begin(magOut) + halfN); // rotate so that negative frequencies appear at the front
+        }
+    }
 
     return magOut;
 }
@@ -57,6 +65,7 @@ struct ConfigPhase {
     bool computeHalfSpectrum = false;
     bool outputInDeg         = false;
     bool unwrapPhase         = false;
+    bool shiftSpectrum       = false;
 };
 
 template<std::ranges::input_range TContainerInOut, typename T = TContainerInOut::value_type>
@@ -82,7 +91,12 @@ void unwrapPhase(TContainerInOut& phase) {
 template<std::ranges::input_range TContainerIn, std::ranges::output_range<typename TContainerIn::value_type::value_type> TContainerOut = std::vector<typename TContainerIn::value_type::value_type>, typename T = TContainerIn::value_type>
 requires(std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>)
 auto computePhaseSpectrum(const TContainerIn& fftIn, TContainerOut&& phaseOut = {}, ConfigPhase config = {}) {
-    std::size_t phaseSize = config.computeHalfSpectrum ? (fftIn.size() / 2) : fftIn.size();
+    const std::size_t N = fftIn.size();
+    if (N == 0) {
+        throw std::invalid_argument("fftIn cannot be empty.");
+    }
+
+    std::size_t phaseSize = config.computeHalfSpectrum ? (N / 2) : N;
     if constexpr (requires(std::size_t n) { phaseOut.resize(n); }) {
         if (phaseOut.size() != phaseSize) {
             phaseOut.resize(phaseSize);
@@ -98,6 +112,11 @@ auto computePhaseSpectrum(const TContainerIn& fftIn, TContainerOut&& phaseOut = 
 
     if (config.outputInDeg) {
         std::ranges::transform(phaseOut, phaseOut.begin(), [](const auto& phase) { return phase * static_cast<typename T::value_type>(180.) * std::numbers::inv_pi_v<typename T::value_type>; });
+    }
+
+    if (!config.computeHalfSpectrum && config.shiftSpectrum) {
+        auto halfN = std::ssize(phaseOut) / 2;
+        std::ranges::rotate(phaseOut, phaseOut.begin() + halfN); // rotate so that negative frequencies appear at the front
     }
 
     return phaseOut;

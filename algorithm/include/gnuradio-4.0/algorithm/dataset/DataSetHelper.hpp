@@ -1,6 +1,8 @@
 #ifndef DATASETHELPER_HPP
 #define DATASETHELPER_HPP
 
+#include <expected>
+
 namespace gr::dataset {
 namespace dim {
 // N.B. explicitly and individually defined indices, rather than enum class
@@ -35,6 +37,49 @@ std::size_t checkIndexRange(const DataSet<T>& ds, std::size_t minIndex = 0UZ, st
             location);
     }
     return maxIndex;
+}
+
+template<typename T>
+[[nodiscard]] std::expected<void, gr::Error> checkDataSetConsistency(const DataSet<T>& ds, std::string_view dsName = "unnamed", std::source_location location = std::source_location::current()) {
+    // check all extents are non-negative
+    if (std::ranges::any_of(ds.extents, [](std::int32_t e) { return e <= 0; })) {
+        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": found 0 or negative extend values [{}]", gr::meta::type_name<T>(), dsName, fmt::join(ds.extents, ", ")), location));
+    }
+
+    // check axis-related sizes: axisCount() == extents.size() == axis_units.size() == axis_values.size()
+    if (ds.nDimensions() != ds.axisCount() || ds.axisCount() != ds.axis_units.size() || ds.axisCount() != ds.axis_values.size()) {
+        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": nDimensions()={}, axisCount()={}, axis_units.size()={}, axis_values.size()={}", gr::meta::type_name<T>(), dsName, ds.nDimensions(), ds.axisCount(), ds.axis_units.size(), ds.axis_values.size()), location));
+    }
+
+    // for each axis index i, check axisValues(i).size() == extents[i]
+    for (std::size_t i = 0UZ; i < ds.extents.size(); i++) {
+        if (ds.axis_values[i].size() != static_cast<std::size_t>(ds.extents[i])) {
+            return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": axisValues({}) size={} != extents[{}]={}", gr::meta::type_name<T>(), dsName, i, ds.axis_values[i].size(), i, ds.extents[i]), location));
+        }
+    }
+
+    // check the number of signals matches all signal-related arrays
+    const std::size_t n_signals = ds.size();
+    if (n_signals != ds.signal_names.size() || n_signals != ds.signal_quantities.size() || n_signals != ds.signal_units.size() || n_signals != ds.signal_ranges.size()) {
+        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\":  ds.size()={}, signal_names.size()={}, signal_quantities.size()={}, signal_units.size()={}, signal_ranges.size()={}", gr::meta::type_name<T>(), dsName, n_signals, ds.signal_names.size(), ds.signal_quantities.size(), ds.signal_units.size(), ds.signal_ranges.size()), location));
+    }
+
+    // check meta_information.size() == timing_events.size() == number of signals
+    if (ds.meta_information.size() != n_signals) {
+        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": meta_information.size()={} != number_of_signals={}", gr::meta::type_name<T>(), dsName, ds.meta_information.size(), n_signals), location));
+    }
+    if (ds.timing_events.size() != n_signals) {
+        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": timing_events.size()={} != number_of_signals={}", gr::meta::type_name<T>(), dsName, ds.timing_events.size(), n_signals), location));
+    }
+
+    // check product_of_extents * number_of_signals == signal_values.size()
+    const std::size_t product_of_extents = std::accumulate(ds.extents.begin(), ds.extents.end(), static_cast<std::size_t>(1), [](std::size_t acc, std::int32_t v) { return acc * static_cast<std::size_t>(v); });
+    const std::size_t expected_size      = product_of_extents * n_signals;
+    if (expected_size != ds.signal_values.size()) {
+        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": signal_values.size()={} != product_of_extents({}) * n_signals({})={}", gr::meta::type_name<T>(), dsName, ds.signal_values.size(), product_of_extents, n_signals, expected_size), location));
+    }
+
+    return {};
 }
 
 template<typename T, typename U>
@@ -216,7 +261,7 @@ template<bool ThrowOnFailure = true, typename T>
     }
 
     // verify signal_names, signal_quantities, and signal_units sizes match extents[0]
-    std::size_t num_signals = static_cast<std::size_t>(dataSet.extents[0]);
+    std::size_t num_signals = static_cast<std::size_t>(dataSet.size());
     if (dataSet.signal_names.size() != num_signals) {
         return handleFailure("signal_names size does not match extents[0].");
     }
