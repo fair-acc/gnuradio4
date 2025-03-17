@@ -14,21 +14,62 @@
 
 namespace gr::testing {
 
-GR_REGISTER_BLOCK(gr::testing::ImChartMonitor, [ float, double, gr::DataSet<float>, gr::DataSet<double> ])
+GR_REGISTER_BLOCK(gr::testing::ImChartMonitor, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::DataSet<float>, gr::DataSet<double> ])
 
-template<typename T>
+template<typename T, bool drawAsynchronously = true>
 requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
-struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawable<UICategory::ChartPane, "console">> {
-    using ClockSourceType = std::chrono::system_clock;
-    PortIn<T>   in;
-    float       sample_rate = 1000.0f;
-    std::string signal_name = "unknown signal";
+struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::conditional_t<drawAsynchronously, BlockingIO<false>, void>, std::conditional_t<drawAsynchronously, Drawable<UICategory::ChartPane, "console">, void>> {
+    using ClockSourceType               = std::chrono::system_clock;
+    using TimePoint                     = ClockSourceType::time_point;
+    constexpr static bool isDataSetLike = gr::DataSetLike<T>;
+    // optional shortening
+    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
+    using A = Annotated<U, description, Arguments...>;
 
-    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name);
+    PortIn<T> in;
 
-    HistoryBuffer<T> _historyBufferX{1000UZ};
-    HistoryBuffer<T> _historyBufferY{1000UZ};
-    HistoryBuffer<T> _historyBufferTags{1000UZ};
+    A<float, "sample rate", Visible, Doc<"Sampling frequency in Hz">, Unit<"Hz">, Limits<float(0), std::numeric_limits<float>::max()>>                    sample_rate   = 1000.0f;
+    A<std::string, "signal name", Visible, Doc<"human-readable identifier for the signal">>                                                               signal_name   = "unknown signal";
+    A<int, "signal index", Doc<"which sub-DataSet-signal to display. -1: plot all">>                                                                      signal_index  = -1;
+    A<gr::Size_t, "history length", Doc<"number of samples retained in ring buffer">>                                                                     n_history     = isDataSetLike ? 3ULL : 1000ULL;
+    A<gr::Size_t, "tag history length", Doc<"number of tag entries retained in tag buffer">>                                                              n_tag_history = 20ULL;
+    A<bool, "reset view", Doc<"true: triggers a view reset">>                                                                                             reset_view    = true;
+    A<bool, "plot graph", Doc<"controls whether to draw the main data graph">>                                                                            plot_graph    = true;
+    A<bool, "plot timing", Doc<"controls whether to display timing info">>                                                                                plot_timing   = false;
+    A<std::uint64_t, "timeout", Unit<"ms">, Limits<std::uint64_t(0), std::numeric_limits<std::uint64_t>::max()>, Doc<"Timeout duration in milliseconds">> timeout_ms    = 40ULL;
+    A<gr::Size_t, "chart width", Doc<"chart character width in terminal">>                                                                                chart_width   = 130U;
+    A<gr::Size_t, "chart heigth", Doc<"chart character width in terminal">>                                                                               chart_height  = 28U;
+
+    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, timeout_ms, chart_width, chart_height);
+
+    HistoryBuffer<T> _historyBufferX{n_history};
+    HistoryBuffer<T> _historyBufferY{n_history};
+    HistoryBuffer<T> _historyBufferTags{n_history};
+
+    struct TagInfo {
+        TimePoint      timestamp;
+        property_map   map;
+        std::size_t    index;
+        std::ptrdiff_t relIndex = 0;
+        bool           merged   = false;
+    };
+    HistoryBuffer<TagInfo> _historyTags{n_tag_history};
+    std::size_t            _tagIndex = 0UZ;
+
+    std::source_location _location      = std::source_location::current();
+    std::uint64_t        _lastUpdate_ns = utcTimeNowNs();
+
+    void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings) {
+        if (newSettings.contains("n_history")) {
+            _historyBufferX.resize(static_cast<std::size_t>(n_history));
+            _historyBufferY.resize(static_cast<std::size_t>(n_history));
+            _historyBufferTags.resize(static_cast<std::size_t>(n_history));
+        }
+
+        if (newSettings.contains("n_tag_history")) {
+            _historyTags.resize(static_cast<std::size_t>(n_tag_history));
+        }
+    }
 
     void start() {
         fmt::println("started sink {} aka. '{}'", this->unique_name, this->name);
@@ -37,16 +78,28 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
 
     void stop() { fmt::println("stopped sink {} aka. '{}'", this->unique_name, this->name); }
 
-    constexpr void processOne(const T& input) noexcept {
+    constexpr void processOne(const T& input) {
+        std::uint64_t now      = utcTimeNowNs();
+        TimePoint     nowStamp = ClockSourceType::now();
+
         if constexpr (std::is_arithmetic_v<T>) {
-            in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
-            const T Ts     = T(1.0f) / T(sample_rate);
+            if constexpr (drawAsynchronously) {
+                in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
+            }
+            const T Ts = T(1.0f) / T(sample_rate);
             _historyBufferX.push_back(_historyBufferX.back() + static_cast<T>(Ts));
         }
         _historyBufferY.push_back(input);
 
         if (this->inputTagsPresent()) { // received tag
             _historyBufferTags.push_back(_historyBufferY.back());
+
+            _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = this->_mergedInputTag.map, .index = _tagIndex++, .relIndex = 0, .merged = true});
+            auto tags = in.tagReader().get();
+            for (const auto& [relIndex, tagMap] : tags) {
+                _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = tagMap, .index = relIndex});
+            }
+
             this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
         } else {
             if constexpr (std::is_floating_point_v<T>) {
@@ -55,19 +108,43 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
                 _historyBufferTags.push_back(std::numeric_limits<T>::lowest());
             }
         }
+
+        if (timeout_ms > 0U) {
+            std::uint64_t diff_ms = (now - _lastUpdate_ns) / 1'000'000ULL;
+            if (diff_ms < timeout_ms) {
+                return;
+            }
+            _lastUpdate_ns = now;
+        }
+
+        if (plot_graph) {
+            plotGraph();
+        }
+
+        if (plot_timing) {
+            plotTiming();
+        }
     }
 
     work::Status draw(const property_map& config = {}, std::source_location location = std::source_location::current()) noexcept {
-        [[maybe_unused]] const work::Status status = this->invokeWork(); // calls work(...) -> processOne(...) (all in the same thread as this 'draw()'
+        reset_view                           = config.contains("reset_view");
+        _location                            = location;
+        [[maybe_unused]] work::Status status = work::Status::OK;
+        if constexpr (drawAsynchronously) {
+            status = this->invokeWork(); // calls work(...) -> processOne(...) (all in the same thread as this 'draw()'
+        }
+        return status;
+    }
 
+    void plotGraph() {
         if constexpr (std::is_arithmetic_v<T>) {
             const auto [xMin, xMax] = std::ranges::minmax_element(_historyBufferX);
             const auto [yMin, yMax] = std::ranges::minmax_element(_historyBufferY);
             if (_historyBufferX.empty() || *xMin == *xMax || *yMin == *yMax) {
-                return status; // buffer or axes' ranges are empty -> skip drawing
+                return; // buffer or axes' ranges are empty -> skip drawing
             }
 
-            if (config.contains("reset_view")) {
+            if (reset_view) {
                 gr::graphs::resetView();
             }
 
@@ -78,19 +155,38 @@ struct ImChartMonitor : public Block<ImChartMonitor<T>, BlockingIO<false>, Drawa
                 return std::pair<double, double>{min - margin, max + margin};
             };
 
-            auto chart = gr::graphs::ImChart<130, 28>({{*xMin, *xMax}, adjustRange(*yMin, *yMax)});
+            auto chart = gr::graphs::ImChart<std::dynamic_extent, std::dynamic_extent>({{*xMin, *xMax}, adjustRange(*yMin, *yMax)}, static_cast<std::size_t>(chart_width), static_cast<std::size_t>(chart_height));
             chart.draw(_historyBufferX, _historyBufferY, signal_name);
             chart.draw<gr::graphs::Style::Marker>(_historyBufferX, _historyBufferTags, "Tags");
             chart.draw();
-        } else if constexpr (gr::DataSetLike<T>) {
+        } else if constexpr (isDataSetLike) {
             if (_historyBufferY.empty()) {
-                return status;
+                return;
             }
-            gr::dataset::draw(_historyBufferY[0], {.reset_view = config.contains("reset_view") ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP}, std::numeric_limits<std::size_t>::max(), location);
+            std::size_t signalIdx = signal_index < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(signal_index);
+            gr::dataset::draw(_historyBufferY[0],
+                {.chart_width     = static_cast<std::size_t>(chart_width),  //
+                    .chart_height = static_cast<std::size_t>(chart_height), //
+                    .reset_view   = reset_view ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP},
+                signalIdx, _location);
         }
-
-        return status;
     }
+
+    void plotTiming() {
+        fmt::println("\nPast Timing Events for '{}'", signal_name);
+        for (auto const& tag : _historyTags) {
+            auto isoTime = [](TimePoint time) noexcept {
+                return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:03}",                // ms-precision ISO time-format
+                    fmt::localtime(std::chrono::system_clock::to_time_t(time)), //
+                    std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count() % 1000);
+            };
+            std::uint64_t nsSinceEpoch = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(tag.timestamp.time_since_epoch()).count());
+
+            fmt::println("{:6} {:1} {:24} {} {}", tag.index, tag.merged ? 'M' : 'T', isoTime(tag.timestamp), nsSinceEpoch, tag.map);
+        }
+    }
+
+    std::uint64_t utcTimeNowNs() { return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(ClockSourceType::now().time_since_epoch()).count()); }
 };
 
 } // namespace gr::testing
