@@ -100,14 +100,14 @@ struct DataSet {
     std::vector<std::vector<T>> axis_values{}; // explicit axis values
 
     // signal data layout:
-    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
+    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …] i.e. [axis_values[0].size(), axis_values[1].size(), …]
     tensor_layout_type        layout{};  // row-major, column-major, “special”
 
     // signal data storage:
-    std::vector<std::string> signal_names{};      // size = extents[0]
-    std::vector<std::string> signal_quantities{}; // size = extents[0]
-    std::vector<std::string> signal_units{};      // size = extents[0]
-    std::vector<T>           signal_values{};     // size = \PI_i extents[i]
+    std::vector<std::string> signal_names{};      // defines number of signals, i.e. 'this->size()'
+    std::vector<std::string> signal_quantities{}; // size = this->size()
+    std::vector<std::string> signal_units{};      // size = this->size()
+    std::vector<T>           signal_values{};     // size = this->size() × Π_i extents[i]
     std::vector<Range<T>>    signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
@@ -116,30 +116,35 @@ struct DataSet {
 
     GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_ranges, meta_information, timing_events);
 
+    [[nodiscard]] std::size_t nDimensions() const noexcept { return extents.size(); }
+
     [[nodiscard]] std::size_t        axisCount() const noexcept { return axis_names.size(); }
-    [[nodiscard]] std::string&       axisName(std::size_t i = 0UZ) { return axis_names[_axCheck(i)]; }
-    [[nodiscard]] std::string_view   axisName(std::size_t i = 0UZ) const { return axis_names[_axCheck(i)]; }
-    [[nodiscard]] std::string&       axisUnit(std::size_t i = 0UZ) { return axis_units[_axCheck(i)]; }
-    [[nodiscard]] std::string_view   axisUnit(std::size_t i = 0UZ) const { return axis_units[_axCheck(i)]; }
-    [[nodiscard]] std::span<T>       axisValues(std::size_t i = 0UZ) { return axis_values[_axCheck(i)]; }
-    [[nodiscard]] std::span<const T> axisValues(std::size_t i = 0UZ) const { return axis_values[_axCheck(i)]; }
+    [[nodiscard]] std::string&       axisName(std::size_t axisIdx = 0UZ) { return axis_names[_axCheck(axisIdx)]; }
+    [[nodiscard]] std::string_view   axisName(std::size_t axisIdx = 0UZ) const { return axis_names[_axCheck(axisIdx)]; }
+    [[nodiscard]] std::string&       axisUnit(std::size_t axisIdx = 0UZ) { return axis_units[_axCheck(axisIdx)]; }
+    [[nodiscard]] std::string_view   axisUnit(std::size_t axisIdx = 0UZ) const { return axis_units[_axCheck(axisIdx)]; }
+    [[nodiscard]] std::span<T>       axisValues(std::size_t axisIdx = 0UZ) { return axis_values[_axCheck(axisIdx)]; }
+    [[nodiscard]] std::span<const T> axisValues(std::size_t axisIdx = 0UZ) const { return axis_values[_axCheck(axisIdx)]; }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return signal_names.size(); }
-    [[nodiscard]] std::string&          signalName(std::size_t i = 0UZ) { return signal_names[_idxCheck(i)]; }
-    [[nodiscard]] std::string_view      signalName(std::size_t i = 0UZ) const { return signal_names[_idxCheck(i)]; }
-    [[nodiscard]] std::string&          signalQuantity(std::size_t i = 0UZ) { return signal_quantities[_idxCheck(i)]; }
-    [[nodiscard]] std::string_view      signalQuantity(std::size_t i = 0UZ) const { return signal_quantities[_idxCheck(i)]; }
-    [[nodiscard]] std::string&          signalUnit(std::size_t i = 0UZ) { return signal_units[_idxCheck(i)]; }
-    [[nodiscard]] std::string_view      signalUnit(std::size_t i = 0UZ) const { return signal_units[_idxCheck(i)]; }
-    [[nodiscard]] std::span<T>          signalValues(std::size_t i = 0UZ) { return {std::next(signal_values.data(), _idxCheckS(i) * _valsPerSigS()), _valsPerSig()}; }
-    [[nodiscard]] std::span<const T>    signalValues(std::size_t i = 0UZ) const { return {std::next(signal_values.data(), _idxCheckS(i) * _valsPerSigS()), _valsPerSig()}; }
-    [[nodiscard]] Range<T>&             signalRange(std::size_t i = 0UZ) { return signal_ranges[_idxCheck(i)]; }
-    [[nodiscard]] const Range<T>&       signalRange(std::size_t i = 0UZ) const { return signal_ranges[_idxCheck(i)]; }
+    [[nodiscard]] std::string&          signalName(std::size_t signalIdx = 0UZ) { return signal_names[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::string_view      signalName(std::size_t signalIdx = 0UZ) const { return signal_names[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::string&          signalQuantity(std::size_t signalIdx = 0UZ) { return signal_quantities[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::string_view      signalQuantity(std::size_t signalIdx = 0UZ) const { return signal_quantities[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::string&          signalUnit(std::size_t signalIdx = 0UZ) { return signal_units[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::string_view      signalUnit(std::size_t signalIdx = 0UZ) const { return signal_units[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::span<T>          signalValues(std::size_t signalIdx = 0UZ) { return {std::next(signal_values.data(), _idxCheckS(signalIdx) * _valsPerSigS()), _valsPerSig()}; }
+    [[nodiscard]] std::span<const T>    signalValues(std::size_t signalIdx = 0UZ) const { return {std::next(signal_values.data(), _idxCheckS(signalIdx) * _valsPerSigS()), _valsPerSig()}; }
+    [[nodiscard]] Range<T>&             signalRange(std::size_t signalIdx = 0UZ) { return signal_ranges[_idxCheck(signalIdx)]; }
+    [[nodiscard]] const Range<T>&       signalRange(std::size_t signalIdx = 0UZ) const { return signal_ranges[_idxCheck(signalIdx)]; }
 
 private:
     [[nodiscard]] std::size_t _axCheck(std::size_t i, std::source_location loc = std::source_location::current()) const {
         if (i >= axis_names.size()) {
-            throw gr::exception(fmt::format("{} axis out of range: i={} >= [0, {}]", loc.function_name(), i, axis_names.size()), loc);
+            throw gr::exception(fmt::format("{} axis out of range: i={} >= axis_name [0, {}]", loc.function_name(), i, axis_names.size()), loc);
+        }
+        if (i >= axis_values.size()) {
+            throw gr::exception(fmt::format("{} axis out of range: i={} >= axis_values [0, {}]", loc.function_name(), i, axis_values.size()), loc);
         }
         return i;
     }

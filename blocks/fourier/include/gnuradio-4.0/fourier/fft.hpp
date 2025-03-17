@@ -164,8 +164,8 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         _outData           = _fftImpl.compute(_inData);
-        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum, algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .outputInDb = outputInDb});
-        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum, algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase});
+        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, _magnitudeSpectrum, algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .outputInDb = outputInDb, .shiftSpectrum = true});
+        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, _phaseSpectrum, algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase, .shiftSpectrum = true});
 
         output[0] = createDataset();
 
@@ -175,38 +175,71 @@ On the choice of window (mathematically aka. apodisation) functions
     constexpr U createDataset() {
         U ds{};
         ds.timestamp = 0;
-        const std::size_t N{_magnitudeSpectrum.size()};
-        const std::size_t dim = 5;
+        const std::size_t     N{_magnitudeSpectrum.size()};
+        constexpr std::size_t nSignals = 4;
 
-        ds.axis_names   = {"Frequency", "Re(FFT)", "Im(FFT)", "Magnitude", "Phase"};
-        ds.axis_units   = {"Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad"};
-        ds.extents      = {dim, static_cast<int32_t>(N)};
-        ds.layout       = gr::LayoutRight{};
-        ds.signal_names = {signal_name, fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name), fmt::format("Magnitude({})", signal_name), fmt::format("Phase({})", signal_name)};
-        ds.signal_units = {"Hz", signal_unit, fmt::format("i{}", signal_unit), fmt::format("{}/√Hz", signal_unit), "rad"};
+        ds.extents = {static_cast<int32_t>(N)};
+        ds.layout  = gr::LayoutRight{}; // row-major
 
-        ds.signal_values.resize(dim * N);
+        // define x-axis (N.B. only one dependent axis <-> nSignals x 1D DataSets)
+        ds.axis_names = {"Frequency"};
+        ds.axis_units = {"Hz"};
+        ds.axis_values.resize(ds.nDimensions());
+        ds.axis_values[0UZ].resize(N);
+
         auto const freqWidth = static_cast<value_type>(sample_rate) / static_cast<value_type>(fftSize);
-        if constexpr (gr::meta::complex_like<T>) {
+        if constexpr (gr::meta::complex_like<T>) { // complex-valued FFT output: symmetric spectrum [-fs/2, +fs/2]
             auto const freqOffset = static_cast<value_type>(N / 2) * freqWidth;
-            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth, freqOffset](const auto i) { return static_cast<value_type>(i) * freqWidth - freqOffset; });
-        } else {
-            std::ranges::transform(std::views::iota(0UL, N), std::ranges::begin(ds.signal_values), [freqWidth](const auto i) { return static_cast<value_type>(i) * freqWidth; });
+            std::ranges::transform(std::views::iota(0UZ, N), std::ranges::begin(ds.axisValues(0UZ)), [freqWidth, freqOffset](const auto i) { return static_cast<value_type>(i) * freqWidth - freqOffset; });
+        } else { // real-valued FFT output: [DC (0), +fs/2] (only upper half, negative is a point-symmetric copy)
+            std::ranges::transform(std::views::iota(0UZ, N), std::ranges::begin(ds.axisValues(0UZ)), [freqWidth](const auto i) { return static_cast<value_type>(i) * freqWidth; });
         }
-        std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(N)), [](const auto& c) { return c.real(); });
-        std::ranges::transform(_outData.begin(), _outData.end(), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(2U * N)), [](const auto& c) { return c.imag(); });
-        std::copy_n(_magnitudeSpectrum.begin(), N, std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(3U * N)));
-        std::copy_n(_phaseSpectrum.begin(), N, std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(4U * N)));
 
-        ds.signal_ranges.resize(dim);
-        for (std::size_t i = 0; i < dim; i++) {
+        // define nSignals and allocate the required storage space
+        ds.signal_names      = {fmt::format("Magnitude({})", signal_name), fmt::format("Phase({})", signal_name), fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name)};
+        ds.signal_quantities = {"Magnitude(FFT)", "Phase(FFT)", "Re(FFT)", "Im(FFT)"};
+        ds.signal_units      = {fmt::format("{}/√Hz", signal_unit), "rad", fmt::format("Re{}", signal_unit) /* real part */, fmt::format("Im{}", signal_unit) /* imaginary part */};
+        assert(ds.signal_names.size() == nSignals);
+        assert(ds.signal_quantities.size() == nSignals);
+        assert(ds.signal_units.size() == nSignals);
+
+        ds.signal_values.resize(nSignals * N);
+        ds.signal_ranges.resize(nSignals);
+
+        assert(_magnitudeSpectrum.size() == ds.signalValues(0UZ).size());
+        std::copy_n(_magnitudeSpectrum.begin(), N, ds.signalValues(0UZ).begin());
+        assert(_phaseSpectrum.size() == ds.signalValues(1UZ).size());
+        std::copy_n(_phaseSpectrum.begin(), N, ds.signalValues(1UZ).begin());
+
+        if constexpr (gr::meta::complex_like<T>) { // complex in -> complex-out FFT
+            assert(_outData.size() == ds.signalValues(2UZ).size());
+            assert(_outData.size() == ds.signalValues(3UZ).size());
+            std::ranges::transform(_outData, ds.signalValues(2UZ).begin(), [](const auto& c) { return std::real(c); });
+            std::ranges::transform(_outData, ds.signalValues(3UZ).begin(), [](const auto& c) { return std::imag(c); });
+        } else { // handle real-valued FFT -- only the upper half (positive frequencies) are relevant, negative are a copy and/or inverted (for imaginary part)
+            auto fftUpperHalf = std::span{_outData}.last(N);
+            assert(fftUpperHalf.size() == ds.signalValues(2UZ).size());
+            assert(fftUpperHalf.size() == ds.signalValues(3UZ).size());
+            std::ranges::transform(fftUpperHalf, ds.signalValues(2UZ).begin(), [](const auto& c) { return std::real(c); });
+            std::ranges::transform(fftUpperHalf, ds.signalValues(3UZ).begin(), [](const auto& c) { return std::imag(c); });
+        }
+
+        for (std::size_t i = 0; i < nSignals; i++) {
             const auto mm       = std::minmax_element(std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>(i * N)), std::next(ds.signal_values.begin(), static_cast<std::ptrdiff_t>((i + 1U) * N)));
             ds.signal_ranges[i] = {*mm.first, *mm.second};
         }
 
-        ds.meta_information = {{{"sample_rate", sample_rate}, {"signal_name", signal_name}, {"signal_unit", signal_unit}, {"signal_min", signal_min}, {"signal_max", signal_max}, //
-            {"fft_size", fftSize}, {"window", window}, {"output_in_db", outputInDb}, {"output_in_deg", outputInDeg}, {"unwrap_phase", unwrapPhase},                               //
-            {"input_chunk_size", this->input_chunk_size}, {"output_chunk_size", this->output_chunk_size}, {"stride", this->stride}}};
+        // setup storage and populate timing events and basic additional meta-information that is not already stored for each signal
+        pmtv::map_t meta_info = {{"sample_rate", sample_rate}, {"window", window}, {"output_in_db", outputInDb}, {"output_in_deg", outputInDeg}, {"unwrap_phase", unwrapPhase}, //
+            {"input_chunk_size", this->input_chunk_size}, {"output_chunk_size", this->output_chunk_size}, {"stride", this->stride}};
+
+        ds.meta_information.resize(nSignals);
+        for (std::size_t i = 0UZ; i < nSignals; i++) {
+            ds.meta_information[i] = meta_info;
+        }
+
+        ds.timing_events.resize(nSignals);
+        // TODO: propagation of timing events is missing
 
         return ds;
     }

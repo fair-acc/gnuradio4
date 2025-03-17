@@ -515,6 +515,10 @@ public:
                 _screen[cursorY][cursorX++] = datasetName[j];
             }
 
+            if (cursorX >= _screen_width) { // wrote till the end of the screen
+                return;
+            }
+
             _screen[cursorY][cursorX++] = ' '; // add a space separator between dataset names
         }
     }

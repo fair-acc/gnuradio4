@@ -6,6 +6,7 @@
 
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Message.hpp>
+#include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 #include "DataSetHelper.hpp"

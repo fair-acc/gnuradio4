@@ -4,6 +4,7 @@
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
+#include <gnuradio-4.0/algorithm/dataset/DataSetHelper.hpp>
 
 namespace gr::dataset {
 
@@ -14,14 +15,20 @@ struct DefaultChartConfig {
 };
 
 template<DataSetLike TDataSet>
-[[maybe_unused]] bool draw(const TDataSet& dataSet, const DefaultChartConfig config = {}) {
-    using TValueType = typename TDataSet::value_type;
+[[maybe_unused]] bool draw(const TDataSet& dataSet, const DefaultChartConfig config = {}, std::size_t signalIndex = std::numeric_limits<std::size_t>::max(), std::source_location location = std::source_location::current()) {
+    using TValueType          = typename TDataSet::value_type;
+    const bool plotAllSignals = signalIndex == std::numeric_limits<std::size_t>::max() || signalIndex >= dataSet.size();
 
     if (dataSet.signal_values.empty()                                    // check for empty data
         || dataSet.axis_values.empty() || dataSet.axis_values[0].empty() // empty axis definition
         || dataSet.signal_ranges.empty()                                 // empty min/max definition
     ) {
         return false;
+    }
+
+    std::expected<void, gr::Error> dsCheck = dataset::detail::checkDataSetConsistency(dataSet);
+    if (!dsCheck) {
+        throw gr::exception(fmt::format("draw(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location);
     }
 
     if (config.reset_view == gr::graphs::ResetChartView::RESET) {
@@ -36,52 +43,61 @@ template<DataSetLike TDataSet>
     };
     assert(!dataSet.axis_values.empty());
     assert(!dataSet.signal_ranges.empty());
-    const TValueType xMin = dataSet.axis_values[0].front();
-    const TValueType xMax = dataSet.axis_values[0].back();
-    TValueType       yMin = dataSet.signal_ranges[0].min;
-    TValueType       yMax = dataSet.signal_ranges[0].max;
+    const TValueType xMin = dataSet.axisValues(0UZ).front();
+    const TValueType xMax = dataSet.axisValues(0UZ).back();
+    TValueType       yMin = std::numeric_limits<TValueType>::max();
+    TValueType       yMax = std::numeric_limits<TValueType>::lowest();
 
-    if constexpr (std::is_arithmetic_v<TValueType>) {
-        const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values);
-        yMin                  = std::min(yMin, *min);
-        yMax                  = std::max(yMax, *max);
-    } else if constexpr (gr::meta::complex_like<TValueType>) {
-        const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, //
-            [](const TValueType& a, const TValueType& b) { return std::abs(a) < std::abs(b); });
+    if (plotAllSignals) {
+        if constexpr (std::is_arithmetic_v<TValueType>) {
+            const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values);
+            yMin                  = std::min(yMin, *min);
+            yMax                  = std::max(yMax, *max);
+        } else if constexpr (gr::meta::complex_like<TValueType>) {
+            const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, //
+                [](const TValueType& a, const TValueType& b) { return std::abs(a) < std::abs(b); });
 
-        yMin = std::abs(yMin) > std::abs(*min) ? *min : yMin;
-        yMax = std::abs(yMax) < std::abs(*min) ? *max : yMax;
+            yMin = std::abs(yMin) > std::abs(*min) ? *min : yMin;
+            yMax = std::abs(yMax) < std::abs(*min) ? *max : yMax;
+        } else {
+            static_assert(std::is_arithmetic_v<TValueType> || std::is_same_v<TValueType, std::complex<typename TValueType::value_type>>, "Unsupported type for DataSet");
+        }
     } else {
-        static_assert(std::is_arithmetic_v<TValueType> || std::is_same_v<TValueType, std::complex<typename TValueType::value_type>>, "Unsupported type for DataSet");
+        yMin = dataSet.signalRange(signalIndex).min;
+        yMax = dataSet.signalRange(signalIndex).max;
     }
 
     auto chart        = gr::graphs::ImChart<std::dynamic_extent, std::dynamic_extent>({{xMin, xMax}, adjustRange(yMin, yMax)}, config.chart_width, config.chart_height);
-    chart.axis_name_x = fmt::format("{} [{}]", dataSet.axis_names[0], dataSet.axis_units[0]);
-    chart.axis_name_y = fmt::format("{} [{}]", dataSet.signal_quantities[0], dataSet.signal_units[0]);
+    chart.axis_name_x = fmt::format("{} [{}]", dataSet.axisName(0UZ), dataSet.axisUnit(0UZ));
+    if (plotAllSignals) {
+        chart.axis_name_y = fmt::format("{} [{}]", dataSet.signalQuantity(0UZ), dataSet.signalUnit(0UZ));
+    } else {
+        chart.axis_name_y = fmt::format("{} [{}]", dataSet.signalQuantity(signalIndex), dataSet.signalUnit(signalIndex));
+    }
 
-    const std::size_t numSignals      = dataSet.signal_names.size();
-    const std::size_t valuesPerSignal = dataSet.signal_values.size() / numSignals; // assuming even distribution of values
-    for (std::size_t i = 0UZ; i < numSignals; i++) {
-        auto signalStart = dataSet.signal_values.begin() + static_cast<std::ptrdiff_t>(i * valuesPerSignal);
-        auto signalEnd   = signalStart + static_cast<std::ptrdiff_t>(valuesPerSignal);
-        chart.draw<>(std::ranges::subrange(dataSet.axis_values[0]), std::ranges::subrange(signalStart, signalEnd), dataSet.signal_names[i]);
+    if (plotAllSignals) {
+        for (std::size_t i = 0UZ; i < dataSet.size(); i++) {
+            chart.draw<>(dataSet.axisValues(0UZ), dataSet.signalValues(i), dataSet.signalName(i));
 
-        if (!dataSet.timing_events.empty() && !dataSet.timing_events[i].empty()) {
-            std::vector<TValueType> tagVector(dataSet.signal_values.size());
-            if constexpr (std::is_floating_point_v<TValueType>) {
-                std::ranges::fill(tagVector, std::numeric_limits<TValueType>::quiet_NaN());
-            } else {
-                std::ranges::fill(tagVector, std::numeric_limits<TValueType>::lowest());
-            }
-            for (const auto& [index, tag] : dataSet.timing_events[i]) {
-                if (index < 0 || index >= static_cast<std::ptrdiff_t>(tagVector.size())) {
-                    continue;
+            if (!dataSet.timing_events.empty() && !dataSet.timing_events[i].empty()) {
+                std::vector<TValueType> tagVector(dataSet.signal_values.size());
+                if constexpr (std::is_floating_point_v<TValueType>) {
+                    std::ranges::fill(tagVector, std::numeric_limits<TValueType>::quiet_NaN());
+                } else {
+                    std::ranges::fill(tagVector, std::numeric_limits<TValueType>::lowest());
                 }
-                tagVector[static_cast<std::size_t>(index)] = dataSet.signal_values[static_cast<std::size_t>(index)];
-            }
+                for (const auto& [index, tag] : dataSet.timing_events[i]) {
+                    if (index < 0 || index >= static_cast<std::ptrdiff_t>(tagVector.size())) {
+                        continue;
+                    }
+                    tagVector[static_cast<std::size_t>(index)] = dataSet.signal_values[static_cast<std::size_t>(index)];
+                }
 
-            chart.draw<gr::graphs::Style::Marker>(dataSet.axis_values[0], tagVector, "Tags");
+                chart.draw<gr::graphs::Style::Marker>(dataSet.axisValues(0UZ), tagVector, "Tags");
+            }
         }
+    } else { // plot single signal
+        chart.draw<>(dataSet.axisValues(0UZ), dataSet.signalValues(signalIndex), dataSet.signalName(signalIndex));
     }
 
     chart.draw();
@@ -116,8 +132,7 @@ DataSet<T> merge(const DataSet<T>& first, const TDataSets&... others) {
     mergedDataSet.axis_values = first.axis_values;
 
     // Prepare to accumulate all other fields
-    mergedDataSet.extents.emplace_back(1);                          // 1-dim data
-    mergedDataSet.extents.emplace_back(first.signal_values.size()); // size of 1-dim data
+    mergedDataSet.extents.emplace_back(first.signal_values.size()); // 1-dim data .> size of 1-dim data
     mergedDataSet.signal_names.reserve(sizeof...(others) + 1UZ);
     mergedDataSet.signal_units.reserve(sizeof...(others) + 1UZ);
     mergedDataSet.signal_values.reserve(first.signal_values.size() * (sizeof...(others) + 1UZ));
@@ -170,11 +185,13 @@ DataSet<T> waveform(WaveType waveType, size_t length, T samplingRate, T frequenc
     dataSet.signal_quantities = {"Voltage"};
     dataSet.signal_units      = {"V"};
 
+    dataSet.extents.emplace_back(static_cast<std::int32_t>(length));
     dataSet.axis_values.resize(1); // Only one axis (time)
     dataSet.axis_values[0].reserve(length);
     dataSet.signal_values.reserve(length);
     dataSet.signal_ranges.push_back({0, 1}); // placeholder for min/max values
-    dataSet.timing_events.resize(1);         // resizing to have one set of timing events
+    dataSet.meta_information.resize(1);
+    dataSet.timing_events.resize(1); // resizing to have one set of timing events
 
     T dt            = T(1) / samplingRate; // time step
     T previousValue = offset * amplitude * ((waveType == WaveType::Sine) ? std::sin(T(0)) : std::cos(T(0)));
