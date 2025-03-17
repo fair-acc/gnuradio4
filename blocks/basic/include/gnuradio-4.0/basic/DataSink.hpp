@@ -399,9 +399,10 @@ inline std::optional<property_map> tagAndMetadata(const std::optional<property_m
 template<typename T>
 [[nodiscard]] inline DataSet<T> makeDataSetTemplate(Metadata metadata) {
     DataSet<T> tmpl;
-    tmpl.signal_names  = {std::move(metadata.signalName)};
-    tmpl.signal_units  = {std::move(metadata.signalUnit)};
-    tmpl.signal_ranges = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
+    tmpl.signal_names      = {std::move(metadata.signalName)};
+    tmpl.signal_quantities = {std::move(metadata.signalQuantity)};
+    tmpl.signal_units      = {std::move(metadata.signalUnit)};
+    tmpl.signal_ranges     = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
     return tmpl;
 }
 
