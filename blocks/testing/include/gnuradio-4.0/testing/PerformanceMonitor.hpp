@@ -89,7 +89,8 @@ Additionally, the block provides three optional output ports for real-time strea
     std::ofstream                            _file;
     std::chrono::time_point<ClockSourceType> _lastTimePoint = ClockSourceType::now();
     float                                    _timeFromLastUpdate{0.f}; // in sec
-    bool                                     _addCsvHeader = true;
+    bool                                     _addCsvHeader  = true;
+    float                                    _sumSampleRate = 0.f;
 
     void start() {
         _lastTimePoint   = ClockSourceType::now();
@@ -120,6 +121,8 @@ Additionally, the block provides three optional output ports for real-time strea
 
         return gr::work::Status::OK;
     }
+
+    [[nodiscard]] float meanSampleRate() const { return _sumSampleRate / static_cast<float>(n_writes); }
 
 private:
     void closeFile() {
@@ -173,6 +176,7 @@ private:
                     _file << n_writes << "," << gr::time::getIsoTime() << "," << rate << "," << residentSize << std::endl;
                 }
             }
+            _sumSampleRate += static_cast<float>(rate);
             _timeFromLastUpdate = 0.f;
             n_writes++;
         }
