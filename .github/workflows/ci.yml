@@ -96,9 +96,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/work/ccache
-          key: ${{ runner.os }}-ccache-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          key: ccache-${{ runner.os }}-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-ccache-
+            ccache-${{ runner.os }}-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
 
       - name: Configure ccache
         run: |
@@ -111,7 +111,10 @@ jobs:
           cache-name: cache-fetchContent-cache
         with:
           path: ${{runner.workspace}}/build/_deps
-          key: ${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          key: fetchContent-${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchContent-${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}
+            fetchContent-${{ runner.os }}-${{ matrix.compiler }}
 
       - name: Configure
         if: matrix.compiler.cmake_wrapper == null
