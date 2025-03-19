@@ -41,7 +41,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
     A<gr::Size_t, "chart width", Doc<"chart character width in terminal">>                                                                                chart_width      = 130U;
     A<gr::Size_t, "chart heigth", Doc<"chart character width in terminal">>                                                                               chart_height     = 28U;
 
-    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, timeout_ms, chart_width, chart_height);
+    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, plot_merged_tags, timeout_ms, chart_width, chart_height);
 
     HistoryBuffer<T> _historyBufferX{n_history};
     HistoryBuffer<T> _historyBufferY{n_history};
