@@ -29,8 +29,8 @@ template<typename T, gr::meta::fixed_string description = "", typename... Argume
 using A = gr::Annotated<T, description, Arguments...>;
 using namespace gr;
 
-GR_REGISTER_BLOCK("gr::basic::SystemClockSource", gr::basic::ClockSource < std::uint8_t, true, std::chrono::system_clock, true)
-GR_REGISTER_BLOCK("gr::basic::SystemClockSourceNonBlocking", gr::basic::ClockSource < std::uint8_t, false, std::chrono::system_clock, true)
+GR_REGISTER_BLOCK("gr::basic::ClockSource", gr::basic::ClockSource, (std::uint8_t, true, std::chrono::system_clock, true));
+GR_REGISTER_BLOCK("gr::basic::ClockSourceNonBlocking", gr::basic::ClockSource, (std::uint8_t, false, std::chrono::system_clock, true));
 
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
 struct ClockSource : Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>> {
