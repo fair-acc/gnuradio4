@@ -84,8 +84,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
     auto connections = std::get<std::vector<pmtv::pmt>>(yaml.at("connections"));
     for (const auto& conn : connections) {
         auto connection = std::get<std::vector<pmtv::pmt>>(conn);
-        if (connection.size() != 4) {
-            throw fmt::format("Unable to parse connection ({} instead of 4 elements)", connection.size());
+        if (connection.size() < 4) {
+            throw fmt::format("Unable to parse connection ({} instead of >=4 elements)", connection.size());
         }
 
         auto parseBlockPort = [&](const auto& blockField, const auto& portField) {
@@ -116,7 +116,24 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
         auto src = parseBlockPort(connection[0], connection[1]);
         auto dst = parseBlockPort(connection[2], connection[3]);
-        resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
+
+        if (connection.size() == 4) {
+            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
+        } else {
+            auto minBufferSize = std::visit(
+                []<typename TValue>(const TValue& value) {
+                    if constexpr (std::is_same_v<TValue, std::size_t>) {
+                        return value;
+                    } else if constexpr (std::is_integral_v<TValue>) {
+                        return static_cast<std::size_t>(value);
+                    } else {
+                        return graph::defaultMinBufferSize;
+                    }
+                },
+                connection[4]);
+
+            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition, minBufferSize);
+        }
     } // for connections
 }
 
@@ -239,6 +256,10 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
             seq.push_back(edge.destinationBlock().name().data());
             writePortDefinition(edge.destinationPortDefinition());
+
+            if (edge.minBufferSize() != graph::defaultMinBufferSize) {
+                seq.push_back(edge.minBufferSize());
+            }
 
             serializedConnections.emplace_back(seq);
         });
