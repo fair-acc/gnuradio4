@@ -126,7 +126,18 @@ using namespace boost::ut;
 
 namespace gr::qa_grc_test {
 
-constexpr std::string_view testGrc = R"(
+template<pmtv::yaml::TypeTagMode tagMode = pmtv::yaml::TypeTagMode::Auto>
+std::string ymlDecodeEncode(std::string_view yml, std::source_location location = std::source_location::current()) {
+    const auto yaml = pmtv::yaml::deserialize(yml);
+    if (!yaml) {
+        throw gr::exception(fmt::format("Could not parse yaml: \n{}", pmtv::yaml::formatAsLines(yml, yaml.error())), location);
+    }
+
+    return pmtv::yaml::serialize<tagMode>(yaml.value());
+}
+
+const boost::ut::suite BasicGrcTests = [] {
+    constexpr std::string_view testGrc = R"(
 blocks:
   - name: ArraySink<float64>
     id: ArraySink<float64>
@@ -147,18 +158,7 @@ connections:
   - [ArraySource<float64>, [1, 1], ArraySink<float64>, [0, 1]]
 )";
 
-template<pmtv::yaml::TypeTagMode tagMode = pmtv::yaml::TypeTagMode::Auto>
-std::string ymlDecodeEncode(std::string_view yml, std::source_location location = std::source_location::current()) {
-    const auto yaml = pmtv::yaml::deserialize(yml);
-    if (!yaml) {
-        throw gr::exception(fmt::format("Could not parse yaml: \n{}", pmtv::yaml::formatAsLines(yml, yaml.error())), location);
-    }
-
-    return pmtv::yaml::serialize<tagMode>(yaml.value());
-}
-
-const boost::ut::suite GrcTests = [] {
-    "Basic graph loading and storing"_test = [] {
+    "Basic graph loading and storing"_test = [&testGrc] {
         try {
             using namespace gr;
             const auto context       = getContext();
@@ -172,7 +172,27 @@ const boost::ut::suite GrcTests = [] {
         }
     };
 
+    "Save and load"_test = [&testGrc] {
+        // Test if we get the same graph when saving it and loading the saved
+        // data into another graph
+        using namespace gr;
+
+        try {
+            const auto context       = getContext();
+            auto       graph1        = gr::loadGrc(context->loader, testGrc);
+            auto       graphSavedSrc = gr::saveGrc(context->loader, graph1);
+            auto       graph2        = gr::loadGrc(context->loader, graphSavedSrc);
+            expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
+            expect(eq(collectEdges(graph1), collectEdges(graph2)));
+        } catch (const std::string& e) {
+            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            expect(false);
+        }
+    };
+};
+
 #if not defined(__EMSCRIPTEN__) // && not defined(__APPLE__)
+const boost::ut::suite PluginsGrcTests = [] {
     "Basic graph loading and storing using plugins"_test = [] {
         try {
             using namespace gr;
@@ -277,20 +297,77 @@ connections:
             expect(false);
         }
     };
+};
 #endif
 
-    "Save and load"_test = [] {
-        // Test if we get the same graph when saving it and loading the saved
-        // data into another graph
-        using namespace gr;
+#if not defined(__EMSCRIPTEN__) // && not defined(__APPLE__)
+const boost::ut::suite PortTests = [] {
+    "Port buffer sizes"_test = [] {
+        constexpr std::string_view testGrc = R"(
+blocks:
+  - name: main_source
+    id: good::fixed_source<float64>
+    parameters:
+      event_count: 100
+      unknown_property: 42
+  - name: multiplier
+    id: good::multiply<float64>
+  - name: counter
+    id: builtin_counter<float64>
+  - name: sink
+    id: good::cout_sink<float64>
+    parameters:
+      total_count: 100
+      unknown_property: 42
+
+connections:
+  - [main_source, 0, multiplier, 0, 1024]
+  - [multiplier, 0, counter, 0, 2048]
+  - [counter, 0, sink, 0, 8192]
+)";
 
         try {
-            const auto context       = getContext();
-            auto       graph1        = gr::loadGrc(context->loader, testGrc);
-            auto       graphSavedSrc = gr::saveGrc(context->loader, graph1);
-            auto       graph2        = gr::loadGrc(context->loader, graphSavedSrc);
-            expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
-            expect(eq(collectEdges(graph1), collectEdges(graph2)));
+            using namespace gr;
+            const auto context  = getContext();
+            const auto graphSrc = ymlDecodeEncode(testGrc);
+
+            auto graph = gr::loadGrc(context->loader, graphSrc);
+
+            {
+                std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
+                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                    auto it = expectedSizes.find(edge.minBufferSize());
+                    if (it != expectedSizes.end()) {
+                        expectedSizes.erase(it);
+                    } else {
+                        expect(false);
+                    }
+                });
+                expect(expectedSizes.empty());
+
+                expect(graph.connectPendingEdges());
+
+                std::size_t thresholdSize = 2 * 8192UZ;
+                graph.forEachEdge([&thresholdSize](const auto& edge) { //
+                    expect(thresholdSize >= edge.bufferSize());
+                });
+            }
+
+            auto graphSavedSrc = gr::saveGrc(context->loader, graph);
+
+            {
+                auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc);
+                std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
+                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                    auto it = expectedSizes.find(edge.minBufferSize());
+                    if (it != expectedSizes.end()) {
+                        expectedSizes.erase(it);
+                    } else {
+                        expect(false);
+                    }
+                });
+                expect(expectedSizes.empty());
+            }
         } catch (const std::string& e) {
             fmt::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
@@ -324,7 +401,10 @@ connections:
             expect(false);
         }
     };
+};
+#endif
 
+const boost::ut::suite SettingsTests = [] {
     "Settings serialization"_test = [] {
         try {
             using namespace gr;
