@@ -50,7 +50,6 @@ const boost::ut::suite NonRunningGraphTests = [] {
     using namespace gr::testing;
     using enum gr::message::Command;
 
-    [[maybe_unused]] auto registerCopyBlock = gr::registerBlock<gr::testing::Copy, float, double>(gr::globalPluginLoader().registry());
     expect(fatal(gt(gr::globalPluginLoader().registry().knownBlocks().size(), 0UZ))) << "didn't register any blocks";
     fmt::println("registered blocks:");
     for (const auto& blockName : gr::globalPluginLoader().registry().knownBlocks()) {

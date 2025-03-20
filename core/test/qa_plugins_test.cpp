@@ -37,7 +37,7 @@ public:
 struct TestContext {
     gr::PluginLoader loader;
 
-    TestContext() : loader(gr::globalBlockRegistry(), std::vector<std::filesystem::path>{"core/test/plugins", "test/plugins", "plugins"}) { gr::registerBlock<builtin_multiply, double, float>(gr::globalBlockRegistry()); }
+    TestContext() : loader(gr::globalBlockRegistry(), std::vector<std::filesystem::path>{"core/test/plugins", "test/plugins", "plugins"}) {}
 };
 
 TestContext& context() {

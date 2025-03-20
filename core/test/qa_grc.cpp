@@ -123,9 +123,6 @@ bool checkAndPrintMissingLines(const std::string& first, const std::string& seco
 auto getContext() {
     static auto ctx = [] {
         auto context = std::make_shared<TestContext>(std::vector<std::filesystem::path>{TESTS_BINARY_PATH "/plugins"});
-        gr::registerBlock<builtin_counter, double>(context->loader.registry());
-        gr::registerBlock<ArraySource, double>(context->loader.registry());
-        gr::registerBlock<"ArraySink", ArraySink, double>(context->loader.registry());
         return context;
     }();
     return ctx;

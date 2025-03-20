@@ -917,10 +917,7 @@ connections:
   - [test_block, 0, sink, 0]
 )";
         BlockRegistry              registry;
-        gr::registerBlock<Source, double>(registry);
-        gr::registerBlock<SettingsChangeRecorder, double>(registry);
-        gr::registerBlock<Sink, double>(registry);
-        PluginLoader loader(registry, {});
+        PluginLoader               loader(registry, {});
         try {
             scheduler::Simple sched{loadGrc(loader, std::string(grc))};
             expect(sched.runAndWait().has_value());

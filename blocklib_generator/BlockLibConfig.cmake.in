@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+
+set(PARSER_EXECUTABLE ${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/parse_registrations)
+
+include("${CMAKE_CURRENT_LIST_DIR}/BlockLibTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/BlockLibMacros.cmake")
