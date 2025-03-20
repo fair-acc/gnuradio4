@@ -18,9 +18,9 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
-
-#include "gnuradio-4.0/TriggerMatcher.hpp"
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include <gnuradio-4.0/TriggerMatcher.hpp>
 
 namespace gr::basic {
 
@@ -29,8 +29,8 @@ template<typename T, gr::meta::fixed_string description = "", typename... Argume
 using A = gr::Annotated<T, description, Arguments...>;
 using namespace gr;
 
-GR_REGISTER_BLOCK("gr::basic::SystemClockSource", gr::basic::ClockSource < std::uint8_t, true, std::chrono::system_clock, true)
-GR_REGISTER_BLOCK("gr::basic::SystemClockSourceNonBlocking", gr::basic::ClockSource < std::uint8_t, false, std::chrono::system_clock, true)
+GR_REGISTER_BLOCK("gr::basic::SystemClockSource", gr::basic::ClockSource, (std::uint8_t, true, std::chrono::system_clock, true))
+GR_REGISTER_BLOCK("gr::basic::SystemClockSourceNonBlocking", gr::basic::ClockSource, (std::uint8_t, false, std::chrono::system_clock, true))
 
 template<typename T, bool useIoThread = true, typename ClockSourceType = std::chrono::system_clock, bool basicPeriodAlgorithm = true>
 struct ClockSource : Block<ClockSource<T, useIoThread, ClockSourceType>, BlockingIO<useIoThread>> {

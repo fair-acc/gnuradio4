@@ -10,9 +10,9 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
-#include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
 
+#include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
@@ -20,8 +20,8 @@
 
 namespace gr::filter {
 
-GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorTimeDomain", gr::filter::FrequencyEstimatorTimeDomain, [ float, double ])
-GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorTimeDomainDecimating", gr::filter::FrequencyEstimatorTimeDomain, ([T], Resampling<10U>), [ float, double ])
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorTimeDomain", gr::filter::FrequencyEstimatorTimeDomain, [T], [ float, double ])
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorTimeDomainDecimating", gr::filter::FrequencyEstimatorTimeDomain, ([T], gr::Resampling<10U>), [ float, double ])
 
 template<typename T, typename... Args>
 requires std::floating_point<T>
@@ -176,8 +176,8 @@ private:
 template<typename T>
 using FrequencyEstimatorTimeDomainDecimating = FrequencyEstimatorTimeDomain<T, Resampling<10U>>;
 
-GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorFrequencyDomain", gr::filter::FrequencyEstimatorFrequencyDomain, [ float, double ])
-GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorFrequencyDomainDecimating", gr::filter::FrequencyEstimatorFrequencyDomain, ([T], Resampling<10U>), [ float, double ])
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorFrequencyDomain", gr::filter::FrequencyEstimatorFrequencyDomain, [T], [ float, double ])
+GR_REGISTER_BLOCK("gr::filter::FrequencyEstimatorFrequencyDomainDecimating", gr::filter::FrequencyEstimatorFrequencyDomain, ([T], gr::Resampling<10U>), [ float, double ])
 
 template<typename T, typename... Args>
 requires std::floating_point<T>

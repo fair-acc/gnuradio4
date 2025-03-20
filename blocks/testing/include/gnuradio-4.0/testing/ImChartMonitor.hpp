@@ -14,7 +14,7 @@
 
 namespace gr::testing {
 
-GR_REGISTER_BLOCK(gr::testing::ImChartMonitor, [ float, double, gr::DataSet<float>, gr::DataSet<double> ])
+GR_REGISTER_BLOCK(gr::testing::ImChartMonitor, [T], [ float, double, gr::DataSet<float>, gr::DataSet<double> ])
 
 template<typename T>
 requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
