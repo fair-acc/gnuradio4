@@ -74,7 +74,7 @@ template<typename T>
 
 } // namespace function_generator
 
-GR_REGISTER_BLOCK(gr::basic::FunctionGenerator, [ float, double ])
+GR_REGISTER_BLOCK(gr::basic::FunctionGenerator, [T], [ float, double ])
 
 template<typename T>
 requires(std::floating_point<T>)

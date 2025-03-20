@@ -14,7 +14,7 @@ namespace gr::basic {
 
 using namespace gr;
 
-GR_REGISTER_BLOCK(gr::basic::PythonBlock, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
+GR_REGISTER_BLOCK(gr::basic::PythonBlock, [T], [ int32_t, float ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> /* || std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>> */

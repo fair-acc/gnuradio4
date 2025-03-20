@@ -362,6 +362,11 @@ public:
     }
 };
 
+template<fixed_string S1, typename T1, fixed_string S2, typename T2>
+consteval bool operator==(constexpr_string<S1, T1>, constexpr_string<S2, T2>) {
+    return S1 == S2;
+}
+
 namespace detail {
 template<std::integral auto N>
 consteval auto fixed_string_from_number_impl() {
