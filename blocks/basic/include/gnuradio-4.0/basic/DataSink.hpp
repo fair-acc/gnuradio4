@@ -397,15 +397,28 @@ inline std::optional<property_map> tagAndMetadata(const std::optional<property_m
 }
 
 template<typename T>
-[[nodiscard]] inline DataSet<T> makeDataSetTemplate(Metadata metadata) {
-    DataSet<T> tmpl;
-    tmpl.signal_names      = {std::move(metadata.signalName)};
-    tmpl.signal_quantities = {std::move(metadata.signalQuantity)};
-    tmpl.signal_units      = {std::move(metadata.signalUnit)};
-    tmpl.signal_ranges     = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
-    return tmpl;
-}
+[[nodiscard]] inline DataSet<T> createDataset(const Metadata& metadata) {
+    DataSet<T> ds;
+    ds.signal_names      = {metadata.signalName};
+    ds.signal_quantities = {metadata.signalQuantity};
+    ds.signal_units      = {metadata.signalUnit};
+    ds.signal_ranges     = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
 
+    ds.timestamp = 0;
+
+    ds.axis_names = {"Time"};
+    ds.axis_units = {"a.u."};
+
+    ds.extents.resize(1);
+    ds.layout = gr::LayoutRight{};
+
+    ds.timing_events.resize(1);
+    ds.axis_values.resize(1);
+
+    ds.meta_information.resize(1);
+
+    return ds;
+}
 } // namespace detail
 
 GR_REGISTER_BLOCK(gr::basic::DataSink, [ float, double ])
@@ -827,7 +840,7 @@ private:
         std::size_t preSamples  = 0;
         std::size_t postSamples = 0;
 
-        DataSet<T>                dataset_template;
+        detail::Metadata          _metadata;
         gr::property_map          trigger_matcher_state;
         TMatcher                  trigger_matcher = {};
         std::deque<PendingWindow> pending_trigger_windows; // triggers that still didn't receive all their data
@@ -838,15 +851,20 @@ private:
         template<typename CallbackFW, trigger::Matcher Matcher>
         explicit TriggerListener(Matcher&& matcher, std::size_t pre, std::size_t post, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)) {}
 
-        void setMetadata(detail::Metadata metadata) override { dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata)); }
+        void setMetadata(detail::Metadata metadata) override { _metadata = std::move(metadata); }
 
         void process(std::span<const T> history, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0 && trigger_matcher("", Tag{0, *tagData0}, trigger_matcher_state) == trigger::MatchResult::Matching) {
-                DataSet<T> dataset = dataset_template;
-                dataset.signal_values.reserve(preSamples + postSamples); // TODO maybe make the circ. buffer smaller but preallocate these
+                DataSet<T> dataset = detail::createDataset<T>(_metadata);
+                dataset.signal_values.reserve(preSamples + postSamples);
+                dataset.axis_values.reserve(preSamples + postSamples);
 
                 const auto preSampleView = history.subspan(0UZ, std::min(preSamples, history.size()));
                 dataset.signal_values.insert(dataset.signal_values.end(), preSampleView.rbegin(), preSampleView.rend());
+                const auto     newAxis = std::views::iota(0UZ, dataset.signal_values.size());
+                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
+                dataset.axis_values[0].insert(dataset.axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
+                dataset.extents[0] = static_cast<std::int32_t>(dataset.signal_values.size());
 
                 dataset.timing_events = {{{static_cast<std::ptrdiff_t>(preSampleView.size()), *tagData0}}};
                 pending_trigger_windows.push_back({.dataset = std::move(dataset), .pending_post_samples = postSamples});
@@ -854,8 +872,14 @@ private:
 
             auto window = pending_trigger_windows.begin();
             while (window != pending_trigger_windows.end()) {
-                const auto postSampleView = inData.first(std::min(window->pending_post_samples, inData.size()));
+                const auto        postSampleView = inData.first(std::min(window->pending_post_samples, inData.size()));
+                const std::size_t oldSize        = window->dataset.signal_values.size();
                 window->dataset.signal_values.insert(window->dataset.signal_values.end(), postSampleView.begin(), postSampleView.end());
+                const auto     newAxis = std::views::iota(oldSize, window->dataset.signal_values.size());
+                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
+                window->dataset.axis_values[0].insert(window->dataset.axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
+                window->dataset.extents[0] = static_cast<std::int32_t>(window->dataset.signal_values.size());
+
                 window->pending_post_samples -= postSampleView.size();
 
                 if (window->pending_post_samples == 0) {
@@ -884,7 +908,7 @@ private:
     struct MultiplexedListener : public DataSetBaseListener<Callback> {
         M                         matcher;
         gr::property_map          matcher_state;
-        DataSet<T>                dataset_template;
+        detail::Metadata          _metadata;
         std::optional<DataSet<T>> pending_dataset;
         std::size_t               maximumWindowSize;
 
@@ -894,7 +918,7 @@ private:
         template<trigger::Matcher Matcher>
         explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, std::shared_ptr<DataSetPoller<T>> poller_, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller_), doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize) {}
 
-        void setMetadata(detail::Metadata metadata) override { dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata)); }
+        void setMetadata(detail::Metadata metadata) override { _metadata = std::move(metadata); }
 
         void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0) {
@@ -909,15 +933,21 @@ private:
                     }
                 }
                 if (obsr == trigger::MatchResult::Matching) {
-                    pending_dataset = dataset_template;
-                    pending_dataset->signal_values.reserve(maximumWindowSize); // TODO might be too much?
+                    pending_dataset = detail::createDataset<T>(_metadata);
+                    pending_dataset->signal_values.reserve(maximumWindowSize);
+                    pending_dataset->axis_values.reserve(maximumWindowSize);
                     pending_dataset->timing_events = {{{0, *tagData0}}};
                 }
             }
             if (pending_dataset) {
-                const auto toWrite = std::min(inData.size(), maximumWindowSize - pending_dataset->signal_values.size());
-                const auto view    = inData.first(toWrite);
+                const auto        toWrite = std::min(inData.size(), maximumWindowSize - pending_dataset->signal_values.size());
+                const auto        view    = inData.first(toWrite);
+                const std::size_t oldSize = pending_dataset->signal_values.size();
                 pending_dataset->signal_values.insert(pending_dataset->signal_values.end(), view.begin(), view.end());
+                const auto     newAxis = std::views::iota(oldSize, pending_dataset->signal_values.size());
+                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
+                pending_dataset->axis_values[0].insert(pending_dataset->axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
+                pending_dataset->extents[0] = static_cast<std::int32_t>(pending_dataset->signal_values.size());
 
                 if (pending_dataset->signal_values.size() == maximumWindowSize) {
                     this->publishDataSet(std::move(*pending_dataset));
@@ -947,7 +977,7 @@ private:
     struct SnapshotListener : public DataSetBaseListener<Callback> {
         std::chrono::nanoseconds    time_delay;
         std::size_t                 sample_delay = 0;
-        DataSet<T>                  dataset_template;
+        detail::Metadata            _metadata;
         M                           trigger_matcher = {};
         gr::property_map            trigger_matcher_state;
         std::deque<PendingSnapshot> pending;
@@ -959,8 +989,8 @@ private:
         explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)) {}
 
         void setMetadata(detail::Metadata metadata) override {
-            sample_delay     = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * metadata.sampleRate));
-            dataset_template = detail::makeDataSetTemplate<T>(std::move(metadata));
+            sample_delay = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * metadata.sampleRate));
+            _metadata    = std::move(metadata);
         }
 
         void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
@@ -978,9 +1008,13 @@ private:
                     break;
                 }
 
-                DataSet<T> dataset    = dataset_template;
-                dataset.timing_events = {{{-static_cast<std::ptrdiff_t>(it->delay), std::move(it->tag_data)}}};
-                dataset.signal_values = {inData[it->pending_samples]};
+                DataSet<T> dataset     = detail::createDataset<T>(_metadata);
+                dataset.timing_events  = {{{-static_cast<std::ptrdiff_t>(it->delay), std::move(it->tag_data)}}};
+                dataset.signal_values  = {inData[it->pending_samples]};
+                const auto     newAxis = std::views::iota(0UZ, dataset.signal_values.size());
+                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
+                dataset.axis_values[0].insert(dataset.axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
+                dataset.extents[0] = static_cast<std::int32_t>(dataset.signal_values.size());
                 this->publishDataSet(std::move(dataset));
                 it = pending.erase(it);
             }

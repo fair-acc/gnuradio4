@@ -243,6 +243,26 @@ bool spinUntil(std::chrono::milliseconds timeout, auto fnc) {
     return false;
 }
 
+template<typename T>
+void testBasicsDataSet(const DataSet<T>& ds, std::source_location location = std::source_location::current()) {
+    using namespace boost::ut;
+
+    expect(eq(ds.extents.size(), 1UZ)) << fmt::format("Error line: {}\n", location.line());
+    if (ds.extents.size() >= 1) {
+        expect(eq(static_cast<std::size_t>(ds.extents[0]), ds.signal_values.size())) << fmt::format("Error line: {}\n", location.line());
+    }
+    expect(eq(ds.axis_values.size(), 1UZ));
+    if (ds.axis_values.size() >= 1) {
+        expect(eq(ds.axis_values[0].size(), ds.signal_values.size())) << fmt::format("Error line: {}\n", location.line());
+        expect(std::ranges::is_sorted(ds.axis_values[0])) << fmt::format("Error line: {}\n", location.line());
+    }
+
+    std::expected<void, gr::Error> dsCheck = dataset::detail::checkDataSetConsistency(ds);
+    if (!dsCheck) {
+        expect(false) << fmt::format("DataSet is not consistent - Error line: {}, Error:\n{}", location.line(), dsCheck.error().message);
+    }
+}
+
 } // namespace gr::basic::data_sink_test
 
 template<typename T>
@@ -500,6 +520,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events[0].size(), 1u));
                         expect(eq(dataset.timing_events[0][0].first, 3));
                         receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                        testBasicsDataSet(dataset);
                     }
                 });
             }
@@ -567,6 +588,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events[0].size(), 1UZ));
                         expect(eq(dataset.timing_events[0][0].first, 0));
                         receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                        testBasicsDataSet(dataset);
                     }
                 });
             }
@@ -630,6 +652,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events[0].size(), 1u));
                         expect(eq(dataset.timing_events[0][0].first, -5000));
                         receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                        testBasicsDataSet(dataset);
                     }
                 });
             }
@@ -718,6 +741,7 @@ const boost::ut::suite DataSinkTests = [] {
                             expect(eq(dataset.signal_units[0], "a.u."s));
                             ranges.push_back(dataset.signal_values.front());
                             ranges.push_back(dataset.signal_values.back());
+                            testBasicsDataSet(dataset);
                         }
                     })) {
                     }
@@ -780,6 +804,7 @@ const boost::ut::suite DataSinkTests = [] {
                         expect(eq(dataset.timing_events[0][0].first, 3000));
                         auto absolute = dataset.timing_events[0] | std::views::transform([&receivedData](const auto& t) { return gr::Tag{checkedSum(receivedData.size(), t.first), t.second}; });
                         receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
+                        testBasicsDataSet(dataset);
                     }
                 })) {
                 }
@@ -931,6 +956,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(receivedDataSets[1].signal_values, getIota(300, 700.f)));
         expect(eq(receivedDataSets[1].signal_names, std::vector{"test signal"s}));
         expect(eq(receivedDataSets[1].signal_units, std::vector{"test unit"s}));
+        testBasicsDataSet(receivedDataSets[1]);
     };
 
     "data set callback"_test = [] {
@@ -972,6 +998,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(receivedDataSets[1].signal_values, getIota(300, 700.f)));
         expect(eq(receivedDataSets[1].signal_names, std::vector{"test signal"s}));
         expect(eq(receivedDataSets[1].signal_units, std::vector{"test unit"s}));
+        testBasicsDataSet(receivedDataSets[1]);
     };
 };
 
