@@ -69,7 +69,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         std::span<OutType>   outSpan(v);
 
         expect(gr::work::Status::OK == fftBlock.processBulk(signal, outSpan));
-        std::expected<void, gr::Error> dsCheck = dataset::detail::checkDataSetConsistency(v[0], fmt::format("TestDataSet({} -> {})", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>()));
+        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(v[0], fmt::format("TestDataSet({} -> {})", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>()));
         expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
 
         // check for DataSet equality

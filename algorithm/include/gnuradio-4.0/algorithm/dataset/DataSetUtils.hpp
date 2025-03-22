@@ -26,7 +26,7 @@ template<DataSetLike TDataSet>
         return false;
     }
 
-    std::expected<void, gr::Error> dsCheck = dataset::detail::checkDataSetConsistency(dataSet);
+    std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataSet);
     if (!dsCheck) {
         throw gr::exception(fmt::format("draw(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location);
     }

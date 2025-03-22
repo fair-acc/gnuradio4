@@ -10,6 +10,7 @@
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/basic/DataSink.hpp>
@@ -265,6 +266,7 @@ const boost::ut::suite DataSinkTests = [] {
     using namespace gr::basic;
     using namespace gr::basic::data_sink_test;
     using namespace std::string_literals;
+    using namespace gr::test;
 
     "callback continuous mode"_test = [] {
         constexpr gr::Size_t  kSamples   = 200005;
@@ -446,7 +448,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(nonMetadataTags.size(), tags.size()));
         expect(eq(indexesMatch(nonMetadataTags, tags), true)) << fmt::format("{} != {}", formatList(nonMetadataTags), formatList(tags));
         expect(eq(metadataTags.size(), 1UZ));
-        expect(eq(metadataTags[0].index, 0UZ));
+        expect(eq(metadataTags[0UZ].index, 0UZ));
         const auto metadata = latestMetadata(metadataTags);
         expect(eq(metadata.signal_name.value_or("<unset>"), "test signal"s));
         expect(eq(metadata.signal_unit.value_or("<unset>"), "test unit"s));
@@ -489,17 +491,17 @@ const boost::ut::suite DataSinkTests = [] {
                 [[maybe_unused]] auto r = poller->process([&receivedData, &receivedTags](const auto& datasets) {
                     for (const auto& dataset : datasets) {
                         receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "dataset - blocking polling trigger mode non-overlapping");
+                        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
+
                         // signal info from sink settings
-                        expect(eq(dataset.signal_names.size(), 1u));
-                        expect(eq(dataset.signal_units.size(), 1u));
-                        expect(eq(dataset.signal_ranges.size(), 1u));
-                        expect(eq(dataset.timing_events.size(), 1u));
-                        expect(eq(dataset.signal_names[0], "test signal"s));
-                        expect(eq(dataset.signal_units[0], "none"s));
-                        expect(eq(dataset.signal_ranges[0], gr::Range<std::int32_t>{-2, +2}));
-                        expect(eq(dataset.timing_events[0].size(), 1u));
-                        expect(eq(dataset.timing_events[0][0].first, 3));
-                        receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                        expect(eq(dataset.signalName(0UZ), "test signal"s));
+                        expect(eq(dataset.signalUnit(0UZ), "none"s));
+                        expect(eq(dataset.signalRange(0UZ), gr::Range<std::int32_t>{-2, +2}));
+                        expect(eq(dataset.timingEvents(0UZ).size(), 1UZ));
+                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, 3));
+                        receivedTags.insert(receivedTags.end(), dataset.timingEvents(0UZ).begin(), dataset.timingEvents(0UZ).end());
                     }
                 });
             }
@@ -510,7 +512,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(sched.runAndWait().has_value());
 
         const auto& [poller, receivedData, receivedTags] = polling.get();
-        const auto expected_tags                         = {tags[0], tags[2]}; // triggers-only
+        const auto expected_tags                         = {tags[0UZ], tags[2UZ]}; // triggers-only
 
         expect(eq(receivedData.size(), 10UZ));
         expect(eq(receivedData, std::vector<int32_t>{2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001}));
@@ -556,17 +558,17 @@ const boost::ut::suite DataSinkTests = [] {
                 [[maybe_unused]] auto r = poller->process([&receivedData, &receivedTags](const auto& datasets) {
                     for (const auto& dataset : datasets) {
                         receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "DataSet");
+                        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
+
                         // signal info from sink settings
-                        expect(eq(dataset.signal_names.size(), 1u));
-                        expect(eq(dataset.signal_units.size(), 1u));
-                        expect(eq(dataset.signal_ranges.size(), 1u));
-                        expect(eq(dataset.timing_events.size(), 1u));
-                        expect(eq(dataset.signal_names[0], "test signal"s));
-                        expect(eq(dataset.signal_units[0], "no unit"s));
-                        expect(eq(dataset.signal_ranges[0], gr::Range<std::int32_t>{-2, +2}));
-                        expect(eq(dataset.timing_events[0].size(), 1UZ));
-                        expect(eq(dataset.timing_events[0][0].first, 0));
-                        receivedTags.insert(receivedTags.end(), dataset.timing_events[0].begin(), dataset.timing_events[0].end());
+                        expect(eq(dataset.signalName(0UZ), "test signal"s));
+                        expect(eq(dataset.signalUnit(0UZ), "no unit"s));
+                        expect(eq(dataset.signalRange(0UZ), gr::Range<std::int32_t>{-2, +2}));
+                        expect(eq(dataset.timingEvents(0UZ).size(), 1UZ));
+                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, 0));
+                        receivedTags.insert(receivedTags.end(), dataset.timingEvents(0UZ).begin(), dataset.timingEvents(0UZ).end());
                     }
                 });
             }
@@ -619,16 +621,15 @@ const boost::ut::suite DataSinkTests = [] {
                 seenFinished            = poller->finished;
                 [[maybe_unused]] auto r = poller->process([&receivedData](const auto& datasets) {
                     for (const auto& dataset : datasets) {
+                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "dataset blocking snapshot mode");
+                        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
+
                         // signal info propagated from source to sink
-                        expect(eq(dataset.signal_names.size(), 1u));
-                        expect(eq(dataset.signal_units.size(), 1u));
-                        expect(eq(dataset.signal_ranges.size(), 1u));
-                        expect(eq(dataset.timing_events.size(), 1u));
-                        expect(eq(dataset.signal_names[0], "test signal"s));
-                        expect(eq(dataset.signal_units[0], "none"s));
-                        expect(eq(dataset.signal_ranges[0], gr::Range<int32_t>{0, kSamples - 1}));
-                        expect(eq(dataset.timing_events[0].size(), 1u));
-                        expect(eq(dataset.timing_events[0][0].first, -5000));
+                        expect(eq(dataset.signalName(0UZ), "test signal"s));
+                        expect(eq(dataset.signalUnit(0UZ), "none"s));
+                        expect(eq(dataset.signalRange(0UZ), gr::Range<int32_t>{0, kSamples - 1}));
+                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, -5000));
                         receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
                     }
                 });
@@ -710,12 +711,13 @@ const boost::ut::suite DataSinkTests = [] {
                     seenFinished = poller->finished.load();
                     while (poller->process([&ranges](const auto& datasets) {
                         for (const auto& dataset : datasets) {
+                            std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "dataset - blocking multiplexed mode");
+                            expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+                            expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
+
                             // default signal info, we didn't set anything
-                            expect(eq(dataset.signal_names.size(), 1u));
-                            expect(eq(dataset.signal_units.size(), 1u));
-                            expect(eq(dataset.timing_events.size(), 1u));
-                            expect(eq(dataset.signal_names[0], "test signal"s));
-                            expect(eq(dataset.signal_units[0], "a.u."s));
+                            expect(eq(dataset.signalName(0UZ), "test signal"s));
+                            expect(eq(dataset.signalUnit(0UZ), "a.u."s));
                             ranges.push_back(dataset.signal_values.front());
                             ranges.push_back(dataset.signal_values.back());
                         }
@@ -772,13 +774,16 @@ const boost::ut::suite DataSinkTests = [] {
                 seenFinished = poller->finished.load();
                 while (poller->process([&receivedData, &receivedTags](const auto& datasets) {
                     for (const auto& dataset : datasets) {
+                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "dataset - blocking polling trigger mode overlapping");
+                        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
+
                         expect(eq(dataset.signal_values.size(), 5000u) >> fatal);
                         receivedData.push_back(dataset.signal_values.front());
                         receivedData.push_back(dataset.signal_values.back());
-                        expect(eq(dataset.timing_events.size(), 1u));
-                        expect(eq(dataset.timing_events[0].size(), 1u));
-                        expect(eq(dataset.timing_events[0][0].first, 3000));
-                        auto absolute = dataset.timing_events[0] | std::views::transform([&receivedData](const auto& t) { return gr::Tag{checkedSum(receivedData.size(), t.first), t.second}; });
+                        expect(eq(dataset.timingEvents(0UZ).size(), 1UZ));
+                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, 3000));
+                        auto absolute = dataset.timingEvents(0UZ) | std::views::transform([&receivedData](const auto& t) { return gr::Tag{checkedSum(receivedData.size(), t.first), t.second}; });
                         receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
                     }
                 })) {
@@ -923,14 +928,17 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto& [poller, receivedDataSets] = polling.get();
         expect(eq(receivedDataSets.size(), 2UZ));
-        expect(eq(receivedDataSets[0].signal_values, getIota(300, 300.f)));
-        expect(eq(receivedDataSets[0].signal_names, std::vector{"test signal"s}));
-        expect(eq(receivedDataSets[0].signal_units, std::vector{"test unit"s}));
-        expect(eq(receivedDataSets[0].timing_events.size(), 1UZ));
-        expect(eq(receivedDataSets[0].timing_events[0].size(), 0UZ));
-        expect(eq(receivedDataSets[1].signal_values, getIota(300, 700.f)));
-        expect(eq(receivedDataSets[1].signal_names, std::vector{"test signal"s}));
-        expect(eq(receivedDataSets[1].signal_units, std::vector{"test unit"s}));
+        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(receivedDataSets[1UZ], "receivedDataSets[1UZ]");
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        expect(eq(receivedDataSets[1UZ].size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
+
+        expect(eq_collections(receivedDataSets[0UZ].signalValues(0UZ), getIota(300, 300.f)));
+        expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"s));
+        expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 0UZ));
+        expect(eq_collections(receivedDataSets[1UZ].signalValues(0UZ), getIota(300, 700.f)));
+        expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"s));
+        expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"s));
     };
 
     "data set callback"_test = [] {
@@ -964,14 +972,17 @@ const boost::ut::suite DataSinkTests = [] {
         registerThread.join();
 
         expect(eq(receivedDataSets.size(), 2UZ));
-        expect(eq(receivedDataSets[0].signal_values, getIota(300, 300.f)));
-        expect(eq(receivedDataSets[0].signal_names, std::vector{"test signal"s}));
-        expect(eq(receivedDataSets[0].signal_units, std::vector{"test unit"s}));
-        expect(eq(receivedDataSets[0].timing_events.size(), 1UZ));
-        expect(eq(receivedDataSets[0].timing_events[0].size(), 0UZ));
-        expect(eq(receivedDataSets[1].signal_values, getIota(300, 700.f)));
-        expect(eq(receivedDataSets[1].signal_names, std::vector{"test signal"s}));
-        expect(eq(receivedDataSets[1].signal_units, std::vector{"test unit"s}));
+        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(receivedDataSets[1UZ], "receivedDataSets[1UZ]");
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        expect(eq(receivedDataSets[1UZ].size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
+
+        expect(eq_collections(receivedDataSets[0UZ].signalValues(0UZ), getIota(300, 300.f)));
+        expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"s));
+        expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 0UZ));
+        expect(eq_collections(receivedDataSets[1UZ].signalValues(0UZ), getIota(300, 700.f)));
+        expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"s));
+        expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"s));
     };
 };
 
