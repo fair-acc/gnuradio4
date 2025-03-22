@@ -37,7 +37,8 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         gr::DataSet<T> ds = generate::triangular<T>("triagonal", nSamples);
         gr::dataset::draw(ds);
 
-        expect(gr::dataset::verify<true>(ds));
+        std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
 
         gr::DataSet<T> ds1 = generate::triangular<double>("triagonal - odd", 11);
         fmt::println("\"{:20}\": {}", ds1.signalName(0UZ), ds1.signal_values);
@@ -51,8 +52,9 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
     };
 
     "ramp DataSet"_test = []<typename T = double> {
-        gr::DataSet<T> ds = generate::ramp<T>("ramp", nSamples);
-        expect(gr::dataset::verify<true>(ds));
+        gr::DataSet<T>                 ds      = generate::ramp<T>("ramp", nSamples);
+        std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 
@@ -61,8 +63,9 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         constexpr T sigma         = T(nSamples) / T(10);
         const T     normalisation = sigma * gr::math::sqrt(T(2) * std::numbers::pi_v<T>);
 
-        gr::DataSet<T> ds = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation);
-        expect(gr::dataset::verify<true>(ds));
+        gr::DataSet<T>                 ds      = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation);
+        std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 
@@ -76,13 +79,15 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         gr::DataSet<T> ds2 = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation);
         gr::DataSet<T> ds  = addFunction(ds1, ds2);
 
-        expect(gr::dataset::verify<true>(ds));
+        std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 
     "randomStepFunction DataSet"_test = []<typename T = double> {
-        gr::DataSet<T> ds = generate::randomStepFunction<T>("randomStepFunction", nSamples);
-        expect(gr::dataset::verify<true>(ds));
+        gr::DataSet<T>                 ds      = generate::randomStepFunction<T>("randomStepFunction", nSamples);
+        std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
+        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 };

@@ -39,49 +39,6 @@ std::size_t checkIndexRange(const DataSet<T>& ds, std::size_t minIndex = 0UZ, st
     return maxIndex;
 }
 
-template<typename T>
-[[nodiscard]] std::expected<void, gr::Error> checkDataSetConsistency(const DataSet<T>& ds, std::string_view dsName = "unnamed", std::source_location location = std::source_location::current()) {
-    // check all extents are non-negative
-    if (std::ranges::any_of(ds.extents, [](std::int32_t e) { return e <= 0; })) {
-        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": found 0 or negative extend values [{}]", gr::meta::type_name<T>(), dsName, fmt::join(ds.extents, ", ")), location));
-    }
-
-    // check axis-related sizes: axisCount() == extents.size() == axis_units.size() == axis_values.size()
-    if (ds.nDimensions() != ds.axisCount() || ds.axisCount() != ds.axis_units.size() || ds.axisCount() != ds.axis_values.size()) {
-        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": nDimensions()={}, axisCount()={}, axis_units.size()={}, axis_values.size()={}", gr::meta::type_name<T>(), dsName, ds.nDimensions(), ds.axisCount(), ds.axis_units.size(), ds.axis_values.size()), location));
-    }
-
-    // for each axis index i, check axisValues(i).size() == extents[i]
-    for (std::size_t i = 0UZ; i < ds.extents.size(); i++) {
-        if (ds.axis_values[i].size() != static_cast<std::size_t>(ds.extents[i])) {
-            return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": axisValues({}) size={} != extents[{}]={}", gr::meta::type_name<T>(), dsName, i, ds.axis_values[i].size(), i, ds.extents[i]), location));
-        }
-    }
-
-    // check the number of signals matches all signal-related arrays
-    const std::size_t n_signals = ds.size();
-    if (n_signals != ds.signal_names.size() || n_signals != ds.signal_quantities.size() || n_signals != ds.signal_units.size() || n_signals != ds.signal_ranges.size()) {
-        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\":  ds.size()={}, signal_names.size()={}, signal_quantities.size()={}, signal_units.size()={}, signal_ranges.size()={}", gr::meta::type_name<T>(), dsName, n_signals, ds.signal_names.size(), ds.signal_quantities.size(), ds.signal_units.size(), ds.signal_ranges.size()), location));
-    }
-
-    // check meta_information.size() == timing_events.size() == number of signals
-    if (ds.meta_information.size() != n_signals) {
-        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": meta_information.size()={} != number_of_signals={}", gr::meta::type_name<T>(), dsName, ds.meta_information.size(), n_signals), location));
-    }
-    if (ds.timing_events.size() != n_signals) {
-        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": timing_events.size()={} != number_of_signals={}", gr::meta::type_name<T>(), dsName, ds.timing_events.size(), n_signals), location));
-    }
-
-    // check product_of_extents * number_of_signals == signal_values.size()
-    const std::size_t product_of_extents = std::accumulate(ds.extents.begin(), ds.extents.end(), static_cast<std::size_t>(1), [](std::size_t acc, std::int32_t v) { return acc * static_cast<std::size_t>(v); });
-    const std::size_t expected_size      = product_of_extents * n_signals;
-    if (expected_size != ds.signal_values.size()) {
-        return std::unexpected(gr::Error(fmt::format("Mismatch in DataSet<{}>-\"{}\": signal_values.size()={} != product_of_extents({}) * n_signals({})={}", gr::meta::type_name<T>(), dsName, ds.signal_values.size(), product_of_extents, n_signals, expected_size), location));
-    }
-
-    return {};
-}
-
 template<typename T, typename U>
 [[nodiscard]] constexpr U linearInterpolate(T x0, T x1, U y0, U y1, U y) noexcept {
     if (y1 == y0) {
@@ -222,71 +179,52 @@ template<typename T>
     return gr::math::pow(T(10), x / T(20)); // Inverse decibel => 10^(value / 20)
 }
 
-template<bool ThrowOnFailure = true, typename T>
-[[maybe_unused]] constexpr bool verify(const DataSet<T>& dataSet, std::source_location location = std::source_location::current()) {
-    auto handleFailure = [&](const std::string& message) -> bool {
-        if constexpr (ThrowOnFailure) {
-            throw gr::exception(message, location);
-        }
-        return false;
+template<typename T>
+[[nodiscard]] std::expected<void, gr::Error> checkConsistency(const DataSet<T>& ds, std::string_view dsName = "unnamed", std::source_location location = std::source_location::current()) {
+    auto handleFailure = [&]<typename... Args>(std::string_view fmtStr, Args&&... args) -> std::expected<void, gr::Error> {
+        std::string combinedFmt = "Mismatch in DataSet<{}>-\"{}\": " + std::string(fmtStr) + "\n";
+        return std::unexpected(gr::Error(fmt::format(fmt::runtime_format_string<>(combinedFmt), gr::meta::type_name<T>(), dsName, std::forward<Args>(args)...), location));
     };
 
-    // axes checks
-    if (dataSet.axisCount() == 0UZ) {
-        return handleFailure("DataSet has zero axes.");
+    // check all extents are non-negative
+    if (std::ranges::any_of(ds.extents, [](std::int32_t e) { return e <= 0; })) {
+        return handleFailure("found 0 or negative extend values [{}]", fmt::join(ds.extents, ", "));
     }
-    if (dataSet.axis_names.size() != dataSet.axisCount()) {
-        return handleFailure("axis_names size does not match axisCount().");
+
+    // check axis-related sizes: axisCount() == extents.size() == axis_units.size() == axis_values.size()
+    if (ds.nDimensions() != ds.axisCount() || ds.axisCount() != ds.axis_units.size() || ds.axisCount() != ds.axis_values.size()) {
+        return handleFailure("nDimensions()={}, axisCount()={}, axis_units.size()={}, axis_values.size()={}", ds.nDimensions(), ds.axisCount(), ds.axis_units.size(), ds.axis_values.size());
     }
-    if (dataSet.axis_units.size() != dataSet.axisCount()) {
-        return handleFailure("axis_units size does not match axisCount().");
-    }
-    if (dataSet.axis_values.size() != dataSet.axisCount()) {
-        return handleFailure("axis_values size does not match axisCount().");
-    }
-    for (std::size_t axis = 0; axis < dataSet.axisCount(); ++axis) {
-        if (dataSet.axis_values[axis].empty()) {
-            return handleFailure(fmt::format("axis_values[{}] is empty.", axis));
+
+    // for each axis index i, check axisValues(i).size() == extents[i]
+    for (std::size_t i = 0UZ; i < ds.extents.size(); i++) {
+        if (ds.axis_values[i].size() != static_cast<std::size_t>(ds.extents[i])) {
+            return handleFailure("axisValues({}) size={} != extents[{}]={}", i, ds.axis_values[i].size(), i, ds.extents[i]);
         }
     }
 
-    // verify extends
-    if (dataSet.extents.empty()) {
-        return handleFailure("DataSet has no extents defined.");
-    }
-    for (std::size_t dim = 0; dim < dataSet.extents.size(); ++dim) {
-        if (dataSet.extents[dim] <= 0) {
-            return handleFailure(fmt::format("Extent at dimension {} is non-positive.", dim));
-        }
+    // check the number of signals matches all signal-related arrays
+    const std::size_t n_signals = ds.size();
+    if (n_signals != ds.signal_names.size() || n_signals != ds.signal_quantities.size() || n_signals != ds.signal_units.size() || n_signals != ds.signal_ranges.size()) {
+        return handleFailure(" ds.size()={}, signal_names.size()={}, signal_quantities.size()={}, signal_units.size()={}, signal_ranges.size()={}", n_signals, ds.signal_names.size(), ds.signal_quantities.size(), ds.signal_units.size(), ds.signal_ranges.size());
     }
 
-    // verify signal_names, signal_quantities, and signal_units sizes match extents[0]
-    std::size_t num_signals = static_cast<std::size_t>(dataSet.size());
-    if (dataSet.signal_names.size() != num_signals) {
-        return handleFailure("signal_names size does not match extents[0].");
+    // check meta_information.size() == timing_events.size() == number of signals
+    if (ds.meta_information.size() != n_signals) {
+        return handleFailure("meta_information.size()={} != number_of_signals={}", ds.meta_information.size(), n_signals);
     }
-    if (dataSet.signal_quantities.size() != num_signals) {
-        return handleFailure("signal_quantities size does not match extents[0].");
-    }
-    if (dataSet.signal_units.size() != num_signals) {
-        return handleFailure("signal_units size does not match extents[0].");
+    if (ds.timing_events.size() != n_signals) {
+        return handleFailure("timing_events.size()={} != number_of_signals={}", ds.timing_events.size(), n_signals);
     }
 
-    std::size_t expected_signal_size = std::accumulate(dataSet.extents.begin(), dataSet.extents.end(), static_cast<std::size_t>(1), std::multiplies<>());
-    if (dataSet.signal_values.size() != expected_signal_size) {
-        return handleFailure("signal_values size does not match the product of extents.");
-    }
-    if (dataSet.signal_ranges.size() != num_signals) {
-        return handleFailure("signal_ranges size does not match the number of signals.");
-    }
-    if (dataSet.meta_information.size() != num_signals) { // Assuming meta_information per signal value
-        return handleFailure("meta_information size does not match the number of signals.");
-    }
-    if (dataSet.timing_events.size() != num_signals) { // Assuming timing_events per signal value
-        return handleFailure("timing_events size does not match the number of signals.");
+    // check product_of_extents * number_of_signals == signal_values.size()
+    const std::size_t product_of_extents = std::accumulate(ds.extents.begin(), ds.extents.end(), static_cast<std::size_t>(1), [](std::size_t acc, std::int32_t v) { return acc * static_cast<std::size_t>(v); });
+    const std::size_t expected_size      = product_of_extents * n_signals;
+    if (expected_size != ds.signal_values.size()) {
+        return handleFailure("signal_values.size()={} != product_of_extents({}) * n_signals({})={}", ds.signal_values.size(), product_of_extents, n_signals, expected_size);
     }
 
-    return true; // all checks passed
+    return {};
 }
 
 } // namespace gr::dataset

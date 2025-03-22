@@ -140,9 +140,6 @@ struct DataSetPoller {
         if (nProcess < minRequiredSamples) {
             return false;
         }
-        if (nProcess < minRequiredSamples) {
-            return false;
-        }
 
         ReaderSpanLike auto readData = reader.get(nProcess);
         fnc(readData);
@@ -404,18 +401,18 @@ template<typename T>
     ds.signal_units      = {metadata.signalUnit};
     ds.signal_ranges     = {{static_cast<T>(metadata.signalMin), static_cast<T>(metadata.signalMax)}};
 
-    ds.timestamp = 0;
+    ds.timestamp = 0ULL;
 
     ds.axis_names = {"Time"};
     ds.axis_units = {"a.u."};
 
-    ds.extents.resize(1);
+    ds.extents.resize(1UZ);
     ds.layout = gr::LayoutRight{};
 
-    ds.timing_events.resize(1);
-    ds.axis_values.resize(1);
+    ds.timing_events.resize(1UZ);
+    ds.axis_values.resize(1UZ);
 
-    ds.meta_information.resize(1);
+    ds.meta_information.resize(1UZ);
 
     return ds;
 }
@@ -619,7 +616,7 @@ public:
 
         {
             std::lock_guard lg(_listener_mutex); // TODO review/profile if a lock-free data structure should be used here
-            const auto      historyView = _history ? _history->get_span(0) : std::span<const T>();
+            const auto      historyView = _history ? _history->get_span(0UZ) : std::span<const T>();
             std::erase_if(_listeners, [](const auto& l) { return l->expired; });
             for (auto& listener : _listeners) {
                 listener->process(historyView, inData, tagData);
@@ -692,9 +689,9 @@ private:
                 }
 
                 if (isBlocking || pollerPtr->writer.available() > 0) {
-                    auto writeData = pollerPtr->writer.reserve(1);
-                    writeData[0]   = std::move(data);
-                    writeData.publish(1);
+                    auto writeData = pollerPtr->writer.reserve(1UZ);
+                    writeData[0UZ] = std::move(data);
+                    writeData.publish(1UZ);
                 } else {
                     pollerPtr->dropCount++;
                 }
@@ -801,9 +798,9 @@ private:
 
                 if (toWrite > 0) {
                     if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
-                        auto tw = poller->tagWriter.reserve(1);
-                        tw[0]   = {samples_written, std::move(*tag)};
-                        tw.publish(1);
+                        auto tw = poller->tagWriter.reserve(1UZ);
+                        tw[0UZ] = {samples_written, std::move(*tag)};
+                        tw.publish(1UZ);
                     }
                     _pendingMetadata.reset();
                     auto writeData = poller->writer.reserve(toWrite);
@@ -855,32 +852,28 @@ private:
 
         void process(std::span<const T> history, std::span<const T> inData, std::optional<property_map> tagData0) override {
             if (tagData0 && trigger_matcher("", Tag{0, *tagData0}, trigger_matcher_state) == trigger::MatchResult::Matching) {
-                DataSet<T> dataset = detail::createDataset<T>(_metadata);
-                dataset.signal_values.reserve(preSamples + postSamples);
-                dataset.axis_values.reserve(preSamples + postSamples);
+                DataSet<T>        dataset       = detail::createDataset<T>(_metadata);
+                const std::size_t minPreSamples = std::min(preSamples, history.size());
+                dataset.signal_values.reserve(minPreSamples + postSamples);
+                dataset.axis_values.reserve(minPreSamples + postSamples);
 
-                const auto preSampleView = history.subspan(0UZ, std::min(preSamples, history.size()));
-                dataset.signal_values.insert(dataset.signal_values.end(), preSampleView.rbegin(), preSampleView.rend());
-                const auto     newAxis = std::views::iota(0UZ, dataset.signal_values.size());
-                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
-                dataset.axis_values[0].insert(dataset.axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
-                dataset.extents[0] = static_cast<std::int32_t>(dataset.signal_values.size());
+                std::ranges::copy(history.subspan(0UZ, minPreSamples) | std::views::reverse, std::back_inserter(dataset.signal_values));
+                std::ranges::copy(std::views::iota(0UZ, minPreSamples), std::back_inserter(dataset.axis_values[0]));
+                dataset.extents[0UZ] = static_cast<std::int32_t>(dataset.signalValues(0UZ).size());
 
-                dataset.timing_events = {{{static_cast<std::ptrdiff_t>(preSampleView.size()), *tagData0}}};
+                dataset.timing_events = {{{static_cast<std::ptrdiff_t>(minPreSamples), *tagData0}}};
                 pending_trigger_windows.push_back({.dataset = std::move(dataset), .pending_post_samples = postSamples});
             }
 
             auto window = pending_trigger_windows.begin();
             while (window != pending_trigger_windows.end()) {
-                const auto        postSampleView = inData.first(std::min(window->pending_post_samples, inData.size()));
-                const std::size_t oldSize        = window->dataset.signal_values.size();
-                window->dataset.signal_values.insert(window->dataset.signal_values.end(), postSampleView.begin(), postSampleView.end());
-                const auto     newAxis = std::views::iota(oldSize, window->dataset.signal_values.size());
-                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
-                window->dataset.axis_values[0].insert(window->dataset.axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
-                window->dataset.extents[0] = static_cast<std::int32_t>(window->dataset.signal_values.size());
+                const std::size_t nPostSamples = std::min(window->pending_post_samples, inData.size());
+                const std::size_t oldSize      = window->dataset.signal_values.size();
+                std::ranges::copy(inData.first(nPostSamples), std::back_inserter(window->dataset.signal_values));
+                std::ranges::copy(std::views::iota(oldSize, window->dataset.signalValues(0UZ).size()), std::back_inserter(window->dataset.axis_values[0UZ]));
+                window->dataset.extents[0UZ] = static_cast<std::int32_t>(window->dataset.signalValues(0UZ).size());
 
-                window->pending_post_samples -= postSampleView.size();
+                window->pending_post_samples -= nPostSamples;
 
                 if (window->pending_post_samples == 0) {
                     this->publishDataSet(std::move(window->dataset));
@@ -926,7 +919,7 @@ private:
                 if (obsr == trigger::MatchResult::NotMatching || obsr == trigger::MatchResult::Matching) {
                     if (pending_dataset) {
                         if (obsr == trigger::MatchResult::NotMatching) {
-                            pending_dataset->timing_events[0].emplace_back(pending_dataset->signal_values.size(), *tagData0);
+                            pending_dataset->timing_events[0UZ].emplace_back(pending_dataset->signal_values.size(), *tagData0);
                         }
                         this->publishDataSet(std::move(*pending_dataset));
                         pending_dataset.reset();
@@ -941,13 +934,10 @@ private:
             }
             if (pending_dataset) {
                 const auto        toWrite = std::min(inData.size(), maximumWindowSize - pending_dataset->signal_values.size());
-                const auto        view    = inData.first(toWrite);
                 const std::size_t oldSize = pending_dataset->signal_values.size();
-                pending_dataset->signal_values.insert(pending_dataset->signal_values.end(), view.begin(), view.end());
-                const auto     newAxis = std::views::iota(oldSize, pending_dataset->signal_values.size());
-                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
-                pending_dataset->axis_values[0].insert(pending_dataset->axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
-                pending_dataset->extents[0] = static_cast<std::int32_t>(pending_dataset->signal_values.size());
+                std::ranges::copy(inData.first(toWrite), std::back_inserter(pending_dataset->signal_values));
+                std::ranges::copy(std::views::iota(oldSize, pending_dataset->signal_values.size()), std::back_inserter(pending_dataset->axis_values[0UZ]));
+                pending_dataset->extents[0UZ] = static_cast<std::int32_t>(pending_dataset->signal_values.size());
 
                 if (pending_dataset->signal_values.size() == maximumWindowSize) {
                     this->publishDataSet(std::move(*pending_dataset));
@@ -1008,13 +998,11 @@ private:
                     break;
                 }
 
-                DataSet<T> dataset     = detail::createDataset<T>(_metadata);
-                dataset.timing_events  = {{{-static_cast<std::ptrdiff_t>(it->delay), std::move(it->tag_data)}}};
-                dataset.signal_values  = {inData[it->pending_samples]};
-                const auto     newAxis = std::views::iota(0UZ, dataset.signal_values.size());
-                std::vector<T> newAxisVec(newAxis.begin(), newAxis.end());
-                dataset.axis_values[0].insert(dataset.axis_values[0].end(), newAxisVec.begin(), newAxisVec.end());
-                dataset.extents[0] = static_cast<std::int32_t>(dataset.signal_values.size());
+                DataSet<T> dataset    = detail::createDataset<T>(_metadata);
+                dataset.timing_events = {{{-static_cast<std::ptrdiff_t>(it->delay), std::move(it->tag_data)}}};
+                dataset.signal_values = {inData[it->pending_samples]};
+                std::ranges::copy(std::views::iota(0UZ, dataset.signalValues(0UZ).size()), std::back_inserter(dataset.axis_values[0]));
+                dataset.extents[0UZ] = static_cast<std::int32_t>(dataset.signalValues(0UZ).size());
                 this->publishDataSet(std::move(dataset));
                 it = pending.erase(it);
             }
@@ -1163,9 +1151,9 @@ private:
                 }
 
                 if (block || poller->writer.available() > 0) {
-                    auto writeData = poller->writer.reserve(1);
-                    writeData[0]   = std::move(data);
-                    writeData.publish(1);
+                    auto writeData = poller->writer.reserve(1UZ);
+                    writeData[0UZ] = std::move(data);
+                    writeData.publish(1UZ);
                 } else {
                     poller->dropCount++;
                 }
