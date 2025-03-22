@@ -9568,6 +9568,7 @@ struct DataSet {
     using value_type           = T;
     using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
     using pmt_map              = pmtv::map_t;
+    using idx_pmt_map          = std::pair<std::ptrdiff_t, pmt_map>;
     T            default_value = T(); // default value for padding, ZOH etc.
     std::int64_t timestamp     = 0;   // UTC timestamp [ns]
 
@@ -9588,8 +9589,8 @@ struct DataSet {
     std::vector<Range<T>>    signal_ranges{};     // [[min_0, max_0], [min_1, max_1], …] used for communicating, for example, HW limits
 
     // meta data
-    std::vector<pmt_map>                                                  meta_information{};
-    std::vector<std::vector<std::pair<std::ptrdiff_t, gr::property_map>>> timing_events{};
+    std::vector<pmt_map>                  meta_information{};
+    std::vector<std::vector<idx_pmt_map>> timing_events{};
 
     GR_MAKE_REFLECTABLE(DataSet, timestamp, axis_names, axis_units, axis_values, extents, layout, signal_names, signal_quantities, signal_units, signal_values, signal_ranges, meta_information, timing_events);
 
@@ -9614,6 +9615,11 @@ struct DataSet {
     [[nodiscard]] std::span<const T>    signalValues(std::size_t signalIdx = 0UZ) const { return {std::next(signal_values.data(), _idxCheckS(signalIdx) * _valsPerSigS()), _valsPerSig()}; }
     [[nodiscard]] Range<T>&             signalRange(std::size_t signalIdx = 0UZ) { return signal_ranges[_idxCheck(signalIdx)]; }
     [[nodiscard]] const Range<T>&       signalRange(std::size_t signalIdx = 0UZ) const { return signal_ranges[_idxCheck(signalIdx)]; }
+
+    [[nodiscard]] pmt_map&                     metaInformation(std::size_t signalIdx = 0UZ) { return meta_information[_idxCheck(signalIdx)]; }
+    [[nodiscard]] const pmt_map&               metaInformation(std::size_t signalIdx = 0UZ) const { return meta_information[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::span<idx_pmt_map>       timingEvents(std::size_t signalIdx = 0UZ) { return timing_events[_idxCheck(signalIdx)]; }
+    [[nodiscard]] std::span<const idx_pmt_map> timingEvents(std::size_t signalIdx = 0UZ) const { return timing_events[_idxCheck(signalIdx)]; }
 
 private:
     [[nodiscard]] std::size_t _axCheck(std::size_t i, std::source_location loc = std::source_location::current()) const {

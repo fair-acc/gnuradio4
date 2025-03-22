@@ -230,7 +230,7 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
         expect(eq(dataSetSink._samples.size(), expectedValues.size()));
         for (std::size_t i = 0; i < dataSetSink._samples.size(); i++) {
             const DataSet<float>&          ds      = dataSetSink._samples.at(i);
-            std::expected<void, gr::Error> dsCheck = dataset::detail::checkDataSetConsistency(ds, "TestDataSet");
+            std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(ds, "TestDataSet");
             expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
             expect(std::ranges::equal(ds.signal_values, expectedValues[i]));
 

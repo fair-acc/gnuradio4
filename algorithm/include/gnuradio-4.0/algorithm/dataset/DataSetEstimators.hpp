@@ -492,8 +492,10 @@ struct StepStartDetectionResult {
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue threshold = TValue(0.5), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
-    if (!gr::dataset::verify<true>(ds)) {
-        throw gr::exception("Invalid DataSet for step/pulse start detection.");
+
+    std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds, "", location);
+    if (!dsCheck.has_value()) {
+        throw gr::exception(fmt::format("Invalid DataSet for step/pulse start detection: {}", dsCheck.error()), location);
     }
     indexMax = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);
 
