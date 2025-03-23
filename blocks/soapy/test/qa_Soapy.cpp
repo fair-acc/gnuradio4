@@ -25,6 +25,7 @@ const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::blocks::soapy;
+    using gr::blocks::soapy::Range;
 
     "helper functions"_test = [] { "range printer"_test = [] { expect(eq(fmt::format("{}", gr::blocks::soapy::Range{1.0, 10.0, 0.5}), std::string("Range{min: 1, max: 10, step: 0.5}"))); }; };
 
