@@ -126,7 +126,7 @@ struct formatter<gr::Range<T>> {
     constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
 
     template<typename FormatContext>
-    auto format(const gr::Range<T>& range, FormatContext& ctx) {
+    auto format(const gr::Range<T>& range, FormatContext& ctx) const {
         return fmt::format_to(ctx.out(), "[min: {}, max: {}]", range.min, range.max);
     }
 };
