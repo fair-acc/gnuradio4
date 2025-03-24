@@ -3,6 +3,7 @@ add_ut_test(qa_Selector)
 add_ut_test(qa_sources)
 add_ut_test(qa_DataSink)
 add_ut_test(qa_TriggerBlocks)
+add_ut_test(qa_And)
 
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_BasicKnownBlocks)
