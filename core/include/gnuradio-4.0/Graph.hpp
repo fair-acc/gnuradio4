@@ -60,9 +60,9 @@ inline static const char* kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
 
 namespace graph {
-inline static const std::size_t  defaultMinBufferSize = 65536;
-inline static const std::int32_t defaultWeight        = 0;
-inline static const std::string  defaultEdgeName      = "unnamed edge";
+inline static constexpr std::size_t  defaultMinBufferSize(bool isArithmeticLike) { return isArithmeticLike ? 65536UZ : 8UZ; }
+inline static constexpr std::int32_t defaultWeight   = 0;
+inline static constexpr std::string  defaultEdgeName = "unnamed edge";
 } // namespace graph
 
 template<typename TSubGraph>
@@ -233,7 +233,7 @@ private:
         Source&     sourceBlockRaw;
         SourcePort& sourcePortOrCollectionRaw;
 
-        std::size_t  minBufferSize = graph::defaultMinBufferSize;
+        std::size_t  minBufferSize = undefined_size;
         std::int32_t weight        = graph::defaultWeight;
         std::string  edgeName      = graph::defaultEdgeName;
 
@@ -278,7 +278,9 @@ private:
                 meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>{};
             }
 
-            self._edges.emplace_back(sourceBlock, PortDefinition{sourcePortIndex, sourcePortSubIndex}, destinationBlock, PortDefinition{destinationPortIndex, destinationPortSubIndex}, minBufferSize, weight, std::move(edgeName));
+            const bool        isArithmeticLike       = sourcePort->kisArithmeticLikeValueType;
+            const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
+            self._edges.emplace_back(sourceBlock, PortDefinition{sourcePortIndex, sourcePortSubIndex}, destinationBlock, PortDefinition{destinationPortIndex, destinationPortSubIndex}, sanitizedMinBufferSize, weight, std::move(edgeName));
 
             return ConnectionResult::SUCCESS;
         }
@@ -637,7 +639,9 @@ public:
             throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
-        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, minBufferSize, weight, edgeName);
+        const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
+        const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
+        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, sanitizedMinBufferSize, weight, edgeName);
 
         message.endpoint = graph::property::kEdgeEmplaced;
         return message;
@@ -701,47 +705,47 @@ public:
 
     // connect using the port index
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto connectInternal(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    [[nodiscard]] auto connectInternal(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
         auto& port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
-        return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection, minBufferSize, weight, edgeName);
+        return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection, minBufferSize, weight, edgeName, location);
     }
 
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard, deprecated("The connect with the port name should be used")]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
-        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName);
+    [[nodiscard, deprecated("The connect with the port name should be used")]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
+        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
     template<std::size_t sourcePortIndex, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
         if constexpr (sourcePortIndex == meta::default_message_port_index) {
-            return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut, minBufferSize, weight, edgeName);
+            return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut, minBufferSize, weight, edgeName, location);
         } else {
-            return connect<sourcePortIndex, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName);
+            return connect<sourcePortIndex, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName, location);
         }
     }
 
     // connect using the port name
 
     template<fixed_string sourcePortName, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
         using source_output_ports             = typename traits::block::all_output_ports<Source>;
         constexpr std::size_t sourcePortIndex = meta::indexForName<sourcePortName, source_output_ports>();
         if constexpr (sourcePortIndex == meta::invalid_index) {
             meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>, meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports> port_not_found_error{};
         }
-        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName);
+        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
     template<fixed_string sourcePortName, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
-        return connect<sourcePortName, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName);
+    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
+        return connect<sourcePortName, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
     // dynamic/runtime connections
 
     template<typename Source, typename Destination>
     requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
-    ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
         auto findBlockNoexcept = [this]<typename Block>(Block&& blockRaw) noexcept -> BlockModel* {
             try {
                 return this->findBlock(std::forward<Block>(blockRaw)).get();
@@ -756,7 +760,10 @@ public:
             return ConnectionResult::FAILED;
         }
 
-        _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, std::move(edgeName));
+        const auto&       sourcePort             = sourceBlock->dynamicOutputPort(sourcePortDefinition, location);
+        const bool        isArithmeticLike       = sourcePort.portInfo().isValueTypeArithmeticLike;
+        const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
+        _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, sanitizedMinBufferSize, weight, std::move(edgeName));
         return ConnectionResult::SUCCESS;
     }
 
@@ -789,7 +796,11 @@ public:
                 edge._sourcePort            = std::addressof(sourcePort);
                 edge._destinationPort       = std::addressof(destinationPort);
             }
+        } catch (gr::exception& e) {
+            fmt::println("applyEdgeConnection({}): {}", edge, e.what());
+            edge._state = Edge::EdgeState::PortNotFound;
         } catch (...) {
+            fmt::println("applyEdgeConnection({}): unknown exception", edge);
             edge._state = Edge::EdgeState::PortNotFound;
         }
 
@@ -801,15 +812,20 @@ public:
         for (const Edge& e : _edges) {
             if (refEdge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected) {
                 return e.bufferSize();
-            };
-        };
+            }
+        }
 
         std::size_t maxSize = 0UZ;
         forEachEdge([&](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
-                maxSize = std::max(maxSize, e.minBufferSize());
-            };
+                std::size_t minBufferSize = e.minBufferSize();
+                if (minBufferSize != undefined_size) {
+                    maxSize = std::max(maxSize, e.minBufferSize());
+                }
+            }
         });
+        assert(maxSize != 0UZ);
+        assert(maxSize != undefined_size);
         return maxSize;
     }
 

@@ -48,13 +48,25 @@ concept PortDomainLike = requires { T::Name; } && std::is_base_of_v<PortDomain<T
 template<typename T>
 using is_port_domain = std::bool_constant<PortDomainLike<T>>;
 
-struct CPU : public PortDomain<"CPU"> {};
+struct CPU : PortDomain<"CPU"> {};
 
-struct GPU : public PortDomain<"GPU"> {};
+struct GPU : PortDomain<"GPU"> {};
 
 static_assert(is_port_domain<CPU>::value);
 static_assert(is_port_domain<GPU>::value);
 static_assert(!is_port_domain<int>::value);
+
+struct PortInfo {
+    PortType         portType                  = PortType::ANY;
+    PortDirection    portDirection             = PortDirection::ANY;
+    std::string_view portDomain                = "unknown";
+    ConnectionResult portConnectionResult      = ConnectionResult::FAILED;
+    std::string      valueTypeName             = "uninitialised type";
+    bool             isValueTypeArithmeticLike = false;
+    std::size_t      valueTypeSize             = 0UZ;
+    std::size_t      bufferSize                = 0UZ;
+    std::size_t      availableBufferSize       = 0UZ;
+};
 
 template<class T>
 concept PortLike = requires(T t, const std::size_t n_items, const std::any& newDefault) { // dynamic definitions
@@ -330,10 +342,11 @@ struct PortDescriptor {
     // tuple-like
     static constexpr bool kPartOfTuple = TupleIdx >= 0;
 
-    static constexpr PortDirection kDirection = portDirection;
-    static constexpr PortType      kPortType  = portType;
-    static constexpr bool          kIsInput   = portDirection == PortDirection::INPUT;
-    static constexpr bool          kIsOutput  = portDirection == PortDirection::OUTPUT;
+    static constexpr PortDirection kDirection                 = portDirection;
+    static constexpr PortType      kPortType                  = portType;
+    static constexpr bool          kIsInput                   = portDirection == PortDirection::INPUT;
+    static constexpr bool          kIsOutput                  = portDirection == PortDirection::OUTPUT;
+    static constexpr bool          kisArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
 
     using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
 
@@ -408,6 +421,9 @@ struct Port {
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
     using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
+
+    static constexpr bool        kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
+    static constexpr std::size_t kDefaultBufferSize         = kIsArithmeticLikeValueType ? 4096UZ : 8UZ; // limit initial max buffer size
 
     // constexpr members:
     static constexpr PortDirection kDirection = portDirection;
@@ -595,7 +611,7 @@ private:
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{}; // todo: for now this is only used in the output ports
 
-    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = 4096) const noexcept {
+    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = kDefaultBufferSize) const noexcept {
         if constexpr (kIsInput) {
             return BufferType(buffer_size).new_reader();
         } else {
@@ -603,7 +619,7 @@ private:
         }
     }
 
-    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = 4096) const noexcept {
+    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = kDefaultBufferSize) const noexcept {
         if constexpr (kIsInput) {
             return TagBufferType(buffer_size).new_reader();
         } else {
@@ -984,6 +1000,8 @@ private:
         [[nodiscard]] virtual std::size_t bufferSize() const = 0;
 
         [[nodiscard]] virtual std::string typeName() const = 0;
+
+        [[nodiscard]] virtual PortInfo portInfo() const = 0; // TODO: rename to type() and remove existing type(), direction(), domain(), ... API
     };
 
     std::unique_ptr<model> _accessor;
@@ -1071,6 +1089,19 @@ private:
         }
 
         [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
+
+        [[nodiscard]] PortInfo portInfo() const override {
+            return {// snapshot
+                .portType                  = T::kPortType,
+                .portDirection             = T::kDirection,
+                .portDomain                = T::Domain::Name,
+                .portConnectionResult      = (_value.nReaders() + _value.nWriters() > 0UZ) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED,
+                .valueTypeName             = meta::type_name<typename T::value_type>(),
+                .isValueTypeArithmeticLike = T::kIsArithmeticLikeValueType,
+                .valueTypeSize             = sizeof(typename T::value_type),
+                .bufferSize                = _value.bufferSize(),
+                .availableBufferSize       = _value.available()};
+        }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -1121,6 +1152,8 @@ public:
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
 
     [[nodiscard]] std::string typeName() const noexcept { return _accessor->typeName(); }
+
+    [[nodiscard]] PortInfo portInfo() const noexcept { return _accessor->portInfo(); }
 
     [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 

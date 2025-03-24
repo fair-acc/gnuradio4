@@ -148,7 +148,7 @@ protected:
 
     BlockModel() = default;
 
-    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, const std::string& name) {
+    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, const std::string& name, std::source_location location = std::source_location::current()) {
         initDynamicPorts();
 
         if (auto separatorIt = std::ranges::find(name, '#'); separatorIt == name.end()) {
@@ -158,7 +158,7 @@ protected:
             });
 
             if (it == what.end()) {
-                throw gr::exception(fmt::format("Port {} not found in {}\n", name, uniqueName()));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
             }
 
             return std::get<gr::DynamicPort>(*it);
@@ -168,7 +168,7 @@ protected:
             std::size_t            index = -1UZ;
             auto [_, ec]                 = std::from_chars(indexString.data(), indexString.data() + indexString.size(), index);
             if (ec != std::errc()) {
-                throw gr::exception(fmt::format("Invalid index {} specified, needs to be an integer", indexString));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, needs to be an integer", what.size(), indexString), location);
             }
 
             auto collectionIt = std::ranges::find_if(what, [&base](const DynamicPortOrCollection& portOrCollection) {
@@ -177,13 +177,13 @@ protected:
             });
 
             if (collectionIt == what.cend()) {
-                throw gr::exception(fmt::format("Invalid name specified name={}, base={}\n", name, base));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid name specified name={}, base={}\n", what.size(), name, base), location);
             }
 
             auto& collection = std::get<NamedPortCollection>(*collectionIt);
 
             if (index >= collection.ports.size()) {
-                throw gr::exception(fmt::format("Invalid index {} specified, out of range. Number of ports is {}", index, collection.ports.size()));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, out of range. Number of ports is {}", what.size(), index, collection.ports.size()), location);
             }
 
             return collection.ports[index];
@@ -224,15 +224,15 @@ public:
         return _dynamicOutputPorts;
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name) { return dynamicPortFromName(_dynamicInputPorts, name); }
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicInputPorts, name, location); }
 
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name) { return dynamicPortFromName(_dynamicOutputPorts, name); }
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicOutputPorts, name, location); }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument(fmt::format("Need to specify the index in the port collection for {}", portCollection->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -241,18 +241,18 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw std::invalid_argument(fmt::format("Specified sub-index for a normal port {}", port->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
         throw std::logic_error("Variant construction failed");
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument(fmt::format("Need to specify the index in the port collection for {}", portCollection->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -261,24 +261,24 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw std::invalid_argument(fmt::format("Specified sub-index for a normal port {}", port->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
         throw std::logic_error("Variant construction failed");
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition) {
-        return std::visit(meta::overloaded(                                                                                                                                   //
-                              [this](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex); }, //
-                              [this](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.name); }),                         //
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
+        return std::visit(meta::overloaded(                                                                                                                                                        //
+                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex, location); }, //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.name, location); }),                         //
             definition.definition);
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(PortDefinition definition) {
-        return std::visit(meta::overloaded(                                                                                                                                    //
-                              [this](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex); }, //
-                              [this](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.name); }),                         //
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
+        return std::visit(meta::overloaded(                                                                                                                                                         //
+                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex, location); }, //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.name, location); }),                         //
             definition.definition);
     }
 
@@ -322,7 +322,7 @@ public:
             }
         }
 
-        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
+        throw gr::exception(fmt::format("Port {} does not exist", name));
     }
 
     std::size_t dynamicOutputPortIndex(const std::string& name) const {
@@ -339,7 +339,7 @@ public:
             }
         }
 
-        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
+        throw gr::exception(fmt::format("Port {} does not exist", name));
     }
 
     virtual ~BlockModel() = default;
@@ -502,7 +502,7 @@ public:
 
     void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
 
-    [[nodiscard]] constexpr work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override { return blockRef().work(requested_work); }
+    [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 
     constexpr work::Status draw(const property_map& config = {}) override {
         if constexpr (requires { blockRef().draw(config); }) {

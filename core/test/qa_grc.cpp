@@ -14,22 +14,32 @@
 #include <boost/ut.hpp>
 
 template<typename T>
-struct ArraySource : public gr::Block<ArraySource<T>> {
-    std::array<gr::PortOut<T>, 2> outA{};
-    std::array<gr::PortOut<T>, 2> outB{};
+struct ArraySource : gr::Block<ArraySource<T>> {
+    // TODO re-enable this -> pre-requisite revert std::array<T, N> not being handled as collection but as tuple.
+    static constexpr std::size_t N_SubPorts = 2UZ;
+    // std::array<gr::PortOut<T>, N_SubPorts> outA{};
+    // std::array<gr::PortOut<T>, N_SubPorts> outB{};
+    std::vector<gr::PortOut<T>> outA{N_SubPorts};
+    std::vector<gr::PortOut<T>> outB{N_SubPorts};
 
     GR_MAKE_REFLECTABLE(ArraySource, outA, outB);
 
-    template<gr::OutputSpanLike TOutputSpan1, gr::OutputSpanLike TOutputSpan2, gr::OutputSpanLike TOutputSpan3, gr::OutputSpanLike TOutputSpan4>
-    gr::work::Status processBulk(TOutputSpan1&, TOutputSpan2&, TOutputSpan3&, TOutputSpan4&) {
-        return gr::work::Status::OK;
-    }
+    // template<gr::OutputSpanLike TOutputSpan1, gr::OutputSpanLike TOutputSpan2, gr::OutputSpanLike TOutputSpan3, gr::OutputSpanLike TOutputSpan4>
+    // gr::work::Status processBulk(TOutputSpan1&, TOutputSpan2&, TOutputSpan3&, TOutputSpan4&) {
+    //     return gr::work::Status::OK;
+    // }
+    gr::work::Status processBulk(auto&, auto&) { return gr::work::Status::OK; }
 };
 
 template<typename T, bool SomeFlag, int SomeInt>
-struct ArraySinkImpl : public gr::Block<ArraySinkImpl<T, SomeFlag, SomeInt>> {
-    std::array<gr::PortIn<T>, 2>                                                    inA;
-    std::array<gr::PortIn<T>, 2>                                                    inB;
+struct ArraySinkImpl : gr::Block<ArraySinkImpl<T, SomeFlag, SomeInt>> {
+    // TODO re-enable this -> pre-requisite revert std::array<T, N> not being handled as collection but as tuple.
+    static constexpr std::size_t N_SubPorts = 2UZ;
+    // std::array<gr::PortIn<T>, 2>                                                    inA;
+    // std::array<gr::PortIn<T>, 2>                                                    inB;
+    std::vector<gr::PortIn<T>> inA{N_SubPorts};
+    std::vector<gr::PortIn<T>> inB{N_SubPorts};
+
     gr::Annotated<bool, "bool setting">                                             bool_setting{false};
     gr::Annotated<std::string, "String setting">                                    string_setting;
     gr::Annotated<std::complex<double>, "std::complex settings">                    complex_setting;
@@ -41,10 +51,11 @@ struct ArraySinkImpl : public gr::Block<ArraySinkImpl<T, SomeFlag, SomeInt>> {
 
     GR_MAKE_REFLECTABLE(ArraySinkImpl, inA, inB, bool_setting, string_setting, complex_setting, bool_vector, string_vector, double_vector, int16_vector, complex_vector);
 
-    template<gr::InputSpanLike TInputSpan1, gr::InputSpanLike TInputSpan2, gr::InputSpanLike TInputSpan3, gr::InputSpanLike TInputSpan4>
-    gr::work::Status processBulk(TInputSpan1&, TInputSpan2&, TInputSpan3&, TInputSpan4&) {
-        return gr::work::Status::OK;
-    }
+    // template<gr::InputSpanLike TInputSpan1, gr::InputSpanLike TInputSpan2, gr::InputSpanLike TInputSpan3, gr::InputSpanLike TInputSpan4>
+    // gr::work::Status processBulk(TInputSpan1&, TInputSpan2&, TInputSpan3&, TInputSpan4&) {
+    //     return gr::work::Status::OK;
+    // }
+    gr::work::Status processBulk(auto&, auto&) { return gr::work::Status::OK; }
 };
 
 // Extra template arguments to test using-declaration plus alias
@@ -302,6 +313,9 @@ connections:
 
 #if not defined(__EMSCRIPTEN__) // && not defined(__APPLE__)
 const boost::ut::suite PortTests = [] {
+    using namespace boost::ut;
+    using namespace boost::ext::ut;
+
     "Port buffer sizes"_test = [] {
         constexpr std::string_view testGrc = R"(
 blocks:
@@ -375,31 +389,32 @@ connections:
     };
 
     "Port collections"_test = [] {
-        try {
-            using namespace gr;
+        using namespace gr;
 
-            const auto context = getContext();
-            gr::Graph  graph1;
-            auto&      arraySink    = graph1.emplaceBlock<ArraySink<double>>();
-            auto&      arraySource0 = graph1.emplaceBlock<ArraySource<double>>();
-            auto&      arraySource1 = graph1.emplaceBlock<ArraySource<double>>();
+        const auto context = getContext();
+        gr::Graph  graph1;
+        auto&      arraySink    = graph1.emplaceBlock<ArraySink<double>>();
+        auto&      arraySource0 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource0"}});
+        auto&      arraySource1 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource1"}});
 
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA0">(arraySource0).to<"inB1">(arraySink)));
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA1">(arraySource1).to<"inB0">(arraySink)));
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB0">(arraySource0).to<"inA0">(arraySink)));
-            expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB1">(arraySource1).to<"inA1">(arraySink)));
+        // TODO re-enable this test -> pre-requisite revert std::array<T, N> not being handled as collection but as tuple.
+        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA0">(arraySource0).to<"inB1">(arraySink)));
+        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA1">(arraySource1).to<"inB0">(arraySink)));
+        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB0">(arraySource0).to<"inA0">(arraySink)));
+        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB1">(arraySource1).to<"inA1">(arraySink)));
 
-            expect(graph1.reconnectAllEdges());
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource0, {0UZ, 0UZ}, arraySink, {1UZ, 1UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource0, {1UZ, 0UZ}, arraySink, {0UZ, 0UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource1, {0UZ, 1UZ}, arraySink, {1UZ, 0UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource1, {1UZ, 1UZ}, arraySink, {0UZ, 1UZ})));
 
-            const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-            const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+        expect(graph1.reconnectAllEdges());
 
-            expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
-            expect(eq(collectEdges(graph1), collectEdges(graph2)));
-        } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
-            expect(false);
-        }
+        const auto graph1Saved = gr::saveGrc(context->loader, graph1);
+        const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+
+        expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
+        expect(eq(collectEdges(graph1), collectEdges(graph2)));
     };
 };
 #endif
