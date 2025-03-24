@@ -53,8 +53,8 @@ const boost::ut::suite GraphTests = [] {
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(sink)));
         graph.connectPendingEdges();
 
-        expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize));
-        expect(eq(sink.in.bufferSize(), graph::defaultMinBufferSize));
+        expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize(true)));
+        expect(eq(sink.in.bufferSize(), graph::defaultMinBufferSize(true)));
     };
 
     "Graph connection buffer size test - set, one"_test = [] {
