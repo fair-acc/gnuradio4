@@ -346,7 +346,7 @@ struct PortDescriptor {
     static constexpr PortType      kPortType                  = portType;
     static constexpr bool          kIsInput                   = portDirection == PortDirection::INPUT;
     static constexpr bool          kIsOutput                  = portDirection == PortDirection::OUTPUT;
-    static constexpr bool          kisArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
+    static constexpr bool          kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
 
     using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
 

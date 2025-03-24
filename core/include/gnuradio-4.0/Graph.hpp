@@ -278,7 +278,7 @@ private:
                 meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>{};
             }
 
-            const bool        isArithmeticLike       = sourcePort->kisArithmeticLikeValueType;
+            const bool        isArithmeticLike       = sourcePort->kIsArithmeticLikeValueType;
             const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
             self._edges.emplace_back(sourceBlock, PortDefinition{sourcePortIndex, sourcePortSubIndex}, destinationBlock, PortDefinition{destinationPortIndex, destinationPortSubIndex}, sanitizedMinBufferSize, weight, std::move(edgeName));
 
