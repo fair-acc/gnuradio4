@@ -54,7 +54,6 @@ const suite AndTests = [] {
             0000 0000 0000 0011   (Result = 3)
          */
         expect(eq(andBlock.processOne(static_cast<int16_t>(-5), static_cast<int16_t>(3)), static_cast<int16_t>(3)));  // -5 & 3 = 3
-
     };
 };
 
