@@ -27,7 +27,7 @@ namespace detail {
 template<typename T>
 std::size_t checkIndexRange(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = 0UZ, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     const std::size_t maxDataSetIndex = ds.axisValues(dim::X).size();
-    if (maxIndex == max_size_t) { // renormalise default range
+    if (maxIndex == max_size) { // renormalise default range
         maxIndex = maxDataSetIndex;
     }
     if (minIndex > maxIndex || minIndex >= maxDataSetIndex || maxIndex > maxDataSetIndex || signalIndex >= ds.size()) {
@@ -78,8 +78,8 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T>
-T getDistance(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ) {
-    if (indexMax == max_size_t) { // renormalise default range
+T getDistance(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ) {
+    if (indexMax == max_size) { // renormalise default range
         indexMax = dataSet.axisValues(dim::X).size() - 1UZ;
     }
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex);
