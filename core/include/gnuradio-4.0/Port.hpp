@@ -423,7 +423,7 @@ struct Port {
     using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
 
     static constexpr bool        kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
-    static constexpr std::size_t kDefaultBufferSize         = kIsArithmeticLikeValueType ? 4096UZ : 8UZ; // limit initial max buffer size
+    static constexpr std::size_t kDefaultBufferSize         = 4096UZ; // TODO: limit initial max buffer size based on kIsArithmeticLikeValueType
 
     // constexpr members:
     static constexpr PortDirection kDirection = portDirection;
