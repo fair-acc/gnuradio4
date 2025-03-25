@@ -700,50 +700,16 @@ const boost::ut::suite<"Small Buffers"> _smallBufferTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
-    // N.B. small buffers are needed for composite types that themselfes can store large amount of data (>1 MB)
+    // N.B. small buffers are needed for composite types that themselves can store large amount of data (>1 MB)
     // the default mmap posix buffer size is typically multiple of the memory page size (e.g. 4096) which would
     // make those buffers quite expensive. Thus, if there are composite types (i.e. other than fundamental or
     // std::complex<> types, the buffer implementation should default to the non-posix/STL C++ allocator
     fmt::println("start small buffer test");
     "std::vector<T>"_test = [] {
         using Type             = std::vector<int>;
+        static_assert(not std::is_trivially_copyable_v<Type>);
         BufferLike auto buffer = CircularBuffer<Type>(4UZ);
         expect(eq(buffer.size(), 4UZ));
-        fmt::println("buffer size: {}", buffer.size());
-
-        // BufferWriterLike auto writer = buffer.new_writer();
-        // BufferReaderLike auto reader = buffer.new_reader();
-        //
-        // const auto genSamples = [&buffer, &writer] {
-        //     for (std::size_t i = 0UZ; i < buffer.size() - 10UZ; i++) { // write-only worker (source) mock-up
-        //         WriterSpanLike auto pSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(1);
-        //         expect(eq(pSpan.size(), 1UZ));
-        //         static int offset = 0;
-        //         for (auto& vector : pSpan) {
-        //             vector.resize(1);
-        //             vector[0] = offset++;
-        //         }
-        //     }
-        // };
-
-        // const auto readSamples = [&reader] {
-        //     while (reader.available()) {
-        //         ReaderSpanLike auto cSpan = reader.get(reader.available());
-        //         for (auto& vector : cSpan) {
-        //             static int offset = -1;
-        //             expect(eq(vector.size(), 1u)) << "vector size == 1";
-        //             expect(eq(vector[0] - offset, 1)) << "vector offset == 1";
-        //             offset = vector[0];
-        //         }
-        //         expect(cSpan.consume(cSpan.size()));
-        //     }
-        // };
-        //
-        // // write-read twice to test wrap-around
-        // genSamples();
-        // readSamples();
-        // genSamples();
-        // readSamples();
     };
 };
 
