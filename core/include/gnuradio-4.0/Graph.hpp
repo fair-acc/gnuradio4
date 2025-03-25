@@ -60,7 +60,7 @@ inline static const char* kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
 
 namespace graph {
-inline static constexpr std::size_t  defaultMinBufferSize(bool isArithmeticLike) { return isArithmeticLike ? 65536UZ : 8UZ; }
+inline static constexpr std::size_t  defaultMinBufferSize(bool isArithmeticLike) { return isArithmeticLike ? 65536UZ : 64UZ; }
 inline static constexpr std::int32_t defaultWeight   = 0;
 inline static const std::string      defaultEdgeName = "unnamed edge"; // Emscripten doesn't want constexpr strings
 } // namespace graph
