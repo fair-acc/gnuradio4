@@ -2,7 +2,9 @@ add_library(gr-filter INTERFACE)
 target_link_libraries(gr-filter INTERFACE gnuradio-core)
 target_include_directories(gr-filter INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/> $<INSTALL_INTERFACE:include/>)
 
-add_library(GrFilterBlocks)
+# An OBJECT library as the generated files have namespace-scope
+# variables with dynamic C++ initialization
+add_library(GrFilterBlocks OBJECT)
 gr_generate_block_instantiations(
     GrFilterBlocks
     HEADERS

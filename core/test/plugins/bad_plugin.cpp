@@ -1,6 +1,6 @@
 #include <vector>
 
-#include <gnuradio-4.0/plugin.hpp>
+#include <gnuradio-4.0/Plugin.hpp>
 
 namespace {
 gr_plugin_metadata plugin_metadata [[maybe_unused]]{"Bad Plugin", "Unknown", "Public Domain", "v0"};

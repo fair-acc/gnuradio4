@@ -2,7 +2,9 @@ add_library(gr-testing INTERFACE)
 target_link_libraries(gr-testing INTERFACE gnuradio-core ut-benchmark)
 target_include_directories(gr-testing INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/> $<INSTALL_INTERFACE:include/>)
 
-add_library(GrTestingBlocks)
+# An OBJECT library as the generated files have namespace-scope
+# variables with dynamic C++ initialization
+add_library(GrTestingBlocks OBJECT)
 gr_generate_block_instantiations(
     GrTestingBlocks
     HEADERS
