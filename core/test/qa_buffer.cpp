@@ -696,6 +696,23 @@ const boost::ut::suite NonPowerTwoTests = [] {
     };
 };
 
+const boost::ut::suite<"Small Buffers"> _smallBufferTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+
+    // N.B. small buffers are needed for composite types that themselves can store large amount of data (>1 MB)
+    // the default mmap posix buffer size is typically multiple of the memory page size (e.g. 4096) which would
+    // make those buffers quite expensive. Thus, if there are composite types (i.e. other than fundamental or
+    // std::complex<> types, the buffer implementation should default to the non-posix/STL C++ allocator
+    fmt::println("start small buffer test");
+    "std::vector<T>"_test = [] {
+        using Type = std::vector<int>;
+        static_assert(not std::is_trivially_copyable_v<Type>);
+        BufferLike auto buffer = CircularBuffer<Type>(4UZ);
+        expect(eq(buffer.size(), 4UZ));
+    };
+};
+
 const boost::ut::suite HistoryBufferTest = [] {
     using namespace boost::ut;
     using namespace gr;

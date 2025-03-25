@@ -3782,9 +3782,11 @@ namespace gr {
 #pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
 #endif
 
-using Size_t                            = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
-inline constexpr Size_t      max_Size_t = std::numeric_limits<gr::Size_t>::max();
-inline constexpr std::size_t max_size_t = std::numeric_limits<std::size_t>::max();
+using Size_t                                = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+inline constexpr Size_t      max_Size       = std::numeric_limits<gr::Size_t>::max();
+inline constexpr std::size_t max_size       = std::numeric_limits<std::size_t>::max();
+inline constexpr Size_t      undefined_Size = std::numeric_limits<gr::Size_t>::max();
+inline constexpr std::size_t undefined_size = std::numeric_limits<std::size_t>::max();
 
 template<typename T, typename U>
 T cast(U value) { /// gcc/clang warning suppressing cast
@@ -10195,13 +10197,25 @@ concept PortDomainLike = requires { T::Name; } && std::is_base_of_v<PortDomain<T
 template<typename T>
 using is_port_domain = std::bool_constant<PortDomainLike<T>>;
 
-struct CPU : public PortDomain<"CPU"> {};
+struct CPU : PortDomain<"CPU"> {};
 
-struct GPU : public PortDomain<"GPU"> {};
+struct GPU : PortDomain<"GPU"> {};
 
 static_assert(is_port_domain<CPU>::value);
 static_assert(is_port_domain<GPU>::value);
 static_assert(!is_port_domain<int>::value);
+
+struct PortInfo {
+    PortType         portType                  = PortType::ANY;
+    PortDirection    portDirection             = PortDirection::ANY;
+    std::string_view portDomain                = "unknown";
+    ConnectionResult portConnectionResult      = ConnectionResult::FAILED;
+    std::string      valueTypeName             = "uninitialised type";
+    bool             isValueTypeArithmeticLike = false;
+    std::size_t      valueTypeSize             = 0UZ;
+    std::size_t      bufferSize                = 0UZ;
+    std::size_t      availableBufferSize       = 0UZ;
+};
 
 template<class T>
 concept PortLike = requires(T t, const std::size_t n_items, const std::any& newDefault) { // dynamic definitions
@@ -10477,10 +10491,11 @@ struct PortDescriptor {
     // tuple-like
     static constexpr bool kPartOfTuple = TupleIdx >= 0;
 
-    static constexpr PortDirection kDirection = portDirection;
-    static constexpr PortType      kPortType  = portType;
-    static constexpr bool          kIsInput   = portDirection == PortDirection::INPUT;
-    static constexpr bool          kIsOutput  = portDirection == PortDirection::OUTPUT;
+    static constexpr PortDirection kDirection                 = portDirection;
+    static constexpr PortType      kPortType                  = portType;
+    static constexpr bool          kIsInput                   = portDirection == PortDirection::INPUT;
+    static constexpr bool          kIsOutput                  = portDirection == PortDirection::OUTPUT;
+    static constexpr bool          kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
 
     using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
 
@@ -10555,6 +10570,9 @@ struct Port {
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
     using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
+
+    static constexpr bool        kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
+    static constexpr std::size_t kDefaultBufferSize         = 4096UZ; // TODO: limit initial max buffer size based on kIsArithmeticLikeValueType
 
     // constexpr members:
     static constexpr PortDirection kDirection = portDirection;
@@ -10742,7 +10760,7 @@ private:
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{}; // todo: for now this is only used in the output ports
 
-    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = 4096) const noexcept {
+    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = kDefaultBufferSize) const noexcept {
         if constexpr (kIsInput) {
             return BufferType(buffer_size).new_reader();
         } else {
@@ -10750,7 +10768,7 @@ private:
         }
     }
 
-    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = 4096) const noexcept {
+    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = kDefaultBufferSize) const noexcept {
         if constexpr (kIsInput) {
             return TagBufferType(buffer_size).new_reader();
         } else {
@@ -11131,6 +11149,8 @@ private:
         [[nodiscard]] virtual std::size_t bufferSize() const = 0;
 
         [[nodiscard]] virtual std::string typeName() const = 0;
+
+        [[nodiscard]] virtual PortInfo portInfo() const = 0; // TODO: rename to type() and remove existing type(), direction(), domain(), ... API
     };
 
     std::unique_ptr<model> _accessor;
@@ -11218,6 +11238,19 @@ private:
         }
 
         [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
+
+        [[nodiscard]] PortInfo portInfo() const override {
+            return {// snapshot
+                .portType                  = T::kPortType,
+                .portDirection             = T::kDirection,
+                .portDomain                = T::Domain::Name,
+                .portConnectionResult      = (_value.nReaders() + _value.nWriters() > 0UZ) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED,
+                .valueTypeName             = meta::type_name<typename T::value_type>(),
+                .isValueTypeArithmeticLike = T::kIsArithmeticLikeValueType,
+                .valueTypeSize             = sizeof(typename T::value_type),
+                .bufferSize                = _value.bufferSize(),
+                .availableBufferSize       = _value.available()};
+        }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -11268,6 +11301,8 @@ public:
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
 
     [[nodiscard]] std::string typeName() const noexcept { return _accessor->typeName(); }
+
+    [[nodiscard]] PortInfo portInfo() const noexcept { return _accessor->portInfo(); }
 
     [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 
@@ -20612,7 +20647,7 @@ protected:
 
     BlockModel() = default;
 
-    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, const std::string& name) {
+    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, const std::string& name, std::source_location location = std::source_location::current()) {
         initDynamicPorts();
 
         if (auto separatorIt = std::ranges::find(name, '#'); separatorIt == name.end()) {
@@ -20622,7 +20657,7 @@ protected:
             });
 
             if (it == what.end()) {
-                throw gr::exception(fmt::format("Port {} not found in {}\n", name, uniqueName()));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
             }
 
             return std::get<gr::DynamicPort>(*it);
@@ -20632,7 +20667,7 @@ protected:
             std::size_t            index = -1UZ;
             auto [_, ec]                 = std::from_chars(indexString.data(), indexString.data() + indexString.size(), index);
             if (ec != std::errc()) {
-                throw gr::exception(fmt::format("Invalid index {} specified, needs to be an integer", indexString));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, needs to be an integer", what.size(), indexString), location);
             }
 
             auto collectionIt = std::ranges::find_if(what, [&base](const DynamicPortOrCollection& portOrCollection) {
@@ -20641,13 +20676,13 @@ protected:
             });
 
             if (collectionIt == what.cend()) {
-                throw gr::exception(fmt::format("Invalid name specified name={}, base={}\n", name, base));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid name specified name={}, base={}\n", what.size(), name, base), location);
             }
 
             auto& collection = std::get<NamedPortCollection>(*collectionIt);
 
             if (index >= collection.ports.size()) {
-                throw gr::exception(fmt::format("Invalid index {} specified, out of range. Number of ports is {}", index, collection.ports.size()));
+                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, out of range. Number of ports is {}", what.size(), index, collection.ports.size()), location);
             }
 
             return collection.ports[index];
@@ -20688,15 +20723,15 @@ public:
         return _dynamicOutputPorts;
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name) { return dynamicPortFromName(_dynamicInputPorts, name); }
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicInputPorts, name, location); }
 
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name) { return dynamicPortFromName(_dynamicOutputPorts, name); }
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicOutputPorts, name, location); }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument(fmt::format("Need to specify the index in the port collection for {}", portCollection->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -20705,18 +20740,18 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw std::invalid_argument(fmt::format("Specified sub-index for a normal port {}", port->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
         throw std::logic_error("Variant construction failed");
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index) {
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw std::invalid_argument(fmt::format("Need to specify the index in the port collection for {}", portCollection->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -20725,24 +20760,24 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw std::invalid_argument(fmt::format("Specified sub-index for a normal port {}", port->name));
+                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
         throw std::logic_error("Variant construction failed");
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition) {
-        return std::visit(meta::overloaded(                                                                                                                                   //
-                              [this](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex); }, //
-                              [this](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.name); }),                         //
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
+        return std::visit(meta::overloaded(                                                                                                                                                        //
+                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex, location); }, //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.name, location); }),                         //
             definition.definition);
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(PortDefinition definition) {
-        return std::visit(meta::overloaded(                                                                                                                                    //
-                              [this](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex); }, //
-                              [this](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.name); }),                         //
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
+        return std::visit(meta::overloaded(                                                                                                                                                         //
+                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex, location); }, //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.name, location); }),                         //
             definition.definition);
     }
 
@@ -20786,7 +20821,7 @@ public:
             }
         }
 
-        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
+        throw gr::exception(fmt::format("Port {} does not exist", name));
     }
 
     std::size_t dynamicOutputPortIndex(const std::string& name) const {
@@ -20803,7 +20838,7 @@ public:
             }
         }
 
-        throw std::invalid_argument(fmt::format("Port {} does not exist", name));
+        throw gr::exception(fmt::format("Port {} does not exist", name));
     }
 
     virtual ~BlockModel() = default;
@@ -20966,7 +21001,7 @@ public:
 
     void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
 
-    [[nodiscard]] constexpr work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) override { return blockRef().work(requested_work); }
+    [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 
     constexpr work::Status draw(const property_map& config = {}) override {
         if constexpr (requires { blockRef().draw(config); }) {
@@ -21608,9 +21643,9 @@ inline static const char* kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
 
 namespace graph {
-inline static const std::size_t  defaultMinBufferSize = 65536;
-inline static const std::int32_t defaultWeight        = 0;
-inline static const std::string  defaultEdgeName      = "unnamed edge";
+inline static constexpr std::size_t  defaultMinBufferSize(bool isArithmeticLike) { return isArithmeticLike ? 65536UZ : 64UZ; }
+inline static constexpr std::int32_t defaultWeight   = 0;
+inline static const std::string      defaultEdgeName = "unnamed edge"; // Emscripten doesn't want constexpr strings
 } // namespace graph
 
 template<typename TSubGraph>
@@ -21781,7 +21816,7 @@ private:
         Source&     sourceBlockRaw;
         SourcePort& sourcePortOrCollectionRaw;
 
-        std::size_t  minBufferSize = graph::defaultMinBufferSize;
+        std::size_t  minBufferSize = undefined_size;
         std::int32_t weight        = graph::defaultWeight;
         std::string  edgeName      = graph::defaultEdgeName;
 
@@ -21826,7 +21861,9 @@ private:
                 meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>{};
             }
 
-            self._edges.emplace_back(sourceBlock, PortDefinition{sourcePortIndex, sourcePortSubIndex}, destinationBlock, PortDefinition{destinationPortIndex, destinationPortSubIndex}, minBufferSize, weight, std::move(edgeName));
+            const bool        isArithmeticLike       = sourcePort->kIsArithmeticLikeValueType;
+            const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
+            self._edges.emplace_back(sourceBlock, PortDefinition{sourcePortIndex, sourcePortSubIndex}, destinationBlock, PortDefinition{destinationPortIndex, destinationPortSubIndex}, sanitizedMinBufferSize, weight, std::move(edgeName));
 
             return ConnectionResult::SUCCESS;
         }
@@ -22185,7 +22222,9 @@ public:
             throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
-        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, minBufferSize, weight, edgeName);
+        const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
+        const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
+        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, sanitizedMinBufferSize, weight, edgeName);
 
         message.endpoint = graph::property::kEdgeEmplaced;
         return message;
@@ -22249,47 +22288,47 @@ public:
 
     // connect using the port index
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto connectInternal(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    [[nodiscard]] auto connectInternal(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, [[maybe_unused]] std::source_location location = std::source_location::current()) {
         auto& port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
         return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection, minBufferSize, weight, edgeName);
     }
 
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard, deprecated("The connect with the port name should be used")]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
-        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName);
+    [[nodiscard, deprecated("The connect with the port name should be used")]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
+        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
     template<std::size_t sourcePortIndex, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, [[maybe_unused]] std::source_location location = std::source_location::current()) {
         if constexpr (sourcePortIndex == meta::default_message_port_index) {
             return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut, minBufferSize, weight, edgeName);
         } else {
-            return connect<sourcePortIndex, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName);
+            return connect<sourcePortIndex, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName, location);
         }
     }
 
     // connect using the port name
 
     template<fixed_string sourcePortName, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
         using source_output_ports             = typename traits::block::all_output_ports<Source>;
         constexpr std::size_t sourcePortIndex = meta::indexForName<sourcePortName, source_output_ports>();
         if constexpr (sourcePortIndex == meta::invalid_index) {
             meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>, meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports> port_not_found_error{};
         }
-        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName);
+        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
     template<fixed_string sourcePortName, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
-        return connect<sourcePortName, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName);
+    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
+        return connect<sourcePortName, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
     // dynamic/runtime connections
 
     template<typename Source, typename Destination>
     requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
-    ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = graph::defaultMinBufferSize, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName) {
+    ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
         auto findBlockNoexcept = [this]<typename Block>(Block&& blockRaw) noexcept -> BlockModel* {
             try {
                 return this->findBlock(std::forward<Block>(blockRaw)).get();
@@ -22304,7 +22343,10 @@ public:
             return ConnectionResult::FAILED;
         }
 
-        _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, minBufferSize, weight, std::move(edgeName));
+        const auto&       sourcePort             = sourceBlock->dynamicOutputPort(sourcePortDefinition, location);
+        const bool        isArithmeticLike       = sourcePort.portInfo().isValueTypeArithmeticLike;
+        const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
+        _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, sanitizedMinBufferSize, weight, std::move(edgeName));
         return ConnectionResult::SUCCESS;
     }
 
@@ -22337,7 +22379,11 @@ public:
                 edge._sourcePort            = std::addressof(sourcePort);
                 edge._destinationPort       = std::addressof(destinationPort);
             }
+        } catch (gr::exception& e) {
+            fmt::println("applyEdgeConnection({}): {}", edge, e.what());
+            edge._state = Edge::EdgeState::PortNotFound;
         } catch (...) {
+            fmt::println("applyEdgeConnection({}): unknown exception", edge);
             edge._state = Edge::EdgeState::PortNotFound;
         }
 
@@ -22349,15 +22395,20 @@ public:
         for (const Edge& e : _edges) {
             if (refEdge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected) {
                 return e.bufferSize();
-            };
-        };
+            }
+        }
 
         std::size_t maxSize = 0UZ;
         forEachEdge([&](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
-                maxSize = std::max(maxSize, e.minBufferSize());
-            };
+                std::size_t minBufferSize = e.minBufferSize();
+                if (minBufferSize != undefined_size) {
+                    maxSize = std::max(maxSize, e.minBufferSize());
+                }
+            }
         });
+        // assert(maxSize != 0UZ);
+        assert(maxSize != undefined_size);
         return maxSize;
     }
 

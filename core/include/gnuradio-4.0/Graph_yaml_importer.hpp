@@ -12,7 +12,7 @@ namespace gr {
 
 namespace detail {
 
-inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml) {
+inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml, std::source_location location = std::source_location::current()) {
 
     std::map<std::string, BlockModel*> createdBlocks;
 
@@ -118,7 +118,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         auto dst = parseBlockPort(connection[2], connection[3]);
 
         if (connection.size() == 4) {
-            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition);
+            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition, undefined_size, graph::defaultWeight, graph::defaultEdgeName, location);
         } else {
             auto minBufferSize = std::visit(
                 []<typename TValue>(const TValue& value) {
@@ -127,12 +127,12 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     } else if constexpr (std::is_integral_v<TValue>) {
                         return static_cast<std::size_t>(value);
                     } else {
-                        return graph::defaultMinBufferSize;
+                        return std::numeric_limits<std::size_t>::max();
                     }
                 },
                 connection[4]);
 
-            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition, minBufferSize);
+            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition, minBufferSize, graph::defaultWeight, graph::defaultEdgeName, location);
         }
     } // for connections
 }
@@ -257,7 +257,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
             seq.push_back(edge.destinationBlock().name().data());
             writePortDefinition(edge.destinationPortDefinition());
 
-            if (edge.minBufferSize() != graph::defaultMinBufferSize) {
+            if (edge.minBufferSize() != std::numeric_limits<std::size_t>::max()) {
                 seq.push_back(edge.minBufferSize());
             }
 
@@ -271,14 +271,14 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
 } // namespace detail
 
-inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc) {
+inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location = std::source_location::current()) {
     Graph      resultGraph;
     const auto yaml = pmtv::yaml::deserialize(yamlSrc);
     if (!yaml) {
         throw gr::exception(fmt::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc));
     }
 
-    detail::loadGraphFromMap(loader, resultGraph, *yaml);
+    detail::loadGraphFromMap(loader, resultGraph, *yaml, location);
     return resultGraph;
 }
 

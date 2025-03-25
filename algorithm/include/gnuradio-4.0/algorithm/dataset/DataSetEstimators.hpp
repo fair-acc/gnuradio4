@@ -34,7 +34,7 @@ struct Point {
 
 namespace estimators {
 template<typename T>
-[[nodiscard]] constexpr T computeCentreOfMass(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = max_size_t, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T computeCentreOfMass(const DataSet<T>& ds, std::size_t minIndex = 0UZ, std::size_t maxIndex = max_size, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
     maxIndex = detail::checkIndexRange(ds, minIndex, maxIndex, signalIndex, location);
     T com    = T(0);
     T mass   = T(0);
@@ -98,7 +98,7 @@ template<std::ranges::random_access_range T, typename TValue = typename T::value
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>
-[[nodiscard]] constexpr std::optional<Point<T>> getMaximum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::optional<Point<T>> getMaximum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
     indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
@@ -124,7 +124,7 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>
-[[nodiscard]] constexpr std::optional<Point<T>> getMinimum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::optional<Point<T>> getMinimum(D&& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
     indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
@@ -150,7 +150,7 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getMean(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getMean(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
     auto signalRange  = dataSet.signalValues(signalIndex) | std::views::drop(indexMin) | std::views::take(indexMax - indexMin);
@@ -167,7 +167,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getMedian(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getMedian(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
     std::span<const T> values = dataSet.signalValues(signalIndex).subspan(indexMin, indexMax - indexMin);
@@ -190,7 +190,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T>
-[[nodiscard]] constexpr T getRange(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getRange(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
     auto signalRange  = dataSet.signalValues(signalIndex) | std::views::drop(indexMin) | std::views::take(indexMax - indexMin);
@@ -205,7 +205,7 @@ template<typename T>
 }
 
 template<typename T>
-[[nodiscard]] constexpr T getRms(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getRms(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
     auto signalRange  = dataSet.signalValues(signalIndex) | std::views::drop(indexMin) | std::views::take(indexMax - indexMin);
@@ -229,7 +229,7 @@ template<typename T>
 }
 
 template<typename T>
-[[nodiscard]] constexpr T getIntegral(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getIntegral(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
     // sign if reversed
@@ -256,7 +256,7 @@ template<typename T>
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getEdgeDetect(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getEdgeDetect(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
     T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex).value().value;
@@ -286,7 +286,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getDutyCycle(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getDutyCycle(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
     T minVal = getMinimum(dataSet, indexMin, indexMax, signalIndex).value().value;
@@ -316,7 +316,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getFrequencyEstimate(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getFrequencyEstimate(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     // getFrequencyEstimate => naive/simple approach counting edges
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
@@ -404,7 +404,7 @@ template<std::ranges::random_access_range T, typename TValue = typename T::value
 }
 
 template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getLocationMaximumGaussInterpolated(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getLocationMaximumGaussInterpolated(const DataSet<T>& dataSet, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     // getFrequencyEstimate => naive/simple approach counting edges
     indexMax = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
@@ -428,7 +428,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr T getZeroCrossing(D&& dataSet, TValue threshold, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr T getZeroCrossing(D&& dataSet, TValue threshold, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0, std::source_location location = std::source_location::current()) {
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
     indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
 
@@ -490,7 +490,7 @@ struct StepStartDetectionResult {
 };
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue threshold = TValue(0.5), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue threshold = TValue(0.5), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
 
     std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds, "", location);
@@ -552,7 +552,7 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
 }
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr std::optional<Point<T>> getSettingTime(D&& dataSet, std::size_t windowSize, TValue tolerance = TValue(0), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] constexpr std::optional<Point<T>> getSettingTime(D&& dataSet, std::size_t windowSize, TValue tolerance = TValue(0), std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
     indexMax                      = detail::checkIndexRange(dataSet, indexMin, indexMax, signalIndex, location);
     if (windowSize == 0UZ || (indexMax - indexMin) < windowSize) {
@@ -626,7 +626,7 @@ struct StepPulseResponseMetrics {
 };
 
 template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type>
-StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size_t, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
+StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMin = 0UZ, std::size_t indexMax = max_size, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
     indexMax                      = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);

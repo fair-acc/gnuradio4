@@ -34,9 +34,11 @@ namespace gr {
 #pragma GCC diagnostic ignored "-Wimplicit-float-conversion"
 #endif
 
-using Size_t                            = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
-inline constexpr Size_t      max_Size_t = std::numeric_limits<gr::Size_t>::max();
-inline constexpr std::size_t max_size_t = std::numeric_limits<std::size_t>::max();
+using Size_t                                = std::uint32_t; // strict type definition in view of cross-platform/cross-compiler/cross-network portability similar to 'std::size_t' (N.B. which is not portable)
+inline constexpr Size_t      max_Size       = std::numeric_limits<gr::Size_t>::max();
+inline constexpr std::size_t max_size       = std::numeric_limits<std::size_t>::max();
+inline constexpr Size_t      undefined_Size = std::numeric_limits<gr::Size_t>::max();
+inline constexpr std::size_t undefined_size = std::numeric_limits<std::size_t>::max();
 
 template<typename T, typename U>
 T cast(U value) { /// gcc/clang warning suppressing cast

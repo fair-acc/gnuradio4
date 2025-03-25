@@ -316,7 +316,7 @@ constexpr DataSet<T> applyPeakToPeak(const DataSet<T>& ds, std::size_t windowSiz
 }
 
 template<ProcessMode mode = ProcessMode::Copy, bool symmetric = false, DataSetLike D, typename T = typename std::remove_cvref_t<D>::value_type, typename U>
-DataSet<T> applyFilter(D&& dataSet, const gr::filter::FilterCoefficients<U>& coeffs, std::size_t signalIndex = max_size_t) {
+DataSet<T> applyFilter(D&& dataSet, const gr::filter::FilterCoefficients<U>& coeffs, std::size_t signalIndex = max_size) {
     using TValue                  = gr::meta::fundamental_base_value_type_t<T>;
     constexpr bool isConstDataSet = std::is_const_v<std::remove_reference_t<D>>;
 
@@ -362,7 +362,7 @@ DataSet<T> applyFilter(D&& dataSet, const gr::filter::FilterCoefficients<U>& coe
         }
     };
 
-    if (signalIndex != max_size_t) {
+    if (signalIndex != max_size) {
         processSignal(signalIndex);
     } else {
         for (std::size_t dsIndex = 0UZ; dsIndex < smoothed.size(); dsIndex++) {
