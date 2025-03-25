@@ -706,7 +706,7 @@ const boost::ut::suite<"Small Buffers"> _smallBufferTests = [] {
     // std::complex<> types, the buffer implementation should default to the non-posix/STL C++ allocator
     fmt::println("start small buffer test");
     "std::vector<T>"_test = [] {
-        using Type             = std::vector<int>;
+        using Type = std::vector<int>;
         static_assert(not std::is_trivially_copyable_v<Type>);
         BufferLike auto buffer = CircularBuffer<Type>(4UZ);
         expect(eq(buffer.size(), 4UZ));
