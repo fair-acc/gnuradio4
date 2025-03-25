@@ -17,7 +17,9 @@ target_link_libraries(gr-basic INTERFACE gnuradio-core gnuradio-algorithm)
 target_include_directories(gr-basic INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                               $<INSTALL_INTERFACE:include/>)
 
-add_library(GrBasicBlocks)
+# An OBJECT library as the generated files have namespace-scope
+# variables with dynamic C++ initialization
+add_library(GrBasicBlocks OBJECT)
 gr_generate_block_instantiations(
     GrBasicBlocks
     HEADERS

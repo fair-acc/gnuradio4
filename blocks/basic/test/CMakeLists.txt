@@ -6,6 +6,7 @@ add_ut_test(qa_TriggerBlocks)
 
 if(ENABLE_BLOCK_REGISTRY AND ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_BasicKnownBlocks)
+  target_link_libraries(qa_BasicKnownBlocks PRIVATE GrBasicBlocks)
 endif()
 add_ut_test(qa_StreamToDataSet)
 add_ut_test(qa_SyncBlock)

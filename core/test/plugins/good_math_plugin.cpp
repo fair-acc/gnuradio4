@@ -1,7 +1,7 @@
 #include <charconv>
 #include <vector>
 
-#include <gnuradio-4.0/plugin.hpp>
+#include <gnuradio-4.0/Plugin.hpp>
 
 GR_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
 

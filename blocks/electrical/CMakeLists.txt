@@ -3,7 +3,9 @@ target_link_libraries(gr-electrical INTERFACE gnuradio-core gnuradio-algorithm)
 target_include_directories(gr-electrical INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                    $<INSTALL_INTERFACE:include/>)
 
-add_library(GrElectricalBlocks)
+# An OBJECT library as the generated files have namespace-scope
+# variables with dynamic C++ initialization
+add_library(GrElectricalBlocks OBJECT)
 gr_generate_block_instantiations(
     GrElectricalBlocks
     HEADERS

@@ -283,7 +283,7 @@ int main(int argc, char** argv) {
                 const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                 const std::size_t hashValue    = std::hash<std::string>{}(templateName);
                 fout << "namespace {\n";
-                fout << std::format("[[maybe_unused]] inline bool reg_{} = gr::registerBlock<{}, \"{}\">(gr::globalBlockRegistry()); // for details: {}:{}\n", hashValue, templateName, finalName.empty() ? "" : finalName, headerPath.string(), lineNum);
+                fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">(gr::globalBlockRegistry()); // for details: {}:{}\n", hashValue, templateName, finalName.empty() ? "" : finalName, headerPath.string(), lineNum);
                 fout << "} // anonymous namespace\n\n";
             } else {
                 // multiple expansions => all in one file
@@ -300,7 +300,7 @@ int main(int argc, char** argv) {
                     const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                     const std::size_t hashValue    = std::hash<std::string>{}(templateName);
                     fout << "namespace {\n";
-                    fout << std::format("[[maybe_unused]] inline bool reg_{} = gr::registerBlock<{}, \"{}\">(gr::globalBlockRegistry()); // for details: {}:{}\n", hashValue, templateName, finalName.empty() ? "" : finalName, headerPath.string(), lineNum);
+                    fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">(gr::globalBlockRegistry()); // for details: {}:{}\n", hashValue, templateName, finalName.empty() ? "" : finalName, headerPath.string(), lineNum);
                     fout << "} // anonymous namespace\n\n";
                     localIdx++;
                 }
@@ -335,7 +335,7 @@ int main(int argc, char** argv) {
                 const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                 const std::size_t hashValue    = std::hash<std::string>{}(templateName);
                 fout << "namespace {\n";
-                fout << std::format("[[maybe_unused]] inline bool reg_{} = gr::registerBlock<{}, \"{}\">(gr::globalBlockRegistry()); // for details: {}:{}\n", hashValue, templateName, finalName.empty() ? "" : finalName, headerPath.string(), lineNum);
+                fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">(gr::globalBlockRegistry()); // for details: {}:{}\n", hashValue, templateName, finalName.empty() ? "" : finalName, headerPath.string(), lineNum);
                 fout << "} // anonymous namespace\n\n";
                 fout << "// end of auto-generated code\n";
 

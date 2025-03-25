@@ -72,8 +72,13 @@ add_ut_test(qa_PortableTypeName)
 
 if(ENABLE_BLOCK_REGISTRY AND ENABLE_BLOCK_PLUGINS)
   add_app_test(qa_grc)
+  gr_generate_block_instantiations(qa_grc HEADERS ArrayTestBlocks.hpp)
+  target_link_libraries(qa_grc PUBLIC GrBasicBlocks)
+
   add_ut_test(qa_GraphMessages)
+  target_link_libraries(qa_GraphMessages PUBLIC GrBasicBlocks GrTestingBlocks)
 
   add_subdirectory(plugins)
   add_app_test(qa_plugins_test)
+  target_link_libraries(qa_plugins_test PUBLIC GrBasicBlocks)
 endif()
