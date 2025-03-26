@@ -10,7 +10,6 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
-
 template<>
 struct fmt::formatter<gr::Tag> {
     template<typename ParseContext>
@@ -58,6 +57,54 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         } else {
             return gr::work::Status::ERROR;
         }
+    }
+};
+
+template<typename T>
+struct DecimatorBackward : gr::Block<DecimatorBackward<T>, gr::Resampling<1UZ, 1UZ, false>, gr::BackwardTagForwarding> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    gr::Size_t decim{1};
+
+    GR_MAKE_REFLECTABLE(DecimatorBackward, in, out, decim);
+
+    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { this->input_chunk_size = decim; }
+
+    [[nodiscard]] gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
+        assert(output.size() >= input.size() / decim);
+
+        std::size_t out_sample_idx = 0;
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            if (i % decim == 0) {
+                output[out_sample_idx++] = input[i];
+            }
+        }
+        return gr::work::Status::OK;
+    }
+};
+
+template<typename T>
+struct DecimatorForward : gr::Block<DecimatorForward<T>, gr::Resampling<1UZ, 1UZ, false>> {
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    gr::Size_t decim{1};
+
+    GR_MAKE_REFLECTABLE(DecimatorForward, in, out, decim);
+
+    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { this->input_chunk_size = decim; }
+
+    [[nodiscard]] gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
+        assert(output.size() >= input.size() / decim);
+
+        std::size_t out_sample_idx = 0;
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            if (i % decim == 0) {
+                output[out_sample_idx++] = input[i];
+            }
+        }
+        return gr::work::Status::OK;
     }
 };
 
@@ -239,6 +286,56 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
         expect(eq(sink._nSamplesProduced, 1008U)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
         expect(eq(sink._tags.size(), 3UZ));                                                          // default policy is to drop epilogue samples
+    };
+
+    auto runPolicyTest = []<typename TDecimator>(const std::vector<Tag>& expectedTags) {
+        gr::Size_t nSamples = 45;
+        gr::Size_t decim    = 10;
+
+        Graph testGraph;
+        auto& src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
+        src._tags = {
+            {0, {{"key", "value@0"}, {"key0", "value@0"}}},     //
+            {4, {{"key", "value@4"}, {"key4", "value@4"}}},     //
+            {5, {{"key", "value@5"}, {"key5", "value@5"}}},     //
+            {15, {{"key", "value@15"}, {"key15", "value@15"}}}, //
+            {20, {{"key", "value@20"}, {"key20", "value@20"}}}, //
+            {25, {{"key", "value@25"}, {"key25", "value@25"}}}, //
+            {35, {{"key", "value@35"}, {"key35", "value@35"}}}  //
+        };
+
+        auto& decimator = testGraph.emplaceBlock<TDecimator>({{"decim", decim}});
+        auto& sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", true}});
+
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(decimator)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(decimator).template to<"in">(sink)));
+
+        scheduler::Simple sched{std::move(testGraph)};
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(src._nSamplesProduced, nSamples));
+        expect(eq(sink._nSamplesProduced, 4U));
+        expect(eq(sink._tags.size(), 4UZ));
+
+        expect(equal_tag_lists(sink._tags, expectedTags));
+    };
+
+    "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                             //
+            {0, {{"key", "value@0"}, {"key0", "value@0"}}},                           //
+            {1, {{"key", "value@5"}, {"key4", "value@4"}, {"key5", "value@5"}}},      //
+            {2, {{"key", "value@20"}, {"key15", "value@15"}, {"key20", "value@20"}}}, //
+            {3, {{"key", "value@25"}, {"key25", "value@25"}}}};
+        runPolicyTest.template operator()<DecimatorForward<float>>(expectedTags);
+    };
+
+    "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                                             //
+            {0, {{"key", "value@5"}, {"key0", "value@0"}, {"key4", "value@4"}, {"key5", "value@5"}}}, //
+            {1, {{"key", "value@15"}, {"key15", "value@15"}}},                                        //
+            {2, {{"key", "value@25"}, {"key20", "value@20"}, {"key25", "value@25"}}},                 //
+            {3, {{"key", "value@35"}, {"key35", "value@35"}}}};
+        runPolicyTest.template operator()<DecimatorBackward<float>>(expectedTags);
     };
 };
 
