@@ -11,13 +11,20 @@ jobs:
   restyled:
     runs-on: ubuntu-latest
     steps:
+      - name: Ensure fork is public
+        if: ${{ github.event.pull_request.head.repo.private }}
+        run: |
+          echo "Private forks are not supported for restyling" >&2
+
       - uses: actions/checkout@v4
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: restyled-io/actions/setup@v4
+      
       - id: restyler
         uses: restyled-io/actions/run@v4
         with:
           fail-on-differences: true
-
