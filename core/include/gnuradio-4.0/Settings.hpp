@@ -407,15 +407,12 @@ public:
                     _block->meta_information.value[memberName + "::visible"]       = RawType::visible();
                 }
 
-                // detect whether field has one of the DEFAULT_TAGS signature
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                    if constexpr (std::ranges::find(gr::tag::kDefaultTags, refl::data_member_name<TBlock, kIdx>.view()) != gr::tag::kDefaultTags.cend()) {
-                        _autoForwardParameters.emplace(memberName);
-                    }
                     _allWritableMembers.emplace(std::move(memberName));
                 }
             });
         }
+        _autoForwardParameters.insert(gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end());
     }
 
     CtxSettings(const CtxSettings& other) {
