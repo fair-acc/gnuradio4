@@ -9,6 +9,12 @@ function(add_gr_plugin PLUGIN_NAME)
 endfunction()
 
 add_gr_plugin(good_math_plugin)
+
 add_gr_plugin(good_base_plugin)
+gr_generate_block_instantiations(
+    good_base_plugin HEADERS good_base_plugin.hpp
+    REGISTRY_HEADER gnuradio-4.0/Plugin.hpp
+    REGISTRY_INSTANCE grPluginInstance)
+
 add_gr_plugin(good_conversion_plugin)
 add_gr_plugin(bad_plugin)

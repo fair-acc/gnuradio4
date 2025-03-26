@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
     std::filesystem::path headerPath       = argv[1];
     std::filesystem::path outDir           = argv[2];
     std::string           registryHeader   = "gnuradio-4.0/BlockRegistry.hpp";
-    std::string           registryInstance = "gr::globalBlockRegistry()";
+    std::string           registryInstance = "gr::globalBlockRegistry";
 
     bool expansionsSplit = false; // true: each block instantiation creates its own file
     for (int index = 3; index < argc; index++) {
@@ -217,7 +217,7 @@ int main(int argc, char** argv) {
             expansionsSplit = true;
         } else if (argc > index + 1 && (std::strcmp(argv[index], "--registry-header") == 0)) {
             registryHeader = argv[index + 1];
-        } else if (argc > index + 1 && (std::strcmp(argv[index], "--block-registry-instance") == 0)) {
+        } else if (argc > index + 1 && (std::strcmp(argv[index], "--registry-instance") == 0)) {
             registryInstance = argv[index + 1];
         }
     }
@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
                 const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                 const std::size_t hashValue    = std::hash<std::string>{}(templateName);
                 fout << "namespace {\n";
-                fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">({}); // for details: {}:{}\n", //
+                fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">({}()); // for details: {}:{}\n", //
                     hashValue, templateName, finalName.empty() ? "" : finalName, registryInstance, headerPath.string(), lineNum);
                 fout << "} // anonymous namespace\n\n";
             } else {
@@ -303,7 +303,7 @@ int main(int argc, char** argv) {
                     const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                     const std::size_t hashValue    = std::hash<std::string>{}(templateName);
                     fout << "namespace {\n";
-                    fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">({}); // for details: {}:{}\n", //
+                    fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">({}()); // for details: {}:{}\n", //
                         hashValue, templateName, finalName.empty() ? "" : finalName, registryInstance, headerPath.string(), lineNum);
                     fout << "} // anonymous namespace\n\n";
                     localIdx++;
@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
                 const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                 const std::size_t hashValue    = std::hash<std::string>{}(templateName);
                 fout << "namespace {\n";
-                fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">({}); // for details: {}:{}\n", //
+                fout << std::format("auto reg_{} = gr::registerBlock<{}, \"{}\">({}()); // for details: {}:{}\n", //
                     hashValue, templateName, finalName.empty() ? "" : finalName, registryInstance, headerPath.string(), lineNum);
                 fout << "} // anonymous namespace\n\n";
                 fout << "// end of auto-generated code\n";
