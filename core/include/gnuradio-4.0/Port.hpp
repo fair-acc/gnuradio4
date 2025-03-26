@@ -462,7 +462,7 @@ struct Port {
     template<SpanReleasePolicy spanReleasePolicy>
     using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
 
-    template<SpanReleasePolicy spanReleasePolicy>
+    template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
     struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
         TagReaderSpanType rawTags;
         std::size_t       streamIndex;
@@ -490,11 +490,15 @@ struct Port {
                     return;
                 }
 
-                if (ReaderSpanType<spanReleasePolicy>::isConsumeRequested()) {
-                    consumeTags(ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume());
+                if constexpr (consumeOnlyFirstTag) {
+                    consumeTags(1UZ);
                 } else {
-                    if (ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
-                        consumeTags(ReaderSpanType<spanReleasePolicy>::size());
+                    if (ReaderSpanType<spanReleasePolicy>::isConsumeRequested()) {
+                        consumeTags(ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume());
+                    } else {
+                        if (ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                            consumeTags(ReaderSpanType<spanReleasePolicy>::size());
+                        }
                     }
                 }
             }
@@ -532,8 +536,8 @@ struct Port {
             return reader.get(n);
         }
     }; // end of InputSpan
-    static_assert(ReaderSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
-    static_assert(InputSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
+    static_assert(ReaderSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll, false>>);
+    static_assert(InputSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll, false>>);
 
     template<SpanReleasePolicy spanReleasePolicy>
     using WriterSpanType = decltype(std::declval<WriterType>().template reserve<spanReleasePolicy>(1UZ));
@@ -824,11 +828,11 @@ public:
         return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
     }
 
-    template<SpanReleasePolicy spanReleasePolicy>
-    InputSpan<spanReleasePolicy> get(std::size_t nSamples)
+    template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
+    InputSpan<spanReleasePolicy, consumeOnlyFirstTag> get(std::size_t nSamples)
     requires(kIsInput)
     {
-        return InputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader(), this->isConnected(), this->isSynchronous());
+        return InputSpan<spanReleasePolicy, consumeOnlyFirstTag>(nSamples, streamReader(), tagReader(), this->isConnected(), this->isSynchronous());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
