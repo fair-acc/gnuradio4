@@ -64,14 +64,6 @@ struct Decimate : public Block<Decimate<T, Average>, SupportedTypes<float, doubl
 
     GR_MAKE_REFLECTABLE(Decimate, in, out, sample_rate);
 
-    void settingsChanged(const property_map& /*old_settings*/, property_map& new_settings, property_map& fwd_settings) noexcept {
-        if (new_settings.contains(std::string(gr::tag::SIGNAL_RATE.shortKey())) || new_settings.contains("input_chunk_size")) {
-            const float fwdSampleRate                                  = sample_rate / static_cast<float>(this->input_chunk_size);
-            fwd_settings[std::string(gr::tag::SIGNAL_RATE.shortKey())] = fwdSampleRate; // TODO: handle 'gr:sample_rate' vs 'sample_rate';
-            fmt::println("change sample_rate for {} --- {} / {} -> {}", this->name, sample_rate, this->input_chunk_size, fwdSampleRate);
-        }
-    }
-
     constexpr work::Status processBulk(std::span<const T>& input, std::span<T>& output) noexcept {
         assert(this->output_chunk_size == gr::Size_t(1) && "block implements only basic decimation");
         assert(this->input_chunk_size != gr::Size_t(0) && "input_chunk_size must be non-zero");
