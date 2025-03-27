@@ -870,6 +870,15 @@ public:
 
             updateActiveParametersImpl();
 
+            // Update sample_rate if the block performs decimation or interpolation
+            if constexpr (TBlock::ResamplingControl::kEnabled) {
+                if (result.forwardParameters.contains(gr::tag::SAMPLE_RATE.shortKey()) && (_block->input_chunk_size != 1ULL || _block->output_chunk_size != 1ULL)) {
+                    const float ratio         = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
+                    const float newSampleRate = ratio * std::get<float>(_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()));
+                    result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
+                }
+            }
+
             if (_stagedParameters.contains(gr::tag::STORE_DEFAULTS)) {
                 storeDefaults();
             }

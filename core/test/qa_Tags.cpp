@@ -329,7 +329,7 @@ const boost::ut::suite TagPropagation = [] {
         runPolicyTest.template operator()<DecimatorForward<float>>(expectedTags);
     };
 
-    "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
+    "Tag propagation with decimation - Backward policy"_test = [&runPolicyTest]() {
         std::vector<Tag>       expectedTags = std::vector<Tag>{                                             //
             {0, {{"key", "value@5"}, {"key0", "value@0"}, {"key4", "value@4"}, {"key5", "value@5"}}}, //
             {1, {{"key", "value@15"}, {"key15", "value@15"}}},                                        //
