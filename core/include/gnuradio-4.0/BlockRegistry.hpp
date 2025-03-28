@@ -114,6 +114,17 @@ public:
         return std::string(name);
     }
 
+    void mergeRegistry(gr::BlockRegistry& anotherRegistry) {
+        if (this == std::addressof(anotherRegistry)) {
+            return;
+        }
+
+        // We don't have append_range from C++23
+        _blockTypes.insert(_blockTypes.end(), anotherRegistry._blockTypes.cbegin(), anotherRegistry._blockTypes.cend());
+        // We don't have insert_range from C++23
+        _blockTypeHandlers.insert(anotherRegistry._blockTypeHandlers.cbegin(), anotherRegistry._blockTypeHandlers.cend());
+    }
+
     friend inline BlockRegistry& globalBlockRegistry();
 };
 

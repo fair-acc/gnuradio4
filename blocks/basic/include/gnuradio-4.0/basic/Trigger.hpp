@@ -8,9 +8,9 @@
 
 namespace gr::blocks::basic {
 
-GR_REGISTER_BLOCK("gr::blocks::basic::SchmittTriggerNoInterpolation", gr::blocks::basic::SchmittTrigger, ([T], gr::trigger::InterpolationMethod::NO_INTERPOLATION), [ std::int16_t, std::int32_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
-GR_REGISTER_BLOCK("gr::blocks::basic::SchmittTriggerBasic", gr::blocks::basic::SchmittTrigger, ([T], gr::trigger::InterpolationMethod::BASIC_LINEAR_INTERPOLATION), [ std::int16_t, std::int32_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
-GR_REGISTER_BLOCK("gr::blocks::basic::SchmittTrigger", gr::blocks::basic::SchmittTrigger, ([T], gr::trigger::InterpolationMethod::LINEAR_INTERPOLATION), [ std::int16_t, std::int32_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::blocks::basic::SchmittTriggerNoInterpolation", gr::blocks::basic::SchmittTrigger, ([T], gr::trigger::InterpolationMethod::NO_INTERPOLATION), [ std::int16_t, std::int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::basic::SchmittTriggerBasic", gr::blocks::basic::SchmittTrigger, ([T], gr::trigger::InterpolationMethod::BASIC_LINEAR_INTERPOLATION), [ std::int16_t, std::int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::basic::SchmittTrigger", gr::blocks::basic::SchmittTrigger, ([T], gr::trigger::InterpolationMethod::LINEAR_INTERPOLATION), [ std::int16_t, std::int32_t, float, double ])
 
 template<typename T, gr::trigger::InterpolationMethod Method>
 requires(std::is_arithmetic_v<T> or (UncertainValueLike<T> && std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>))

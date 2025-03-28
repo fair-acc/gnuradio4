@@ -26,7 +26,7 @@ constexpr Type parse(std::string_view name) {
 
 } // namespace signal_generator
 
-GR_REGISTER_BLOCK(gr::basic::SignalGenerator, [ float, double ])
+GR_REGISTER_BLOCK(gr::basic::SignalGenerator, [T], [ float, double ])
 
 template<std::floating_point T>
 struct SignalGenerator : Block<SignalGenerator<T>, BlockingIO<true>> {

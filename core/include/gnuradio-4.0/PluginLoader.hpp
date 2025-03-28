@@ -16,7 +16,7 @@
 #ifdef ENABLE_BLOCK_PLUGINS
 #include <dlfcn.h>
 
-#include "plugin.hpp"
+#include "Plugin.hpp"
 #endif
 
 namespace gr {

@@ -1,4 +1,4 @@
-#include <gnuradio-4.0/plugin.hpp>
+#include <gnuradio-4.0/Plugin.hpp>
 
 #include <charconv>
 #include <vector>

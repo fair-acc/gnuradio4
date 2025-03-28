@@ -10,7 +10,7 @@
 
 namespace gr::blocks::type::converter {
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::Convert, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::Convert, ([T], [U]), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
 
 template<typename T, typename R>
 requires std::is_arithmetic_v<T> && std::is_arithmetic_v<R>
@@ -32,7 +32,7 @@ struct Convert : Block<Convert<T, R>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ScalingConvert, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ScalingConvert, ([T], [U]), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
 
 template<typename T, typename R>
 requires std::is_arithmetic_v<T> && std::is_arithmetic_v<R>
@@ -58,7 +58,7 @@ Performs scaling, i.e. 'R output = R(input * scale)'
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::Abs, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::Abs, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
@@ -80,7 +80,7 @@ struct Abs : Block<Abs<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::Imag, [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::Imag, [T], [ std::complex<float>, std::complex<double> ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
@@ -95,7 +95,7 @@ struct Imag : Block<Imag<T>> {
     [[nodiscard]] constexpr R processOne(T input) const noexcept { return std::imag(input); }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::Real, [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::Real, [T], [ std::complex<float>, std::complex<double> ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
@@ -110,7 +110,7 @@ struct Real : Block<Real<T>> {
     [[nodiscard]] constexpr R processOne(T input) const noexcept { return std::real(input); }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::Arg, [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::Arg, [T], [ std::complex<float>, std::complex<double> ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
@@ -125,7 +125,7 @@ struct Arg : Block<Arg<T>> {
     [[nodiscard]] constexpr R processOne(T input) const noexcept { return std::arg(input); }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::RadiansToDegree, [ float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::RadiansToDegree, [T], [ float, double ])
 
 template<std::floating_point T>
 struct RadiansToDegree : Block<RadiansToDegree<T>> {
@@ -142,7 +142,7 @@ struct RadiansToDegree : Block<RadiansToDegree<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::DegreeToRadians, [ float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::DegreeToRadians, [T], [ float, double ])
 
 template<std::floating_point T>
 struct DegreeToRadians : Block<DegreeToRadians<T>> {
@@ -159,7 +159,7 @@ struct DegreeToRadians : Block<DegreeToRadians<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [T], [ std::complex<float>, std::complex<double> ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
@@ -177,7 +177,7 @@ struct ToRealImag : Block<ToRealImag<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [ float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [T], [ float, double ])
 
 template<std::floating_point T>
 struct RealImagToComplex : Block<RealImagToComplex<T>> {
@@ -194,7 +194,7 @@ struct RealImagToComplex : Block<RealImagToComplex<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [T], [ std::complex<float>, std::complex<double> ])
 
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
@@ -212,7 +212,7 @@ struct ToMagPhase : Block<ToMagPhase<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [ float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ToRealImag, [T], [ float, double ])
 
 template<typename T>
 requires std::is_arithmetic_v<T>
@@ -230,7 +230,7 @@ struct MagPhaseToComplex : public gr::Block<MagPhaseToComplex<T>> {
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::ComplexToInterleaved, [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::ComplexToInterleaved, ([T], [U]), [ std::complex<float>, std::complex<double> ], [ float, double ])
 
 template<typename T, typename R>
 requires meta::complex_like<T> && (std::floating_point<R> || std::is_same_v<R, std::int8_t> || std::is_same_v<R, std::int16_t>)
@@ -253,7 +253,7 @@ For every complex input item, we produce two output items that alternate between
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::type::converter::InterleavedToComplex, [ int8_t, int16_t, float, double ])
+GR_REGISTER_BLOCK(gr::blocks::type::converter::InterleavedToComplex, ([T], [U]), [ float, double ], [ std::complex<float>, std::complex<double> ])
 
 template<typename T, typename R>
 requires(std::floating_point<T> || std::is_same_v<T, std::int8_t> || std::is_same_v<T, std::int16_t>) && meta::complex_like<R>
