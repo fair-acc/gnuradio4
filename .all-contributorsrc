@@ -135,6 +135,15 @@
         "bug",
         "maintenance"
       ]
+    },
+    {
+      "login": "marcusmueller",
+      "name": "Marcus Müller",
+      "avatar_url": "https://avatars.githubusercontent.com/u/958972?v=4",
+      "profile": "https://github.com/marcusmueller",
+      "contributions": [
+        "infra"
+      ]
     }
   ],
   "commitType": "docs",
