@@ -16,6 +16,7 @@ function(setup_test_no_asan TEST_NAME)
             gr-math
             gr-testing
             gr-basic
+            gr-filter
             ut)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
 endfunction()

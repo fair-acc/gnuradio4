@@ -353,6 +353,7 @@ public:
 
     constexpr static bool blockingIO             = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
     constexpr static bool noDefaultTagForwarding = std::disjunction_v<std::is_same<NoDefaultTagForwarding, Arguments>...>;
+    constexpr static bool backwardTagForwarding  = std::disjunction_v<std::is_same<BackwardTagForwarding, Arguments>...>;
 
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
@@ -714,11 +715,15 @@ public:
     /**
      * Merge tags from all sync ports into one merged tag, apply auto-update parameters
      */
-    constexpr void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
+    void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
         for_each_reader_span(
             [this, untilLocalIndex](auto& in) {
                 if (in.isSync) {
-                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndex).map) {
+                    std::size_t untilLocalIndexAdjusted = untilLocalIndex;
+                    if constexpr (!backwardTagForwarding) {
+                        untilLocalIndexAdjusted = 1UZ;
+                    }
+                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndexAdjusted).map) {
                         _mergedInputTag.map.insert_or_assign(key, value);
                     }
                 }
@@ -760,10 +765,10 @@ public:
                     using enum gr::SpanReleasePolicy;
                     if constexpr (std::remove_cvref_t<Port>::kIsInput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).template get<ProcessAll>(nSyncSamples);
+                            return std::forward<Port>(port).template get<ProcessAll, !backwardTagForwarding>(nSyncSamples);
                         } else {
                             // return std::forward<Port>(port).template get<ProcessNone>(std::max(port.min_samples, std::min(port.streamReader().available(), port.max_samples)));
-                            return std::forward<Port>(port).template get<ProcessNone>(port.streamReader().available());
+                            return std::forward<Port>(port).template get<ProcessNone, !backwardTagForwarding>(port.streamReader().available());
                         }
                     } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
@@ -1612,7 +1617,8 @@ protected:
         auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
-        updateMergedInputTagAndApplySettings(inputSpans);
+        updateMergedInputTagAndApplySettings(inputSpans, processedIn);
+
         applyChangedSettings();
 
         // Actual publishing occurs when outputSpans go out of scope. If processedOut == 0, the Tags will not be published.

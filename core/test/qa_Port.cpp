@@ -53,18 +53,19 @@ const boost::ut::suite PortTests = [] {
         auto writer    = in.buffer().streamBuffer.new_writer();
         auto tagWriter = in.buffer().tagBuffer.new_writer();
         { // put testdata into buffer
-            auto writeSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(6);
-            auto tagSpan   = tagWriter.tryReserve(5);
-            expect(eq(writeSpan.size(), 6UZ));
-            expect(eq(tagSpan.size(), 5UZ));
+            auto writeSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(8);
+            auto tagSpan   = tagWriter.tryReserve(6);
+            expect(eq(writeSpan.size(), 8UZ));
+            expect(eq(tagSpan.size(), 6UZ));
             tagSpan[0] = {0, {{"id", "tag@100"}, {"id0", true}}};
             tagSpan[1] = {1, {{"id", "tag@101"}, {"id1", true}}};
             tagSpan[2] = {3, {{"id", "tag@103"}, {"id3", true}}};
             tagSpan[3] = {4, {{"id", "tag@104"}, {"id4", true}}};
             tagSpan[4] = {5, {{"id", "tag@105"}, {"id5", true}}};
+            tagSpan[5] = {6, {{"id", "tag@106"}, {"id6", true}}};
             std::iota(writeSpan.begin(), writeSpan.end(), 100);
-            tagSpan.publish(5);   // this should not be necessary as the ProcessAll policy should publish automatically
-            writeSpan.publish(6); // this should not be necessary as the ProcessAll policy should publish automatically
+            tagSpan.publish(6);   // this should not be necessary as the ProcessAll policy should publish automatically
+            writeSpan.publish(8); // this should not be necessary as the ProcessAll policy should publish automatically
         }
         { // partial consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(6);
@@ -88,12 +89,19 @@ const boost::ut::suite PortTests = [] {
             expect(std::ranges::equal(data, std::ranges::empty_view<int>()));
             expect(data.getMergedTag() == gr::Tag{0UZ, {}});
         }
-        { // get last sample
-            auto data = in.get<SpanReleasePolicy::ProcessAll>(1);
-            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{5, {{"id", "tag@105"}, {"id5", true}}}}));
-            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}})}));
-            expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5) | std::views::take(1)));
+        { // get consume only first tag
+            auto data = in.get<SpanReleasePolicy::ProcessAll, true>(2);
+            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{5, {{"id", "tag@105"}, {"id5", true}}}, {6, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}}), std::make_pair(1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
+            expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5) | std::views::take(2)));
             expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@105"}, {"id5", true}}});
+        }
+        { // get last sample, last tag is still available
+            auto data = in.get<SpanReleasePolicy::ProcessAll>(1);
+            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{6, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
+            expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(7) | std::views::take(1)));
+            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@106"}, {"id6", true}}});
         }
     };
 
