@@ -44,6 +44,7 @@ function(add_app_test TEST_NAME)
     ${TEST_NAME}
     good_math_plugin
     good_base_plugin
+    good_conversion_plugin
     bad_plugin)
 endfunction()
 

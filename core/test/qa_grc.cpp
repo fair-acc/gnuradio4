@@ -16,9 +16,10 @@
 #include "ArrayTestBlocks.hpp"
 
 struct TestContext {
-    explicit TestContext(std::vector<std::filesystem::path> paths) : loader(gr::globalBlockRegistry(), std::move(paths)) {}
+    explicit TestContext(std::vector<std::filesystem::path> paths) : registry(gr::globalBlockRegistry()), loader(registry, std::move(paths)) {}
 
-    gr::PluginLoader loader;
+    gr::BlockRegistry registry;
+    gr::PluginLoader  loader;
 };
 
 namespace {
