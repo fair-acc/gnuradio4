@@ -8932,7 +8932,7 @@ struct formatter<gr::Range<T>> {
     constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
 
     template<typename FormatContext>
-    auto format(const gr::Range<T>& range, FormatContext& ctx) {
+    auto format(const gr::Range<T>& range, FormatContext& ctx) const {
         return fmt::format_to(ctx.out(), "[min: {}, max: {}]", range.min, range.max);
     }
 };
@@ -9074,6 +9074,8 @@ struct fmt::formatter<std::vector<bool>> {
     }
 };
 
+#if FMT_VERSION < 110000
+/* fmt introduces a std::expected formatter with version 11.0.0 */
 template<typename Value, typename Error>
 struct fmt::formatter<std::expected<Value, Error>> {
     constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
@@ -9087,7 +9089,7 @@ struct fmt::formatter<std::expected<Value, Error>> {
         }
     }
 };
-
+#endif
 #endif // GNURADIO_FORMATTER_HPP
 
 // #include <gnuradio-4.0/meta/reflection.hpp>

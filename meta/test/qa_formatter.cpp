@@ -108,11 +108,16 @@ const boost::ut::suite expectedFormatter = [] {
 
     auto value = fmt::format("{}", Expected(5));
     fmt::println("expected formatter test: {}", value);
-    expect(eq(value, "<std::expected-value: 5>"s));
 
     auto error = fmt::format("{}", Expected(std::unexpected("Error")));
     fmt::println("expected formatter test: {}", error);
+#if FMT_VERSION < 110000
+    expect(eq(value, "<std::expected-value: 5>"s));
     expect(eq(error, "<std::unexpected: Error>"s));
+#else
+    expect(eq(value, "expected(5)"s));
+    expect(eq(error, "unexpected(\"Error\")"s));
+#endif
 };
 
 const boost::ut::suite<"Range<T> formatter"> _rangeFormatter = [] {
