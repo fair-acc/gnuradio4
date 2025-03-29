@@ -14,7 +14,12 @@ gr_generate_block_instantiations(
   include/gnuradio-4.0/testing/Delay.hpp
   include/gnuradio-4.0/testing/PerformanceMonitor.hpp
   include/gnuradio-4.0/testing/SettingsChangeRecorder.hpp)
-target_link_libraries(GrTestingBlocks PUBLIC gnuradio-core gnuradio-blocklib-core gr-testing gnuradio-algorithm)
+target_link_libraries(
+  GrTestingBlocks
+  PUBLIC gnuradio-core
+         gnuradio-blocklib-core
+         gr-testing
+         gnuradio-algorithm)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

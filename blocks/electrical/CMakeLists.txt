@@ -6,7 +6,12 @@ target_include_directories(gr-electrical INTERFACE $<BUILD_INTERFACE:${CMAKE_CUR
 # An OBJECT library as the generated files have namespace-scope variables with dynamic C++ initialization
 add_library(GrElectricalBlocks SHARED)
 gr_generate_block_instantiations(GrElectricalBlocks HEADERS include/gnuradio-4.0/electrical/PowerEstimators.hpp)
-target_link_libraries(GrElectricalBlocks PUBLIC gnuradio-core gnuradio-blocklib-core gr-basic gr-electrical)
+target_link_libraries(
+  GrElectricalBlocks
+  PUBLIC gnuradio-core
+         gnuradio-blocklib-core
+         gr-basic
+         gr-electrical)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

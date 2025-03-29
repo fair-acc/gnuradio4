@@ -10,7 +10,12 @@ gr_generate_block_instantiations(
   HEADERS
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
   include/gnuradio-4.0/filter/time_domain_filter.hpp)
-target_link_libraries(GrFilterBlocks PUBLIC gnuradio-core gnuradio-blocklib-core gr-filter gnuradio-algorithm)
+target_link_libraries(
+  GrFilterBlocks
+  PUBLIC gnuradio-core
+         gnuradio-blocklib-core
+         gr-filter
+         gnuradio-algorithm)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)
