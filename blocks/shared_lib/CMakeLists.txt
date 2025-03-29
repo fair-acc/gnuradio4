@@ -5,6 +5,7 @@ target_include_directories(GnuRadioBlockLib PUBLIC $<BUILD_INTERFACE:${CMAKE_CUR
 
 target_link_libraries(
   GnuRadioBlockLib
+  PRIVATE
   GrTestingBlocks
   GrFileIoBlocks
   GrBasicBlocks

@@ -12,13 +12,10 @@ if(NOT EMSCRIPTEN)
   target_link_libraries(
     gnuradio-plugin
     PUBLIC gnuradio-core
+           gnuradio-blocklib-core
            gnuradio-options
            pmtv
            fmt)
-
-  include(GenerateExportHeader)
-  generate_export_header(gnuradio-plugin)
-  # TODO install exported headers
 
   install(
     TARGETS gnuradio-plugin
@@ -32,6 +29,7 @@ if(ENABLE_EXAMPLES)
     main
     PUBLIC gnuradio-options
            gnuradio-core
+           gnuradio-blocklib-core
            fmt::fmt
            magic_enum)
 endif()

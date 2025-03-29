@@ -1,13 +1,22 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
-#include <gnuradio-4.0/Scheduler.hpp>
-
-#include "message_utils.hpp"
+#include "TestBlockRegistryContext.hpp"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
+
+namespace ut = boost::ut;
+
+template<>
+auto ut::cfg<ut::override> = RunnerContext( //
+    paths{},                                // plugin paths
+    gr_blocklib_init_module_GrBasicBlocks,  //
+    gr_blocklib_init_module_GrTestingBlocks);
+
+#include "message_utils.hpp"
 
 const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
     using namespace boost::ut;
@@ -50,15 +59,15 @@ const boost::ut::suite NonRunningGraphTests = [] {
     using namespace gr::testing;
     using enum gr::message::Command;
 
-    expect(fatal(gt(gr::globalPluginLoader().registry().knownBlocks().size(), 0UZ))) << "didn't register any blocks";
+    expect(fatal(gt(context->registry.knownBlocks().size(), 0UZ))) << "didn't register any blocks";
     fmt::println("registered blocks:");
-    for (const auto& blockName : gr::globalPluginLoader().registry().knownBlocks()) {
+    for (const auto& blockName : context->registry.knownBlocks()) {
         fmt::println("    block: {}", blockName);
     }
 
     "Block addition tests"_test = [] {
         gr::MsgPortOut toGraph;
-        gr::Graph      testGraph;
+        gr::Graph      testGraph(context->loader);
         gr::MsgPortIn  fromGraph;
 
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
@@ -92,7 +101,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
 
     "Block removal tests"_test = [] {
         gr::MsgPortOut toGraph;
-        gr::Graph      testGraph;
+        gr::Graph      testGraph(context->loader);
         gr::MsgPortIn  fromGraph;
 
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
@@ -137,7 +146,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
 
     "Block replacement tests"_test = [] {
         gr::MsgPortOut toGraph;
-        gr::Graph      testGraph;
+        gr::Graph      testGraph(context->loader);
         gr::MsgPortIn  fromGraph;
 
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
@@ -195,7 +204,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
 
     "Edge addition tests"_test = [&] {
         gr::MsgPortOut toGraph;
-        gr::Graph      testGraph;
+        gr::Graph      testGraph(context->loader);
         gr::MsgPortIn  fromGraph;
 
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
@@ -260,7 +269,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
 
     "BlockRegistry tests"_test = [] {
         gr::MsgPortOut toGraph;
-        gr::Graph      testGraph;
+        gr::Graph      testGraph(context->loader);
         gr::MsgPortIn  fromGraph;
 
         expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
@@ -277,7 +286,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
                 const auto& dataMap    = reply.data.value();
                 auto        foundTypes = dataMap.find("types");
                 if (foundTypes != dataMap.end() || !std::holds_alternative<std::vector<std::string>>(foundTypes->second)) {
-                    PluginLoader& loader             = gr::globalPluginLoader();
+                    PluginLoader& loader             = context->loader;
                     auto          expectedBlockTypes = loader.knownBlocks();
                     std::ranges::sort(expectedBlockTypes);
                     auto blockTypes = std::get<std::vector<std::string>>(foundTypes->second);
@@ -300,7 +309,7 @@ const boost::ut::suite RunningGraphTests = [] {
     using namespace gr::testing;
     using enum gr::message::Command;
 
-    gr::scheduler::Simple scheduler{gr::Graph()};
+    gr::scheduler::Simple scheduler{gr::Graph(context->loader)};
 
     auto& source = scheduler.graph().emplaceBlock<SlowSource<float>>();
     auto& sink   = scheduler.graph().emplaceBlock<CountingSink<float>>();

@@ -207,6 +207,8 @@ private:
     std::vector<Edge>                                 _edges;
     std::vector<std::unique_ptr<BlockModel>>          _blocks;
 
+    gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
+
     template<typename TBlock>
     std::unique_ptr<BlockModel>& findBlock(TBlock& what) {
         static_assert(!std::is_pointer_v<std::remove_cvref_t<TBlock>>);
@@ -343,6 +345,9 @@ public:
         propertyCallbacks[graph::property::kGraphInspect]       = std::mem_fn(&Graph::propertyCallbackGraphInspect);
         propertyCallbacks[graph::property::kRegistryBlockTypes] = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
     }
+
+    Graph(gr::PluginLoader& pluginLoader) : Graph(property_map{}) { _pluginLoader = std::addressof(pluginLoader); }
+
     Graph(Graph&)            = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
     Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { *this = std::move(other); }
@@ -394,8 +399,8 @@ public:
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings, PluginLoader& loader = gr::globalPluginLoader()) {
-        if (auto block_load = loader.instantiate(type, std::move(initialSettings)); block_load) {
+    [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings) {
+        if (auto block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
             setTopologyChanged();
             auto& newBlock = addBlock(std::move(block_load), false); // false == do not emit message
 
@@ -698,8 +703,7 @@ public:
 
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kRegistryBlockTypes);
-        PluginLoader& loader = gr::globalPluginLoader();
-        message.data         = property_map{{"types", loader.knownBlocks()}};
+        message.data = property_map{{"types", _pluginLoader->knownBlocks()}};
         return message;
     }
 

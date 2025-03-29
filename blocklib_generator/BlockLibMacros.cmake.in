@@ -18,7 +18,7 @@ function(gr_generate_block_instantiations LIB_NAME)
     set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${LIB_NAME}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
 
-    set(GEN_CPP_LIST "")
+    set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
     foreach(HDR IN LISTS CBL_HEADERS)
 
         # Try to only run the generation when the header is newer than the last time
@@ -33,7 +33,13 @@ function(gr_generate_block_instantiations LIB_NAME)
             # remove any previously generated .cpp files for this header.
             file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.cpp")
             if(OLD_FILES)
-                message(STATUS "deleting old generated files ${OLD_FILES}")
+                message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
+                file(REMOVE ${OLD_FILES})
+            endif()
+
+            file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.hpp")
+            if(OLD_FILES)
+                message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
                 file(REMOVE ${OLD_FILES})
             endif()
 
@@ -61,7 +67,7 @@ function(gr_generate_block_instantiations LIB_NAME)
 
             set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HDR})
 
-            message(STATUS "Generating code for header: ${ABS_HDR} -> ${GEN_DIR} with PARSER_SPLIT_OPTION=${PARSER_SPLIT_OPTION}, other options [ ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION} ]")
+            message(STATUS "[BlockLibMacros] Generating code for header: ${ABS_HDR} -> ${GEN_DIR} with PARSER_SPLIT_OPTION=${PARSER_SPLIT_OPTION}, other options [ ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION} ]")
 
             # BlockLibConfig.cmake sets this when BlockLib is found via find_package
             # However when FetchContent is used that doesn't happen, so fall back to the build path
@@ -70,6 +76,7 @@ function(gr_generate_block_instantiations LIB_NAME)
             endif()
 
             # run the parser tool immediately at configuration time.
+            message(STATUS "[BlockLibMacros] Running: ${PARSER_EXECUTABLE} ${ABS_HDR} ${GEN_DIR} ${PARSER_SPLIT_OPTION} ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION}")
             execute_process(
                     COMMAND ${PARSER_EXECUTABLE} "${ABS_HDR}" "${GEN_DIR}" ${PARSER_SPLIT_OPTION} ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION}
                     RESULT_VARIABLE gen_res
@@ -78,7 +85,7 @@ function(gr_generate_block_instantiations LIB_NAME)
                     OUTPUT_STRIP_TRAILING_WHITESPACE
                     ERROR_STRIP_TRAILING_WHITESPACE
             )
-            message(STATUS "Output from parse_registrations for ${ABS_HDR}:\n${gen_out}")
+            message(STATUS "[BlockLibMacros] Output from parse_registrations for ${ABS_HDR}:\n${gen_out}")
             if(NOT gen_res EQUAL 0)
                 message(FATAL_ERROR "Error running parse_registrations on ${HDR}: ${gen_err}")
             endif()
@@ -86,6 +93,7 @@ function(gr_generate_block_instantiations LIB_NAME)
 
         # Glob for the generated .cpp files.
         file(GLOB GENERATED_FILES "${GEN_DIR}/${BASENAME}*.cpp")
+        message(STATUS "[BlockLibMacros] Globed for generated files in ${GEN_DIR} named ${BASENAME}*.cpp got:\n${GENERATED_FILES}")
         if(NOT GENERATED_FILES)
             # If no .cpp files were generated, create a dummy file.
             set(DUMMY_CPP "${GEN_DIR}/dummy_${BASENAME}.cpp")

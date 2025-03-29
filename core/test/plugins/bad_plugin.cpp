@@ -20,7 +20,10 @@ public:
 } // namespace
 
 extern "C" {
-void GNURADIO_PLUGIN_EXPORT gr_plugin_make(gr_plugin_base** plugin) { *plugin = nullptr; }
+void GNURADIO_BLOCKLIB_CORE_EXPORT gr_plugin_make(gr_plugin_base** plugin) { *plugin = nullptr; }
 
-void GNURADIO_PLUGIN_EXPORT gr_plugin_free(gr_plugin_base* plugin) { delete plugin; }
+void GNURADIO_BLOCKLIB_CORE_EXPORT gr_plugin_free(gr_plugin_base* /*plugin*/) {
+    // We can not really kill a plugin, once a dynamic libray is loaded
+    // it is here to stay
+}
 }

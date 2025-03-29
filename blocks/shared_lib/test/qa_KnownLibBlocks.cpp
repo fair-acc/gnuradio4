@@ -11,9 +11,7 @@ using namespace boost::ut;
 using namespace std::string_view_literals;
 
 const boost::ut::suite TagTests = [] {
-    std::cout << "globalBlockRegistry is " << std::addressof(gr::globalBlockRegistry()) << std::endl;
-    std::cout << "grBlockLibRegistry is " << std::addressof(grBlockLibRegistry()) << std::endl;
-    gr::globalBlockRegistry().mergeRegistry(grBlockLibRegistry());
+    grBlockLibInit(gr::globalBlockRegistry());
 
     "CheckKnownBlocks"_test = [] {
         auto checkRegistryContents = [](gr::BlockRegistry& registry) { //
@@ -69,9 +67,7 @@ const boost::ut::suite TagTests = [] {
             expect(registry.isBlockKnown("gr::filter::fir_filter<float32>"sv));
         };
 
-        expect(gt(grBlockLibRegistry().knownBlocks().size(), 20UZ));
-        checkRegistryContents(grBlockLibRegistry());
-
+        expect(gt(gr::globalBlockRegistry().knownBlocks().size(), 20UZ));
         checkRegistryContents(gr::globalBlockRegistry());
     };
 
@@ -82,7 +78,6 @@ const boost::ut::suite TagTests = [] {
             expect(registry.createBlock("gr::basic::ClockSource<uint8, true, std::chrono::system_clock, true>"sv, {}) != nullptr);
         };
 
-        checkRegistryInstantiation(grBlockLibRegistry());
         checkRegistryInstantiation(gr::globalBlockRegistry());
     };
 };

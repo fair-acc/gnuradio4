@@ -10,6 +10,8 @@
 
 #include "BlockModel.hpp"
 
+#include <gnuradio-blocklib-core_export.h>
+
 /**
  *  namespace gr {
  *  template<typename T> struct AlgoImpl1 {};
@@ -72,6 +74,9 @@ public:
             return meta::detail::makePortableTypeName(std::string{alias} + "<" + std::string{aliasParameters} + ">");
         }();
         _blockTypes.push_back(name);
+#ifndef NDEBUG
+        fmt::print("[Registry {}] Adding block name {}, fullAlias {}\n", static_cast<void*>(this), name, fullAlias);
+#endif
         auto handler             = TBlockTypeHandler{.alias = fullAlias, .createFunction = detail::blockFactory<TBlock>};
         _blockTypeHandlers[name] = handler;
         if (!fullAlias.empty()) {
@@ -125,14 +130,17 @@ public:
         _blockTypeHandlers.insert(anotherRegistry._blockTypeHandlers.cbegin(), anotherRegistry._blockTypeHandlers.cend());
     }
 
-    friend inline BlockRegistry& globalBlockRegistry();
+    friend BlockRegistry& globalBlockRegistry(std::source_location location);
 };
 
-inline BlockRegistry& globalBlockRegistry() {
-    static BlockRegistry s_instance;
-    return s_instance;
-}
+GNURADIO_BLOCKLIB_CORE_EXPORT
+BlockRegistry& globalBlockRegistry(std::source_location location = std::source_location::current());
 
 } // namespace gr
+
+extern "C" {
+GNURADIO_BLOCKLIB_CORE_EXPORT
+gr::BlockRegistry* grGlobalBlockRegistry(std::source_location location = std::source_location::current());
+}
 
 #endif // GNURADIO_BLOCK_REGISTRY_HPP

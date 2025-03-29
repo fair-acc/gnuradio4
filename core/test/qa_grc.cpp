@@ -15,11 +15,16 @@
 
 #include "ArrayTestBlocks.hpp"
 
-struct TestContext {
-    explicit TestContext(std::vector<std::filesystem::path> paths) : loader(gr::globalBlockRegistry(), std::move(paths)) {}
+#include "TestBlockRegistryContext.hpp"
 
-    gr::PluginLoader loader;
-};
+namespace ut = boost::ut;
+
+template<>
+auto ut::cfg<ut::override> = RunnerContext(                //
+    paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
+    gr_blocklib_init_module_GrBasicBlocks,                 //
+    gr_blocklib_init_module_GrTestingBlocks,               //
+    gr_blocklib_init_module_qa_grc);
 
 namespace {
 auto collectBlocks(const gr::Graph& graph) {
@@ -72,14 +77,6 @@ bool checkAndPrintMissingLines(const std::string& first, const std::string& seco
     return allLinesFound;
 }
 
-auto getContext() {
-    static auto ctx = [] {
-        auto context = std::make_shared<TestContext>(std::vector<std::filesystem::path>{TESTS_BINARY_PATH "/plugins"});
-        return context;
-    }();
-    return ctx;
-};
-
 } // namespace
 
 using namespace boost::ut;
@@ -121,8 +118,6 @@ connections:
     "Basic graph loading and storing"_test = [&testGrc] {
         try {
             using namespace gr;
-            const auto context = getContext();
-
             for (const auto& block : context->loader.knownBlocks()) {
                 fmt::print("Block {} is known\n", block);
             }
@@ -143,10 +138,9 @@ connections:
         using namespace gr;
 
         try {
-            const auto context       = getContext();
-            auto       graph1        = gr::loadGrc(context->loader, testGrc);
-            auto       graphSavedSrc = gr::saveGrc(context->loader, graph1);
-            auto       graph2        = gr::loadGrc(context->loader, graphSavedSrc);
+            auto graph1        = gr::loadGrc(context->loader, testGrc);
+            auto graphSavedSrc = gr::saveGrc(context->loader, graph1);
+            auto graph2        = gr::loadGrc(context->loader, graphSavedSrc);
             expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
             expect(eq(collectEdges(graph1), collectEdges(graph2)));
         } catch (const std::string& e) {
@@ -185,7 +179,6 @@ connections:
   - [counter, 0, sink, 0]
 )";
 
-            const auto context   = getContext();
             const auto graphSrc1 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::Auto>(pluginsTestGrc);
             const auto graphSrc2 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::None>(pluginsTestGrc);
             fmt::println("yml-before:\n {}\nwith type-tags:\n{}\nwithout type tags:\n{}", pluginsTestGrc, graphSrc1, graphSrc2);
@@ -248,7 +241,6 @@ connections:
   - [counter, 0, sink, 0]
 )";
 
-            const auto context  = getContext();
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
             auto       graph    = gr::loadGrc(context->loader, graphSrc);
 
@@ -296,7 +288,6 @@ connections:
 
         try {
             using namespace gr;
-            const auto context  = getContext();
             const auto graphSrc = ymlDecodeEncode(testGrc);
 
             auto graph = gr::loadGrc(context->loader, graphSrc);
@@ -345,11 +336,10 @@ connections:
     "Port collections"_test = [] {
         using namespace gr;
 
-        const auto context = getContext();
-        gr::Graph  graph1;
-        auto&      arraySink    = graph1.emplaceBlock<ArraySink<double>>();
-        auto&      arraySource0 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource0"}});
-        auto&      arraySource1 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource1"}});
+        gr::Graph graph1;
+        auto&     arraySink    = graph1.emplaceBlock<ArraySink<double>>();
+        auto&     arraySource0 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource0"}});
+        auto&     arraySource1 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource1"}});
 
         // TODO re-enable this test -> pre-requisite revert std::array<T, N> not being handled as collection but as tuple.
         // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA0">(arraySource0).to<"inB1">(arraySink)));
@@ -378,7 +368,6 @@ const boost::ut::suite SettingsTests = [] {
         try {
             using namespace gr;
 
-            const auto context = getContext();
             gr::Graph  graph1;
             const auto expectedString        = std::string("abc");
             const bool expectedBool          = true;
@@ -418,7 +407,6 @@ const boost::ut::suite SettingsTests = [] {
         try {
             using namespace gr;
 
-            const auto context = getContext();
             gr::Graph  graph1;
             auto&      block = graph1.emplaceBlock<ArraySink<double>>({{"name", "ArraySink0"}});
             const auto now   = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());

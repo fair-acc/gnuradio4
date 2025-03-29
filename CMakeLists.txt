@@ -208,6 +208,9 @@ if(INCLUDE_WHAT_YOU_USE_TOOL_PATH)
   set_property(GLOBAL PROPERTY CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${INCLUDE_WHAT_YOU_USE_TOOL_PATH})
 endif()
 
+# For generating export (visibility) macros
+include(GenerateExportHeader)
+
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
