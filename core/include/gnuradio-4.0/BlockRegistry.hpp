@@ -10,7 +10,7 @@
 
 #include "BlockModel.hpp"
 
-#include <gnuradio-blocklib-core_export.h>
+#include <gnuradio-4.0/Export.hpp>
 
 /**
  *  namespace gr {
@@ -147,13 +147,13 @@ public:
     friend BlockRegistry& globalBlockRegistry(std::source_location location);
 };
 
-GNURADIO_BLOCKLIB_CORE_EXPORT
+GNURADIO_EXPORT
 BlockRegistry& globalBlockRegistry(std::source_location location = std::source_location::current());
 
 } // namespace gr
 
 extern "C" {
-GNURADIO_BLOCKLIB_CORE_EXPORT
+GNURADIO_EXPORT
 gr::BlockRegistry* grGlobalBlockRegistry(std::source_location location = std::source_location::current());
 }
 

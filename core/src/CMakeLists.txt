@@ -29,7 +29,6 @@ if(ENABLE_EXAMPLES)
     main
     PUBLIC gnuradio-options
            gnuradio-core
-           gnuradio-blocklib-core
            fmt::fmt
            magic_enum)
 endif()

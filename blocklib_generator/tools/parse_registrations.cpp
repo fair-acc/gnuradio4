@@ -120,7 +120,7 @@ struct GeneratedFiles {
 }
 
 [[nodiscard]] std::string emitInitAllCode(auto& fout, std::string_view namePrefix, std::string_view registryInstance, const std::vector<std::string>& generatedRegistrationFunctions) {
-    fout << std::format("\nextern \"C\" {{\nGNURADIO_BLOCKLIB_CORE_EXPORT std::size_t gr_blocklib_init_unit_{}(gr::BlockRegistry& registry) {{\n    std::size_t result = true; \n", namePrefix);
+    fout << std::format("\nextern \"C\" {{\nGNURADIO_EXPORT std::size_t gr_blocklib_init_unit_{}(gr::BlockRegistry& registry) {{\n    std::size_t result = true; \n", namePrefix);
     for (const auto& generatedRegistrationFunction : generatedRegistrationFunctions) {
         fout << "    result += !" << generatedRegistrationFunction << "(registry);\n";
     }
@@ -293,7 +293,7 @@ int main(int argc, char** argv) try {
             #include "declarations.hpp"
 
             extern "C" {{
-                GNURADIO_BLOCKLIB_CORE_EXPORT
+                GNURADIO_EXPORT
                 std::size_t gr_blocklib_init_module_{}(gr::BlockRegistry& registry) {{
                     std::size_t result = 0UZ;
                     #include "raw_calls.hpp"

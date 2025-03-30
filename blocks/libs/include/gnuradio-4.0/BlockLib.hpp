@@ -1,12 +1,12 @@
 #ifndef GR_BLOCKLIB_INIT_HPP
 
 #include <cstddef>
-#include <gnuradio-blocklib-core_export.h>
+#include <gnuradio-4.0/Export.hpp>
 
 namespace gr {
 class BlockRegistry;
 }
 
-GNURADIO_BLOCKLIB_CORE_EXPORT std::size_t grBlockLibInit(gr::BlockRegistry& registry);
+GNURADIO_EXPORT std::size_t grBlockLibInit(gr::BlockRegistry& registry);
 
 #endif

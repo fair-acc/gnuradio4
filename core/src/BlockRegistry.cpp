@@ -1,8 +1,8 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 
 extern "C" {
-GNURADIO_BLOCKLIB_CORE_EXPORT
-gr::BlockRegistry* grGlobalBlockRegistry(std::source_location location) {
+GNURADIO_EXPORT
+gr::BlockRegistry* grGlobalBlockRegistry([[maybe_unused]] std::source_location location) {
     static gr::BlockRegistry s_instance;
 #ifndef NDEBUG
     fmt::print("This is the registry {}, called from {} {}\n", //

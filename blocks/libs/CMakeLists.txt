@@ -12,4 +12,6 @@ target_link_libraries(
           GrHttpBlocks
           GrFilterBlocks)
 
-add_subdirectory(test)
+if(ENABLE_TESTING)
+  add_subdirectory(test)
+endif()

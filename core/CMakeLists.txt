@@ -47,7 +47,6 @@ target_link_libraries(
          vir)
 
 add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
-generate_export_header(gnuradio-blocklib-core)
 set_target_properties(gnuradio-blocklib-core
                       PROPERTIES PUBLIC_HEADER "include/gnuradio-4.0/BlockRegistry.hpp include/gnuradio-4.0/Plugin.hpp")
 message(WARNING "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
