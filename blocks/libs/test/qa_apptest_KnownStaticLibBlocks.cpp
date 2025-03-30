@@ -1,8 +1,10 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
-#include <gnuradio-4.0/PluginLoader.hpp>
 
 #include <cassert>
+#include <iostream>
+
+using namespace std::string_literals;
 
 // This tests automatic loading of .so files that are not
 // plugins, but ordinary dynamic block libraries -- they
@@ -11,19 +13,17 @@
 // This is intentionally not a ut test as it tests
 // how a normal application would use the block registry
 // in the lifetime of main
-//
+
+extern "C" {
+std::size_t gr_blocklib_init_module_GrBasicBlocks(gr::BlockRegistry&);
+}
 
 int main() {
-    gr::globalPluginLoader();
+    gr_blocklib_init_module_GrBasicBlocks(gr::globalBlockRegistry());
 
     auto known = gr::globalBlockRegistry().knownBlocks();
     std::ranges::sort(known);
     std::vector<std::string> desired{
-        //
-        "builtin_counter<float32>"s,              //
-        "builtin_counter<float64>"s,              //
-        "builtin_multiply<float32>"s,             //
-        "builtin_multiply<float64>"s,             //
         "gr::basic::DataSink<float32>"s,          //
         "gr::basic::DataSink<float64>"s,          //
         "gr::basic::DataSetSink<float32>"s,       //

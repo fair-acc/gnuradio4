@@ -9,4 +9,4 @@ add_subdirectory(soapy)
 add_subdirectory(testing)
 
 # shared library that contains all registered blocks
-add_subdirectory(shared_lib)
+add_subdirectory(libs)

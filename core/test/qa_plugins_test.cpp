@@ -156,4 +156,4 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
     };
 };
 
-int main() {}
+int main() { /* not needed for UT */ }
