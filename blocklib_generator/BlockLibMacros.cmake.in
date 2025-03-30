@@ -1,5 +1,17 @@
 # define global block building command
 
+function(gr_detail_append_file_to MERGE_OUTPUT_FILE MERGE_INPUT_FILE)
+  file(READ ${MERGE_INPUT_FILE} CONTENTS)
+  file(APPEND ${MERGE_OUTPUT_FILE} "${CONTENTS}")
+endfunction()
+
+function(gr_detail_merge_files_into MERGE_OUTPUT_FILE MERGE_INPUT_FILES)
+  file(WRITE ${MERGE_OUTPUT_FILE} "")
+  foreach(MERGE_INPUT_FILE ${MERGE_INPUT_FILES})
+    gr_detail_append_file_to(${MERGE_OUTPUT_FILE} ${MERGE_INPUT_FILE})
+  endforeach()
+endfunction()
+
 function(gr_generate_block_instantiations LIB_NAME)
     set(options "SPLIT_BLOCK_INSTANTIATIONS")
     set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE)
@@ -19,8 +31,8 @@ function(gr_generate_block_instantiations LIB_NAME)
     file(MAKE_DIRECTORY "${GEN_DIR}")
 
     set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
-    foreach(HDR IN LISTS CBL_HEADERS)
 
+    foreach(HDR IN LISTS CBL_HEADERS)
         # Try to only run the generation when the header is newer than the last time
         set(modified 0)
         file(TIMESTAMP ${HDR} modified "%s")
@@ -37,7 +49,7 @@ function(gr_generate_block_instantiations LIB_NAME)
                 file(REMOVE ${OLD_FILES})
             endif()
 
-            file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.hpp")
+            file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.hpp.in")
             if(OLD_FILES)
                 message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
                 file(REMOVE ${OLD_FILES})
@@ -102,7 +114,22 @@ function(gr_generate_block_instantiations LIB_NAME)
         endif()
 
         list(APPEND GEN_CPP_LIST ${GENERATED_FILES})
+
     endforeach()
+
+        # Merge generated declarations.hpp.in into single declarations.hpp
+        # and raw_calls.hpp.in into a single raw_calls.hpp
+        message(STATUS "[BlockLibMacros] generating ${GEN_DIR}/declarations.hpp from ${GEN_DIR}/*_declarations.hpp.in")
+        file(GLOB DECLARATIONS_FILES "${GEN_DIR}/*_declarations.hpp.in")
+        if(DECLARATIONS_FILES)
+            gr_detail_merge_files_into(${GEN_DIR}/declarations.hpp "${DECLARATIONS_FILES}")
+        endif()
+
+        message(STATUS "[BlockLibMacros] generating ${GEN_DIR}/raw_calls.hpp from ${GEN_DIR}/*_raw_calls.hpp.in")
+        file(GLOB RAW_CALLS_FILES "${GEN_DIR}/*_raw_calls.hpp.in")
+        if(RAW_CALLS_FILES)
+            gr_detail_merge_files_into(${GEN_DIR}/raw_calls.hpp "${RAW_CALLS_FILES}")
+        endif()
 
     target_sources(${LIB_NAME} PRIVATE ${GEN_CPP_LIST})
 
