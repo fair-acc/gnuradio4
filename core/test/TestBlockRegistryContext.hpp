@@ -17,7 +17,7 @@ struct TestContext {
 
     template<typename... Args>
     gr::BlockRegistry initRegistry(Args*... args) {
-        auto _registry = gr::globalBlockRegistry();
+        gr::BlockRegistry _registry;
         ((args(_registry)), ...);
         return _registry;
     }

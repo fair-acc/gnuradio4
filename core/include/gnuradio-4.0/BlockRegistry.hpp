@@ -47,18 +47,32 @@ std::unique_ptr<gr::BlockModel> blockFactory(property_map params) {
     return std::make_unique<gr::BlockWrapper<TBlock>>(std::move(params));
 }
 
+std::unique_ptr<gr::BlockModel> blockFactoryProto(property_map params);
+
 } // namespace detail
 
 class BlockRegistry {
     struct TBlockTypeHandler {
-        std::string                                                  alias;
-        std::function<std::unique_ptr<gr::BlockModel>(property_map)> createFunction;
+        std::string                          alias;
+        decltype(detail::blockFactoryProto)* createFunction = nullptr;
     };
 
     std::vector<std::string>                              _blockTypes;
     std::map<std::string, TBlockTypeHandler, std::less<>> _blockTypeHandlers;
 
 public:
+    BlockRegistry()                                      = default;
+    BlockRegistry(const BlockRegistry& other)            = delete;
+    BlockRegistry& operator=(const BlockRegistry& other) = delete;
+
+    BlockRegistry(BlockRegistry&& other) noexcept : _blockTypes(std::move(other._blockTypes)), _blockTypeHandlers(std::move(other._blockTypeHandlers)) {}
+    BlockRegistry& operator=(BlockRegistry&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(_blockTypes, tmp._blockTypes);
+        std::swap(_blockTypeHandlers, tmp._blockTypeHandlers);
+        return *this;
+    }
+
 #ifdef ENABLE_BLOCK_REGISTRY
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
