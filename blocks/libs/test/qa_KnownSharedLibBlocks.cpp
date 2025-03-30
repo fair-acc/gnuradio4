@@ -65,6 +65,7 @@ const boost::ut::suite TagTests = [] {
             expect(registry.isBlockKnown("gr::electrical::PowerMetrics<float32, 3ul>"sv));
             expect(registry.isBlockKnown("gr::http::HttpBlock<float32>"sv));
             expect(registry.isBlockKnown("gr::filter::fir_filter<float32>"sv));
+            expect(registry.isBlockKnown("gr::blocks::fft::FFT<float32>"sv));
         };
 
         expect(gt(gr::globalBlockRegistry().knownBlocks().size(), 20UZ));

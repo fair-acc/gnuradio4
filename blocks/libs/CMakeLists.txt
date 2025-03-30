@@ -10,7 +10,8 @@ target_link_libraries(
           GrBasicBlocks
           GrElectricalBlocks
           GrHttpBlocks
-          GrFilterBlocks)
+          GrFilterBlocks
+          GrFourierBlocks)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

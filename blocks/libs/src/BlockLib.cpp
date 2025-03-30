@@ -3,6 +3,7 @@
 
 extern "C" {
 bool gr_blocklib_init_module_GrFilterBlocks(gr::BlockRegistry& registry);
+bool gr_blocklib_init_module_GrFourierBlocks(gr::BlockRegistry& registry);
 bool gr_blocklib_init_module_GrElectricalBlocks(gr::BlockRegistry& registry);
 bool gr_blocklib_init_module_GrHttpBlocks(gr::BlockRegistry& registry);
 bool gr_blocklib_init_module_GrFileIoBlocks(gr::BlockRegistry& registry);
@@ -18,6 +19,7 @@ std::size_t grBlockLibInit(gr::BlockRegistry& registry) {
     result += gr_blocklib_init_module_GrFileIoBlocks(registry);
     result += gr_blocklib_init_module_GrTestingBlocks(registry);
     result += gr_blocklib_init_module_GrBasicBlocks(registry);
+    result += gr_blocklib_init_module_GrFourierBlocks(registry);
     return result;
 }
 
