@@ -82,6 +82,9 @@ public:
             if (alias.empty()) {
                 return std::string{};
             }
+            if (alias[0] == '=') {
+                return std::string(alias.substr(1));
+            }
             if (aliasParameters.empty()) {
                 return meta::detail::makePortableTypeName(alias);
             }
@@ -89,7 +92,7 @@ public:
         }();
         _blockTypes.push_back(name);
 #ifndef NDEBUG
-        fmt::print("[Registry {}] Adding block name {}, fullAlias {}\n", static_cast<void*>(this), name, fullAlias);
+        fmt::print("[Registry {}] Adding block name {}, alias {}, fullAlias {}\n", static_cast<void*>(this), name, alias, fullAlias);
 #endif
         auto handler             = TBlockTypeHandler{.alias = fullAlias, .createFunction = detail::blockFactory<TBlock>};
         _blockTypeHandlers[name] = handler;

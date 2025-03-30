@@ -15,6 +15,7 @@ const boost::ut::suite TagTests = [] {
 
     "CheckKnownBlocks"_test = [] {
         auto checkRegistryContents = [](gr::BlockRegistry& registry) { //
+            expect(registry.isBlockKnown("gr::basic::ClockSource"sv));
             expect(registry.isBlockKnown("gr::testing::Delay<float32>"sv));
             expect(registry.isBlockKnown("gr::testing::Delay<float64>"sv));
             expect(registry.isBlockKnown("gr::testing::ImChartMonitor<uint8, true>"sv));
@@ -55,7 +56,6 @@ const boost::ut::suite TagTests = [] {
             expect(registry.isBlockKnown("gr::testing::NullSink<gr::Tensor<float32>>"sv));
             expect(registry.isBlockKnown("gr::testing::NullSink<gr::DataSet<float32>>"sv));
             expect(registry.isBlockKnown("gr::blocks::fileio::BasicFileSink<float32>"sv));
-            expect(registry.isBlockKnown("gr::basic::ClockSource<uint8, true, std::chrono::system_clock, true>"sv));
             expect(registry.isBlockKnown("gr::blocks::type::converter::Convert<float32, float32>"sv));
             expect(registry.isBlockKnown("gr::blocks::type::converter::Convert<float32, float64>"sv));
             expect(registry.isBlockKnown("gr::blocks::type::converter::ScalingConvert<float32, float32>"sv));
@@ -76,7 +76,7 @@ const boost::ut::suite TagTests = [] {
         auto checkRegistryInstantiation = [](gr::BlockRegistry& registry) { //
             expect(registry.createBlock("gr::testing::Delay<float32>"sv, {}) != nullptr);
             expect(registry.createBlock("gr::basic::DataSink<float32>"sv, {}) != nullptr);
-            expect(registry.createBlock("gr::basic::ClockSource<uint8, true, std::chrono::system_clock, true>"sv, {}) != nullptr);
+            expect(registry.createBlock("gr::basic::ClockSource"sv, {}) != nullptr);
         };
 
         checkRegistryInstantiation(gr::globalBlockRegistry());

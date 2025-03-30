@@ -2076,12 +2076,15 @@ struct BlockParameters : meta::typelist<Types...> {
     static constexpr /*meta::constexpr_string*/ auto toString() { return detail::encodeListOfTypes<Types...>(); }
 };
 
-template<typename TBlock, fixed_string Name = "">
+template<typename TBlock, fixed_string OverrideName = "">
 int registerBlock(auto& registerInstance) {
     using namespace vir::literals;
     constexpr auto name     = refl::class_name<TBlock>;
     constexpr auto longname = refl::type_name<TBlock>;
-    if constexpr (name != longname) {
+    if constexpr (OverrideName != "") {
+        registerInstance.template addBlockType<TBlock>(OverrideName, {});
+
+    } else if constexpr (name != longname) {
         constexpr auto tmpl = longname.substring(name.size + 1_cw, longname.size - 2_cw - name.size);
         registerInstance.template addBlockType<TBlock>(name, tmpl);
     } else {
