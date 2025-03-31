@@ -26,7 +26,7 @@ function(gr_generate_block_instantiations LIB_NAME)
         message(FATAL_ERROR "No headers passed to gr_generate_block_instantiations")
     endif()
 
-    # directory where parse_registrations will output .cpp files.
+    # directory where gnuradio_4_0_parse_registrations will output .cpp files.
     set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${LIB_NAME}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
 
@@ -84,7 +84,7 @@ function(gr_generate_block_instantiations LIB_NAME)
             # BlockLibConfig.cmake sets this when BlockLib is found via find_package
             # However when FetchContent is used that doesn't happen, so fall back to the build path
             if (NOT PARSER_EXECUTABLE)
-                set(PARSER_EXECUTABLE @PROJECT_BINARY_DIR@/tools_build/parse_registrations)
+                set(PARSER_EXECUTABLE @PROJECT_BINARY_DIR@/tools_build/gnuradio_4_0_parse_registrations)
             endif()
 
             # run the parser tool immediately at configuration time.
@@ -97,9 +97,9 @@ function(gr_generate_block_instantiations LIB_NAME)
                     OUTPUT_STRIP_TRAILING_WHITESPACE
                     ERROR_STRIP_TRAILING_WHITESPACE
             )
-            message(STATUS "[BlockLibMacros] Output from parse_registrations for ${ABS_HDR}:\n${gen_out}")
+            message(STATUS "[BlockLibMacros] Output from gnuradio_4_0_parse_registrations for ${ABS_HDR}:\n${gen_out}")
             if(NOT gen_res EQUAL 0)
-                message(FATAL_ERROR "Error running parse_registrations on ${HDR}: ${gen_err}")
+                message(FATAL_ERROR "Error running gnuradio_4_0_parse_registrations on ${HDR}: ${gen_err}")
             endif()
         endif()
 
