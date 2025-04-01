@@ -30,9 +30,30 @@ std::string gr::meta::detail::makePortableTypeName(std::string_view name) {
         return it->second;
     }
 
-    auto stripStdPrivates = [](std::string_view _name) {
-        static const std::regex stdPrivate("::_[A-Z_][^:]*");
-        return std::regex_replace(std::string(_name), stdPrivate, std::string());
+    auto stripStdPrivates = [](std::string_view _name) -> std::string {
+        // There's an issue in std::regex in libstdcpp which tries to construct
+        // a vector of larger-than-possible size in some cases. Need to
+        // implement this manually. To simplify, we will remove any namespace
+        // starting with an underscore.
+        // static const std::regex stdPrivate("::_[A-Z_][a-zA-Z0-9_]*");
+        // return std::regex_replace(std::string(_name), stdPrivate, std::string());
+        std::string result(_name);
+        std::size_t oldStart = 0UZ;
+        while (true) {
+            auto delStart = result.find("::_"s, oldStart);
+            if (delStart == std::string::npos) {
+                break;
+            }
+
+            auto delEnd = delStart + 3;
+            while (delEnd < result.size() && (std::isalnum(result[delEnd]) || result[delEnd] == '_')) {
+                delEnd++;
+            }
+
+            result.erase(delStart, delEnd - delStart);
+            oldStart = delStart;
+        }
+        return result;
     };
 
     std::string_view view   = name;

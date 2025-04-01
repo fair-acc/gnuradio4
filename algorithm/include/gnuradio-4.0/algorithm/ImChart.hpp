@@ -61,12 +61,12 @@ private:
 };
 
 struct LinearAxisTransform {
-    template<typename T>
+    template<std::floating_point T>
     [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         return screenOffset + static_cast<std::size_t>((value - axisMin) / (axisMax - axisMin) * static_cast<T>(screenSize - screenOffset - 1UZ));
     }
 
-    template<typename T>
+    template<std::floating_point T>
     [[nodiscard]] static constexpr T fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         return axisMin + static_cast<T>(screenCoordinate - screenOffset) / static_cast<T>(screenSize - screenOffset - 1UZ) * (axisMax - axisMin);
     }
@@ -84,7 +84,7 @@ struct LogAxisTransform {
         return screenOffset + static_cast<std::size_t>(proportion * static_cast<T>(screenSize - screenOffset - 1UZ)); // convert into screen space
     }
 
-    template<typename T>
+    template<std::floating_point T>
     [[nodiscard]] static constexpr T fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         if (axisMin <= 0UZ || axisMax <= axisMin) {
             throw std::invalid_argument(fmt::format("{} not defined for non-positive ranges [{}, {}].", gr::meta::type_name<LogAxisTransform>(), axisMin, axisMax));
