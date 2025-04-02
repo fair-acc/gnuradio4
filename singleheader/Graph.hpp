@@ -9797,6 +9797,15 @@ struct BlockingIO {
 struct NoDefaultTagForwarding {};
 
 /**
+ * @brief Specifies the Tag Forwarding Policy for blocks with chunked data constraints, namely `input_chunk_size != 1`.
+ *
+ * If this attribute is omitted, the default `Forward` policy applies. The available policies are:
+ * - Forward (default, no attribute required): Processes the tag as if it belongs to the first sample of the **next** `processBulk(..)` call.
+ * - Backward (`BackwardTagForwarding` is set): Processes the tag as if it belongs to the first sample of the **current** `processBulk(..)` call.
+ */
+struct BackwardTagForwarding {};
+
+/**
  * @brief Annotates block, indicating to perform resampling based on the provided `inputChunkSize` and `outputChunkSize`.
  * For each `inputChunkSize` input samples, `outputChunkSize` output samples are published.
  * Thus the total number of input/output samples can be calculated as `nInput = k * inputChunkSize` and `nOutput = k * outputChunkSize`.
@@ -10613,7 +10622,7 @@ struct Port {
     template<SpanReleasePolicy spanReleasePolicy>
     using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
 
-    template<SpanReleasePolicy spanReleasePolicy>
+    template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
     struct InputSpan : public ReaderSpanType<spanReleasePolicy> {
         TagReaderSpanType rawTags;
         std::size_t       streamIndex;
@@ -10641,11 +10650,15 @@ struct Port {
                     return;
                 }
 
-                if (ReaderSpanType<spanReleasePolicy>::isConsumeRequested()) {
-                    consumeTags(ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume());
+                if constexpr (consumeOnlyFirstTag) {
+                    consumeTags(1UZ);
                 } else {
-                    if (ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
-                        consumeTags(ReaderSpanType<spanReleasePolicy>::size());
+                    if (ReaderSpanType<spanReleasePolicy>::isConsumeRequested()) {
+                        consumeTags(ReaderSpanType<spanReleasePolicy>::nRequestedSamplesToConsume());
+                    } else {
+                        if (ReaderSpanType<spanReleasePolicy>::spanReleasePolicy() == SpanReleasePolicy::ProcessAll) {
+                            consumeTags(ReaderSpanType<spanReleasePolicy>::size());
+                        }
                     }
                 }
             }
@@ -10683,8 +10696,8 @@ struct Port {
             return reader.get(n);
         }
     }; // end of InputSpan
-    static_assert(ReaderSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
-    static_assert(InputSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll>>);
+    static_assert(ReaderSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll, false>>);
+    static_assert(InputSpanLike<InputSpan<gr::SpanReleasePolicy::ProcessAll, false>>);
 
     template<SpanReleasePolicy spanReleasePolicy>
     using WriterSpanType = decltype(std::declval<WriterType>().template reserve<spanReleasePolicy>(1UZ));
@@ -10975,11 +10988,11 @@ public:
         return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
     }
 
-    template<SpanReleasePolicy spanReleasePolicy>
-    InputSpan<spanReleasePolicy> get(std::size_t nSamples)
+    template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
+    InputSpan<spanReleasePolicy, consumeOnlyFirstTag> get(std::size_t nSamples)
     requires(kIsInput)
     {
-        return InputSpan<spanReleasePolicy>(nSamples, streamReader(), tagReader(), this->isConnected(), this->isSynchronous());
+        return InputSpan<spanReleasePolicy, consumeOnlyFirstTag>(nSamples, streamReader(), tagReader(), this->isConnected(), this->isSynchronous());
     }
 
     template<SpanReleasePolicy spanReleasePolicy>
@@ -17161,15 +17174,12 @@ public:
                     _block->meta_information.value[memberName + "::visible"]       = RawType::visible();
                 }
 
-                // detect whether field has one of the DEFAULT_TAGS signature
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                    if constexpr (std::ranges::find(gr::tag::kDefaultTags, refl::data_member_name<TBlock, kIdx>.view()) != gr::tag::kDefaultTags.cend()) {
-                        _autoForwardParameters.emplace(memberName);
-                    }
                     _allWritableMembers.emplace(std::move(memberName));
                 }
             });
         }
+        _autoForwardParameters.insert(gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end());
     }
 
     CtxSettings(const CtxSettings& other) {
@@ -17626,6 +17636,15 @@ public:
             }
 
             updateActiveParametersImpl();
+
+            // Update sample_rate if the block performs decimation or interpolation
+            if constexpr (TBlock::ResamplingControl::kEnabled) {
+                if (result.forwardParameters.contains(gr::tag::SAMPLE_RATE.shortKey()) && (_block->input_chunk_size != 1ULL || _block->output_chunk_size != 1ULL)) {
+                    const float ratio         = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
+                    const float newSampleRate = ratio * std::get<float>(_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()));
+                    result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
+                }
+            }
 
             if (_stagedParameters.contains(gr::tag::STORE_DEFAULTS)) {
                 storeDefaults();
@@ -18566,6 +18585,7 @@ public:
 
     constexpr static bool blockingIO             = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
     constexpr static bool noDefaultTagForwarding = std::disjunction_v<std::is_same<NoDefaultTagForwarding, Arguments>...>;
+    constexpr static bool backwardTagForwarding  = std::disjunction_v<std::is_same<BackwardTagForwarding, Arguments>...>;
 
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
@@ -18927,11 +18947,15 @@ public:
     /**
      * Merge tags from all sync ports into one merged tag, apply auto-update parameters
      */
-    constexpr void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
+    void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
         for_each_reader_span(
             [this, untilLocalIndex](auto& in) {
                 if (in.isSync) {
-                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndex).map) {
+                    std::size_t untilLocalIndexAdjusted = untilLocalIndex;
+                    if constexpr (!backwardTagForwarding) {
+                        untilLocalIndexAdjusted = 1UZ;
+                    }
+                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndexAdjusted).map) {
                         _mergedInputTag.map.insert_or_assign(key, value);
                     }
                 }
@@ -18973,10 +18997,10 @@ public:
                     using enum gr::SpanReleasePolicy;
                     if constexpr (std::remove_cvref_t<Port>::kIsInput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).template get<ProcessAll>(nSyncSamples);
+                            return std::forward<Port>(port).template get<ProcessAll, !backwardTagForwarding>(nSyncSamples);
                         } else {
                             // return std::forward<Port>(port).template get<ProcessNone>(std::max(port.min_samples, std::min(port.streamReader().available(), port.max_samples)));
-                            return std::forward<Port>(port).template get<ProcessNone>(port.streamReader().available());
+                            return std::forward<Port>(port).template get<ProcessNone, !backwardTagForwarding>(port.streamReader().available());
                         }
                     } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
@@ -19825,7 +19849,8 @@ protected:
         auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
-        updateMergedInputTagAndApplySettings(inputSpans);
+        updateMergedInputTagAndApplySettings(inputSpans, processedIn);
+
         applyChangedSettings();
 
         // Actual publishing occurs when outputSpans go out of scope. If processedOut == 0, the Tags will not be published.
