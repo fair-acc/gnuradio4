@@ -64,49 +64,15 @@ configure_file(BlockLibMacros.cmake.in BlockLibMacros.cmake @ONLY)
 
 include(${PROJECT_BINARY_DIR}/BlockLibMacros.cmake)
 
-function(create_block_library LIB_NAME)
-  set(options "")
-  set(oneValueArgs "")
-  set(multiValueArgs HEADERS SOURCES)
-  cmake_parse_arguments(
-    CBL
-    "${options}"
-    "${oneValueArgs}"
-    "${multiValueArgs}"
-    ${ARGN})
-
-  add_library(${LIB_NAME} SHARED ${CBL_SOURCES})
-
-  gr_generate_block_instantiations(${LIB_NAME} HEADERS ${CBL_HEADERS})
-
-  target_include_directories(${LIB_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                                                $<INSTALL_INTERFACE:include>)
-
-  set_target_properties(${LIB_NAME} PROPERTIES CXX_STANDARD 23)
-  install(TARGETS ${LIB_NAME} LIBRARY DESTINATION lib)
-endfunction()
-
-# --------------------------------------------------------------------------
-# 1. Add subdirectories defining libraries via create_block_library
-# --------------------------------------------------------------------------
-
-# Optionally build aggregator library. if (TARGET grBasic AND TARGET grMath) add_library(grBlockLib SHARED
-# src/dummy.cpp) target_link_libraries(grBlockLib PUBLIC grBasic grMath) set_target_properties(grBlockLib PROPERTIES
-# CXX_STANDARD 23) install(TARGETS grBlockLib LIBRARY DESTINATION lib) endif()
-#
-set(CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/BlockLib")
+set(GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/BlockLib")
 
 configure_package_config_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/BlockLibConfig.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/BlockLibConfig.cmake"
-  INSTALL_DESTINATION ${CMAKECONFIG_INSTALL_DIR})
-#
-# install(EXPORT BlockLibTargets DESTINATION ${CMAKECONFIG_INSTALL_DIR} NAMESPACE BlockLib::)
-
-message(WARNING "Current binary dir: ${CMAKE_CURRENT_BINARY_DIR}")
+  INSTALL_DESTINATION ${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR})
 
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/BlockLibConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/BlockLibMacros.cmake"
-  DESTINATION "${CMAKECONFIG_INSTALL_DIR}"
+  DESTINATION "${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR}"
   COMPONENT Devel)
 
 install(PROGRAMS ${PARSER_EXECUTABLE} DESTINATION ${CMAKE_INSTALL_BINDIR})

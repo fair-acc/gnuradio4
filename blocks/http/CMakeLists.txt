@@ -3,10 +3,11 @@ target_link_libraries(gr-http INTERFACE gnuradio-core gnuradio-algorithm httplib
 target_include_directories(gr-http INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                              $<INSTALL_INTERFACE:include/>)
 
-# An OBJECT library as the generated files have namespace-scope variables with dynamic C++ initialization
-add_library(GrHttpBlocks SHARED)
-gr_generate_block_instantiations(GrHttpBlocks HEADERS include/gnuradio-4.0/http/HttpBlock.hpp)
-target_link_libraries(GrHttpBlocks PUBLIC gnuradio-core gnuradio-blocklib-core gr-http)
+gr_add_block_library(
+  GrHttpBlocks
+  MAKE_SHARED_LIBRARY MAKE_STATIC_LIBRARY
+  HEADERS include/gnuradio-4.0/http/HttpBlock.hpp
+  LINK_LIBRARIES gr-http)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

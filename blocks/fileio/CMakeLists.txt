@@ -3,14 +3,14 @@ target_link_libraries(gr-fileio INTERFACE gnuradio-core)
 target_include_directories(gr-fileio INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                $<INSTALL_INTERFACE:include/>)
 
-# An OBJECT library as the generated files have namespace-scope variables with dynamic C++ initialization
-add_library(GrFileIoBlocks SHARED)
-gr_generate_block_instantiations(
+gr_add_block_library(
   GrFileIoBlocks
+  MAKE_SHARED_LIBRARY MAKE_STATIC_LIBRARY
+  SPLIT_BLOCK_INSTANTIATIONS
   HEADERS
   include/gnuradio-4.0/fileio/BasicFileIo.hpp
-  SPLIT_BLOCK_INSTANTIATIONS)
-target_link_libraries(GrFileIoBlocks PUBLIC gnuradio-core gnuradio-blocklib-core gr-fileio)
+  LINK_LIBRARIES
+  gr-fileio)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

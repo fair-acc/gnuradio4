@@ -105,7 +105,7 @@ function(gr_generate_block_instantiations LIB_NAME)
 
         # Glob for the generated .cpp files.
         file(GLOB GENERATED_FILES "${GEN_DIR}/${BASENAME}*.cpp")
-        message(STATUS "[BlockLibMacros] Globed for generated files in ${GEN_DIR} named ${BASENAME}*.cpp got:\n${GENERATED_FILES}")
+        # message(STATUS "[BlockLibMacros] Globed for generated files in ${GEN_DIR} named ${BASENAME}*.cpp got:\n${GENERATED_FILES}")
         if(NOT GENERATED_FILES)
             # If no .cpp files were generated, create a dummy file.
             set(DUMMY_CPP "${GEN_DIR}/dummy_${BASENAME}.cpp")
@@ -132,7 +132,43 @@ function(gr_generate_block_instantiations LIB_NAME)
         endif()
 
     target_sources(${LIB_NAME} PRIVATE ${GEN_CPP_LIST})
+endfunction()
 
-    # TODO: Do we need this, or just link to gnuradio-core
-    # target_link_libraries(${LIB_NAME} PRIVATE BlockLib::Registry)
+function(gr_add_block_library LIB_NAME)
+    set(options "SPLIT_BLOCK_INSTANTIATIONS" "MAKE_SHARED_LIBRARY" "MAKE_STATIC_LIBRARY")
+    set(oneValueAr gs REGISTRY_HEADER REGISTRY_INSTANCE)
+    set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
+    cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    message(WARNING " SBI '${CBL_SPLIT_BLOCK_INSTANTIATIONS}' MSL '${CBL_MAKE_SHARED_LIBRARY}'")
+    if(${CBL_SPLIT_BLOCK_INSTANTIATIONS})
+      set(SPLIT_BLOCK_INSTANTIATIONS_ARG "SPLIT_BLOCK_INSTANTIATIONS")
+    else()
+      set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
+    endif()
+
+    add_library(${LIB_NAME} OBJECT)
+    gr_generate_block_instantiations(${LIB_NAME}
+        HEADERS ${CBL_HEADERS}
+        ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
+    target_link_libraries(${LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+
+    if(${CBL_MAKE_SHARED_LIBRARY})
+        set(SHARED_LIB_NAME "${LIB_NAME}Shared")
+        message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
+        add_library(${SHARED_LIB_NAME} SHARED)
+        target_link_libraries(${SHARED_LIB_NAME} ${LIB_NAME})
+        install(TARGETS ${SHARED_LIB_NAME} LIBRARY DESTINATION lib)
+    endif()
+
+    if(${CBL_MAKE_STATIC_LIBRARY})
+        set(STATIC_LIB_NAME "${LIB_NAME}Static")
+        message(STATUS "[BlockLibMacros] Creating a static library target ${STATIC_LIB_NAME}")
+        add_library(${STATIC_LIB_NAME} STATIC)
+        target_link_libraries(${STATIC_LIB_NAME} ${LIB_NAME})
+        install(TARGETS ${STATIC_LIB_NAME} LIBRARY DESTINATION lib)
+    endif()
+
+    # TODO Install pkgconfig files, CMake files for finding the package,
+    # header for blocklib init
 endfunction()
