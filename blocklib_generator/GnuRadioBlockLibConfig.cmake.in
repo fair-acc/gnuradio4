@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+
+set(PARSER_EXECUTABLE ${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/gnuradio_4_0_parse_registrations)
+
+include("${CMAKE_CURRENT_LIST_DIR}/GnuRadioBlockLibTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/GnuRadioBlockLibMacros.cmake")

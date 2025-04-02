@@ -5,9 +5,13 @@ target_include_directories(gr-fourier INTERFACE $<BUILD_INTERFACE:${CMAKE_CURREN
 
 gr_add_block_library(
   GrFourierBlocks
-  MAKE_SHARED_LIBRARY MAKE_STATIC_LIBRARY
-  HEADERS include/gnuradio-4.0/fourier/fft.hpp
-  LINK_LIBRARIES gr-basic gr-fourier)
+  MAKE_SHARED_LIBRARY
+  MAKE_STATIC_LIBRARY
+  HEADERS
+  include/gnuradio-4.0/fourier/fft.hpp
+  LINK_LIBRARIES
+  gr-basic
+  gr-fourier)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

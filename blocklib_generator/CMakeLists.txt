@@ -60,18 +60,19 @@ endif()
 # --------------------------------------------------------------------------
 
 # add core functionality such as registry
-configure_file(BlockLibMacros.cmake.in BlockLibMacros.cmake @ONLY)
+configure_file(GnuRadioBlockLibMacros.cmake.in GnuRadioBlockLibMacros.cmake @ONLY)
 
-include(${PROJECT_BINARY_DIR}/BlockLibMacros.cmake)
+include(${PROJECT_BINARY_DIR}/GnuRadioBlockLibMacros.cmake)
 
-set(GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/BlockLib")
+set(GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/GnuRadioBlockLib")
 
 configure_package_config_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/BlockLibConfig.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/BlockLibConfig.cmake"
-  INSTALL_DESTINATION ${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR})
+  "${CMAKE_CURRENT_SOURCE_DIR}/GnuRadioBlockLibConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibConfig.cmake" INSTALL_DESTINATION ${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR})
 
 install(
-  FILES "${CMAKE_CURRENT_BINARY_DIR}/BlockLibConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/BlockLibMacros.cmake"
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/GnuRadioBlockLibMacros.cmake"
   DESTINATION "${GR_BLOCKLIB_CMAKECONFIG_INSTALL_DIR}"
   COMPONENT Devel)
 

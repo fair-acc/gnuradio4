@@ -5,7 +5,8 @@ target_include_directories(gr-testing INTERFACE $<BUILD_INTERFACE:${CMAKE_CURREN
 
 gr_add_block_library(
   GrTestingBlocks
-  MAKE_SHARED_LIBRARY MAKE_STATIC_LIBRARY
+  MAKE_SHARED_LIBRARY
+  MAKE_STATIC_LIBRARY
   HEADERS
   include/gnuradio-4.0/testing/NullSources.hpp
   include/gnuradio-4.0/testing/ImChartMonitor.hpp
@@ -13,7 +14,9 @@ gr_add_block_library(
   include/gnuradio-4.0/testing/Delay.hpp
   include/gnuradio-4.0/testing/PerformanceMonitor.hpp
   include/gnuradio-4.0/testing/SettingsChangeRecorder.hpp
-  LINK_LIBRARIES gr-testing gnuradio-algorithm)
+  LINK_LIBRARIES
+  gr-testing
+  gnuradio-algorithm)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

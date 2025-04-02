@@ -13,26 +13,27 @@ set(GrBasicBlocks_HDRS
 set(GrBasicBlocks_LIBS gr-basic gr-testing)
 
 if(PYTHON_AVAILABLE)
-  list(APPEND GrBasicBlocks_HDRS
+  list(
+    APPEND
+    GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/PythonBlock.hpp
     include/gnuradio-4.0/basic/PythonInterpreter.hpp)
-  list(APPEND GrBasicBlocks_LIBS
-    ${Python3_LIBRARIES})
+  list(APPEND GrBasicBlocks_LIBS ${Python3_LIBRARIES})
 endif()
 
-add_library(
-  gr-basic
-  INTERFACE
-  ${GrBasicBlocks_HDRS})
+add_library(gr-basic INTERFACE ${GrBasicBlocks_HDRS})
 target_link_libraries(gr-basic INTERFACE gnuradio-core gnuradio-algorithm)
 target_include_directories(gr-basic INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                               $<INSTALL_INTERFACE:include/>)
 
 gr_add_block_library(
   GrBasicBlocks
-  MAKE_SHARED_LIBRARY MAKE_STATIC_LIBRARY
-  HEADERS ${GrBasicBlocks_HDRS}
-  LINK_LIBRARIES ${GrBasicBlocks_LIBS})
+  MAKE_SHARED_LIBRARY
+  MAKE_STATIC_LIBRARY
+  HEADERS
+  ${GrBasicBlocks_HDRS}
+  LINK_LIBRARIES
+  ${GrBasicBlocks_LIBS})
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

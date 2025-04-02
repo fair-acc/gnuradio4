@@ -5,7 +5,8 @@ target_include_directories(gr-fileio INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT
 
 gr_add_block_library(
   GrFileIoBlocks
-  MAKE_SHARED_LIBRARY MAKE_STATIC_LIBRARY
+  MAKE_SHARED_LIBRARY
+  MAKE_STATIC_LIBRARY
   SPLIT_BLOCK_INSTANTIATIONS
   HEADERS
   include/gnuradio-4.0/fileio/BasicFileIo.hpp

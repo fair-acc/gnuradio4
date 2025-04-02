@@ -81,7 +81,7 @@ function(gr_generate_block_instantiations LIB_NAME)
 
             message(STATUS "[BlockLibMacros] Generating code for header: ${ABS_HDR} -> ${GEN_DIR} with PARSER_SPLIT_OPTION=${PARSER_SPLIT_OPTION}, other options [ ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION} ]")
 
-            # BlockLibConfig.cmake sets this when BlockLib is found via find_package
+            # GnuRadioBlockLibConfig.cmake sets this when GnuRadioBlockLib is found via find_package
             # However when FetchContent is used that doesn't happen, so fall back to the build path
             if (NOT PARSER_EXECUTABLE)
                 set(PARSER_EXECUTABLE @PROJECT_BINARY_DIR@/tools_build/gnuradio_4_0_parse_registrations)
