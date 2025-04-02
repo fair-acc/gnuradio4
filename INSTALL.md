@@ -1,98 +1,55 @@
-# 1. Prerequisites
+# GNU Radio 4 Installation Guide
 
-- CMake (v3.15+)
-- C++20 compiler (GCC 11+, Clang 14+, MSVC 19.30+)
+## Introduction
+GNU Radio 4 (GR4) is a header-only library, which means it does not require traditional installation. Instead, you can use it directly in your projects. This guide provides instructions on how to set up and use GR4.
+
+## Prerequisites
+Ensure you have the following dependencies installed:
+- CMake (version 3.16 or later)
+- A C++ compiler supporting C++17 or later (GCC, Clang, or MSVC)
 - Git
-- Python 3.8+ (for some tools)
+- Python (for optional testing)
 
-# 2. Installation Methods
-
-## Method A: Direct Usage (For Development/Contributions)
-
+## Cloning the Repository
+To get started, clone the GNU Radio 4 repository:
 ```bash
-# Clone the repository
-git clone https://github.com/fair-acc/gnuradio4.git
-cd gnuradio4
+ git clone https://github.com/fair-acc/gnuradio4.git
+ cd gnuradio4
+```
 
-# Build tests (optional)
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . --target all -j$(nproc)
+## Building GNU Radio 4
+Since GR4 is a header-only library, you generally don’t need to build or install it. However, if you want to run the tests, follow these steps:
+```bash
+ mkdir build && cd build
+ cmake ..
+ make -j$(nproc)  # or 'cmake --build .' for multi-platform support
+```
 
-# Run tests (optional)
-ctest --output-on-failure
-
-## Method B: Include in Your Project (As Header-Only Library)
-# Add to your CMakeLists.txt:
+## Using GNU Radio 4 in Your Project
+You can include GNU Radio 4 in your CMake-based project using `FetchContent`:
+```cmake
 include(FetchContent)
 FetchContent_Declare(
-  gnuradio4
-  GIT_REPOSITORY https://github.com/fair-acc/gnuradio4.git
-  GIT_TAG main
+    gnuradio4
+    GIT_REPOSITORY https://github.com/fair-acc/gnuradio4.git
+    GIT_TAG main  # Change to a specific tag if needed
 )
 FetchContent_MakeAvailable(gnuradio4)
+```
 
-target_link_libraries(your_target PRIVATE gnuradio4::gnuradio4)
+## Running Tests
+To verify the build, run:
+```bash
+ ctest --output-on-failure
+```
 
+## Contributing
+If you want to contribute, fork the repository and submit a pull request. Follow the coding guidelines provided in the repository.
 
-# 3. Creating Your First Flowgraph
-## Create a new project with this structure:
-my_gr4_project/
-├── CMakeLists.txt
-├── main.cpp
-└── blocks/ (optional custom blocks)
+## Additional Resources
+For more details, refer to the [GNU Radio Wiki](https://wiki.gnuradio.org) or join community discussions.
 
+---
 
-# Example main.cpp:
-#include <gnuradio4/blocklib/basic/blocks/vector_source.hpp>
-#include <gnuradio4/blocklib/basic/blocks/vector_sink.hpp>
-#include <gnuradio4/flowgraph.hpp>
-
-int main() {
-    auto src = gr::basic::vector_source<float>({1, 2, 3});
-    auto snk = gr::basic::vector_sink<float>();
-    auto fg  = gr::flowgraph();
-    
-    fg.connect(src, "out", snk, "in");
-    fg.run();
-    return 0;
-}
-
-# Example CMakeLists.txt:
-cmake_minimum_required(VERSION 3.15)
-project(my_gr4_project)
-
-# Method B inclusion here
-
-add_executable(my_flowgraph main.cpp)
-target_link_libraries(my_flowgraph PRIVATE gnuradio4::gnuradio4)
-
-# 4. Building and Running
-
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build .
-./my_flowgraph
-
-# 5. Key Differences from GR3
-Feature       	  GNU Radio 3.x	   GNU Radio 4.0
-Architecture	    Shared lib	     Header-only
-Block Creation	  Python/C++	     C++20
-Scheduler	        Static	         Dynamic
-Dependencies	    Heavy	           Minimal
-
-# 6. Troubleshooting
-Compiler Errors: Ensure C++20 support is enabled:
-
-target_compile_features(your_target PRIVATE cxx_std_20)
-CMake Issues: Clear build directory and reconfigure
-
-Header Not Found: Verify FetchContent downloaded sources
-
-# 7. Next Steps
-Explore more examples in gnuradio4/examples/
-
-Join the EU GNU Radio Days workshop (Aug 2024)
-
-Contribute blocks via PRs!
+This guide is a basic starting point. If you encounter issues, please check the repository’s `DEVELOPMENT.md` or raise an issue on GitHub.
 
