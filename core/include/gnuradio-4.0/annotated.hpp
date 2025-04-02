@@ -87,6 +87,15 @@ struct BlockingIO {
 struct NoDefaultTagForwarding {};
 
 /**
+ * @brief Specifies the Tag Forwarding Policy for blocks with chunked data constraints, namely `input_chunk_size != 1`.
+ *
+ * If this attribute is omitted, the default `Forward` policy applies. The available policies are:
+ * - Forward (default, no attribute required): Processes the tag as if it belongs to the first sample of the **next** `processBulk(..)` call.
+ * - Backward (`BackwardTagForwarding` is set): Processes the tag as if it belongs to the first sample of the **current** `processBulk(..)` call.
+ */
+struct BackwardTagForwarding {};
+
+/**
  * @brief Annotates block, indicating to perform resampling based on the provided `inputChunkSize` and `outputChunkSize`.
  * For each `inputChunkSize` input samples, `outputChunkSize` output samples are published.
  * Thus the total number of input/output samples can be calculated as `nInput = k * inputChunkSize` and `nOutput = k * outputChunkSize`.
