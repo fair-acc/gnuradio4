@@ -65,7 +65,7 @@ public:
     BlockRegistry(const BlockRegistry& other)            = delete;
     BlockRegistry& operator=(const BlockRegistry& other) = delete;
 
-    BlockRegistry(BlockRegistry&& other) noexcept : _blockTypes(std::move(other._blockTypes)), _blockTypeHandlers(std::move(other._blockTypeHandlers)) {}
+    BlockRegistry(BlockRegistry&& other) noexcept : _blockTypes(std::exchange(other._blockTypes, {})), _blockTypeHandlers(std::exchange(other._blockTypeHandlers, {})) {}
     BlockRegistry& operator=(BlockRegistry&& other) noexcept {
         auto tmp = std::move(other);
         std::swap(_blockTypes, tmp._blockTypes);

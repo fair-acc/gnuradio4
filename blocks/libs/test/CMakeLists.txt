@@ -3,13 +3,13 @@ if(NOT EMSCRIPTEN)
   target_link_libraries(
     qa_KnownSharedLibBlocks
     PRIVATE gnuradio-core
-            GrTestingBlocks
-            GrFileIoBlocks
-            GrBasicBlocks
-            GrElectricalBlocks
-            GrHttpBlocks
-            GrFilterBlocks
-            GrFourierBlocks)
+            GrTestingBlocksShared
+            GrFileIoBlocksShared
+            GrBasicBlocksShared
+            GrElectricalBlocksShared
+            GrHttpBlocksShared
+            GrFilterBlocksShared
+            GrFourierBlocksShared)
 
   add_executable(qa_apptest_KnownStaticLibBlocks qa_apptest_KnownStaticLibBlocks.cpp)
   setup_test(qa_apptest_KnownStaticLibBlocks)

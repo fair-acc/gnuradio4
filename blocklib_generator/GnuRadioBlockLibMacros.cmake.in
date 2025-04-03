@@ -14,9 +14,16 @@ endfunction()
 
 function(gr_generate_block_instantiations LIB_NAME)
     set(options "SPLIT_BLOCK_INSTANTIATIONS")
-    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE)
+    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE MODULE_NAME_BASE)
     set(multiValueArgs HEADERS SOURCES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    message(WARNING "NAEM BASE ${MODULE_NAME_BASE}")
+    if (NOT CBL_MODULE_NAME_BASE)
+        set (MODULE_NAME_BASE ${LIB_NAME})
+    else()
+        set (MODULE_NAME_BASE ${CBL_MODULE_NAME_BASE})
+    endif()
 
     if (NOT TARGET ${LIB_NAME})
         message(FATAL_ERROR "${LIB_NAME} is not a target")
@@ -27,7 +34,7 @@ function(gr_generate_block_instantiations LIB_NAME)
     endif()
 
     # directory where gnuradio_4_0_parse_registrations will output .cpp files.
-    set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${LIB_NAME}")
+    set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${MODULE_NAME_BASE}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
 
     set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
@@ -140,24 +147,25 @@ function(gr_add_block_library LIB_NAME)
     set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-    message(WARNING " SBI '${CBL_SPLIT_BLOCK_INSTANTIATIONS}' MSL '${CBL_MAKE_SHARED_LIBRARY}'")
     if(${CBL_SPLIT_BLOCK_INSTANTIATIONS})
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "SPLIT_BLOCK_INSTANTIATIONS")
     else()
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
     endif()
 
-    add_library(${LIB_NAME} OBJECT)
-    gr_generate_block_instantiations(${LIB_NAME}
+    set(OBJECT_LIB_NAME "${LIB_NAME}Object")
+    add_library(${OBJECT_LIB_NAME} OBJECT)
+    gr_generate_block_instantiations(${OBJECT_LIB_NAME}
         HEADERS ${CBL_HEADERS}
+        MODULE_NAME_BASE ${LIB_NAME}
         ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
-    target_link_libraries(${LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
 
     if(${CBL_MAKE_SHARED_LIBRARY})
         set(SHARED_LIB_NAME "${LIB_NAME}Shared")
         message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
         add_library(${SHARED_LIB_NAME} SHARED)
-        target_link_libraries(${SHARED_LIB_NAME} ${LIB_NAME})
+        target_link_libraries(${SHARED_LIB_NAME} ${OBJECT_LIB_NAME})
         install(TARGETS ${SHARED_LIB_NAME} LIBRARY DESTINATION lib)
     endif()
 
@@ -165,7 +173,7 @@ function(gr_add_block_library LIB_NAME)
         set(STATIC_LIB_NAME "${LIB_NAME}Static")
         message(STATUS "[BlockLibMacros] Creating a static library target ${STATIC_LIB_NAME}")
         add_library(${STATIC_LIB_NAME} STATIC)
-        target_link_libraries(${STATIC_LIB_NAME} ${LIB_NAME})
+        target_link_libraries(${STATIC_LIB_NAME} ${OBJECT_LIB_NAME})
         install(TARGETS ${STATIC_LIB_NAME} LIBRARY DESTINATION lib)
     endif()
 
