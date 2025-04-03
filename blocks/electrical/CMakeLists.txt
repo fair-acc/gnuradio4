@@ -6,7 +6,6 @@ target_include_directories(gr-electrical INTERFACE $<BUILD_INTERFACE:${CMAKE_CUR
 gr_add_block_library(
   GrElectricalBlocks
   MAKE_SHARED_LIBRARY
-  MAKE_STATIC_LIBRARY
   HEADERS
   include/gnuradio-4.0/electrical/PowerEstimators.hpp
   LINK_LIBRARIES

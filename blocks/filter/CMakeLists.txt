@@ -6,7 +6,6 @@ target_include_directories(gr-filter INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT
 gr_add_block_library(
   GrFilterBlocks
   MAKE_SHARED_LIBRARY
-  MAKE_STATIC_LIBRARY
   HEADERS
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
   include/gnuradio-4.0/filter/time_domain_filter.hpp

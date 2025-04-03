@@ -6,7 +6,6 @@ target_include_directories(gr-http INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_S
 gr_add_block_library(
   GrHttpBlocks
   MAKE_SHARED_LIBRARY
-  MAKE_STATIC_LIBRARY
   HEADERS
   include/gnuradio-4.0/http/HttpBlock.hpp
   LINK_LIBRARIES

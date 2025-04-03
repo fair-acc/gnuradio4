@@ -6,7 +6,6 @@ target_include_directories(gr-testing INTERFACE $<BUILD_INTERFACE:${CMAKE_CURREN
 gr_add_block_library(
   GrTestingBlocks
   MAKE_SHARED_LIBRARY
-  MAKE_STATIC_LIBRARY
   HEADERS
   include/gnuradio-4.0/testing/NullSources.hpp
   include/gnuradio-4.0/testing/ImChartMonitor.hpp
