@@ -84,7 +84,7 @@ jobs:
             cmake_flags: "-DCMAKE_LINKER=/usr/bin/clang-18"
           - cmake_wrapper: emcmake
             cc: emcc
-            cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE}"
+            cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14"
         cmake-build-type: [ Release, Debug ]
 
     steps:

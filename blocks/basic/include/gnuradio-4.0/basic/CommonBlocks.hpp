@@ -14,7 +14,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
-GR_REGISTER_BLOCK(builtin_multiply, [ double, float ])
+GR_REGISTER_BLOCK(builtin_multiply, [T], [ double, float ])
 
 template<typename T>
 struct builtin_multiply : gr::Block<builtin_multiply<T>> {
@@ -37,7 +37,7 @@ struct builtin_multiply : gr::Block<builtin_multiply<T>> {
     [[nodiscard]] constexpr auto processOne(T a) const noexcept { return a * factor; }
 };
 
-GR_REGISTER_BLOCK(builtin_counter, [ double, float ])
+GR_REGISTER_BLOCK(builtin_counter, [T], [ double, float ])
 
 template<typename T>
 struct builtin_counter : gr::Block<builtin_counter<T>> {

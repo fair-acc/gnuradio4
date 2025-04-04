@@ -1,0 +1,182 @@
+# define global block building command
+
+function(gr_detail_append_file_to MERGE_OUTPUT_FILE MERGE_INPUT_FILE)
+  file(READ ${MERGE_INPUT_FILE} CONTENTS)
+  file(APPEND ${MERGE_OUTPUT_FILE} "${CONTENTS}")
+endfunction()
+
+function(gr_detail_merge_files_into MERGE_OUTPUT_FILE MERGE_INPUT_FILES)
+  file(WRITE ${MERGE_OUTPUT_FILE} "")
+  foreach(MERGE_INPUT_FILE ${MERGE_INPUT_FILES})
+    gr_detail_append_file_to(${MERGE_OUTPUT_FILE} ${MERGE_INPUT_FILE})
+  endforeach()
+endfunction()
+
+function(gr_generate_block_instantiations LIB_NAME)
+    set(options "SPLIT_BLOCK_INSTANTIATIONS")
+    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE MODULE_NAME_BASE)
+    set(multiValueArgs HEADERS SOURCES)
+    cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    message(WARNING "NAEM BASE ${MODULE_NAME_BASE}")
+    if (NOT CBL_MODULE_NAME_BASE)
+        set (MODULE_NAME_BASE ${LIB_NAME})
+    else()
+        set (MODULE_NAME_BASE ${CBL_MODULE_NAME_BASE})
+    endif()
+
+    if (NOT TARGET ${LIB_NAME})
+        message(FATAL_ERROR "${LIB_NAME} is not a target")
+    endif()
+
+    if (NOT CBL_HEADERS)
+        message(FATAL_ERROR "No headers passed to gr_generate_block_instantiations")
+    endif()
+
+    # directory where gnuradio_4_0_parse_registrations will output .cpp files.
+    set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${MODULE_NAME_BASE}")
+    file(MAKE_DIRECTORY "${GEN_DIR}")
+
+    set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
+
+    foreach(HDR IN LISTS CBL_HEADERS)
+        # Try to only run the generation when the header is newer than the last time
+        set(modified 0)
+        file(TIMESTAMP ${HDR} modified "%s")
+        if (NOT DEFINED modified_${HDR} OR "${modified}" GREATER modified_${HDR})
+            set(modified_${HDR} ${modified} CACHE STRING "Last generated time" FORCE)
+
+            get_filename_component(ABS_HDR "${HDR}" ABSOLUTE)
+            get_filename_component(BASENAME "${HDR}" NAME_WE)
+
+            # remove any previously generated .cpp files for this header.
+            file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.cpp")
+            if(OLD_FILES)
+                message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
+                file(REMOVE ${OLD_FILES})
+            endif()
+
+            file(GLOB OLD_FILES "${GEN_DIR}/*${BASENAME}*.hpp.in")
+            if(OLD_FILES)
+                message(STATUS "[BlockLibMacros] deleting old generated files ${OLD_FILES}")
+                file(REMOVE ${OLD_FILES})
+            endif()
+
+            if(GR_SPLIT_BLOCK_INSTANTIATIONS OR CBL_SPLIT_BLOCK_INSTANTIATIONS)
+                set(PARSER_SPLIT_OPTION "--split")
+            else()
+                set(PARSER_SPLIT_OPTION "")
+            endif()
+
+            if(CBL_REGISTRY_HEADER)
+                set(PARSER_REGISTRY_HEADER_FLAG "--registry-header")
+                set(PARSER_REGISTRY_HEADER_OPTION ${CBL_REGISTRY_HEADER})
+            else()
+                set(PARSER_REGISTRY_HEADER_FLAG "")
+                set(PARSER_REGISTRY_HEADER_OPTION "")
+            endif()
+
+            if(CBL_REGISTRY_INSTANCE)
+                set(PARSER_REGISTRY_INSTANCE_FLAG "--registry-instance")
+                set(PARSER_REGISTRY_INSTANCE_OPTION ${CBL_REGISTRY_INSTANCE})
+            else()
+                set(PARSER_REGISTRY_INSTANCE_FLAG "")
+                set(PARSER_REGISTRY_INSTANCE_OPTION "")
+            endif()
+
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HDR})
+
+            message(STATUS "[BlockLibMacros] Generating code for header: ${ABS_HDR} -> ${GEN_DIR} with PARSER_SPLIT_OPTION=${PARSER_SPLIT_OPTION}, other options [ ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION} ]")
+
+            # GnuRadioBlockLibConfig.cmake sets this when GnuRadioBlockLib is found via find_package
+            # However when FetchContent is used that doesn't happen, so fall back to the build path
+            if (NOT PARSER_EXECUTABLE)
+                set(PARSER_EXECUTABLE @PROJECT_BINARY_DIR@/tools_build/gnuradio_4_0_parse_registrations)
+            endif()
+
+            # run the parser tool immediately at configuration time.
+            message(STATUS "[BlockLibMacros] Running: ${PARSER_EXECUTABLE} ${ABS_HDR} ${GEN_DIR} ${PARSER_SPLIT_OPTION} ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION}")
+            execute_process(
+                    COMMAND ${PARSER_EXECUTABLE} "${ABS_HDR}" "${GEN_DIR}" ${PARSER_SPLIT_OPTION} ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION}
+                    RESULT_VARIABLE gen_res
+                    OUTPUT_VARIABLE gen_out
+                    ERROR_VARIABLE gen_err
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_STRIP_TRAILING_WHITESPACE
+            )
+            message(STATUS "[BlockLibMacros] Output from gnuradio_4_0_parse_registrations for ${ABS_HDR}:\n${gen_out}")
+            if(NOT gen_res EQUAL 0)
+                message(FATAL_ERROR "Error running gnuradio_4_0_parse_registrations on ${HDR}: ${gen_err}")
+            endif()
+        endif()
+
+        # Glob for the generated .cpp files.
+        file(GLOB GENERATED_FILES "${GEN_DIR}/${BASENAME}*.cpp")
+        # message(STATUS "[BlockLibMacros] Globed for generated files in ${GEN_DIR} named ${BASENAME}*.cpp got:\n${GENERATED_FILES}")
+        if(NOT GENERATED_FILES)
+            # If no .cpp files were generated, create a dummy file.
+            set(DUMMY_CPP "${GEN_DIR}/dummy_${BASENAME}.cpp")
+            file(WRITE "${DUMMY_CPP}" "// No macros or expansions found for '${BASENAME}'\n")
+            list(APPEND GENERATED_FILES "${DUMMY_CPP}")
+        endif()
+
+        list(APPEND GEN_CPP_LIST ${GENERATED_FILES})
+
+    endforeach()
+
+        # Merge generated declarations.hpp.in into single declarations.hpp
+        # and raw_calls.hpp.in into a single raw_calls.hpp
+        message(STATUS "[BlockLibMacros] generating ${GEN_DIR}/declarations.hpp from ${GEN_DIR}/*_declarations.hpp.in")
+        file(GLOB DECLARATIONS_FILES "${GEN_DIR}/*_declarations.hpp.in")
+        if(DECLARATIONS_FILES)
+            gr_detail_merge_files_into(${GEN_DIR}/declarations.hpp "${DECLARATIONS_FILES}")
+        endif()
+
+        message(STATUS "[BlockLibMacros] generating ${GEN_DIR}/raw_calls.hpp from ${GEN_DIR}/*_raw_calls.hpp.in")
+        file(GLOB RAW_CALLS_FILES "${GEN_DIR}/*_raw_calls.hpp.in")
+        if(RAW_CALLS_FILES)
+            gr_detail_merge_files_into(${GEN_DIR}/raw_calls.hpp "${RAW_CALLS_FILES}")
+        endif()
+
+    target_sources(${LIB_NAME} PRIVATE ${GEN_CPP_LIST})
+endfunction()
+
+function(gr_add_block_library LIB_NAME)
+    set(options "SPLIT_BLOCK_INSTANTIATIONS" "MAKE_SHARED_LIBRARY" "MAKE_STATIC_LIBRARY")
+    set(oneValueAr gs REGISTRY_HEADER REGISTRY_INSTANCE)
+    set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
+    cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(${CBL_SPLIT_BLOCK_INSTANTIATIONS})
+      set(SPLIT_BLOCK_INSTANTIATIONS_ARG "SPLIT_BLOCK_INSTANTIATIONS")
+    else()
+      set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
+    endif()
+
+    set(OBJECT_LIB_NAME "${LIB_NAME}Object")
+    add_library(${OBJECT_LIB_NAME} OBJECT)
+    gr_generate_block_instantiations(${OBJECT_LIB_NAME}
+        HEADERS ${CBL_HEADERS}
+        MODULE_NAME_BASE ${LIB_NAME}
+        ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
+    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+
+    if(${CBL_MAKE_SHARED_LIBRARY})
+        set(SHARED_LIB_NAME "${LIB_NAME}Shared")
+        message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
+        add_library(${SHARED_LIB_NAME} SHARED)
+        target_link_libraries(${SHARED_LIB_NAME} ${OBJECT_LIB_NAME})
+        install(TARGETS ${SHARED_LIB_NAME} LIBRARY DESTINATION lib)
+    endif()
+
+    if(${CBL_MAKE_STATIC_LIBRARY})
+        set(STATIC_LIB_NAME "${LIB_NAME}Static")
+        message(STATUS "[BlockLibMacros] Creating a static library target ${STATIC_LIB_NAME}")
+        add_library(${STATIC_LIB_NAME} STATIC)
+        target_link_libraries(${STATIC_LIB_NAME} ${OBJECT_LIB_NAME})
+        install(TARGETS ${STATIC_LIB_NAME} LIBRARY DESTINATION lib)
+    endif()
+
+    # TODO Install pkgconfig files, CMake files for finding the package,
+    # header for blocklib init
+endfunction()

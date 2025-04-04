@@ -5,7 +5,6 @@ set(public_headers
     include/gnuradio-4.0/AtomicBitset.hpp
     include/gnuradio-4.0/Block.hpp
     include/gnuradio-4.0/BlockModel.hpp
-    include/gnuradio-4.0/BlockRegistry.hpp
     include/gnuradio-4.0/BlockTraits.hpp
     include/gnuradio-4.0/Buffer.hpp
     include/gnuradio-4.0/BufferSkeleton.hpp
@@ -17,7 +16,6 @@ set(public_headers
     include/gnuradio-4.0/HistoryBuffer.hpp
     include/gnuradio-4.0/LifeCycle.hpp
     include/gnuradio-4.0/Message.hpp
-    include/gnuradio-4.0/plugin.hpp
     include/gnuradio-4.0/PluginLoader.hpp
     include/gnuradio-4.0/Port.hpp
     include/gnuradio-4.0/PortTraits.hpp
@@ -32,7 +30,6 @@ set(public_headers
     include/gnuradio-4.0/YamlPmt.hpp)
 
 set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}")
-
 target_include_directories(
   gnuradio-core
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
@@ -49,6 +46,13 @@ target_link_libraries(
          pmtv
          vir)
 
+add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
+set_target_properties(gnuradio-blocklib-core
+                      PROPERTIES PUBLIC_HEADER "include/gnuradio-4.0/BlockRegistry.hpp include/gnuradio-4.0/Plugin.hpp")
+message(WARNING "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
+target_include_directories(gnuradio-blocklib-core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/>)
+target_link_libraries(gnuradio-blocklib-core PUBLIC gnuradio-core)
+
 # configure a header file to pass the CMake settings to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cmake/config.hpp.in"
                "${CMAKE_CURRENT_BINARY_DIR}/include/gnuradio-4.0/config.hpp" @ONLY)
@@ -64,5 +68,5 @@ add_subdirectory(src)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)
-  add_subdirectory(benchmarks)
+  # add_subdirectory(benchmarks)
 endif()

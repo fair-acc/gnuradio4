@@ -9,6 +9,7 @@ function(setup_test_no_asan TEST_NAME)
     ${TEST_NAME}
     PRIVATE gnuradio-options
             gnuradio-core
+            gnuradio-blocklib-core
             fmt
             fftw
             gr-basic
@@ -40,11 +41,12 @@ endfunction()
 function(add_app_test TEST_NAME)
   add_executable(${TEST_NAME} ${TEST_NAME}.cpp)
   setup_test(${TEST_NAME})
-  target_link_libraries(${TEST_NAME} PRIVATE gnuradio-core gnuradio-plugin)
+  target_link_libraries(${TEST_NAME} PRIVATE gnuradio-core gnuradio-blocklib-core gnuradio-plugin)
   add_dependencies(
     ${TEST_NAME}
     good_math_plugin
     good_base_plugin
+    good_conversion_plugin
     bad_plugin)
 endfunction()
 
@@ -73,8 +75,13 @@ add_ut_test(qa_PortableTypeName)
 
 if(ENABLE_BLOCK_REGISTRY AND ENABLE_BLOCK_PLUGINS)
   add_app_test(qa_grc)
+  gr_generate_block_instantiations(qa_grc HEADERS ArrayTestBlocks.hpp)
+  target_link_libraries(qa_grc PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+
   add_ut_test(qa_GraphMessages)
+  target_link_libraries(qa_GraphMessages PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
 
   add_subdirectory(plugins)
   add_app_test(qa_plugins_test)
+  target_link_libraries(qa_plugins_test PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
 endif()

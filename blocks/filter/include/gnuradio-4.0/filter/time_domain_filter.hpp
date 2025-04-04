@@ -18,7 +18,7 @@ namespace gr::filter {
 
 using namespace gr;
 
-GR_REGISTER_BLOCK(gr::filter::fir_filter, [ float, double ])
+GR_REGISTER_BLOCK(gr::filter::fir_filter, [T], [ float, double ])
 
 template<typename T>
 requires std::floating_point<T>
@@ -123,7 +123,7 @@ a are the feedback coefficients
 };
 
 GR_REGISTER_BLOCK(gr::filter::BasicFilter, ([T]), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
-GR_REGISTER_BLOCK(gr::filter::BasicDecimatingFilter, ([T], Resampling<1UZ, 1UZ, false>), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK(gr::filter::BasicFilterProto, ([T], gr::Resampling<1UZ, 1UZ, false>), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
 template<typename T, typename... Args>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
@@ -230,7 +230,7 @@ using BasicFilter = BasicFilterProto<T>;
 template<typename T>
 using BasicDecimatingFilter = BasicFilterProto<T, Resampling<1UZ, 1UZ, false>>;
 
-GR_REGISTER_BLOCK(gr::filter::Decimator, ([T], gr::filter::IIRForm::DF_I_TRANSPOSED), [ uint8_t, int8_t, uint16_t, int16_t, uint32_t, int32_t, uint64_t, int64_t, float, double, std::complex<float>, std::complex<double>, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK(gr::filter::Decimator, [T], [ uint8_t, int8_t, uint16_t, int16_t, uint32_t, int32_t, uint64_t, int64_t, float, double, std::complex<float>, std::complex<double>, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
 template<typename T>
 struct Decimator : Block<Decimator<T>, Resampling<1UZ, 1UZ, false>> {

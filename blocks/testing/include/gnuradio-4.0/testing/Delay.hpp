@@ -8,7 +8,7 @@
 
 namespace gr::testing {
 
-GR_REGISTER_BLOCK(gr::testing::Delay, [float double])
+GR_REGISTER_BLOCK(gr::testing::Delay, [T], [ float, double ])
 
 template<typename T>
 struct Delay : Block<Delay<T>> {
