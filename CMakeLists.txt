@@ -5,10 +5,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
-# blocklib_generator is a build process dependency, add it before everything
-add_subdirectory(blocklib_generator)
-
-add_library(gnuradio-options INTERFACE)
+# Mainly for FMT
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
   message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
@@ -32,6 +30,13 @@ option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF
 if(EMSCRIPTEN)
   set(ENABLE_BLOCK_PLUGINS OFF)
 endif()
+
+if(ENABLE_BLOCK_REGISTRY)
+  # blocklib_generator is a build process dependency, add it before everything
+  add_subdirectory(blocklib_generator)
+endif()
+
+add_library(gnuradio-options INTERFACE)
 
 message(
   STATUS
@@ -207,9 +212,6 @@ if(INCLUDE_WHAT_YOU_USE_TOOL_PATH)
   message(" using 'Include What You Use' path: (${INCLUDE_WHAT_YOU_USE_TOOL_PATH})")
   set_property(GLOBAL PROPERTY CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${INCLUDE_WHAT_YOU_USE_TOOL_PATH})
 endif()
-
-# Mainly for FMT
-set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(gnuradio-options)
