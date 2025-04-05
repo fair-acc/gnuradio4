@@ -294,11 +294,11 @@ int main(int argc, char** argv) try {
     int  macroCount = 0UZ;
     int  fileCount  = 0UZ;
 
-    const auto integratorFile = (options.outDir / "integrator.cpp");
-    // TODO: Generate header that can defines the init_module function,
-    // and install it / add it to include path
-    if (!std::filesystem::exists(integratorFile)) {
-        std::ofstream integrator = openFile(integratorFile);
+    const auto moduleName = options.outDir.filename().string();
+
+    const auto integratorSourceFile = (options.outDir / "integrator.cpp");
+    if (!std::filesystem::exists(integratorSourceFile)) {
+        std::ofstream integrator = openFile(integratorSourceFile);
         integrator << std::format(R"cppcode(
             #include <gnuradio-4.0/BlockRegistry.hpp>
 
@@ -313,7 +313,31 @@ int main(int argc, char** argv) try {
                 }}
             }}
         )cppcode",
-            options.outDir.filename().string());
+            moduleName);
+    }
+
+    const auto integratorHeaderFile = (options.outDir / moduleName);
+    if (!std::filesystem::exists(integratorHeaderFile)) {
+        std::ofstream integrator = openFile(integratorHeaderFile);
+        integrator << std::format(R"cppcode(
+            #ifndef GR_BLOCKLIB_INIT_MODULE_{0}
+            #define GR_BLOCKLIB_INIT_MODULE_{0}
+            namespace gr {{ class BlockRegistry; }}
+
+            extern "C" {{
+                GNURADIO_EXPORT
+                std::size_t gr_blocklib_init_module_{0}(gr::BlockRegistry& registry);
+            }}
+
+            namespace gr::blocklib {{
+                inline
+                std::size_t init{0}(gr::BlockRegistry& registry) {{
+                    return gr_blocklib_init_module_{0}(registry);
+                }}
+            }}
+            #endif
+        )cppcode",
+            moduleName);
     }
 
     std::string line;
