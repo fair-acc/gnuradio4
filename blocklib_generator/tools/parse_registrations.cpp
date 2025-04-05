@@ -78,6 +78,28 @@ constexpr std::expected<std::vector<std::string_view>, std::string> splitTopLeve
 
 } // namespace detail
 
+struct Options {
+    std::filesystem::path headerPath;
+    std::filesystem::path outDir;
+    std::string           registryHeader   = "gnuradio-4.0/BlockRegistry.hpp";
+    std::string           registryInstance = "gr::globalBlockRegistry";
+    bool                  expansionsSplit  = false; // true: each block instantiation creates its own file
+
+    Options(int argc, char** argv) {
+        headerPath = argv[1];
+        outDir     = argv[2];
+        for (int index = 3; index < argc; index++) {
+            if ((std::strcmp(argv[index], "--split") == 0) || (std::strcmp(argv[index], "-s") == 0)) {
+                expansionsSplit = true;
+            } else if (argc > index + 1 && (std::strcmp(argv[index], "--registry-header") == 0)) {
+                registryHeader = argv[index + 1];
+            } else if (argc > index + 1 && (std::strcmp(argv[index], "--registry-instance") == 0)) {
+                registryInstance = argv[index + 1];
+            }
+        }
+    }
+};
+
 struct RegisterBlock {
     std::string_view                           baseName;     // e.g. "MyBlock" if quoted
     std::string_view                           templateName; // e.g. "gr::basic::Block1"
@@ -106,7 +128,7 @@ struct GeneratedFiles {
 };
 
 // Returns the name of the generated function
-[[nodiscard]] std::string emitRegistrationCode(auto& registrationsOutput, std::string_view namePrefix, std::size_t hashValue, std::string_view templateName, std::string_view finalName, std::string_view registryInstance, std::string_view headerPath, std::size_t lineNum) {
+[[nodiscard]] std::string emitRegistrationCode(auto& registrationsOutput, std::string_view namePrefix, std::size_t hashValue, std::string_view templateName, std::string_view finalName, std::size_t lineNum, const Options& options) {
     registrationsOutput << std::format(R"cppcode(
     namespace gr {{ class BlockRegistry; }}
     namespace {{
@@ -115,17 +137,18 @@ struct GeneratedFiles {
         }}
     }}
 )cppcode", //
-        namePrefix, hashValue, templateName, finalName.empty() ? "" : finalName, registryInstance, headerPath, lineNum);
+        namePrefix, hashValue, templateName, finalName.empty() ? "" : finalName, options.registryInstance, options.headerPath.string(), lineNum);
     return std::format("reg_{}_{}", namePrefix, hashValue);
 }
 
-[[nodiscard]] std::string emitInitAllCode(auto& fout, std::string_view namePrefix, std::string_view registryInstance, const std::vector<std::string>& generatedRegistrationFunctions) {
+[[nodiscard]] std::string emitInitAllCode(auto& fout, std::string_view namePrefix, const std::vector<std::string>& generatedRegistrationFunctions, const Options& options) {
     fout << std::format("\nextern \"C\" {{\nGNURADIO_EXPORT std::size_t gr_blocklib_init_unit_{}(gr::BlockRegistry& registry) {{\n    std::size_t result = true; \n", namePrefix);
     for (const auto& generatedRegistrationFunction : generatedRegistrationFunctions) {
         fout << "    result += !" << generatedRegistrationFunction << "(registry);\n";
     }
     fout << "    return result;\n}\n}\n\n";
-    fout << std::format("auto gr_blocklib_init_unit_{0}_invoked = gr_blocklib_init_unit_{0}({1}());\n", namePrefix, registryInstance);
+
+    fout << std::format("auto gr_blocklib_init_unit_{0}_invoked = gr_blocklib_init_unit_{0}({1}());\n", namePrefix, options.registryInstance);
     return std::format("gr_blocklib_init_unit_{}", namePrefix);
 }
 
@@ -250,41 +273,30 @@ int main(int argc, char** argv) try {
         std::cerr << std::format("Usage: {} <header.hpp> <outputDir> [--split | -s] [--registry-header include_file.hpp]\n", commandPath.string());
         return 1;
     }
-    std::filesystem::path headerPath       = argv[1];
-    std::filesystem::path outDir           = argv[2];
-    std::string           registryHeader   = "gnuradio-4.0/BlockRegistry.hpp";
-    std::string           registryInstance = "gr::globalBlockRegistry";
 
-    bool expansionsSplit = false; // true: each block instantiation creates its own file
-    for (int index = 3; index < argc; index++) {
-        if ((std::strcmp(argv[index], "--split") == 0) || (std::strcmp(argv[index], "-s") == 0)) {
-            expansionsSplit = true;
-        } else if (argc > index + 1 && (std::strcmp(argv[index], "--registry-header") == 0)) {
-            registryHeader = argv[index + 1];
-        } else if (argc > index + 1 && (std::strcmp(argv[index], "--registry-instance") == 0)) {
-            registryInstance = argv[index + 1];
-        }
-    }
+    Options options(argc, argv);
 
-    std::cout << std::format("parsing header: '{}' -> '{}'  split: {} \n", headerPath.string(), outDir.string(), expansionsSplit ? "Yes" : "No");
+    std::cout << std::format("parsing header: '{}' -> '{}'  split: {} \n", options.headerPath.string(), options.outDir.string(), options.expansionsSplit ? "Yes" : "No");
 
-    if (!std::filesystem::exists(headerPath)) {
-        std::cerr << std::format("error: file '{}' not found.\n", headerPath.string());
+    if (!std::filesystem::exists(options.headerPath)) {
+        std::cerr << std::format("error: file '{}' not found.\n", options.headerPath.string());
         return 1;
     }
 
-    std::ifstream fin(headerPath);
+    std::ifstream fin(options.headerPath);
     if (!fin.is_open()) {
-        throw std::format("cannot open '{}' for writing", headerPath.string());
+        throw std::format("cannot open '{}' for writing", options.headerPath.string());
     }
 
-    std::filesystem::create_directories(outDir);
+    std::filesystem::create_directories(options.outDir);
 
-    auto stem       = headerPath.stem().string();
+    auto stem       = options.headerPath.stem().string();
     int  macroCount = 0UZ;
     int  fileCount  = 0UZ;
 
-    const auto integratorFile = (outDir / "integrator.cpp");
+    const auto integratorFile = (options.outDir / "integrator.cpp");
+    // TODO: Generate header that can defines the init_module function,
+    // and install it / add it to include path
     if (!std::filesystem::exists(integratorFile)) {
         std::ofstream integrator = openFile(integratorFile);
         integrator << std::format(R"cppcode(
@@ -301,7 +313,7 @@ int main(int argc, char** argv) try {
                 }}
             }}
         )cppcode",
-            outDir.filename().string());
+            options.outDir.filename().string());
     }
 
     std::string line;
@@ -317,23 +329,23 @@ int main(int argc, char** argv) try {
 
         auto maybe = parseRegisterBlockMacro(trimmed);
         if (!maybe) {
-            std::cerr << std::format("\terror: parse failure in {}:{} => {}\n", headerPath.filename().string(), lineNum, maybe.error());
+            std::cerr << std::format("\terror: parse failure in {}:{} => {}\n", options.headerPath.filename().string(), lineNum, maybe.error());
             continue;
         }
         auto& info = *maybe;
 
         // we do 1 .cpp per macro, or multiple if expansionsSplit => each expansion => a new .cpp
-        if (auto combos = cartesianProduct(info.expansions); !expansionsSplit || combos.empty()) {
+        if (auto combos = cartesianProduct(info.expansions); !options.expansionsSplit || combos.empty()) {
             std::vector<std::string> generatedRegistrationFunctions;
 
             // Single .cpp for all expansions of this macro
             const auto namePrefix  = std::format("{}_{}", stem, macroCount);
-            const auto outFileBase = (outDir / namePrefix).string();
+            const auto outFileBase = (options.outDir / namePrefix).string();
 
             GeneratedFiles output(outFileBase);
 
             output.registrations << std::format("// auto-generated by {}, do not edit.\n", commandPath.string());
-            output.registrations << std::format("#include <{1}>\n#include \"{0}\" // for details: {0}:1\n\n", headerPath.string(), registryHeader);
+            output.registrations << std::format("#include <{1}>\n#include \"{0}\" // for details: {0}:1\n\n", options.headerPath.string(), options.registryHeader);
 
             if (combos.empty()) {
                 // No expansions => single call
@@ -347,7 +359,7 @@ int main(int argc, char** argv) try {
 
                 const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                 const std::size_t hashValue    = std::hash<std::string>{}(templateName);
-                generatedRegistrationFunctions.push_back(emitRegistrationCode(output.registrations, namePrefix, hashValue, templateName, finalName, registryInstance, headerPath.string(), lineNum));
+                generatedRegistrationFunctions.push_back(emitRegistrationCode(output.registrations, namePrefix, hashValue, templateName, finalName, lineNum, options));
             } else {
                 // multiple expansions => all in one file
                 int localIdx = 0;
@@ -362,12 +374,12 @@ int main(int argc, char** argv) try {
 
                     const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                     const std::size_t hashValue    = std::hash<std::string>{}(templateName);
-                    generatedRegistrationFunctions.push_back(emitRegistrationCode(output.registrations, namePrefix, hashValue, templateName, finalName, registryInstance, headerPath.string(), lineNum));
+                    generatedRegistrationFunctions.push_back(emitRegistrationCode(output.registrations, namePrefix, hashValue, templateName, finalName, lineNum, options));
                     localIdx++;
                 }
             }
 
-            auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, registryInstance, generatedRegistrationFunctions);
+            auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, generatedRegistrationFunctions, options);
             output.registrations << "// To initialize, call " << generatedInitFunction << "\n";
 
             output.declarations << "extern \"C\" { bool " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
@@ -383,12 +395,12 @@ int main(int argc, char** argv) try {
 
                 const auto replaced    = replacePlaceholders(std::string(info.paramPack), vars);
                 const auto namePrefix  = std::format("{}_{}_{}", stem, macroCount, localIdx);
-                const auto outFileBase = (outDir / namePrefix).string();
+                const auto outFileBase = (options.outDir / namePrefix).string();
 
                 GeneratedFiles output(outFileBase);
 
                 output.registrations << std::format("// auto-generated by {}, do not edit.\n", commandPath.string());
-                output.registrations << std::format("#include <{1}>\n#include \"{0}\" // for details: {0}:1\n\n", headerPath.string(), registryHeader);
+                output.registrations << std::format("#include <{1}>\n#include \"{0}\" // for details: {0}:1\n\n", options.headerPath.string(), options.registryHeader);
 
                 std::string finalName;
                 if (!info.baseName.empty() && !replaced.empty()) {
@@ -399,8 +411,8 @@ int main(int argc, char** argv) try {
 
                 const std::string templateName = std::format("{}{}", info.templateName, replaced.empty() ? "" : std::format("<{}>", replaced));
                 const std::size_t hashValue    = std::hash<std::string>{}(templateName);
-                generatedRegistrationFunctions.push_back(emitRegistrationCode(output.registrations, namePrefix, hashValue, templateName, finalName, registryInstance, headerPath.string(), lineNum));
-                auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, registryInstance, generatedRegistrationFunctions);
+                generatedRegistrationFunctions.push_back(emitRegistrationCode(output.registrations, namePrefix, hashValue, templateName, finalName, lineNum, options));
+                auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, generatedRegistrationFunctions, options);
                 output.registrations << "// To initialize, call " << generatedInitFunction << "\n";
 
                 output.declarations << "extern \"C\" { bool " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
