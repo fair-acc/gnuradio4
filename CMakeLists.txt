@@ -30,7 +30,7 @@ option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
 option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 
-if(EMSCRIPTEN)
+if(EMSCRIPTEN OR NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
 

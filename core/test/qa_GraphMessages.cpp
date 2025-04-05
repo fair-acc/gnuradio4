@@ -3,6 +3,9 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
+#include <GrBasicBlocks>
+#include <GrTestingBlocks>
+
 #include "TestBlockRegistryContext.hpp"
 
 using namespace std::chrono_literals;
@@ -13,8 +16,8 @@ namespace ut = boost::ut;
 template<>
 auto ut::cfg<ut::override> = RunnerContext( //
     paths{},                                // plugin paths
-    gr_blocklib_init_module_GrBasicBlocks,  //
-    gr_blocklib_init_module_GrTestingBlocks);
+    gr::blocklib::initGrBasicBlocks,        //
+    gr::blocklib::initGrTestingBlocks);
 
 #include "message_utils.hpp"
 

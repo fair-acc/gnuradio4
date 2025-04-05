@@ -10,6 +10,9 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/basic/CommonBlocks.hpp>
 
+#include <GrBasicBlocks>
+#include <GrTestingBlocks>
+
 #include "TestBlockRegistryContext.hpp"
 
 using namespace std::chrono_literals;
@@ -19,8 +22,8 @@ namespace ut = boost::ut;
 template<>
 auto ut::cfg<ut::override> = RunnerContext(                //
     paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
-    gr_blocklib_init_module_GrBasicBlocks,                 //
-    gr_blocklib_init_module_GrTestingBlocks);
+    gr::blocklib::initGrBasicBlocks,                       //
+    gr::blocklib::initGrTestingBlocks);
 
 const boost::ut::suite PluginLoaderTests = [] {
     using namespace boost::ut;
