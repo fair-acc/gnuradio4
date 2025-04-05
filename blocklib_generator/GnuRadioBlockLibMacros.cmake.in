@@ -57,6 +57,7 @@ function(gr_generate_block_instantiations LIB_NAME)
     # directory where gnuradio_4_0_parse_registrations will output .cpp files.
     set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${MODULE_NAME_BASE}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
+    target_include_directories(${LIB_NAME} PUBLIC ${GEN_DIR})
 
     set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
 
@@ -227,4 +228,5 @@ function(gr_add_block_plugin LIB_NAME)
 
     # TODO Install pkgconfig files, CMake files for finding the package,
     # header for blocklib init
+
 endfunction()

@@ -4,19 +4,9 @@
 #include <cassert>
 #include <iostream>
 
+#include <GrBasicBlocks>
+
 using namespace std::string_literals;
-
-// This tests automatic loading of .so files that are not
-// plugins, but ordinary dynamic block libraries -- they
-// just need to be in a path that the PluginLoader searches in.
-//
-// This is intentionally not a ut test as it tests
-// how a normal application would use the block registry
-// in the lifetime of main
-
-extern "C" {
-std::size_t gr_blocklib_init_module_GrBasicBlocks(gr::BlockRegistry&);
-}
 
 int main() {
     gr_blocklib_init_module_GrBasicBlocks(gr::globalBlockRegistry());

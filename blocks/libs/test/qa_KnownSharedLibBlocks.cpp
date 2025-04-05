@@ -9,26 +9,24 @@ using namespace boost::ut;
 
 using namespace std::string_view_literals;
 
-extern "C" {
-bool gr_blocklib_init_module_GrFilterBlocks(gr::BlockRegistry& registry);
-bool gr_blocklib_init_module_GrFourierBlocks(gr::BlockRegistry& registry);
-bool gr_blocklib_init_module_GrElectricalBlocks(gr::BlockRegistry& registry);
-bool gr_blocklib_init_module_GrHttpBlocks(gr::BlockRegistry& registry);
-bool gr_blocklib_init_module_GrFileIoBlocks(gr::BlockRegistry& registry);
-bool gr_blocklib_init_module_GrTestingBlocks(gr::BlockRegistry& registry);
-bool gr_blocklib_init_module_GrBasicBlocks(gr::BlockRegistry& registry);
-}
+#include <GrBasicBlocks>
+#include <GrElectricalBlocks>
+#include <GrFileIoBlocks>
+#include <GrFilterBlocks>
+#include <GrFourierBlocks>
+#include <GrHttpBlocks>
+#include <GrTestingBlocks>
 
 const boost::ut::suite TagTests = [] {
     auto&       registry = gr::globalBlockRegistry();
     std::size_t result   = 0UZ;
-    result += gr_blocklib_init_module_GrFilterBlocks(registry);
-    result += gr_blocklib_init_module_GrElectricalBlocks(registry);
-    result += gr_blocklib_init_module_GrHttpBlocks(registry);
-    result += gr_blocklib_init_module_GrFileIoBlocks(registry);
-    result += gr_blocklib_init_module_GrTestingBlocks(registry);
-    result += gr_blocklib_init_module_GrBasicBlocks(registry);
-    result += gr_blocklib_init_module_GrFourierBlocks(registry);
+    result += gr::blocklib::initGrBasicBlocks(registry);
+    result += gr::blocklib::initGrElectricalBlocks(registry);
+    result += gr::blocklib::initGrFileIoBlocks(registry);
+    result += gr::blocklib::initGrFilterBlocks(registry);
+    result += gr::blocklib::initGrFourierBlocks(registry);
+    result += gr::blocklib::initGrHttpBlocks(registry);
+    result += gr::blocklib::initGrTestingBlocks(registry);
     if (result) {
         fmt::print("Warning: Failed to init {} blocks\n", result);
     }
