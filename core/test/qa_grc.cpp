@@ -15,6 +15,10 @@
 
 #include "ArrayTestBlocks.hpp"
 
+#include <GrBasicBlocks>
+#include <GrTestingBlocks>
+#include <qa_grc>
+
 #include "TestBlockRegistryContext.hpp"
 
 namespace ut = boost::ut;
@@ -22,9 +26,9 @@ namespace ut = boost::ut;
 template<>
 auto ut::cfg<ut::override> = RunnerContext(                //
     paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
-    gr_blocklib_init_module_GrBasicBlocks,                 //
-    gr_blocklib_init_module_GrTestingBlocks,               //
-    gr_blocklib_init_module_qa_grc);
+    gr::blocklib::initGrBasicBlocks,                       //
+    gr::blocklib::initGrTestingBlocks,                     //
+    gr::blocklib::initqa_grc);
 
 namespace {
 auto collectBlocks(const gr::Graph& graph) {

@@ -3,12 +3,6 @@
 
 #include <boost/ut.hpp>
 
-extern "C" {
-bool gr_blocklib_init_module_GrBasicBlocks(gr::BlockRegistry&);
-bool gr_blocklib_init_module_GrTestingBlocks(gr::BlockRegistry&);
-bool gr_blocklib_init_module_qa_grc(gr::BlockRegistry&);
-}
-
 using paths = std::vector<std::filesystem::path>;
 
 struct TestContext {
