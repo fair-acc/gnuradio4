@@ -44,8 +44,8 @@ function(add_app_test TEST_NAME)
   target_link_libraries(${TEST_NAME} PRIVATE gnuradio-core gnuradio-blocklib-core gnuradio-plugin)
   add_dependencies(
     ${TEST_NAME}
+    GoodBasePlugin
     good_math_plugin
-    good_base_plugin
     good_conversion_plugin
     bad_plugin)
 endfunction()
