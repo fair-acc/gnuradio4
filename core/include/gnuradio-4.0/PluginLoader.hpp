@@ -13,7 +13,7 @@
 
 #include "BlockRegistry.hpp"
 
-#ifdef ENABLE_BLOCK_PLUGINS
+#ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
 #include <dlfcn.h>
 
 #include "Plugin.hpp"
@@ -24,7 +24,7 @@ namespace gr {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-#ifdef ENABLE_BLOCK_PLUGINS
+#ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
 // Plugins are not supported on WASM
 
 using plugin_create_function_t  = void (*)(gr_plugin_base**);

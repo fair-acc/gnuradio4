@@ -1,4 +1,4 @@
-if(NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN AND TARGET GrBasicBlocksShared)
   add_ut_test(qa_KnownSharedLibBlocks)
   target_link_libraries(
     qa_KnownSharedLibBlocks

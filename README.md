@@ -5,6 +5,7 @@
 [![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
 ![CMake](https://github.com/fair-acc/gnuradio4/workflows/CMake/badge.svg) <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-13-orange.svg?style=flat-square)](#contributors-)
+
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 # GNU Radio 4.0 prototype
@@ -41,7 +42,7 @@ cd gnuradio4
 sudo ./enableZRAM.sh
 
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=RelWithAssert -DENABLE_BLOCK_PLUGINS=ON -DENABLE_BLOCK_REGISTRY=ON ..
+cmake -DCMAKE_BUILD_TYPE=RelWithAssert -DGR_ENABLE_BLOCK_REGISTRY=ON ..
 cmake --build . -- -j$(nproc)
 ```
 
@@ -54,9 +55,8 @@ echo 1 | sudo tee /sys/block/zram0/reset
 
 ### Key CMake Flags `-D...=<ON|OFF>`
 
-- **`ENABLE_BLOCK_PLUGINS`** (default: ON): builds the plugin system, allowing dynamic loading of blocks.
-- **`ENABLE_BLOCK_REGISTRY`** (default: ON): enables a runtime registry of blocks.
-  Turning this off (along with `ENABLE_BLOCK_PLUGINS`) gives fully static builds.
+- **`GR_ENABLE_BLOCK_REGISTRY`** (default: ON): enables a runtime registry of blocks.
+  Turning this off gives fully static builds.
 - **`EMBEDDED`** (default: OFF): reduces code size and runtime features for constrained systems.
   Also implicitly enabled by `-DCMAKE_BUILD_TYPE=MinSizeRel`.
 - **`WARNINGS_AS_ERRORS`** (default: ON): treats all compiler warnings as errors (`-Werror`).
@@ -70,8 +70,7 @@ echo 1 | sudo tee /sys/block/zram0/reset
 ```bash
 cmake -B build -S . \
   -DCMAKE_BUILD_TYPE=RelWithAssert \
-  -DENABLE_BLOCK_PLUGINS=ON \
-  -DENABLE_BLOCK_REGISTRY=ON \
+  -DGR_ENABLE_BLOCK_REGISTRY=ON \
   -DWARNINGS_AS_ERRORS=ON \
   -DTIMETRACE=OFF \
   -DADDRESS_SANITIZER=OFF \
