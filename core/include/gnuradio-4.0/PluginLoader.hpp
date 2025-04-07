@@ -13,10 +13,10 @@
 
 #include "BlockRegistry.hpp"
 
-#ifdef ENABLE_BLOCK_PLUGINS
+#ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
 #include <dlfcn.h>
 
-#include "plugin.hpp"
+#include "Plugin.hpp"
 #endif
 
 namespace gr {
@@ -24,7 +24,7 @@ namespace gr {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-#ifdef ENABLE_BLOCK_PLUGINS
+#ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
 // Plugins are not supported on WASM
 
 using plugin_create_function_t  = void (*)(gr_plugin_base**);
@@ -190,10 +190,25 @@ public:
 
         auto* handler = handlerForName(name);
         if (handler == nullptr) {
+#ifndef NDEBUG
+            fmt::print("Known blocks in the registry\n");
+            for (const auto& knownBlock : _registry->knownBlocks()) {
+                fmt::print("    {}\n", knownBlock);
+            }
+            fmt::print("]\n");
+
+            fmt::print("Known handlers from plugins [\n", name);
+            for (const auto& [handlerName, _] : _handlerForName) {
+                fmt::print("    {}\n", handlerName);
+            }
+            fmt::print("]\n");
+#endif
+            fmt::print("Error: Handler not found for '{}', returning nullptr.\n", name);
             return {};
         }
 
-        return handler->createBlock(name, params);
+        auto result = handler->createBlock(name, params);
+        return result;
     }
 
     bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block) || handlerForName(block) != nullptr; }

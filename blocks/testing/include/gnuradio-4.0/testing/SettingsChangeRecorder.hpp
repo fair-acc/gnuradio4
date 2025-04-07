@@ -52,7 +52,7 @@ void printChanges(const property_map& oldMap, const property_map& newMap) noexce
 };
 } // namespace utils
 
-GR_REGISTER_BLOCK(gr::testing::SettingsChangeRecorder, [ int32_t, float, double, gr::DataSetLike<T>, gr::DataSet<T> ])
+GR_REGISTER_BLOCK(gr::testing::SettingsChangeRecorder, [T], [ int32_t, float, double ])
 
 template<typename T>
 // struct SettingsChangeRecorder : public Block<SettingsChangeRecorder<T>, BlockingIO<true>, SupportedTypes<float, double>> { // TODO: reenable BlockingIO

@@ -4,6 +4,7 @@ target_link_libraries(
   qa_Soapy
   PRIVATE gnuradio-options
           gnuradio-core
+          gnuradio-blocklib-core
           fmt
           fftw
           gr-soapy

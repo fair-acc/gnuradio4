@@ -61,7 +61,7 @@ inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::st
 
 enum class Mode { overwrite, append, multi };
 
-GR_REGISTER_BLOCK(gr::blocks::fileio::BasicFileSink, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::fileio::BasicFileSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 
 template<typename T>
 struct BasicFileSink : Block<BasicFileSink<T>> {
@@ -169,7 +169,7 @@ private:
     }
 };
 
-GR_REGISTER_BLOCK(gr::blocks::fileio::BasicFileSource, [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::fileio::BasicFileSource, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 
 template<typename T>
 struct BasicFileSource : Block<BasicFileSource<T>> {

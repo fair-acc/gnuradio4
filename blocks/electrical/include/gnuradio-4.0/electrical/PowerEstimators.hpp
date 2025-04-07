@@ -10,12 +10,13 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
+#include <gnuradio-4.0/basic/StreamToDataSet.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 namespace gr::electrical {
 
-GR_REGISTER_BLOCK("gr::electrical::ThreePhasePowerMetrics", gr::basic::StreamFilterImpl, (<T>, 3UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
-GR_REGISTER_BLOCK("gr::electrical::SinglePhasePowerMetrics", gr::basic::StreamFilterImpl, (<T>, 1UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::electrical::ThreePhasePowerMetrics", gr::electrical::PowerMetrics, ([T], 3UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::electrical::SinglePhasePowerMetrics", gr::electrical::PowerMetrics, ([T], 1UZ), [ float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
 template<typename T, std::size_t nPhases>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)

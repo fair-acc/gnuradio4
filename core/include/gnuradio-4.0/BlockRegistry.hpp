@@ -10,6 +10,8 @@
 
 #include "BlockModel.hpp"
 
+#include <gnuradio-4.0/Export.hpp>
+
 /**
  *  namespace gr {
  *  template<typename T> struct AlgoImpl1 {};
@@ -45,19 +47,33 @@ std::unique_ptr<gr::BlockModel> blockFactory(property_map params) {
     return std::make_unique<gr::BlockWrapper<TBlock>>(std::move(params));
 }
 
+std::unique_ptr<gr::BlockModel> blockFactoryProto(property_map params);
+
 } // namespace detail
 
 class BlockRegistry {
     struct TBlockTypeHandler {
-        std::string                                                  alias;
-        std::function<std::unique_ptr<gr::BlockModel>(property_map)> createFunction;
+        std::string                          alias;
+        decltype(detail::blockFactoryProto)* createFunction = nullptr;
     };
 
     std::vector<std::string>                              _blockTypes;
     std::map<std::string, TBlockTypeHandler, std::less<>> _blockTypeHandlers;
 
 public:
-#ifdef ENABLE_BLOCK_REGISTRY
+    BlockRegistry()                                      = default;
+    BlockRegistry(const BlockRegistry& other)            = delete;
+    BlockRegistry& operator=(const BlockRegistry& other) = delete;
+
+    BlockRegistry(BlockRegistry&& other) noexcept : _blockTypes(std::exchange(other._blockTypes, {})), _blockTypeHandlers(std::exchange(other._blockTypeHandlers, {})) {}
+    BlockRegistry& operator=(BlockRegistry&& other) noexcept {
+        auto tmp = std::move(other);
+        std::swap(_blockTypes, tmp._blockTypes);
+        std::swap(_blockTypeHandlers, tmp._blockTypeHandlers);
+        return *this;
+    }
+
+#ifdef GR_ENABLE_BLOCK_REGISTRY
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
     void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
@@ -66,12 +82,16 @@ public:
             if (alias.empty()) {
                 return std::string{};
             }
+            if (alias[0] == '=') {
+                return std::string(alias.substr(1));
+            }
             if (aliasParameters.empty()) {
                 return meta::detail::makePortableTypeName(alias);
             }
             return meta::detail::makePortableTypeName(std::string{alias} + "<" + std::string{aliasParameters} + ">");
         }();
         _blockTypes.push_back(name);
+
         auto handler             = TBlockTypeHandler{.alias = fullAlias, .createFunction = detail::blockFactory<TBlock>};
         _blockTypeHandlers[name] = handler;
         if (!fullAlias.empty()) {
@@ -114,14 +134,28 @@ public:
         return std::string(name);
     }
 
-    friend inline BlockRegistry& globalBlockRegistry();
+    void mergeRegistry(gr::BlockRegistry& anotherRegistry) {
+        if (this == std::addressof(anotherRegistry)) {
+            return;
+        }
+
+        // We don't have append_range from C++23
+        _blockTypes.insert(_blockTypes.end(), anotherRegistry._blockTypes.cbegin(), anotherRegistry._blockTypes.cend());
+        // We don't have insert_range from C++23
+        _blockTypeHandlers.insert(anotherRegistry._blockTypeHandlers.cbegin(), anotherRegistry._blockTypeHandlers.cend());
+    }
+
+    friend BlockRegistry& globalBlockRegistry(std::source_location location);
 };
 
-inline BlockRegistry& globalBlockRegistry() {
-    static BlockRegistry s_instance;
-    return s_instance;
-}
+GNURADIO_EXPORT
+BlockRegistry& globalBlockRegistry(std::source_location location = std::source_location::current());
 
 } // namespace gr
+
+extern "C" {
+GNURADIO_EXPORT
+gr::BlockRegistry* grGlobalBlockRegistry(std::source_location location = std::source_location::current());
+}
 
 #endif // GNURADIO_BLOCK_REGISTRY_HPP

@@ -42,7 +42,7 @@ enum class RequestType : char {
     POST      = 3,
 };
 
-GR_REGISTER_BLOCK(gr::http::HttpBlock, [ float, double ])
+GR_REGISTER_BLOCK(gr::http::HttpBlock, [T], [ float, double ])
 
 template<typename T>
 struct HttpBlock : Block<HttpBlock<T>, BlockingIO<false>> {
