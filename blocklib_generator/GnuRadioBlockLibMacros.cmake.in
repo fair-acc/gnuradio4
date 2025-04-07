@@ -37,9 +37,32 @@ function(gr_generate_block_instantiations LIB_NAME)
         message(FATAL_ERROR "No headers passed to gr_generate_block_instantiations")
     endif()
 
+    if(GR_SPLIT_BLOCK_INSTANTIATIONS OR CBL_SPLIT_BLOCK_INSTANTIATIONS)
+        set(PARSER_SPLIT_FLAG "--split")
+    else()
+        set(PARSER_SPLIT_FLAG "")
+    endif()
+
+    if(CBL_REGISTRY_HEADER)
+        set(PARSER_REGISTRY_HEADER_FLAG "--registry-header")
+        set(PARSER_REGISTRY_HEADER_OPTION ${CBL_REGISTRY_HEADER})
+    else()
+        set(PARSER_REGISTRY_HEADER_FLAG "")
+        set(PARSER_REGISTRY_HEADER_OPTION "")
+    endif()
+
+    if(CBL_REGISTRY_INSTANCE)
+        set(PARSER_REGISTRY_INSTANCE_FLAG "--registry-instance")
+        set(PARSER_REGISTRY_INSTANCE_OPTION ${CBL_REGISTRY_INSTANCE})
+    else()
+        set(PARSER_REGISTRY_INSTANCE_FLAG "")
+        set(PARSER_REGISTRY_INSTANCE_OPTION "")
+    endif()
+
     # directory where gnuradio_4_0_parse_registrations will output .cpp files.
     set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${MODULE_NAME_BASE}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
+    target_include_directories(${LIB_NAME} PUBLIC ${GEN_DIR})
 
     set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
 
@@ -66,31 +89,9 @@ function(gr_generate_block_instantiations LIB_NAME)
                 file(REMOVE ${OLD_FILES})
             endif()
 
-            if(GR_SPLIT_BLOCK_INSTANTIATIONS OR CBL_SPLIT_BLOCK_INSTANTIATIONS)
-                set(PARSER_SPLIT_OPTION "--split")
-            else()
-                set(PARSER_SPLIT_OPTION "")
-            endif()
-
-            if(CBL_REGISTRY_HEADER)
-                set(PARSER_REGISTRY_HEADER_FLAG "--registry-header")
-                set(PARSER_REGISTRY_HEADER_OPTION ${CBL_REGISTRY_HEADER})
-            else()
-                set(PARSER_REGISTRY_HEADER_FLAG "")
-                set(PARSER_REGISTRY_HEADER_OPTION "")
-            endif()
-
-            if(CBL_REGISTRY_INSTANCE)
-                set(PARSER_REGISTRY_INSTANCE_FLAG "--registry-instance")
-                set(PARSER_REGISTRY_INSTANCE_OPTION ${CBL_REGISTRY_INSTANCE})
-            else()
-                set(PARSER_REGISTRY_INSTANCE_FLAG "")
-                set(PARSER_REGISTRY_INSTANCE_OPTION "")
-            endif()
-
             set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${HDR})
 
-            message(STATUS "[BlockLibMacros] Generating code for header: ${ABS_HDR} -> ${GEN_DIR} with PARSER_SPLIT_OPTION=${PARSER_SPLIT_OPTION}, other options [ ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION} ]")
+            message(STATUS "[BlockLibMacros] Generating code for header: ${ABS_HDR} -> ${GEN_DIR} with PARSER_SPLIT_FLAG=${PARSER_SPLIT_FLAG}, other options [ ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION} ]")
 
             # GnuRadioBlockLibConfig.cmake sets this when GnuRadioBlockLib is found via find_package
             # However when FetchContent is used that doesn't happen, so fall back to the build path
@@ -99,9 +100,20 @@ function(gr_generate_block_instantiations LIB_NAME)
             endif()
 
             # run the parser tool immediately at configuration time.
-            message(STATUS "[BlockLibMacros] Running: ${PARSER_EXECUTABLE} ${ABS_HDR} ${GEN_DIR} ${PARSER_SPLIT_OPTION} ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION}")
+            message(STATUS "[BlockLibMacros] Running: ${PARSER_EXECUTABLE} ${ABS_HDR} ${GEN_DIR}
+                    ${PARSER_SPLIT_FLAG}
+                    ${PARSER_REGISTRY_HEADER_FLAG}
+                    ${PARSER_REGISTRY_HEADER_OPTION}
+                    ${PARSER_REGISTRY_INSTANCE_FLAG}
+                    ${PARSER_REGISTRY_INSTANCE_OPTION}")
             execute_process(
-                    COMMAND ${PARSER_EXECUTABLE} "${ABS_HDR}" "${GEN_DIR}" ${PARSER_SPLIT_OPTION} ${PARSER_REGISTRY_HEADER_FLAG} ${PARSER_REGISTRY_HEADER_OPTION} ${PARSER_REGISTRY_INSTANCE_FLAG} ${PARSER_REGISTRY_INSTANCE_OPTION}
+                    COMMAND ${PARSER_EXECUTABLE} # command
+                    "${ABS_HDR}" "${GEN_DIR}" # paths
+                    ${PARSER_SPLIT_FLAG}
+                    ${PARSER_REGISTRY_HEADER_FLAG}
+                    ${PARSER_REGISTRY_HEADER_OPTION}
+                    ${PARSER_REGISTRY_INSTANCE_FLAG}
+                    ${PARSER_REGISTRY_INSTANCE_OPTION}
                     RESULT_VARIABLE gen_res
                     OUTPUT_VARIABLE gen_out
                     ERROR_VARIABLE gen_err
@@ -152,25 +164,25 @@ function(gr_add_block_library LIB_NAME)
     endif()
 
     set(options "SPLIT_BLOCK_INSTANTIATIONS" "MAKE_SHARED_LIBRARY" "MAKE_STATIC_LIBRARY")
-    set(oneValueAr gs REGISTRY_HEADER REGISTRY_INSTANCE)
+    set(oneValueArgs REGISTRY_HEADER REGISTRY_INSTANCE)
     set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
     cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-    if(${CBL_SPLIT_BLOCK_INSTANTIATIONS})
+    if(CBL_SPLIT_BLOCK_INSTANTIATIONS)
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "SPLIT_BLOCK_INSTANTIATIONS")
     else()
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
     endif()
 
     set(OBJECT_LIB_NAME "${LIB_NAME}Object")
-    add_library(${OBJECT_LIB_NAME} OBJECT)
+    add_library(${OBJECT_LIB_NAME} OBJECT ${CBL_SOURCES})
     gr_generate_block_instantiations(${OBJECT_LIB_NAME}
         HEADERS ${CBL_HEADERS}
         MODULE_NAME_BASE ${LIB_NAME}
         ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
     target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
 
-    if(${CBL_MAKE_SHARED_LIBRARY})
+    if(CBL_MAKE_SHARED_LIBRARY)
         set(SHARED_LIB_NAME "${LIB_NAME}Shared")
         message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
         add_library(${SHARED_LIB_NAME} SHARED)
@@ -178,7 +190,7 @@ function(gr_add_block_library LIB_NAME)
         install(TARGETS ${SHARED_LIB_NAME} LIBRARY DESTINATION lib)
     endif()
 
-    if(${CBL_MAKE_STATIC_LIBRARY})
+    if(CBL_MAKE_STATIC_LIBRARY)
         set(STATIC_LIB_NAME "${LIB_NAME}Static")
         message(STATUS "[BlockLibMacros] Creating a static library target ${STATIC_LIB_NAME}")
         add_library(${STATIC_LIB_NAME} STATIC)
@@ -188,4 +200,53 @@ function(gr_add_block_library LIB_NAME)
 
     # TODO Install pkgconfig files, CMake files for finding the package,
     # header for blocklib init
+endfunction()
+
+function(gr_add_block_plugin LIB_NAME)
+    if(DEFINED GR_ENABLE_BLOCK_REGISTRY AND NOT ${GR_ENABLE_BLOCK_REGISTRY})
+        message(WARNING "GR_ENABLE_BLOCK_REGISTRY is set to Off, not generating plugin ${LIB_NAME}")
+        return()
+    endif()
+
+    if(DEFINED INTERNAL_ENABLE_BLOCK_PLUGINS AND NOT ${INTERNAL_ENABLE_BLOCK_PLUGINS})
+        message(WARNING "INTERNAL_ENABLE_BLOCK_PLUGINS is set to Off, not generating plugin ${LIB_NAME}")
+        return()
+    endif()
+
+    set(options "SPLIT_BLOCK_INSTANTIATIONS")
+    set(oneValueArgs _NO_ONE_VALUE_ARGS)
+    set(multiValueArgs HEADERS SOURCES LINK_LIBRARIES)
+    cmake_parse_arguments(CBL "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    if(CBL_SPLIT_BLOCK_INSTANTIATIONS)
+      set(SPLIT_BLOCK_INSTANTIATIONS_ARG "SPLIT_BLOCK_INSTANTIATIONS")
+    else()
+      set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
+    endif()
+
+    set(OBJECT_LIB_NAME "${LIB_NAME}")
+    add_library(${OBJECT_LIB_NAME} OBJECT
+        ${CBL_SOURCES}
+    )
+    gr_generate_block_instantiations(${OBJECT_LIB_NAME}
+        HEADERS ${CBL_HEADERS}
+        SOURCES ${CBL_SOURCES}
+        LINK_LIBRARIES ${CBL_LINK_LIBRARIES}
+        MODULE_NAME_BASE ${LIB_NAME}
+        ${SPLIT_BLOCK_INSTANTIATIONS_ARG}
+        REGISTRY_HEADER
+        gnuradio-4.0/Plugin.hpp
+        REGISTRY_INSTANCE
+        grPluginInstance)
+    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core gnuradio-plugin ${CBL_LINK_LIBRARIES})
+
+    set(PLUGIN_LIB_NAME "${LIB_NAME}Plugin")
+    message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")
+    add_library(${PLUGIN_LIB_NAME} SHARED)
+    target_link_libraries(${PLUGIN_LIB_NAME} ${OBJECT_LIB_NAME})
+    install(TARGETS ${PLUGIN_LIB_NAME} LIBRARY DESTINATION lib)
+
+    # TODO Install pkgconfig files, CMake files for finding the package,
+    # header for blocklib init
+
 endfunction()

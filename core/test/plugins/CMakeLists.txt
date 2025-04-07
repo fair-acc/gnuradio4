@@ -1,4 +1,13 @@
-function(add_gr_plugin PLUGIN_NAME)
+# Plugins based on the blocklib generator
+gr_add_block_plugin(
+  GoodBase
+  SOURCES
+  good_base_plugin.cpp
+  HEADERS
+  good_base_plugin.hpp)
+
+# Ordinary plugins
+function(add_non_blocklib_plugin PLUGIN_NAME)
   add_library(${PLUGIN_NAME} MODULE ${PLUGIN_NAME}.cpp)
 
   # target_compile_options(${PLUGIN_NAME} PRIVATE -fsanitize=address -Wall)
@@ -13,17 +22,6 @@ function(add_gr_plugin PLUGIN_NAME)
            fmt)
 endfunction()
 
-add_gr_plugin(good_math_plugin)
-
-add_gr_plugin(good_base_plugin)
-gr_generate_block_instantiations(
-  good_base_plugin
-  HEADERS
-  good_base_plugin.hpp
-  REGISTRY_HEADER
-  gnuradio-4.0/Plugin.hpp
-  REGISTRY_INSTANCE
-  grPluginInstance)
-
-add_gr_plugin(good_conversion_plugin)
-add_gr_plugin(bad_plugin)
+add_non_blocklib_plugin(good_math_plugin)
+add_non_blocklib_plugin(good_conversion_plugin)
+add_non_blocklib_plugin(bad_plugin)

@@ -6,15 +6,13 @@
 #include <gnuradio-4.0/basic/Selector.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
 
-extern "C" {
-bool gr_blocklib_init_module_GrBasicBlocks(gr::BlockRegistry&);
-}
+#include <GrBasicBlocks>
 
 const boost::ut::suite KnownBlockTests = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
 
-    gr_blocklib_init_module_GrBasicBlocks(gr::globalBlockRegistry());
+    gr::blocklib::initGrBasicBlocks(gr::globalBlockRegistry());
 
     "Registered"_test = [] {
         auto known = gr::globalBlockRegistry().knownBlocks();
