@@ -73,7 +73,7 @@ public:
         return *this;
     }
 
-#ifdef ENABLE_BLOCK_REGISTRY
+#ifdef GR_ENABLE_BLOCK_REGISTRY
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
     void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {

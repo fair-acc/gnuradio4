@@ -35,6 +35,6 @@ gr_add_block_library(
   LINK_LIBRARIES
   ${GrBasicBlocks_LIBS})
 
-if(ENABLE_TESTING)
+if(TARGET GrBasicBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()

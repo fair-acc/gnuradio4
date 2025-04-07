@@ -11,6 +11,6 @@ gr_add_block_library(
   LINK_LIBRARIES
   gr-http)
 
-if(ENABLE_TESTING)
+if(TARGET GrHttpBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()

@@ -12,6 +12,6 @@ gr_add_block_library(
   LINK_LIBRARIES
   gr-fileio)
 
-if(ENABLE_TESTING)
+if(TARGET GrFileIoBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()

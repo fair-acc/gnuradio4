@@ -12,6 +12,6 @@ gr_add_block_library(
   gr-basic
   gr-electrical)
 
-if(ENABLE_TESTING)
+if(TARGET GrElectricalBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()

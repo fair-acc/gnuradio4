@@ -12,6 +12,6 @@ gr_add_block_library(
   gr-basic
   gr-fourier)
 
-if(ENABLE_TESTING)
+if(TARGET GrFourierBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()

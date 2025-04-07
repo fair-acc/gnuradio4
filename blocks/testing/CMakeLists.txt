@@ -17,6 +17,6 @@ gr_add_block_library(
   gr-testing
   gnuradio-algorithm)
 
-if(ENABLE_TESTING)
+if(TARGET GrTestingBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()

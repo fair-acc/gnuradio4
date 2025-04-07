@@ -7,7 +7,7 @@ on:
 jobs:
   build:
     name: "Create single-header release"
-    runs-on: ubuntu-22.04
+    runs-on: "ubuntu-latest"
 
     steps:
     - uses: actions/checkout@v4
@@ -22,15 +22,9 @@ jobs:
         path: ${{runner.workspace}}/build/_deps
         key: ${{ runner.os }}-gcc-Release-${{ hashFiles('CMakeLists.txt') }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
-    - name: Install gcc-12
-      run: |
-        sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa # provides newer gcc 12.2.0 instead of 12.1.0
-        sudo apt-get install -y gcc-12 g++-12
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 110 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
-
     - name: Configure CMake to fetch UT dependency
       shell: bash
-      run: cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -S . -B ./build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_C_COMPILER=gcc-14 -DENABLE_BLOCK_REGISTRY=Off -DENABLE_BLOCK_PLUGINS=Off
 
     - name: create single-header
       shell: bash

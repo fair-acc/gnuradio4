@@ -13,6 +13,6 @@ gr_add_block_library(
   gr-filter
   gnuradio-algorithm)
 
-if(ENABLE_TESTING)
+if(TARGET GrFilterBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()
