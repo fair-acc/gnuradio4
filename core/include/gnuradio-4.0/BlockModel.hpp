@@ -459,7 +459,7 @@ protected:
         using TBlock = std::remove_cvref_t<decltype(blockRef())>;
         if constexpr (TBlock::blockCategory == block::Category::NormalBlock) {
             auto registerPort = [this, processPort]<gr::detail::PortDescription CurrentPortType>(DynamicPorts& where, auto, CurrentPortType*) noexcept {
-                if constexpr (CurrentPortType::kIsDynamicCollection) {
+                if constexpr (CurrentPortType::kIsDynamicCollection || CurrentPortType::kIsStaticCollection) {
                     auto&               collection = CurrentPortType::getPortObject(blockRef());
                     NamedPortCollection result;
                     result.name = CurrentPortType::Name;

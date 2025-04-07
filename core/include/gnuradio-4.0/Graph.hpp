@@ -1146,9 +1146,11 @@ inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_coun
 template<std::size_t OutId, std::size_t InId, SourceBlockLike A, SinkBlockLike B>
 constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
     if constexpr (!std::is_same_v<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-        gr::meta::print_types<gr::meta::message_type<"OUTPUT_PORTS_ARE:">, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>,
-
-            gr::meta::message_type<"INPUT_PORTS_ARE:">, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
+        gr::meta::print_types<                                                                                                                                                                                          //
+            gr::meta::message_type<"OUTPUT_PORTS_ARE:">,                                                                                                                                                                //
+            typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, //
+            gr::meta::message_type<"INPUT_PORTS_ARE:">,                                                                                                                                                                 //
+            typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
     }
     return {std::forward<A>(a), std::forward<B>(b)};
 }

@@ -1,6 +1,7 @@
 #ifndef GNURADIO_NODE_NODE_TRAITS_HPP
 #define GNURADIO_NODE_NODE_TRAITS_HPP
 
+#include <array>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -33,23 +34,39 @@ namespace detail {
 template<typename TPortDescr>
 using port_name = typename TPortDescr::NameT;
 
+template<typename T>
+struct array_traits {
+    static constexpr bool is_array = false;
+};
+
+template<typename T, std::size_t Size>
+struct array_traits<std::array<T, Size>> {
+    static constexpr bool        is_array = true;
+    static constexpr std::size_t size     = Size;
+};
+
 // see also MergedGraph partial specialization below
 template<PortReflectable TBlock>
 struct all_port_descriptors_impl {
     using type = refl::make_typelist_from_index_sequence<std::make_index_sequence<refl::data_member_count<TBlock>>, //
-        [](auto Idx) consteval {
-            using T                           = refl::data_member_type<TBlock, Idx>;
-            constexpr meta::fixed_string name = refl::data_member_name<TBlock, Idx>;
+        [](auto MemberIdx) consteval {
+            using T                           = refl::data_member_type<TBlock, MemberIdx>;
+            constexpr meta::fixed_string name = refl::data_member_name<TBlock, MemberIdx>;
             if constexpr (port::is_port<T>::value) {
                 // Port -> PortDescriptor
-                return meta::typelist<typename T::template make_port_descriptor<name, Idx, gr::detail::SinglePort>>{};
+                return meta::typelist<typename T::template make_port_descriptor<name, gr::detail::SinglePort, /*unused*/ 0, MemberIdx>>{};
             } else if constexpr (port::is_port_tuple<T>::value) {
                 // tuple<Ports...> -> typelist<PortDescriptor...>
-                // array<Port, N> -> typelist<PortDescriptor, PortDescriptor, ...>
-                return [=]<size_t... Is>(std::index_sequence<Is...>) { return meta::typelist<typename std::tuple_element_t<Is, T>::template make_port_descriptor<name + meta::fixed_string_from_number<Is>, Idx, Is>...>{}; }(std::make_index_sequence<std::tuple_size_v<T>>());
+                return [=]<size_t... Is>(std::index_sequence<Is...>) { return meta::typelist<typename std::tuple_element_t<Is, T>::template make_port_descriptor<name + meta::fixed_string_from_number<Is>, gr::detail::TupleOfPorts, /* index in tuple */ Is, MemberIdx>...>{}; }(std::make_index_sequence<std::tuple_size_v<T>>());
             } else if constexpr (port::is_port_collection<T>::value) {
-                // vector<Port> -> PortDescriptor|PortCollection
-                return meta::typelist<typename T::value_type::template make_port_descriptor<name, Idx, gr::detail::PortCollection>>{};
+                using traits = array_traits<T>;
+                if constexpr (traits::is_array) {
+                    // vector<Port> -> PortDescriptor|DynamicPortCollection
+                    // array<Port, N> -> typelist<PortDescriptor, PortDescriptor, ...>
+                    return meta::typelist<typename T::value_type::template make_port_descriptor<name, gr::detail::StaticPortCollection, /* size for array */ traits::size, MemberIdx>>{};
+                } else {
+                    return meta::typelist<typename T::value_type::template make_port_descriptor<name, gr::detail::DynamicPortCollection, /* not used */ 0, MemberIdx>>{};
+                }
             } else {
                 // not a Port, nothing to add to the resulting typelist
                 return meta::typelist<>{};
@@ -133,9 +150,9 @@ using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBloc
  * arguments can be simdized types of the actual port data types.
  *
  * The block can be a sink (no output ports).
- * The requirement of at least one function argument disallows sources.
+ * The requirement of at least one function argument disallows source blocks.
  *
- * There is another (unnamed) concept for source nodes: Source nodes can implement
+ * There is another (unnamed) concept for source blocks: Source blocks can implement
  * `processOne_simd(integral_constant N)`, which returns SIMD object(s) of width N.
  */
 template<typename TBlock>
@@ -251,7 +268,7 @@ static_assert(OutputSpanLike<DummyOutputSpan<int>>);
 
 template<gr::detail::PortDescription Port, bool isInputStdSpan, bool isOutputStdSpan>
 constexpr auto* port_to_processBulk_argument_helper() {
-    if constexpr (Port::kIsDynamicCollection) { // vector of ports
+    if constexpr (Port::kIsDynamicCollection || Port::kIsStaticCollection) { // vector or array of ports
         if constexpr (Port::kIsInput) {
             if constexpr (isInputStdSpan) {
                 return static_cast<std::span<std::span<const typename Port::value_type::value_type>>*>(nullptr);

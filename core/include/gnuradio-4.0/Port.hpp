@@ -329,18 +329,20 @@ concept OutputSpanLike = std::ranges::contiguous_range<T> && std::ranges::output
 };
 
 namespace detail {
-enum TupleIdxSpecialValues : int { SinglePort = -1, PortCollection = -2 };
+enum PortOrCollectionKind { SinglePort, DynamicPortCollection, StaticPortCollection, TupleOfPorts };
 
-template<typename T, meta::fixed_string portName, PortType portType, PortDirection portDirection, size_t MemberIdx, int TupleIdx, typename... Attributes>
+// int KindExtraData -- tuple index for ports in tuples, array size for arrays of ports, unused otherwise
+template<typename T, meta::fixed_string portName, PortType portType, PortDirection portDirection, PortOrCollectionKind Kind, std::size_t KindExtraData, std::size_t MemberIdx, typename... Attributes>
 struct PortDescriptor {
     static_assert(not portName.empty());
     static_assert(MemberIdx != size_t(-1));
 
     // descriptor for a std::vector<Port> (or similar dynamically sized container)
-    static constexpr bool kIsDynamicCollection = TupleIdx == PortCollection;
+    static constexpr bool kIsDynamicCollection = Kind == DynamicPortCollection;
+    static constexpr bool kIsStaticCollection  = Kind == StaticPortCollection;
 
     // tuple-like
-    static constexpr bool kPartOfTuple = TupleIdx >= 0;
+    static constexpr bool kPartOfTuple = Kind == TupleOfPorts;
 
     static constexpr PortDirection kDirection                 = portDirection;
     static constexpr PortType      kPortType                  = portType;
@@ -351,13 +353,16 @@ struct PortDescriptor {
     using Required = meta::typelist<Attributes...>::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
 
     // directly used as the return type of processOne (if there are multiple PortDescriptors a tuple of all value_types)
-    using value_type = std::conditional_t<kIsDynamicCollection, std::vector<T>, T>;
+    using value_type =                                                            //
+        std::conditional_t<kIsDynamicCollection, std::vector<T>,                  //
+            std::conditional_t<kIsStaticCollection, std::array<T, KindExtraData>, //
+                T>>;
 
     template<typename TBlock>
     requires std::same_as<std::remove_cvref_t<TBlock>, typename std::remove_cvref_t<TBlock>::derived_t>
     static constexpr decltype(auto) getPortObject(TBlock&& obj) {
         if constexpr (kPartOfTuple) {
-            return refl::data_member<MemberIdx>(obj)[std::integral_constant<int, TupleIdx>()];
+            return std::get<KindExtraData>(refl::data_member<MemberIdx>(obj));
         } else {
             return refl::data_member<MemberIdx>(obj);
         }
@@ -377,6 +382,7 @@ concept PortDescription = requires {
     typename T::NameT;
     typename T::Required;
     { auto(T::kIsDynamicCollection) } -> std::same_as<bool>;
+    { auto(T::kIsStaticCollection) } -> std::same_as<bool>;
     { auto(T::kPartOfTuple) } -> std::same_as<bool>;
     { auto(T::kIsInput) } -> std::same_as<bool>;
     { auto(T::kIsOutput) } -> std::same_as<bool>;
@@ -408,8 +414,8 @@ concept PortDescription = requires {
  */
 template<typename T, PortType portType, PortDirection portDirection, typename... Attributes>
 struct Port {
-    template<meta::fixed_string newName, size_t Idx, int TupleIdx>
-    using make_port_descriptor = detail::PortDescriptor<T, newName, portType, portDirection, Idx, TupleIdx, Attributes...>;
+    template<meta::fixed_string newName, detail::PortOrCollectionKind Kind, std::size_t KindExtraData, size_t MemberIdx>
+    using make_port_descriptor = detail::PortDescriptor<T, newName, portType, portDirection, Kind, KindExtraData, MemberIdx, Attributes...>;
 
     static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
     static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");

@@ -422,31 +422,32 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
     GR_MAKE_REFLECTABLE(ArrayPortsNode, input, output);
 
     template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
-    gr::work::Status processBulk(TInSpan& in0, TInSpan& in1, TInSpan& in2, TInSpan& in3, TOutSpan& out0, TOutSpan& out1, TOutSpan& out2, TOutSpan& out3) {
-        auto available = std::min(in0.size(), out0.size());
-        std::copy_n(in0.begin(), available, out0.begin());
-        std::ignore = in0.consume(available);
-        out0.publish(available);
+    gr::work::Status processBulk(std::span<TInSpan>& ins, std::span<TOutSpan>& outs) {
+        auto available = std::min(ins[0].size(), outs[0].size());
+        std::copy_n(ins[0].begin(), available, outs[0].begin());
+        std::ignore = ins[0].consume(available);
+        outs[0].publish(available);
 
-        available = std::min(in1.size(), out1.size());
-        std::copy_n(in1.begin(), available, out1.begin());
-        std::ignore = in1.consume(available);
-        out1.publish(available);
+        available = std::min(ins[1].size(), outs[1].size());
+        std::copy_n(ins[1].begin(), available, outs[1].begin());
+        std::ignore = ins[1].consume(available);
+        outs[1].publish(available);
 
-        available = std::min(in2.size(), out2.size());
-        std::copy_n(in2.begin(), available, out2.begin());
-        std::ignore = in2.consume(available);
-        out2.publish(available);
+        available = std::min(ins[2].size(), outs[2].size());
+        std::copy_n(ins[2].begin(), available, outs[2].begin());
+        std::ignore = ins[2].consume(available);
+        outs[2].publish(available);
 
-        available = std::min(in3.size(), out3.size());
-        std::copy_n(in3.begin(), available, out3.begin());
-        std::ignore = in3.consume(available);
-        out3.publish(available);
+        available = std::min(ins[3].size(), outs[3].size());
+        std::copy_n(ins[3].begin(), available, outs[3].begin());
+        std::ignore = ins[3].consume(available);
+        outs[3].publish(available);
 
         return gr::work::Status::OK;
     }
 };
 static_assert(gr::HasProcessBulkFunction<ArrayPortsNode<int>>);
+
 const boost::ut::suite<"Block signatures"> _block_signature = [] {
     using namespace boost::ut;
 
@@ -781,16 +782,16 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input0">(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input1">(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input2">(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input3">(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input", 0>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input", 1>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input", 2>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input", 3>(testNode)));
 
         // test also different connect API
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output0"s, *sinks[0], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output1"s, *sinks[1], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output2"s, *sinks[2], "in"s)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output3"s, *sinks[3], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#0"s, *sinks[0], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#1"s, *sinks[1], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#2"s, *sinks[2], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#3"s, *sinks[3], "in"s)));
 
         gr::scheduler::Simple sched{std::move(graph)};
         expect(sched.runAndWait().has_value());
