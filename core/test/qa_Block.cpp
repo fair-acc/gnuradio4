@@ -413,13 +413,13 @@ struct SyncOrAsyncBlock : gr::Block<SyncOrAsyncBlock<T, isInputAsync, isOutputAs
 static_assert(gr::HasProcessBulkFunction<SyncOrAsyncBlock<float, true, true>>);
 
 template<typename T>
-struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
+struct VectorPortsBlock : gr::Block<VectorPortsBlock<T>> {
     static constexpr std::size_t nPorts = 4;
 
-    std::array<gr::PortIn<T, gr::Async>, nPorts>  input;
-    std::array<gr::PortOut<T, gr::Async>, nPorts> output;
+    std::vector<gr::PortIn<T, gr::Async>>  input{nPorts};
+    std::vector<gr::PortOut<T, gr::Async>> output{nPorts};
 
-    GR_MAKE_REFLECTABLE(ArrayPortsNode, input, output);
+    GR_MAKE_REFLECTABLE(VectorPortsBlock, input, output);
 
     template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
     gr::work::Status processBulk(std::span<TInSpan>& ins, std::span<TOutSpan>& outs) {
@@ -446,7 +446,43 @@ struct ArrayPortsNode : gr::Block<ArrayPortsNode<T>> {
         return gr::work::Status::OK;
     }
 };
-static_assert(gr::HasProcessBulkFunction<ArrayPortsNode<int>>);
+static_assert(gr::HasProcessBulkFunction<VectorPortsBlock<int>>);
+
+template<typename T>
+struct ArrayPortsBlock : gr::Block<ArrayPortsBlock<T>> {
+    static constexpr std::size_t nPorts = 4;
+
+    std::array<gr::PortIn<T, gr::Async>, nPorts>  input;
+    std::array<gr::PortOut<T, gr::Async>, nPorts> output;
+
+    GR_MAKE_REFLECTABLE(ArrayPortsBlock, input, output);
+
+    template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
+    gr::work::Status processBulk(std::span<TInSpan>& ins, std::span<TOutSpan>& outs) {
+        auto available = std::min(ins[0].size(), outs[0].size());
+        std::copy_n(ins[0].begin(), available, outs[0].begin());
+        std::ignore = ins[0].consume(available);
+        outs[0].publish(available);
+
+        available = std::min(ins[1].size(), outs[1].size());
+        std::copy_n(ins[1].begin(), available, outs[1].begin());
+        std::ignore = ins[1].consume(available);
+        outs[1].publish(available);
+
+        available = std::min(ins[2].size(), outs[2].size());
+        std::copy_n(ins[2].begin(), available, outs[2].begin());
+        std::ignore = ins[2].consume(available);
+        outs[2].publish(available);
+
+        available = std::min(ins[3].size(), outs[3].size());
+        std::copy_n(ins[3].begin(), available, outs[3].begin());
+        std::ignore = ins[3].consume(available);
+        outs[3].publish(available);
+
+        return gr::work::Status::OK;
+    }
+};
+static_assert(gr::HasProcessBulkFunction<ArrayPortsBlock<int>>);
 
 const boost::ut::suite<"Block signatures"> _block_signature = [] {
     using namespace boost::ut;
@@ -758,11 +794,56 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         syncOrAsyncTest<false, false>();
     };
 
+    "basic ports in vectors"_test = [] {
+        using namespace gr::testing;
+        using namespace std::string_literals;
+
+        using TestNode = VectorPortsBlock<double>;
+
+        const gr::Size_t nSamples = 5;
+
+        gr::Graph                                                         graph;
+        std::array<TagSource<double>*, 4>                                 sources;
+        std::array<TagSink<double, ProcessFunction::USE_PROCESS_ONE>*, 4> sinks;
+
+        auto& testNode = graph.emplaceBlock<TestNode>();
+
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
+
+        sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
+        sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
+        sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
+        sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
+
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input", 0>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input", 1>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input", 2>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input", 3>(testNode)));
+
+        // test also different connect API
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#0"s, *sinks[0], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#1"s, *sinks[1], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#2"s, *sinks[2], "in"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#3"s, *sinks[3], "in"s)));
+
+        gr::scheduler::Simple sched{std::move(graph)};
+        expect(sched.runAndWait().has_value());
+
+        std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
+        for (std::size_t i = 0UZ; i < sinks.size(); i++) {
+            expect(sinks[i]->_nSamplesProduced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
+            expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << fmt::format("sinks[{}]->_samples does not match to expected values", i);
+        }
+    };
+
     "basic ports in arrays"_test = [] {
         using namespace gr::testing;
         using namespace std::string_literals;
 
-        using TestNode = ArrayPortsNode<double>;
+        using TestNode = ArrayPortsBlock<double>;
 
         const gr::Size_t nSamples = 5;
 
