@@ -301,6 +301,7 @@ int main(int argc, char** argv) try {
         std::ofstream integrator = openFile(integratorSourceFile);
         integrator << std::format(R"cppcode(
             #include <gnuradio-4.0/BlockRegistry.hpp>
+            #include <gnuradio-4.0/Export.hpp>
 
             #include "declarations.hpp"
 
@@ -322,6 +323,9 @@ int main(int argc, char** argv) try {
         integrator << std::format(R"cppcode(
             #ifndef GR_BLOCKLIB_INIT_MODULE_{0}
             #define GR_BLOCKLIB_INIT_MODULE_{0}
+
+            #include <gnuradio-4.0/Export.hpp>
+
             namespace gr {{ class BlockRegistry; }}
 
             extern "C" {{
