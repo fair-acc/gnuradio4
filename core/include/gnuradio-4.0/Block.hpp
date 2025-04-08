@@ -521,7 +521,7 @@ public:
         auto setPortName = [&](std::size_t, auto* t) {
             using Description = std::remove_pointer_t<decltype(t)>;
             auto& port        = Description::getPortObject(self());
-            if constexpr (Description::kIsDynamicCollection) {
+            if constexpr (Description::kIsDynamicCollection || Description::kIsStaticCollection) {
                 for (auto& actualPort : port) {
                     actualPort.name = Description::Name;
                 }
@@ -1682,7 +1682,7 @@ protected:
                 }
             }
         } else { // block does not define any valid processing function
-            static_assert(meta::always_false<traits::block::stream_input_port_types_tuple<Derived>>, "neither processBulk(...) nor processOne(...) implemented");
+            meta::print_types<meta::message_type<"neither processBulk(...) nor processOne(...) implemented for:">, Derived>{};
         }
 
         // sanitise input/output samples based on explicit user-defined processBulk(...) return status

@@ -32,9 +32,6 @@ struct is_port_tuple : std::false_type {};
 template<typename... Ts>
 struct is_port_tuple<std::tuple<Ts...>> : std::conjunction<is_port<Ts>...> {};
 
-template<typename T, std::size_t N>
-struct is_port_tuple<std::array<T, N>> : is_port<T> {};
-
 template<typename Collection>
 concept is_port_collection_v = is_port_v<typename Collection::value_type> and not is_port_tuple<Collection>::value;
 
@@ -62,6 +59,9 @@ using is_output_port = std::bool_constant<T::kIsOutput>;
 
 template<gr::detail::PortDescription T>
 using is_dynamic_port_collection = std::bool_constant<T::kIsDynamicCollection>;
+
+template<gr::detail::PortDescription T>
+using is_static_port_collection = std::bool_constant<T::kIsStaticCollection>;
 
 template<PortType portType>
 struct is_port_type {

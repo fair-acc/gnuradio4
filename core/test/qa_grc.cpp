@@ -13,13 +13,14 @@
 
 #include <boost/ut.hpp>
 
-#include "ArrayTestBlocks.hpp"
+#include "CollectionTestBlocks.hpp"
 
 #include <GrBasicBlocks>
 #include <GrTestingBlocks>
 #include <qa_grc>
 
 #include "TestBlockRegistryContext.hpp"
+#include "gnuradio-4.0/BlockModel.hpp"
 
 namespace ut = boost::ut;
 
@@ -101,15 +102,15 @@ const boost::ut::suite BasicGrcTests = [] {
     constexpr std::string_view testGrc = R"(
 blocks:
   - name: ArraySinkImpl<float64, true, 42>
-    id: ArraySinkImpl<float64, true, 42>
+    id: gr::testing::ArraySinkImpl<float64, true, 42>
     parameters:
-      name: ArraySinkImpl<float64, true, 42>
+      name: gr::testing::ArraySinkImpl<float64, true, 42>
   - name: ArraySource<float64>
-    id: ArraySource<float64>
+    id: gr::testing::ArraySource<float64>
     parameters:
       name: ArraySource<float64>
   - name: ArraySource<float64>
-    id: ArraySource<float64>
+    id: gr::testing::ArraySource<float64>
     parameters:
       name: ArraySource<float64>
 connections:
@@ -337,26 +338,52 @@ connections:
         }
     };
 
-    "Port collections"_test = [] {
+    "Array of Ports"_test = [] {
         using namespace gr;
 
         gr::Graph graph1;
-        auto&     arraySink    = graph1.emplaceBlock<ArraySink<double>>();
-        auto&     arraySource0 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource0"}});
-        auto&     arraySource1 = graph1.emplaceBlock<ArraySource<double>>({{"name", "ArraySource1"}});
+        auto&     arraySink    = graph1.emplaceBlock<gr::testing::ArraySink<double>>();
+        auto&     arraySource0 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource0"}});
+        auto&     arraySource1 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource1"}});
 
-        // TODO re-enable this test -> pre-requisite revert std::array<T, N> not being handled as collection but as tuple.
-        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA0">(arraySource0).to<"inB1">(arraySink)));
-        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA1">(arraySource1).to<"inB0">(arraySink)));
-        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB0">(arraySource0).to<"inA0">(arraySink)));
-        // expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB1">(arraySource1).to<"inA1">(arraySink)));
-
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource0, {0UZ, 0UZ}, arraySink, {1UZ, 1UZ})));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource0, {1UZ, 0UZ}, arraySink, {0UZ, 0UZ})));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource1, {0UZ, 1UZ}, arraySink, {1UZ, 0UZ})));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource1, {1UZ, 1UZ}, arraySink, {0UZ, 1UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB", 0>(arraySource0).to<"inA", 0>(arraySink)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outB", 1>(arraySource1).to<"inA", 1>(arraySink)));
 
         expect(graph1.reconnectAllEdges());
+
+        expect(eq(graph1.edges().size(), 4UZ));
+        for (const auto& edge : graph1.edges()) {
+            expect(edge.state() == Edge::EdgeState::Connected);
+        }
+
+        const auto graph1Saved = gr::saveGrc(context->loader, graph1);
+        const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+
+        expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
+        expect(eq(collectEdges(graph1), collectEdges(graph2)));
+    };
+
+    "Vector of Ports"_test = [] {
+        using namespace gr;
+
+        gr::Graph graph1;
+        auto&     vectorSink    = graph1.emplaceBlock<gr::testing::VectorSink<double>>();
+        auto&     vectorSource0 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource0"}});
+        auto&     vectorSource1 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource1"}});
+
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, {0UZ, 0UZ}, vectorSink, {1UZ, 1UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, {1UZ, 0UZ}, vectorSink, {0UZ, 0UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource1, {0UZ, 1UZ}, vectorSink, {1UZ, 0UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource1, {1UZ, 1UZ}, vectorSink, {0UZ, 1UZ})));
+
+        expect(graph1.reconnectAllEdges());
+
+        expect(eq(graph1.edges().size(), 4UZ));
+        for (const auto& edge : graph1.edges()) {
+            expect(edge.state() == Edge::EdgeState::Connected);
+        }
 
         const auto graph1Saved = gr::saveGrc(context->loader, graph1);
         const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
@@ -382,7 +409,7 @@ const boost::ut::suite SettingsTests = [] {
             const auto expectedInt16Vector   = std::vector<int16_t>{1, 2, 3};
             const auto expectedComplexVector = std::vector<std::complex<double>>{{1., 1.}, {2., 2.}, {3., 3.}};
 
-            std::ignore = graph1.emplaceBlock<ArraySink<double>>({{"bool_setting", bool(expectedBool)}, {"string_setting", expectedString}, {"complex_setting", expectedComplex}, //
+            std::ignore = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"bool_setting", bool(expectedBool)}, {"string_setting", expectedString}, {"complex_setting", expectedComplex}, //
                 {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
@@ -412,7 +439,7 @@ const boost::ut::suite SettingsTests = [] {
             using namespace gr;
 
             gr::Graph  graph1;
-            auto&      block = graph1.emplaceBlock<ArraySink<double>>({{"name", "ArraySink0"}});
+            auto&      block = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"name", "ArraySink0"}});
             const auto now   = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
             expect(block.settings().set({{"name", "ArraySink1"}}, SettingsCtx{now, "1"}).empty());
             expect(block.settings().set({{"name", "ArraySink1+10"}}, SettingsCtx{now + 10'000'000'000ULL, "1"}).empty());

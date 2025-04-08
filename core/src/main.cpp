@@ -1,9 +1,10 @@
 #include <array>
-#include <fmt/core.h>
-
 #include <cassert>
 
+#include <fmt/core.h>
+
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/config.hpp> // contains the project and compiler flags definitions
 
 template<typename T>
@@ -51,15 +52,15 @@ struct adder : public gr::Block<adder<T>> {
     }
 };
 
-template<typename T, std::size_t Count = 2>
-struct duplicate : public gr::Block<duplicate<T, Count>> {
-    gr::PortIn<T>                     in;
-    std::array<gr::PortOut<T>, Count> out;
+template<typename T>
+struct duplicate : public gr::Block<duplicate<T>> {
+    gr::PortIn<T>                              in;
+    std::tuple<gr::PortOut<T>, gr::PortOut<T>> out;
 
     GR_MAKE_REFLECTABLE(duplicate, in, out);
 
     [[nodiscard]] constexpr auto processOne(T a) const noexcept {
-        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::tuple{((void)Is, a)...}; }(std::make_index_sequence<Count>());
+        return [&a]<std::size_t... Is>(std::index_sequence<Is...>) { return std::tuple{((void)Is, a)...}; }(std::make_index_sequence<std::tuple_size_v<decltype(out)>>());
     }
 };
 
@@ -143,7 +144,7 @@ int main() {
     }
 
     {
-        auto merged = mergeByIndex<0, 0>(duplicate<int, 2>(), scale<int, 2>());
+        auto merged = mergeByIndex<0, 0>(duplicate<int>(), scale<int, 2>());
         static_assert(std::same_as<decltype(merged)::ReturnType, std::tuple<int, int>>);
         reflectBlock(merged);
 
@@ -178,16 +179,16 @@ int main() {
     }
 
     {
-        auto merged = merge<"out1", "original">(merge<"out0", "original">(duplicate<int, 4>(), scale<int, 2>()), scale<int, 2>());
+        auto merged = merge<"out1", "original">(merge<"out0", "original">(duplicate<int>(), scale<int, 2>()), scale<int, 2>());
         reflectBlock(merged);
 
         // execute graph
         std::array<int, 4> a = {1, 2, 3, 4};
 
         for (std::size_t i = 0; i < 4; ++i) {
-            auto tuple            = merged.processOne(a[i]);
-            auto [r1, r2, r3, r4] = tuple;
-            fmt::print("{} {} {} {} \n", r1, r2, r3, r4);
+            auto tuple    = merged.processOne(a[i]);
+            auto [r1, r2] = tuple;
+            fmt::print("{} {} \n", r1, r2);
         }
     }
 

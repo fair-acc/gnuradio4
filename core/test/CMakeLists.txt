@@ -76,7 +76,7 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_Settings)
 
   add_app_test(qa_grc)
-  gr_generate_block_instantiations(qa_grc HEADERS ArrayTestBlocks.hpp)
+  gr_generate_block_instantiations(qa_grc HEADERS CollectionTestBlocks.hpp)
   target_link_libraries(qa_grc PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
 
   add_ut_test(qa_GraphMessages)
