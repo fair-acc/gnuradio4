@@ -333,8 +333,8 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         });
         auto& sink1  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
         auto& sink2  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out0">(source).to<"in">(sink1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out1">(source).to<"in">(sink2)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(sink1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 1>(source).to<"in">(sink2)));
 
         auto sched = scheduler{std::move(flow), threadPool};
 

@@ -497,8 +497,8 @@ nestedVector2:
     - { key: !!str [5, 6] }
 nestedFlow: [ !!str [1, 2], [3, 4] ]
 vectorWithBlockMap:
-  - name: ArraySink<double>
-    id: ArraySink
+  - name: ArraySink
+    id: gr::testing::ArraySink<double>
     parameters:
       name: Block
 vectorWithColons:
@@ -525,7 +525,7 @@ vectorWithColons:
         expected["nestedVector"]               = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
         expected["nestedFlow"]                 = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
         expected["nestedVector2"]              = std::vector<pmtv::pmt>{static_cast<int64_t>(42), std::vector<std::string>{"1", "2"}, std::vector<std::string>{"3", "4"}, pmtv::map_t{{"key", std::vector<std::string>{"5", "6"}}}};
-        expected["vectorWithBlockMap"]         = std::vector<pmtv::pmt>{pmtv::map_t{{"name", "ArraySink<double>"}, {"id", "ArraySink"}, {"parameters", pmtv::map_t{{"name", "Block"}}}}};
+        expected["vectorWithBlockMap"]         = std::vector<pmtv::pmt>{pmtv::map_t{{"name", "ArraySink"}, {"id", "gr::testing::ArraySink<double>"}, {"parameters", pmtv::map_t{{"name", "Block"}}}}};
         expected["vectorWithColons"]           = std::vector<pmtv::pmt>{"key: value", "key2: value2"};
 
         testYAML(src1, expected);
@@ -657,11 +657,11 @@ key#Comment: foo
         constexpr std::string_view src = R"(
 blocks:
   - name: ArraySink<double>
-    id: ArraySink<double>
+    id: gr::testing::ArraySink<double>
     parameters:
       name: ArraySink<double>
   - name: ArraySource<double>
-    id: ArraySource<double>
+    id: gr::testing::ArraySource<double>
     parameters:
       name: ArraySource<double>
 connections:
@@ -674,11 +674,11 @@ connections:
         pmtv::map_t expected;
         pmtv::map_t block1;
         block1["name"]       = "ArraySink<double>";
-        block1["id"]         = "ArraySink<double>";
+        block1["id"]         = "gr::testing::ArraySink<double>";
         block1["parameters"] = pmtv::map_t{{"name", "ArraySink<double>"}};
         pmtv::map_t block2;
         block2["name"]       = "ArraySource<double>";
-        block2["id"]         = "ArraySource<double>";
+        block2["id"]         = "gr::testing::ArraySource<double>";
         block2["parameters"] = pmtv::map_t{{"name", "ArraySource<double>"}};
         expected["blocks"]   = std::vector<pmtv::pmt>{block1, block2};
         const auto zero      = pmtv::pmt{static_cast<int64_t>(0)};
