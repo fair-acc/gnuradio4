@@ -13,9 +13,7 @@
 #include <volk/volk.h>
 namespace gr::blocks::math {
 
-//------------------------------------------------------------------------------
-// Helper: defaultValue()
-//------------------------------------------------------------------------------
+
 namespace detail {
 template<typename T>
 T defaultValue() noexcept {
@@ -29,10 +27,7 @@ T defaultValue() noexcept {
 }
 } // namespace detail
 
-//------------------------------------------------------------------------------
-// Constant Math Operation Blocks
-// (AddConst, SubtractConst, MultiplyConst, DivideConst)
-//------------------------------------------------------------------------------
+
 template<typename T, typename op>
 struct MathOpImpl : Block<MathOpImpl<T, op>> {
     PortIn<T>  in{};
@@ -80,10 +75,6 @@ GR_REGISTER_BLOCK("gr::blocks::math::SubtractConst", gr::blocks::math::MathOpImp
 GR_REGISTER_BLOCK("gr::blocks::math::MultiplyConst", gr::blocks::math::MathOpImpl, ([T], '*'), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::DivideConst", gr::blocks::math::MathOpImpl, ([T], '/'), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ]);
 
-//------------------------------------------------------------------------------
-// Multi-Port Math Operation Blocks
-// (Add, Subtract, Multiply, Divide)
-//------------------------------------------------------------------------------
 template<typename T, typename op>
 requires(std::is_arithmetic_v<T>)
 struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
@@ -141,9 +132,9 @@ GR_REGISTER_BLOCK("gr::blocks::math::Subtract", gr::blocks::math::MathOpImpl, ([
 GR_REGISTER_BLOCK("gr::blocks::math::Multiply", gr::blocks::math::MathOpImpl, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::Divide", gr::blocks::math::MathOpImpl, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ]);
 
-//------------------------------------------------------------------------------
+
 // Conjugate Block
-//------------------------------------------------------------------------------
+
 template<typename T>    // complex<float> complex<double>
 struct ConjugateImpl : Block<ConjugateImpl<T>> {
     using Description = Doc<R"("@brief This block returns the conjugate by inverting the imaginary part of the input signal")">;
