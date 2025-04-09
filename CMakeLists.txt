@@ -231,7 +231,9 @@ endif()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
 if(NOT (TARGET magic_enum))
-  add_library(magic_enum INTERFACE)
+  add_library(magic_enum INTERFACE
+          blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
+          blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
   target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
                              INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
 endif()
@@ -239,7 +241,10 @@ endif()
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
 add_library(
   exprtk STATIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
+                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.cpp"
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp # dummy source file
 )
 target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
                                          "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
@@ -286,11 +291,15 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
   find_package(SoapySDR CONFIG)
 endif()
 
-add_library(pmtv INTERFACE)
+add_library(pmtv INTERFACE
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
 target_link_libraries(pmtv INTERFACE)
 
-add_library(vir INTERFACE)
+add_library(vir INTERFACE
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
 
 # FFTW3 is build 2 times for float and double precisions
@@ -371,7 +380,9 @@ ExternalProject_Add(
   INSTALL_COMMAND ""
   LOG_DOWNLOAD ON)
 
-add_library(fftw INTERFACE)
+add_library(fftw INTERFACE
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
+        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
 target_link_libraries(
   fftw
   INTERFACE fftw3
