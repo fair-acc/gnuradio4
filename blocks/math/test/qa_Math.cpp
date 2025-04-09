@@ -147,10 +147,8 @@ std::complex<float>, std::complex<double>*/>();
         auto block = DivideConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress, block.ioThreadPool);
         expect(eq(block.processOne(T(4)), T(4) / T(2))) << fmt::format("SubtractConst(2) test for type {}\n", meta::type_name<T>());
-    } | kArithmeticTypes;
-   
+    } | kArithmeticTypes; 
 };
-
 using namespace boost::ut;
 using namespace gr;
 using namespace gr::testing;
