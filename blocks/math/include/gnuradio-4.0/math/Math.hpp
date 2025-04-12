@@ -148,30 +148,13 @@ struct ConjugateImpl : Block<ConjugateImpl<T>> {
     static std::shared_ptr<ConjugateImpl<T>> make() {     // returns a smart pointer to ConjugateImpl
         return std::make_shared<ConjugateImpl<T>>();      // new instance of ConjugateImpl dynamically and wraps it ina shrared_ptr.
     }
-    
-    gr::work::Status processBulk(gr::InputSpanLike auto& input_span, gr::OutputSpanLike auto& output_span) const noexcept {
-        if (input_span.size() != output_span.size()) {
-            return gr::work::Status::ERROR;
+    T processOne(const T& input) const noexcept {
+        if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
+            return std::conj(input);
         }
-        
-        if constexpr (std::is_same_v<T, std::complex<float>>) {
-            volk_32fc_conjugate_32fc(
-                reinterpret_cast<std::complex<float>*>(output_span.data()),
-                reinterpret_cast<const std::complex<float>*>(input_span.data()),
-                static_cast<unsigned int>(input_span.size())
-            );            
-        }
-        else if constexpr (std::is_same_v<T, std::complex<double>>) {
-            std::transform(input_span.begin(), input_span.end(), output_span.begin(),
-                [](const std::complex<double>& z) {
-                    return std::conj(z);
-                });
-        }
-        return gr::work::Status::OK;
-    }
+        return input;
+    }  
 };
-
-// Register the Conjugate block for the float and double complex types
 GR_REGISTER_BLOCK("gr::blocks::math::Conjugate", gr::blocks::math::ConjugateImpl, std::tuple<std::complex<float>, std::complex<double>>);
 
 } // namespace gr::blocks::math
