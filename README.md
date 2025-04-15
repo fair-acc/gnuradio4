@@ -63,7 +63,7 @@ echo 1 | sudo tee /sys/block/zram0/reset
 - **`TIMETRACE`** (default: OFF): activates Clang’s `-ftime-trace` for per-file compilation timing.
 - **`ADDRESS_SANITIZER`** (default: OFF): enables AddressSanitizer (can’t be combined with the other sanitiser options).
 - **`UB_SANITIZER`** (default: OFF): enables 'Undefined Behavior' checks.
-- **`THREAD_SANITIZER`** (default: OFF): enables threadding checks (N.B. strong impact on performance).
+- **`THREAD_SANITIZER`** (default: OFF): enables threading checks (N.B. strong impact on performance).
 
 ### Example Combined Command
 
