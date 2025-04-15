@@ -34,6 +34,10 @@
 
 namespace gr {
 
+class Graph;
+std::string  saveGrc(PluginLoader& loader, const gr::Graph& rootGraph);
+inline Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location = std::source_location::current());
+
 namespace graph::property {
 inline static const char* kEmplaceBlock = "EmplaceBlock";
 inline static const char* kRemoveBlock  = "RemoveBlock";
@@ -53,6 +57,8 @@ inline static const char* kEdgeRemoved  = "EdgeRemoved";
 
 inline static const char* kGraphInspect   = "GraphInspect";
 inline static const char* kGraphInspected = "GraphInspected";
+
+inline static const char* kGraphGRC = "GraphGRC";
 
 inline static const char* kRegistryBlockTypes = "RegistryBlockTypes";
 
@@ -344,6 +350,7 @@ public:
         propertyCallbacks[graph::property::kEmplaceEdge]        = std::mem_fn(&Graph::propertyCallbackEmplaceEdge);
         propertyCallbacks[graph::property::kRemoveEdge]         = std::mem_fn(&Graph::propertyCallbackRemoveEdge);
         propertyCallbacks[graph::property::kGraphInspect]       = std::mem_fn(&Graph::propertyCallbackGraphInspect);
+        propertyCallbacks[graph::property::kGraphGRC]           = std::mem_fn(&Graph::propertyCallbackGraphGRC);
         propertyCallbacks[graph::property::kRegistryBlockTypes] = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
     }
 
@@ -699,6 +706,25 @@ public:
         }();
 
         message.endpoint = graph::property::kGraphInspected;
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackGraphGRC([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == graph::property::kGraphGRC);
+
+        if (message.cmd == message::Command::Get) {
+            message.data = property_map{{"value", gr::saveGrc(*_pluginLoader, *this)}};
+        } else if (message.cmd == message::Command::Set) {
+            const auto& data        = message.data.value();
+            auto        yamlContent = std::get<std::string>(data.at("value"s));
+            *this                   = gr::loadGrc(*_pluginLoader, yamlContent);
+
+            setTopologyChanged();
+
+        } else {
+            throw gr::exception(fmt::format("Unexpected command type {}", message.cmd));
+        }
+
         return message;
     }
 
@@ -1467,7 +1493,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
 } // namespace detail
 
-inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location = std::source_location::current()) {
+inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location) {
     Graph      resultGraph;
     const auto yaml = pmtv::yaml::deserialize(yamlSrc);
     if (!yaml) {
