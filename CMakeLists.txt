@@ -5,15 +5,19 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
-add_library(gnuradio-options INTERFACE)
+# Mainly for FMT
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
   message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
   set(EMSCRIPTEN ON)
 endif()
 
-option(ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ON)
-option(ENABLE_BLOCK_REGISTRY "Enable building the block registry" ON)
+# This option affects the GR build, as well as the behavior of BlockLib cmake functions that are used in out-of-tree
+# modules
+option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ON)
+
+option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ON)
 option(EMBEDDED "Enable embedded mode" OFF)
 if(EMSCRIPTEN)
   option(WARNINGS_AS_ERRORS "Enable -Werror flags" OFF) # some ubiquous warnings in UT need to be fixed first.
@@ -26,15 +30,20 @@ option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
 option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 
-if(EMSCRIPTEN)
-  set(ENABLE_BLOCK_PLUGINS OFF)
+if(EMSCRIPTEN OR NOT GR_ENABLE_BLOCK_REGISTRY)
+  set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
+
+# blocklib_generator is a build process dependency, add it before everything
+add_subdirectory(blocklib_generator)
+
+add_library(gnuradio-options INTERFACE)
 
 message(
   STATUS
-    "Is block registry enabled? (faster compile-times and when runtime or Python wrapping APIs are not required) ${ENABLE_BLOCK_REGISTRY}"
+    "Is block registry enabled? (faster compile-times and when runtime or Python wrapping APIs are not required) ${GR_ENABLE_BLOCK_REGISTRY}"
 )
-message(STATUS "Is plugin system enabled? ${ENABLE_BLOCK_PLUGINS}")
+message(STATUS "Is plugin system enabled? ${INTERNAL_ENABLE_BLOCK_PLUGINS}")
 
 # Determine if fmt is built as a subproject (using add_subdirectory) or if it is the master project.
 if(NOT DEFINED GR_TOPLEVEL_PROJECT)
@@ -205,9 +214,6 @@ if(INCLUDE_WHAT_YOU_USE_TOOL_PATH)
   set_property(GLOBAL PROPERTY CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${INCLUDE_WHAT_YOU_USE_TOOL_PATH})
 endif()
 
-# Mainly for FMT
-set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-
 include(cmake/CompilerWarnings.cmake)
 set_project_warnings(gnuradio-options)
 
@@ -231,9 +237,7 @@ endif()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
 if(NOT (TARGET magic_enum))
-  add_library(magic_enum INTERFACE
-          blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
-          blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
+  add_library(magic_enum INTERFACE)
   target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
                              INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
 endif()
@@ -241,10 +245,7 @@ endif()
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
 add_library(
   exprtk STATIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.cpp"
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp # dummy source file
+                "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
 )
 target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
                                          "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
@@ -291,15 +292,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
   find_package(SoapySDR CONFIG)
 endif()
 
-add_library(pmtv INTERFACE
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
+add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
 target_link_libraries(pmtv INTERFACE)
 
-add_library(vir INTERFACE
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
+add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
 
 # FFTW3 is build 2 times for float and double precisions
@@ -380,9 +377,7 @@ ExternalProject_Add(
   INSTALL_COMMAND ""
   LOG_DOWNLOAD ON)
 
-add_library(fftw INTERFACE
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp
-        blocks/basic/include/gnuradio-4.0/basic/ClockSource.hpp)
+add_library(fftw INTERFACE)
 target_link_libraries(
   fftw
   INTERFACE fftw3

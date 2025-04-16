@@ -1,12 +1,11 @@
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wconversion"
 #include <boost/ut.hpp>
+
 #include <gnuradio-4.0/math/Math.hpp>
+
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
-#include <volk/volk.h>
 
 template<typename T>
 struct TestParameters {
@@ -29,7 +28,7 @@ void test_block(const TestParameters<T> p) {
         ? graph.emplaceBlock<BlockUnderTest>()
         : graph.emplaceBlock<BlockUnderTest>({{"n_inputs", n_inputs}});
     for (Size_t i = 0; i < n_inputs; ++i) {
-        auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.inputs[i]}, {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
+        auto& src = graph.emplaceBlock<TagSource<T,ProcessFunction::USE_PROCESS_ONE>>({{"values",p.inputs[i]}, {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
         std::string input_port=std::is_same_v<BlockUnderTest,ConjugateImpl<T>> ? "in"s : "in#" + std::to_string(i);
         expect(eq(graph.connect(src, "out"s, block, input_port), ConnectionResult::SUCCESS)) << fmt::format("Failed to connect output port of src {} to input port {}", i, input_port);
     }
@@ -157,25 +156,22 @@ using namespace gr::blocks::math;
 
 const boost::ut::suite<"complex conjugate math tests"> conjugateTests = [] {
     "Conjugate"_test = []<typename T>(const T&) {
-        // Define test parameters:
-        // Input: vector of complex numbers.
-        // Expected output: each complex number with its imaginary part inverted.
+        // Deduce the underlying type: float if T == std::complex<float>, or double if T == std::complex<double>
+        using Underlying = typename T::value_type;
         TestParameters<T> params{
             .inputs = {{
-                T(1.0,  2.0),    // Expected conjugate: (1.0, -2.0)
-                T(0.0, -3.0),    // Expected conjugate: (0.0,  3.0)
-                T(2.0,  3.0)     // Expected conjugate: (2.0, -3.0)
+                T(static_cast<Underlying>(1.0),  static_cast<Underlying>(2.0)),    // Expected conjugate: (1.0, -2.0)
+                T(static_cast<Underlying>(0.0),  static_cast<Underlying>(-3.0)),   // Expected conjugate: (0.0,  3.0)
+                T(static_cast<Underlying>(2.0),  static_cast<Underlying>(3.0))     // Expected conjugate: (2.0, -3.0)
             }},
             .output = {
-                T(1.0, -2.0),
-                T(0.0,  3.0),
-                T(2.0, -3.0)
+                T(static_cast<Underlying>(1.0),  static_cast<Underlying>(-2.0)),
+                T(static_cast<Underlying>(0.0),  static_cast<Underlying>(3.0)),
+                T(static_cast<Underlying>(2.0),  static_cast<Underlying>(-3.0))
             }
         };
-
         // Execute the test graph: instantiate the Conjugate block and check the output.
         test_block<T, ConjugateImpl<T>>(params);
     } | std::tuple<std::complex<float>, std::complex<double>>();
 };
-
 int main() { /* not needed for UT */ }

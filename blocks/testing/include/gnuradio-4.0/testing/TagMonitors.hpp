@@ -84,7 +84,7 @@ inline constexpr bool equal_tag_lists(const std::vector<Tag>& tags1, const std::
     return true;
 }
 
-GR_REGISTER_BLOCK("gr::testing::TagSource", gr::testing::TagSource, ([T], ProcessFunction::USE_PROCESS_ONE), [ float, double ])
+GR_REGISTER_BLOCK("gr::testing::TagSource", gr::testing::TagSource, ([T], gr::testing::ProcessFunction::USE_PROCESS_ONE), [ float, double ])
 
 template<typename T, ProcessFunction UseProcessVariant = ProcessFunction::USE_PROCESS_BULK>
 struct TagSource : Block<TagSource<T, UseProcessVariant>> {
@@ -146,7 +146,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             _valueIndex++;
             return currentValue;
         }
-        return mark_tag ? (tagGenerated ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
+return mark_tag ? (tagGenerated ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(static_cast<float>(_nSamplesProduced));
     }
 
     work::Status processBulk(OutputSpanLike auto& outSpan) noexcept
@@ -187,8 +187,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
                 outSpan[0] = tagGenerated ? static_cast<T>(1) : static_cast<T>(0);
             } else {
                 for (std::size_t i = 0; i < nSamples; ++i) {
-                     outSpan[i] = static_cast<T>(_nSamplesProduced + i);
-                    //outSpan[i] = T(static_cast<typename T::value_type>(_nSamplesProduced + i), 0.0);
+                    outSpan[i] = static_cast<T>(_nSamplesProduced + i);
                 }
             }
         }
@@ -234,7 +233,7 @@ private:
     [[nodiscard]] bool isInfinite() const { return n_samples_max == 0U; }
 };
 
-GR_REGISTER_BLOCK("gr::testing::TagMonitor", gr::testing::TagMonitor, ([T], ProcessFunction::USE_PROCESS_ONE), [ float, double ])
+GR_REGISTER_BLOCK("gr::testing::TagMonitor", gr::testing::TagMonitor, ([T], gr::testing::ProcessFunction::USE_PROCESS_ONE), [ float, double ])
 
 template<typename T, ProcessFunction UseProcessVariant>
 struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
@@ -309,7 +308,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     }
 };
 
-GR_REGISTER_BLOCK("gr::testing::TagSink", gr::testing::TagSink, ([T], ProcessFunction::USE_PROCESS_ONE), [ float, double ])
+GR_REGISTER_BLOCK("gr::testing::TagSink", gr::testing::TagSink, ([T], gr::testing::ProcessFunction::USE_PROCESS_ONE), [ float, double ])
 
 template<typename T, ProcessFunction UseProcessVariant>
 struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
