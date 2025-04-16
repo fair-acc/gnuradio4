@@ -114,7 +114,23 @@ template<typename T>
 using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
 template<typename T>
 using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
+template<typename T>    // std::complex<float> or std::complex<double>
+struct ConjugateImpl : Block<ConjugateImpl<T>> {
+    using Description = Doc<R"("@brief This block returns the conjugate by inverting the imaginary part of the input signal")">;
 
+    // Ports
+    PortIn<T> in{};
+    PortOut<T> out{};
+
+    GR_MAKE_REFLECTABLE(ConjugateImpl, in, out);  
+
+    T processOne(const T& input) const noexcept {
+        if constexpr (std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>) {
+            return std::conj(input);
+        }else{
+            return input;
+        }
+    }
+};
 } // namespace gr::blocks::math
-
 #endif // GNURADIO_MATH_HPP
