@@ -8,18 +8,20 @@
 
 #include "TestBlockRegistryContext.hpp"
 
+#include "message_utils.hpp"
+
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
 namespace ut = boost::ut;
 
-template<>
-auto ut::cfg<ut::override> = RunnerContext( //
-    paths{},                                // plugin paths
-    gr::blocklib::initGrBasicBlocks,        //
+// We don't like new, but this will ensure the object is alive
+// when ut starts running the tests. It runs the tests when
+// its static objects get destroyed, which means other static
+// objects might have been destroyed before that.
+TestContext* context = new TestContext(paths{}, // plugin paths
+    gr::blocklib::initGrBasicBlocks,            //
     gr::blocklib::initGrTestingBlocks);
-
-#include "message_utils.hpp"
 
 const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
     using namespace boost::ut;
