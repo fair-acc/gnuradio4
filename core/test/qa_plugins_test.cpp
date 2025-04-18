@@ -19,31 +19,34 @@ using namespace std::chrono_literals;
 
 namespace ut = boost::ut;
 
-template<>
-auto ut::cfg<ut::override> = RunnerContext(                //
-    paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
-    gr::blocklib::initGrBasicBlocks,                       //
-    gr::blocklib::initGrTestingBlocks);
+auto makeTestContext() {
+    return std::make_unique<TestContext>(                      //
+        paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
+        gr::blocklib::initGrBasicBlocks,                       //
+        gr::blocklib::initGrTestingBlocks);
+}
 
 const boost::ut::suite PluginLoaderTests = [] {
+    auto context = makeTestContext();
+
     using namespace boost::ut;
     using namespace gr;
 
-    "GoodPlugins"_test = [] {
+    "GoodPlugins"_test = [&] {
         expect(!context->loader.plugins().empty());
         for (const auto& plugin : context->loader.plugins()) {
             expect(plugin->metadata.plugin_name.starts_with("Good"));
         }
     };
 
-    "BadPlugins"_test = [] {
+    "BadPlugins"_test = [&] {
         expect(!context->loader.failed_plugins().empty());
         for (const auto& plugin : context->loader.failed_plugins()) {
             expect(plugin.first.ends_with("bad_plugin.so"));
         }
     };
 
-    "KnownBlocksList"_test = [] {
+    "KnownBlocksList"_test = [&] {
         auto       known = context->loader.knownBlocks();
         std::array requireds{"good::cout_sink<float64>", "good::cout_sink<float32>", "good::fixed_source<float64>", "good::fixed_source<float32>", "good::divide<float64>", "good::divide<float32>", "builtin_multiply<float64>", "builtin_multiply<float32>"};
 
@@ -56,8 +59,9 @@ const boost::ut::suite PluginLoaderTests = [] {
 const boost::ut::suite BlockInstantiationTests = [] {
     using namespace boost::ut;
     using namespace gr;
+    auto context = makeTestContext();
 
-    "KnownBlocksInstantiate"_test = [] {
+    "KnownBlocksInstantiate"_test = [&] {
         expect(context->loader.instantiate("good::fixed_source<float64>") != nullptr);
         expect(context->loader.instantiate("good::cout_sink<float64>") != nullptr);
         expect(context->loader.instantiate("good::multiply<float64>") != nullptr);
@@ -71,14 +75,15 @@ const boost::ut::suite BlockInstantiationTests = [] {
         expect(context->loader.instantiate("good::convert<float32, float32>") == nullptr);
     };
 
-    "UnknownBlocks"_test = [] { expect(context->loader.instantiate("ThisBlockDoesNotExist<float64>") == nullptr); };
+    "UnknownBlocks"_test = [&] { expect(context->loader.instantiate("ThisBlockDoesNotExist<float64>") == nullptr); };
 };
 
 const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
     using namespace boost::ut;
     using namespace gr;
+    auto context = makeTestContext();
 
-    "FixedSourceToSink"_test = [] {
+    "FixedSourceToSink"_test = [&] {
         auto block_source = context->loader.instantiate("good::fixed_source<float64>");
         assert(block_source != nullptr);
         auto block_sink = context->loader.instantiate("good::cout_sink<float64>");
@@ -87,7 +92,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         expect(connection_1 == gr::ConnectionResult::SUCCESS);
     };
 
-    "LongerPipeline"_test = [] {
+    "LongerPipeline"_test = [&] {
         auto block_source = context->loader.instantiate("good::fixed_source<float64>");
 
         gr::property_map block_multiply_params;
@@ -112,7 +117,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         }
     };
 
-    "Graph"_test = [] {
+    "Graph"_test = [&] {
         gr::Graph testGraph(context->loader);
 
         // Instantiate the node that is defined in a plugin
