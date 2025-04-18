@@ -20,7 +20,6 @@ struct Xor : Block<Xor<T>> {
     GR_MAKE_REFLECTABLE(Xor, in1, in2, out);
 
     [[nodiscard]] constexpr T processOne(T input1, T input2) const noexcept { return input1 ^ input2; }
-
 };
 
 } // namespace gr::basic

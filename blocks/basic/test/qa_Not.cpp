@@ -21,7 +21,6 @@ const suite NotTests = [] {
         expect(eq(notBlock.processOne(static_cast<int16_t>(0xAAAA)), static_cast<int16_t>(0x5555)));
     };
 
-
     "int32_t support"_test = [] {
         Not<int32_t> notBlock;
 
@@ -30,6 +29,5 @@ const suite NotTests = [] {
         expect(eq(notBlock.processOne(0x0000AAAA), static_cast<int32_t>(0xFFFF5555)));
     };
 };
-
 
 int main() { return boost::ut::cfg<boost::ut::override>.run(); }

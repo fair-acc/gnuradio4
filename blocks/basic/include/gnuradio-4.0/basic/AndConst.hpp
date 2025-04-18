@@ -7,13 +7,13 @@
 
 namespace gr::basic {
 
-GR_REGISTER_BLOCK(gr::basic::AndConst, [ uint8_t, int16_t, int32_t])
+GR_REGISTER_BLOCK(gr::basic::AndConst, [ uint8_t, int16_t, int32_t ])
 
 template<std::integral T>
-struct AndConst : Block<AndConst <T>> {
+struct AndConst : Block<AndConst<T>> {
     using Description = Doc<"@brief Performs a bitwise AND operation on two inputs, producing one output stream.">;
 
-    PortIn<T> in;
+    PortIn<T>  in;
     PortOut<T> out;
 
     T constant = 1;
