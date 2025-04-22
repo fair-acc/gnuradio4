@@ -24,12 +24,13 @@
 
 namespace ut = boost::ut;
 
-template<>
-auto ut::cfg<ut::override> = RunnerContext(                //
-    paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
-    gr::blocklib::initGrBasicBlocks,                       //
-    gr::blocklib::initGrTestingBlocks,                     //
-    gr::blocklib::initqa_grc);
+auto makeTestContext() {
+    return std::make_unique<TestContext>(                      //
+        paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
+        gr::blocklib::initGrBasicBlocks,                       //
+        gr::blocklib::initGrTestingBlocks,                     //
+        gr::blocklib::initqa_grc);
+}
 
 namespace {
 auto collectBlocks(const gr::Graph& graph) {
@@ -54,32 +55,48 @@ auto collectEdges(const gr::Graph& graph) {
     return result;
 }
 
-bool checkAndPrintMissingLines(const std::string& first, const std::string& second) {
-    std::istringstream              ssSecond(second);
-    std::unordered_set<std::string> linesSecond;
-    std::string                     line;
-    while (std::getline(ssSecond, line)) {
-        linesSecond.insert(line);
+bool checkAndPrintMissingBlocks(const std::string& first, const std::string& second) {
+    gr::property_map firstYaml  = *pmtv::yaml::deserialize(first);
+    gr::property_map secondYaml = *pmtv::yaml::deserialize(second);
+
+    // Basic check for blocks
+    using BlockMinData = std::pair<std::string, std::string>;
+    std::vector<BlockMinData> firstBlocks;
+    std::vector<BlockMinData> secondBlocks;
+    std::set<BlockMinData>    seenBlocks;
+
+    for (const auto& block : std::get<std::vector<pmtv::pmt>>(firstYaml.at("blocks"))) {
+        const auto&  blockMap = std::get<gr::property_map>(block);
+        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), std::get<std::string>(blockMap.at("name"s))};
+        firstBlocks.push_back(data);
+        seenBlocks.insert(data);
     }
 
-    std::istringstream ssFirst(first);
-    bool               allLinesFound = true;
-    size_t             lineNumber    = 0;
-    while (std::getline(ssFirst, line)) {
-        ++lineNumber;
-        if (std::ranges::all_of(line, [](char c) { return std::isspace(c); })) {
-            continue;
-        }
-        if (!linesSecond.contains(line)) {
-            fmt::println(stderr, "missing line {}:\n{}", lineNumber, line);
-            allLinesFound = false;
-        }
-    }
-    if (!allLinesFound) {
-        fmt::println(stderr, "\nin:\n{}", second);
+    for (const auto& block : std::get<std::vector<pmtv::pmt>>(secondYaml.at("blocks"))) {
+        const auto&  blockMap = std::get<gr::property_map>(block);
+        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), std::get<std::string>(blockMap.at("name"s))};
+        secondBlocks.push_back(data);
+        seenBlocks.erase(data);
     }
 
-    return allLinesFound;
+    for (const auto& block : seenBlocks) {
+        fmt::print("Missing id={} name={}\n", block.first, block.second);
+    }
+
+    if (seenBlocks.empty() && (std::get<std::vector<pmtv::pmt>>(firstYaml.at("connections")).size() == std::get<std::vector<pmtv::pmt>>(secondYaml.at("connections")).size())) {
+        return true;
+    }
+
+    fmt::print("Blocks in first:\n");
+    for (const auto& data : firstBlocks) {
+        fmt::print("    id={} name={}\n", data.first, data.second);
+    }
+    fmt::print("Blocks in second:\n");
+    for (const auto& data : secondBlocks) {
+        fmt::print("    id={} name={}\n", data.first, data.second);
+    }
+
+    return false;
 }
 
 } // namespace
@@ -99,28 +116,30 @@ std::string ymlDecodeEncode(std::string_view yml, std::source_location location 
 }
 
 const boost::ut::suite BasicGrcTests = [] {
+    auto context = makeTestContext();
+
     constexpr std::string_view testGrc = R"(
 blocks:
   - name: ArraySinkImpl<float64, true, 42>
-    id: gr::testing::ArraySinkImpl<float64, true, 42>
+    id: gr::testing::ArraySink<float64>
     parameters:
-      name: gr::testing::ArraySinkImpl<float64, true, 42>
-  - name: ArraySource<float64>
+      name: ArraySinkImpl<float64, true, 42>
+  - name: ArraySourceOne<float64>
     id: gr::testing::ArraySource<float64>
     parameters:
-      name: ArraySource<float64>
+      name: ArraySourceOne<float64>
   - name: ArraySource<float64>
     id: gr::testing::ArraySource<float64>
     parameters:
       name: ArraySource<float64>
 connections:
-  - [ArraySource<float64>, [0, 0], 'ArraySinkImpl<float64, true, 42>', [1, 1]]
-  - [ArraySource<float64>, [0, 1], 'ArraySinkImpl<float64, true, 42>', [1, 0]]
+  - [ArraySourceOne<float64>, [0, 0], 'ArraySinkImpl<float64, true, 42>', [1, 1]]
+  - [ArraySourceOne<float64>, [0, 1], 'ArraySinkImpl<float64, true, 42>', [1, 0]]
   - [ArraySource<float64>, [1, 0], 'ArraySinkImpl<float64, true, 42>', [0, 0]]
   - [ArraySource<float64>, [1, 1], 'ArraySinkImpl<float64, true, 42>', [0, 1]]
 )";
 
-    "Basic graph loading and storing"_test = [&testGrc] {
+    "Basic graph loading and storing"_test = [&] {
         try {
             using namespace gr;
             for (const auto& block : context->loader.knownBlocks()) {
@@ -130,14 +149,14 @@ connections:
             const auto graphSrc      = ymlDecodeEncode(testGrc);
             auto       graph         = gr::loadGrc(context->loader, graphSrc);
             auto       graphSavedSrc = gr::saveGrc(context->loader, graph);
-            expect(checkAndPrintMissingLines(graphSrc, graphSavedSrc));
+            expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
             fmt::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };
 
-    "Save and load"_test = [&testGrc] {
+    "Save and load"_test = [&] {
         // Test if we get the same graph when saving it and loading the saved
         // data into another graph
         using namespace gr;
@@ -157,7 +176,9 @@ connections:
 
 #if not defined(__EMSCRIPTEN__) // && not defined(__APPLE__)
 const boost::ut::suite PluginsGrcTests = [] {
-    "Basic graph loading and storing using plugins"_test = [] {
+    auto context = makeTestContext();
+
+    "Basic graph loading and storing using plugins"_test = [&] {
         try {
             using namespace gr;
 
@@ -195,7 +216,7 @@ connections:
 
             auto graphSavedSrc = gr::saveGrc(context->loader, graph);
 
-            // expect(checkAndPrintMissingLines(graphSrc2, graphSavedSrc)); // TODO: change imprecise unit-test check
+            expect(checkAndPrintMissingBlocks(graphSrc2, graphSavedSrc));
 
             gr::scheduler::Simple scheduler(std::move(graph));
             expect(scheduler.runAndWait().has_value());
@@ -205,7 +226,7 @@ connections:
         }
     };
 
-    "Basic graph and subgraph loading and storing using plugins"_test = [] {
+    "Basic graph and subgraph loading and storing using plugins"_test = [&] {
         try {
             using namespace gr;
 
@@ -253,7 +274,7 @@ connections:
 
             auto graphSavedSrc = gr::saveGrc(context->loader, graph);
 
-            // expect(checkAndPrintMissingLines(graphSrc, graphSavedSrc));
+            expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
             fmt::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
@@ -266,8 +287,9 @@ connections:
 const boost::ut::suite PortTests = [] {
     using namespace boost::ut;
     using namespace boost::ext::ut;
+    auto context = makeTestContext();
 
-    "Port buffer sizes"_test = [] {
+    "Port buffer sizes"_test = [&] {
         constexpr std::string_view testGrc = R"(
 blocks:
   - name: main_source
@@ -338,7 +360,7 @@ connections:
         }
     };
 
-    "Array of Ports"_test = [] {
+    "Array of Ports"_test = [&] {
         using namespace gr;
 
         gr::Graph graph1;
@@ -365,7 +387,7 @@ connections:
         expect(eq(collectEdges(graph1), collectEdges(graph2)));
     };
 
-    "Vector of Ports"_test = [] {
+    "Vector of Ports"_test = [&] {
         using namespace gr;
 
         gr::Graph graph1;
@@ -395,7 +417,9 @@ connections:
 #endif
 
 const boost::ut::suite SettingsTests = [] {
-    "Settings serialization"_test = [] {
+    auto context = makeTestContext();
+
+    "Settings serialization"_test = [&] {
         try {
             using namespace gr;
 
@@ -434,7 +458,7 @@ const boost::ut::suite SettingsTests = [] {
         }
     };
 
-    "Context settings"_test = [] {
+    "Context settings"_test = [&] {
         try {
             using namespace gr;
 
