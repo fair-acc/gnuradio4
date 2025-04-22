@@ -142,9 +142,9 @@ struct GeneratedFiles {
 }
 
 [[nodiscard]] std::string emitInitAllCode(auto& fout, std::string_view namePrefix, const std::vector<std::string>& generatedRegistrationFunctions, const Options& options) {
-    fout << std::format("\nextern \"C\" {{\nGNURADIO_EXPORT std::size_t gr_blocklib_init_unit_{}(gr::BlockRegistry& registry) {{\n    std::size_t result = true; \n", namePrefix);
+    fout << std::format("\nextern \"C\" {{\nGNURADIO_EXPORT std::size_t gr_blocklib_init_unit_{}(gr::BlockRegistry& registry) {{\n    std::size_t result = 0UZ; \n", namePrefix);
     for (const auto& generatedRegistrationFunction : generatedRegistrationFunctions) {
-        fout << "    result += !" << generatedRegistrationFunction << "(registry);\n";
+        fout << "    result += ( !" << generatedRegistrationFunction << "(registry) ? 1UZ : 0UZ );\n";
     }
     fout << "    return result;\n}\n}\n\n";
 
@@ -406,7 +406,10 @@ int main(int argc, char** argv) try {
             auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, generatedRegistrationFunctions, options);
             output.registrations << "// To initialize, call " << generatedInitFunction << "\n";
 
+            const std::string declarationsGuard = std::format("HEADER_GUARD_{}_HPP", generatedInitFunction);
+            output.declarations << std::format("#ifndef {}\n#define {}\n", declarationsGuard, declarationsGuard);
             output.declarations << "extern \"C\" { std::size_t " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
+            output.declarations << std::format("#endif // {}\n", declarationsGuard);
             output.rawCalls << "result += !" << generatedInitFunction << "(registry);\n";
 
             output.registrations << "// end of auto-generated code\n";
@@ -439,7 +442,10 @@ int main(int argc, char** argv) try {
                 auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, generatedRegistrationFunctions, options);
                 output.registrations << "// To initialize, call " << generatedInitFunction << "\n";
 
+                const std::string declarationsGuard = std::format("HEADER_GUARD_{}_HPP", generatedInitFunction);
+                output.declarations << std::format("#ifndef {}\n#define {}\n", declarationsGuard, declarationsGuard);
                 output.declarations << "extern \"C\" { bool " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
+                output.declarations << std::format("#endif // {}\n", declarationsGuard);
                 output.rawCalls << "result += !" << generatedInitFunction << "(registry);\n";
 
                 output.registrations << "// end of auto-generated code\n";

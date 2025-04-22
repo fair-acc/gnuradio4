@@ -1,9 +1,10 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.27)
 
 project(gnuradio CXX)
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -13,14 +14,101 @@ if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't bee
   set(EMSCRIPTEN ON)
 endif()
 
-# This option affects the GR build, as well as the behavior of BlockLib cmake functions that are used in out-of-tree
-# modules
-option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ON)
+# default explicit compiler and linker flag optimisation per build type
+if(NOT MSVC)
+  # optional:  -fno-inline-functions -fvar-tracking-assignments
+  set(CMAKE_CXX_FLAGS_DEBUG "-Og -g1 -DDEBUG -fno-omit-frame-pointer -ffunction-sections -fdata-sections")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O2 -g0 -DNDEBUG -ffunction-sections -fdata-sections")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1 -gz -DNDEBUG -ffunction-sections -fdata-sections")
+  set(CMAKE_CXX_FLAGS_RELWITHASSERT "-O2 -DASSERT_ENABLED -ffunction-sections -fdata-sections")
+  # '-s': strip debug symbols, 'EMBEDDED is used to disable/minimise code features for embedded systems (e.g. code-size,
+  # console printouts, etc.)
+  set(CMAKE_CXX_FLAGS_MINSIZEREL "-Os -g0 -DNDEBUG -DEMBEDDED -ffunction-sections -fdata-sections")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -s")
+  endif()
 
-option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ON)
-option(EMBEDDED "Enable embedded mode" OFF)
+  set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
+
+  if(NOT EMSCRIPTEN)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
+      message(STATUS "GCC <15 detected – disabling LTO due to known IPA/modref crash issues.")
+    else()
+      set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto=auto -fno-fat-lto-objects")
+      set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -flto=auto -fno-fat-lto-objects")
+      set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -flto=auto -fno-fat-lto-objects")
+      set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -flto=auto -fno-fat-lto-objects")
+    endif()
+  endif()
+
+  find_program(MOLD_BIN ld.mold)
+  if(MOLD_BIN)
+    set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=mold")
+    message(STATUS "Using mold @ ${MOLD_BIN} as the linker.")
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    find_program(LLD_BIN ld.lld)
+    if(LLD_BIN)
+      set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=lld")
+      message(STATUS "Using lld @ ${LLD_BIN} as the linker.")
+    endif()
+  endif()
+  set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${_LD_GC_SECTIONS}")
+  set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "${_LD_GC_SECTIONS}")
+  set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${_LD_GC_SECTIONS}")
+  set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${_LD_GC_SECTIONS}")
+  set(CMAKE_EXE_LINKER_FLAGS_MINSIZEREL "${_LD_GC_SECTIONS}")
+  set(CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL "${_LD_GC_SECTIONS}")
+elseif(MSVC)
+  set(CMAKE_CXX_FLAGS_DEBUG "/Od /Zi /Zf /DDEBUG")
+  set(CMAKE_CXX_FLAGS_RELEASE "/O2 /GL /DNDEBUG")
+  set(CMAKE_CXX_FLAGS_RELWITHASSERT "/O2 /GL /DASSERT_ENABLED")
+  set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "/O2 /GL /Zi /Zf /DNDEBUG")
+  set(CMAKE_CXX_FLAGS_MINSIZEREL "/O1 /Os /GL /DNDEBUG")
+
+  set(LINK_RELEASE "/LTCG /OPT:REF /OPT:ICF")
+  set(LINK_RELASSERT "${LINK_RELEASE}")
+  set(LINK_RELDEBINFO "${LINK_RELEASE}")
+  set(LINK_MINSIZE "${LINK_RELEASE} /DEBUG:NONE") # strip PDB
+endif()
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE
+      "RelWithAssert"
+      CACHE STRING "Default build type" FORCE)
+endif()
+set_property(
+  CACHE CMAKE_BUILD_TYPE
+  PROPERTY STRINGS
+           None
+           Debug
+           Release
+           RelWithAssert
+           RelWithDebInfo
+           MinSizeRel)
+
+set(REGISTRY_DEFAULT ON)
+if(CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+  set(REGISTRY_DEFAULT OFF)
+endif()
+
+# Determine if GR4 is built as a subproject (using add_subdirectory) or if it is the master project.
+if(NOT DEFINED GR_TOPLEVEL_PROJECT)
+  set(GR_TOPLEVEL_PROJECT OFF)
+  if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(GR_TOPLEVEL_PROJECT ON)
+    message(STATUS "CMake version: ${CMAKE_VERSION}")
+  endif()
+endif()
+
+# Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
+option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
+option(USE_CCACHE "Use ccache if available" ON)
+option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ${REGISTRY_DEFAULT})
 if(EMSCRIPTEN)
-  option(WARNINGS_AS_ERRORS "Enable -Werror flags" OFF) # some ubiquous warnings in UT need to be fixed first.
+  option(WARNINGS_AS_ERRORS "Enable -Werror flags" OFF) # some ubiquitous warnings in UT need to be fixed first.
 else()
   option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 endif()
@@ -29,10 +117,20 @@ option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
 option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
+option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
+option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 
 if(EMSCRIPTEN OR NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
+
+if((ADDRESS_SANITIZER AND UB_SANITIZER)
+   OR (ADDRESS_SANITIZER AND THREAD_SANITIZER)
+   OR (UB_SANITIZER AND THREAD_SANITIZER))
+  message(FATAL_ERROR "Only one sanitizer can be enabled at a time.")
+endif()
+
+include(cmake/CompilerWarnings.cmake)
 
 # blocklib_generator is a build process dependency, add it before everything
 add_subdirectory(blocklib_generator)
@@ -44,15 +142,6 @@ message(
     "Is block registry enabled? (faster compile-times and when runtime or Python wrapping APIs are not required) ${GR_ENABLE_BLOCK_REGISTRY}"
 )
 message(STATUS "Is plugin system enabled? ${INTERNAL_ENABLE_BLOCK_PLUGINS}")
-
-# Determine if fmt is built as a subproject (using add_subdirectory) or if it is the master project.
-if(NOT DEFINED GR_TOPLEVEL_PROJECT)
-  set(GR_TOPLEVEL_PROJECT OFF)
-  if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(GR_TOPLEVEL_PROJECT ON)
-    message(STATUS "CMake version: ${CMAKE_VERSION}")
-  endif()
-endif()
 
 # clang-scan-deps in required by ccache
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
@@ -74,7 +163,6 @@ endif()
 
 # Use ccache if found and enabled
 find_program(CCACHE_PROGRAM ccache)
-option(USE_CCACHE "Use ccache if available" ON)
 if(CCACHE_PROGRAM AND USE_CCACHE)
   message(STATUS "ccache found and will be used")
   set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
@@ -98,57 +186,6 @@ if(DISABLE_EXTERNAL_DEPS_WARNINGS) # enable warnings for external dependencies
   set(CMAKE_EXT_DEP_WARNING_GUARD SYSTEM)
 endif()
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU|Intel)")
-  # -Og is a much more reasonable default for debugging. Also enable gdb extensions.
-  set(CMAKE_CXX_FLAGS_DEBUG
-      "-Og -ggdb"
-      CACHE INTERNAL "Flags used by the compiler during debug builds.")
-
-  # Add a build type that keeps runtime checks enabled
-  set(CMAKE_CXX_FLAGS_RELWITHASSERT
-      "-O2"
-      CACHE INTERNAL "Flags used by the compiler during release builds containing runtime checks.")
-
-  # Add a build type that keeps runtime checks enabled
-  set(CMAKE_CXX_FLAGS_RELEASE
-      "-O2"
-      CACHE INTERNAL "Flags used by the compiler during release builds.")
-
-  # The default value is often an empty string, but this is usually not desirable and one of the other standard build
-  # types is usually more appropriate.
-  if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE
-        "RelWithAssert"
-        CACHE
-          STRING
-          "Choose the type of build. Options are: None Debug Release RelWithAssert RelWithDebInfo MinSizeRel.\n\
- - None: no compiler flags, defaults and target-specific flags apply\n\
- - Debug: best/complete debugging experience; as optimized as reasonable\n\
- - Release: full optimization; some runtime checks disabled\n\
- - RelWithAssert: full optimization; runtime checks enabled\n\
- - RelWithDebInfo: optimized; debug info; some runtime checks disabled\n\
- - MinSizeRel: optimized with a focus on minimal code size"
-          FORCE)
-  endif(NOT CMAKE_BUILD_TYPE)
-  set_property(
-    CACHE CMAKE_BUILD_TYPE
-    PROPERTY STRINGS
-             None
-             Debug
-             Release
-             RelWithAssert
-             RelWithDebInfo
-             MinSizeRel)
-
-  if(CMAKE_BUILD_TYPE STREQUAL ""
-     AND NOT
-         CMAKE_CXX_FLAGS
-         MATCHES
-         "-O[123gs]")
-    message(WARNING "It seems you are compiling without optimization. Please set CMAKE_BUILD_TYPE or CMAKE_CXX_FLAGS.")
-  endif()
-endif()
-
 # Initialize a variable to hold all the compiler flags -> exported into global config.h(.in)
 if(CMAKE_BUILD_TYPE MATCHES Debug)
   set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_DEBUG} ${CMAKE_CXX_FLAGS}")
@@ -160,10 +197,6 @@ elseif(CMAKE_BUILD_TYPE MATCHES RelWithDebInfo)
   set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS}")
 elseif(CMAKE_BUILD_TYPE MATCHES MinSizeRel)
   set(ALL_COMPILER_FLAGS "${CMAKE_CXX_FLAGS_MINSIZEREL} ${CMAKE_CXX_FLAGS}")
-  set(EMBEDDED ON)
-  # 'EMBEDDED is used to disable/minimise code features for embedded systems (e.g. code-size, console printouts, etc.)
-  add_compile_definitions(EMBEDDED)
-  message(STATUS "enable size-optimising core feature (e.g. suppressing self-documentation): ${EMBEDDED}")
 endif()
 # Replace ; with space
 string(
@@ -190,38 +223,34 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
-  # Validate that only one sanitizer option is enabled
-  if((ADDRESS_SANITIZER AND UB_SANITIZER)
-     OR (ADDRESS_SANITIZER AND THREAD_SANITIZER)
-     OR (UB_SANITIZER AND THREAD_SANITIZER))
-    message(
-      FATAL_ERROR "Only one of ADDRESS_SANITIZER, UB_SANITIZER, or THREAD_SANITIZER can be enabled at the same time.")
+  if(ADDRESS_SANITIZER)
+    set(SANITIZER_FLAGS
+        -fsanitize=address
+        -fsanitize-address-use-after-scope
+        -fsanitize=leak
+        -fno-omit-frame-pointer
+        -fstack-protector-strong
+        -fstack-clash-protection)
+  elseif(UB_SANITIZER)
+    set(SANITIZER_FLAGS
+        -fsanitize=undefined
+        -fsanitize-address-use-after-scope
+        -fsanitize=leak
+        -fno-omit-frame-pointer
+        -fstack-protector-strong
+        -fstack-clash-protection)
+  elseif(THREAD_SANITIZER)
+    set(SANITIZER_FLAGS -fsanitize=thread -fsanitize=thread)
   endif()
 
-  if(ADDRESS_SANITIZER)
+  if(DEFINED SANITIZER_FLAGS)
     add_compile_options(
-      -fsanitize=address
-      -fsanitize-address-use-after-scope
-      -fsanitize=leak
+      ${SANITIZER_FLAGS}
       -fno-omit-frame-pointer
       -fstack-protector-strong
-      -fstack-clash-protection) # additional flags: -D_GLIBCXX_DEBUG -D_FORTIFY_SOURCE=2
-    add_link_options(
-      -fsanitize=address
-      -fsanitize-address-use-after-scope
-      -fsanitize=leak
-      -fno-omit-frame-pointer
-      -fstack-protector-strong
-      -fstack-clash-protection) # additional flags: -D_GLIBCXX_DEBUG -D_FORTIFY_SOURCE=2
-    message(STATUS "Enable ADDRESS_SANITIZER: ${ADDRESS_SANITIZER}")
-  elseif(UB_SANITIZER)
-    add_compile_options(-fsanitize=undefined)
-    add_link_options(-fsanitize=undefined)
-    message(STATUS "Enable UB_SANITIZER: ${UB_SANITIZER}")
-  elseif(THREAD_SANITIZER)
-    add_compile_options(-fsanitize=thread)
-    add_link_options(-fsanitize=thread)
-    message(STATUS "Enable THREAD_SANITIZER: ${THREAD_SANITIZER}")
+      -fstack-clash-protection)
+    add_link_options(${SANITIZER_FLAGS})
+    message(STATUS "Enabled sanitizer flags: ${SANITIZER_FLAGS}")
   endif()
 endif()
 
@@ -232,7 +261,6 @@ if(INCLUDE_WHAT_YOU_USE_TOOL_PATH)
   set_property(GLOBAL PROPERTY CMAKE_CXX_INCLUDE_WHAT_YOU_USE ${INCLUDE_WHAT_YOU_USE_TOOL_PATH})
 endif()
 
-include(cmake/CompilerWarnings.cmake)
 set_project_warnings(gnuradio-options)
 
 if(EMSCRIPTEN)
@@ -267,7 +295,24 @@ add_library(
 )
 target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
                                          "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
-target_compile_options(exprtk PRIVATE -O1)
+if(EMSCRIPTEN)
+  target_compile_options(exprtk PRIVATE -O1 -g0)
+elseif(
+  CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+  AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13
+  AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS_EQUAL 14)
+  message(STATUS "GCC <15 detected – disabling LTO for exprtk due to known IPA/modref crash issues.")
+  target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
+else()
+  target_compile_options(
+    exprtk
+    PRIVATE -O1
+            -g0
+            -flto=auto
+            -ffat-lto-objects
+            -fvisibility=hidden)
+endif()
+set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
 # include exprtk header-only - END
 
 include(FetchContent)
@@ -320,7 +365,7 @@ target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
 # FFTW3 is build 2 times for float and double precisions
 set(FFTW_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/fftw)
 if(EMSCRIPTEN)
-  set(FFTW_CFLAGS "${CFLAGS} -fPIC -w")
+  set(FFTW_CFLAGS "${CFLAGS} -fPIC -w -O2 -g0 -ffunction-sections -fdata-sections")
   set(FFTW_CONFIG
       cd
       ${FFTW_PREFIX}/src/
@@ -351,7 +396,7 @@ if(EMSCRIPTEN)
       --silent
       V=0)
 else()
-  set(FFTW_CFLAGS "${CFLAGS} -fPIC -w -O3 -march=native -mtune=native")
+  set(FFTW_CFLAGS "${CFLAGS} -fPIC -w -O2 -g0 -march=native -mtune=native -ffunction-sections -fdata-sections")
   set(FFTW_CONFIG
       ${FFTW_PREFIX}/src/configure
       --enable-silent-rules
@@ -436,9 +481,13 @@ if(Python3_FOUND AND NOT EMSCRIPTEN)
   endif()
 endif()
 
-option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
+add_subdirectory(bench) # custom ut addon for microbenchmarking
 
-option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
+add_subdirectory(core)
+add_subdirectory(meta)
+add_subdirectory(algorithm)
+add_subdirectory(blocks)
+
 if(ENABLE_TESTING AND (UNIX OR APPLE))
   list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
   enable_testing()
@@ -449,13 +498,12 @@ if(ENABLE_TESTING AND (UNIX OR APPLE))
     target_compile_options(
       gnuradio-options
       INTERFACE --coverage
-                -O0
-                -g
+                -Og
+                -g1
                 -gz
-                -gdwarf-2
-                -gstrict-dwarf
-                -U_FORTIFY_SOURCE
-                -D_FORTIFY_SOURCE=0) # fortify_source is not possible without optimization
+                # -gdwarf-2 -gstrict-dwarf
+      # -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
+    ) # fortify_source is not possible without optimization
     target_link_libraries(gnuradio-options INTERFACE --coverage)
     append_coverage_compiler_flags()
     set(GCOVR_ADDITIONAL_ARGS "--merge-mode-functions=merge-use-line-min")
@@ -507,9 +555,88 @@ if(ENABLE_TESTING AND (UNIX OR APPLE))
   message("Building Tests and benchmarks.")
 endif()
 
-add_subdirectory(bench) # custom ut addon for microbenchmarking
+# print effective options
+message(STATUS "================================================")
+message(STATUS "GR-4 build configuration")
+message(STATUS "------------------------------------------------")
+message(STATUS "GR_TOPLEVEL_PROJECT          : ${GR_TOPLEVEL_PROJECT}")
+message(STATUS "GR_ENABLE_BLOCK_REGISTRY     : ${GR_ENABLE_BLOCK_REGISTRY}")
+message(STATUS "INTERNAL_ENABLE_BLOCK_PLUGINS: ${INTERNAL_ENABLE_BLOCK_PLUGINS}")
+message(STATUS "USE_CCACHE                   : ${USE_CCACHE}")
+message(STATUS "WARNINGS_AS_ERRORS           : ${WARNINGS_AS_ERRORS}")
+message(STATUS "TIMETRACE                    : ${TIMETRACE}")
+message(STATUS "ADDRESS_SANITIZER            : ${ADDRESS_SANITIZER}")
+message(STATUS "UB_SANITIZER                 : ${UB_SANITIZER}")
+message(STATUS "THREAD_SANITIZER             : ${THREAD_SANITIZER}")
+message(STATUS "ENABLE_TBB                   : ${ENABLE_TBB}")
+message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
+message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
+message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
+message(STATUS "------------------------------------------------")
 
-add_subdirectory(core)
-add_subdirectory(meta)
-add_subdirectory(algorithm)
-add_subdirectory(blocks)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)
+set(_config_cxx_flags "${CMAKE_CXX_FLAGS_${_BT}}")
+set(_config_link_flags "${CMAKE_EXE_LINKER_FLAGS_${_BT}}")
+set(_base_cxx_flags "${CMAKE_CXX_FLAGS}")
+set(_base_link_flags "${CMAKE_EXE_LINKER_FLAGS}")
+get_directory_property(_dir_compile_opts COMPILE_OPTIONS)
+get_directory_property(_dir_link_opts LINK_OPTIONS)
+get_target_property(_t_copts gnuradio-options INTERFACE_COMPILE_OPTIONS)
+get_target_property(_t_lopts gnuradio-options INTERFACE_LINK_OPTIONS)
+if(_t_lopts STREQUAL "_t_lopts-NOTFOUND")
+  unset(_t_lopts)
+endif()
+
+string(
+  JOIN
+  " "
+  _final_compile_opts
+  ${_base_cxx_flags}
+  ${_config_cxx_flags}
+  ${_dir_compile_opts}
+  ${_t_copts})
+string(
+  JOIN
+  " "
+  _final_link_opts
+  ${_base_link_flags}
+  ${_config_link_flags}
+  ${_dir_link_opts}
+  ${_t_lopts})
+
+message(STATUS "Effective compiler flags : ${_final_compile_opts}")
+message(STATUS "Effective linker flags   : ${_final_link_opts}")
+message(STATUS "------------------------------------------------")
+message(STATUS "Toolchain details")
+message(STATUS "------------------------------------------------")
+message(STATUS "C++ compiler ID          : ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "C++ compiler path        : ${CMAKE_CXX_COMPILER}")
+message(STATUS "C++ compiler version     : ${CMAKE_CXX_COMPILER_VERSION}")
+string(
+  REGEX MATCH
+        "-fuse-ld=([a-zA-Z0-9._-]+)"
+        _linker_backend
+        "${_final_link_opts}")
+if(_linker_backend MATCHES "-fuse-ld=([a-zA-Z0-9._-]+)")
+  set(_detected_linker "${CMAKE_CXX_COMPILER} with ${CMAKE_MATCH_1}")
+else()
+  set(_detected_linker "${CMAKE_LINKER} (default/provided linker)")
+endif()
+message(STATUS "Linker                   : ${_detected_linker}")
+
+if(CCACHE_PROGRAM)
+  execute_process(
+    COMMAND ${CCACHE_PROGRAM} --version
+    OUTPUT_VARIABLE CCACHE_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  string(
+    REGEX MATCH
+          "[^\n]*"
+          CCACHE_VERSION_LINE
+          "${CCACHE_VERSION}")
+  message(STATUS "ccache                   : ${CCACHE_VERSION_LINE}")
+else()
+  message(STATUS "ccache                   : not found or disabled")
+endif()
+
+message(STATUS "================================================")
