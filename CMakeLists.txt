@@ -54,6 +54,24 @@ if(NOT DEFINED GR_TOPLEVEL_PROJECT)
   endif()
 endif()
 
+# clang-scan-deps in required by ccache
+if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+  string(
+    REGEX MATCH
+          "^[0-9]+"
+          CLANG_MAJOR
+          "${CMAKE_CXX_COMPILER_VERSION}")
+  find_program(CLANG_SCAN_DEPS_EXEC NAMES clang-scan-deps-${CLANG_MAJOR} clang-scan-deps)
+  if(CLANG_SCAN_DEPS_EXEC)
+    set(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS
+        "${CLANG_SCAN_DEPS_EXEC}"
+        CACHE FILEPATH "" FORCE)
+  else()
+    message(WARNING "clang‑scan‑deps not found; module scanning will be disabled")
+    set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+  endif()
+endif()
+
 # Use ccache if found and enabled
 find_program(CCACHE_PROGRAM ccache)
 option(USE_CCACHE "Use ccache if available" ON)
@@ -427,7 +445,7 @@ if(ENABLE_TESTING AND (UNIX OR APPLE))
   if(ENABLE_COVERAGE)
     message("Coverage reporting enabled")
     include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake #
-                                      # (License: BSL-1.0)
+    # (License: BSL-1.0)
     target_compile_options(
       gnuradio-options
       INTERFACE --coverage
