@@ -6,8 +6,8 @@
 #include <string>
 
 #if defined(_WIN32) || defined(_WIN64)
-#include <psapi.h>
 #include <windows.h>
+#include <psapi.h>
 #elif defined(__linux__)
 #include <fstream>
 #include <unistd.h>

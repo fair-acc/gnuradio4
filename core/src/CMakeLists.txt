@@ -16,6 +16,9 @@ if(NOT EMSCRIPTEN)
            gnuradio-options
            pmtv
            fmt)
+  if(WIN32)
+    target_compile_definitions(gnuradio-plugin PRIVATE BUILDING_MYPLUGIN)
+  endif()
 
   install(
     TARGETS gnuradio-plugin

@@ -8,3 +8,6 @@ target_link_libraries(
           gr-testing
           gr-soapy
           ut)
+if(WIN32)
+  target_link_libraries(soapy_example PRIVATE dl)
+endif()

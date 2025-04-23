@@ -19,6 +19,9 @@ function(setup_test_no_asan TEST_NAME)
             gr-basic
             gr-filter
             ut)
+  if(WIN32)
+    target_link_libraries(${TEST_NAME} PRIVATE dl)
+  endif()
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
 endfunction()
 

@@ -18,6 +18,13 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
+//FIXME - this is a hack to see if I can get the codebase built.  Findout "properly" where the
+//failure is.  The problem is that under Windows windows.h defines ERROR as 0.  This messes the
+//ERROR function work::status::ERROR.
+#ifdef ERROR
+#  undef ERROR
+#endif
+
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
 using namespace gr::message;
