@@ -9,13 +9,13 @@ using namespace boost::ut;
 
 using namespace std::string_view_literals;
 
-#include <GrBasicBlocks>
-#include <GrElectricalBlocks>
-#include <GrFileIoBlocks>
-#include <GrFilterBlocks>
-#include <GrFourierBlocks>
-#include <GrHttpBlocks>
-#include <GrTestingBlocks>
+#include <GrBasicBlocks.hpp>
+#include <GrElectricalBlocks.hpp>
+#include <GrFileIoBlocks.hpp>
+#include <GrFilterBlocks.hpp>
+#include <GrFourierBlocks.hpp>
+#include <GrHttpBlocks.hpp>
+#include <GrTestingBlocks.hpp>
 
 const boost::ut::suite TagTests = [] {
     auto&       registry = gr::globalBlockRegistry();
