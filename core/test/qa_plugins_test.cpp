@@ -10,8 +10,8 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/basic/CommonBlocks.hpp>
 
-#include <GrBasicBlocks>
-#include <GrTestingBlocks>
+#include <GrBasicBlocks.hpp>
+#include <GrTestingBlocks.hpp>
 
 #include "TestBlockRegistryContext.hpp"
 

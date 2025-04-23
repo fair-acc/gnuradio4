@@ -15,9 +15,9 @@
 
 #include "CollectionTestBlocks.hpp"
 
-#include <GrBasicBlocks>
-#include <GrTestingBlocks>
-#include <qa_grc>
+#include <GrBasicBlocks.hpp>
+#include <GrTestingBlocks.hpp>
+#include <qa_grc.hpp>
 
 #include "TestBlockRegistryContext.hpp"
 #include "gnuradio-4.0/BlockModel.hpp"

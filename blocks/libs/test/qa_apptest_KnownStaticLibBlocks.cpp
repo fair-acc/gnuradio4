@@ -4,7 +4,7 @@
 #include <cassert>
 #include <iostream>
 
-#include <GrBasicBlocks>
+#include <GrBasicBlocks.hpp>
 
 using namespace std::string_literals;
 

@@ -316,7 +316,7 @@ int main(int argc, char** argv) try {
             moduleName);
     }
 
-    const auto integratorHeaderFile = (options.outDir / moduleName);
+    const auto integratorHeaderFile = (options.outDir / (moduleName + ".hpp"));
     if (!std::filesystem::exists(integratorHeaderFile)) {
         std::ofstream integrator = openFile(integratorHeaderFile);
         integrator << std::format(R"cppcode(
