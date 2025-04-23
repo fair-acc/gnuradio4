@@ -3,8 +3,8 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
-#include <GrBasicBlocks>
-#include <GrTestingBlocks>
+#include <GrBasicBlocks.hpp>
+#include <GrTestingBlocks.hpp>
 
 #include "TestBlockRegistryContext.hpp"
 
