@@ -697,7 +697,10 @@ public:
     constexpr void publishMergedInputTag(auto& outputSpanTuple) noexcept {
         if constexpr (!noDefaultTagForwarding) {
             if (inputTagsPresent()) {
-                for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(_mergedInputTag.map, 0); }, outputSpanTuple);
+                const auto&  autoForwardKeys = settings().autoForwardParameters();
+                property_map onlyAutoForwardMap;
+                std::ranges::copy_if(_mergedInputTag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); });
+                for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
             }
         }
     }
