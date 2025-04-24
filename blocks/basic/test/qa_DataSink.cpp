@@ -274,11 +274,13 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto srcTags = makeTestTags(0, 1000);
 
-        gr::Graph testGraph;
-        auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test source"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
-        auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test source"}});
-        src._tags       = srcTags;
+        gr::Graph                testGraph;
+        auto&                    src                   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test source"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
+        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
+        delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
+        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test source"}});
+        src._tags  = srcTags;
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -374,11 +376,13 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph  testGraph;
-        const auto tags = makeTestTags(0, 1000);
-        auto&      src  = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
-        src._tags       = tags;
-        auto& delay     = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink      = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
+        const auto tags                                = makeTestTags(0, 1000);
+        auto&      src                                 = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
+        src._tags                                      = tags;
+        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
+        delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
+        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -458,12 +462,13 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling trigger mode non-overlapping"_test = [] {
+        using namespace gr::tag;
         constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph testGraph;
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
 
-        const auto tags = std::vector<Tag>{{3000, {{"TYPE", "TRIGGER"}}}, {8000, {{"TYPE", "NO_TRIGGER"}}}, {180000, {{"TYPE", "TRIGGER"}}}};
+        const auto tags = std::vector<Tag>{{3000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}, {8000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER"}}}, {180000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
         src._tags       = tags;
         auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", -2.0f}, {"signal_max", 2.0f}});
@@ -473,7 +478,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto polling = std::async([] {
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-                const auto v = tag.get("TYPE");
+                const auto v = tag.get(TRIGGER_NAME.shortKey());
                 return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
 
@@ -522,11 +527,12 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "propagation of signal metadata per data set"_test = [] {
+        using namespace gr::tag;
         constexpr gr::Size_t kSamples = 40000000;
 
         gr::Graph  testGraph;
         auto&      src  = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "no unit"}, {"signal_min", -2.f}, {"signal_max", 2.f}});
-        const auto tags = std::vector<Tag>{{39000000, {{"TYPE", "TRIGGER"}}}};
+        const auto tags = std::vector<Tag>{{39000000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
         src._tags       = tags;
         auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"signal_name", "test signal"}});
@@ -540,7 +546,7 @@ const boost::ut::suite DataSinkTests = [] {
             bool                                                 seenFinished = false;
 
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-                const auto type = tag.get("TYPE");
+                const auto type = tag.get(TRIGGER_NAME.shortKey());
                 return (type && std::get<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
             std::shared_ptr<DataSetPoller<int32_t>> poller;
@@ -583,11 +589,12 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking snapshot mode"_test = [] {
+        using namespace gr::tag;
         constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph testGraph;
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {gr::tag::SAMPLE_RATE.shortKey(), 10000.f}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", 0.f}, {"signal_max", static_cast<float>(kSamples - 1)}});
-        src._tags     = {{3000, {{"TYPE", "TRIGGER"}}}, {8000, {{"TYPE", "NO_TRIGGER"}}}, {180000, {{"TYPE", "TRIGGER"}}}};
+        src._tags     = {{3000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}, {8000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER"}}}, {180000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
         auto& delay   = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
@@ -601,7 +608,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto callback = [&receivedDataCb](const auto& dataset) { receivedDataCb.insert(receivedDataCb.end(), dataset.signal_values.begin(), dataset.signal_values.end()); };
 
         auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-            const auto v = tag.get("TYPE");
+            const auto v = tag.get(TRIGGER_NAME.shortKey());
             return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
         };
 
@@ -655,10 +662,12 @@ const boost::ut::suite DataSinkTests = [] {
 
         const gr::Size_t n_samples = static_cast<gr::Size_t>(tags.size() * 10000 + 100000);
         gr::Graph        testGraph;
-        auto&            src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", n_samples}, {"mark_tag", false}});
-        src._tags            = tags;
-        auto& delay          = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", 2500u}});
-        auto& sink           = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
+        auto&            src                           = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", n_samples}, {"mark_tag", false}});
+        src._tags                                      = tags;
+        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", 2500u}});
+        std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
+        delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
+        auto& sink = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -743,6 +752,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "blocking polling trigger mode overlapping"_test = [] {
+        using namespace gr::tag;
         constexpr std::uint32_t kSamples  = 150000;
         constexpr std::size_t   kTriggers = 300;
 
@@ -750,7 +760,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
 
         for (std::size_t i = 0; i < kTriggers; ++i) {
-            src._tags.push_back(Tag{60000UZ + i, {{"TYPE", "TRIGGER"}}});
+            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}});
         }
 
         auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
@@ -804,6 +814,7 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "callback trigger mode overlapping"_test = [] {
+        using namespace gr::tag;
         constexpr std::uint32_t kSamples  = 150000;
         constexpr std::size_t   kTriggers = 300;
 
@@ -811,7 +822,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
 
         for (std::size_t i = 0; i < kTriggers; ++i) {
-            src._tags.push_back(Tag{60000UZ + i, {{"TYPE", "TRIGGER"}}});
+            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}});
         }
 
         auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});

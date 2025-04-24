@@ -574,7 +574,7 @@ const boost::ut::suite SettingsCtxTests = [] {
     };
 };
 
-const boost::ut::suite TransactionTests = [] {
+const boost::ut::suite CtxSettingsTests = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::setting_test;
@@ -615,7 +615,7 @@ const boost::ut::suite TransactionTests = [] {
 
         const property_map params = settings.getStored(parameterKeys).value(); // return as ctx.time = std::chrono::system_clock::now()
         expect(eq(std::get<float>(params.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(params.at("name")), std::string("TestName10")));
+        expect(eq(std::get<std::string>(params.at("name")), "TestName10"s));
         const property_map paramsAll = settings.getStored().value(); // test API without parameters, should return all keys
         expect(eq(paramsAll.size(), 2UZ));
 
@@ -623,31 +623,31 @@ const boost::ut::suite TransactionTests = [] {
 
         const property_map params0 = settings.getStored(parameterKeys, ctx0).value(); // return exact
         expect(eq(std::get<float>(params0.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(params0.at("name")), std::string("TestName10")));
+        expect(eq(std::get<std::string>(params0.at("name")), "TestName10"s));
 
         const property_map params1 = settings.getStored(parameterKeys, ctx1).value(); // return previous
         expect(eq(std::get<float>(params1.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(params1.at("name")), std::string("TestName10")));
+        expect(eq(std::get<std::string>(params1.at("name")), "TestName10"s));
 
         const property_map params2 = settings.getStored(parameterKeys, ctx2).value(); // return exact
         expect(eq(std::get<float>(params2.at("scaling_factor")), 12.f));
-        expect(eq(std::get<std::string>(params2.at("name")), std::string("TestName12")));
+        expect(eq(std::get<std::string>(params2.at("name")), "TestName12"s));
 
         const property_map params3 = settings.getStored(parameterKeys, ctx3).value(); // return previous
         expect(eq(std::get<float>(params3.at("scaling_factor")), 12.f));
-        expect(eq(std::get<std::string>(params3.at("name")), std::string("TestName12")));
+        expect(eq(std::get<std::string>(params3.at("name")), "TestName12"s));
 
         const property_map params4 = settings.getStored(parameterKeys, ctx4).value(); // return exact
         expect(eq(std::get<float>(params4.at("scaling_factor")), 14.f));
-        expect(eq(std::get<std::string>(params4.at("name")), std::string("TestName14")));
+        expect(eq(std::get<std::string>(params4.at("name")), "TestName14"s));
 
         const property_map params5 = settings.getStored(parameterKeys, ctx5).value(); // return latest
         expect(eq(std::get<float>(params5.at("scaling_factor")), 14.f));
-        expect(eq(std::get<std::string>(params5.at("name")), std::string("TestName14")));
+        expect(eq(std::get<std::string>(params5.at("name")), "TestName14"s));
 
         const property_map paramsNull = settings.getStored(parameterKeys, ctxNull).value(); // return as ctx.time = std::chrono::system_clock::now()
         expect(eq(std::get<float>(paramsNull.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(paramsNull.at("name")), std::string("TestName10")));
+        expect(eq(std::get<std::string>(paramsNull.at("name")), "TestName10"s));
     };
 #ifdef __EMSCRIPTEN__
     "CtxSettings Resolve Duplicate Timestamp"_test = [] {
@@ -787,7 +787,7 @@ const boost::ut::suite TransactionTests = [] {
         expect(eq(std::get<float>(block.settings().getStored("scaling_factor").value()), 42.f)); // TODO:
     };
 
-    "CtxSettings autoUpdate settings"_test = [&] {
+    "CtxSettings autoUpdateParameters"_test = [&] {
         using namespace gr::testing;
 
         gr::Size_t         n_samples      = 20;

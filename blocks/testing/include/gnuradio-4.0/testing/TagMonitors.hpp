@@ -28,9 +28,11 @@ inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) no
 
 template<typename MapType>
 inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, const std::string& name1, const std::string& name2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
+    const auto skipKey = [&](const auto& key) { return ignoreKeys != std::nullopt && std::ranges::find(ignoreKeys.value(), key) != ignoreKeys.value().end(); };
+
     for (const auto& [key, value] : map1) {
-        if (ignoreKeys != std::nullopt && std::ranges::find(ignoreKeys.value(), key) != ignoreKeys.value().end()) {
-            continue; // skip this key
+        if (skipKey(key)) {
+            continue;
         }
         const auto it = map2.find(key);
         if (it == map2.end()) {
@@ -38,6 +40,13 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         } else if (it->second != value) {
             fmt::print("    key '{}' has different values ('{}' vs '{}')\n", key, value, it->second);
         }
+    }
+
+    for (const auto& [key, value] : map2) {
+        if (skipKey(key) || map1.contains(key)) {
+            continue;
+        }
+        fmt::print("    key '{}' is present in {} but not in {}\n", key, name2, name1);
     }
 }
 
