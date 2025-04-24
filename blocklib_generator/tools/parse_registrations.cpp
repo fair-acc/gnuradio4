@@ -44,7 +44,7 @@ namespace detail {
         return {};
     }
     const auto last = std::ranges::find_if(sv.rbegin(), sv.rend(), notSpace).base();
-    return std::string_view{first, static_cast<size_t>(last - first)};
+    return std::string_view{first, static_cast<std::size_t>(last - first)};
 }
 
 constexpr std::expected<std::vector<std::string_view>, std::string> splitTopLevelCommaSeparatedValues(std::string_view input) {
@@ -176,7 +176,7 @@ static std::expected<RegisterBlock, std::string> parseRegisterBlockMacro(std::st
     auto parts = exParts.value();
 
     RegisterBlock rb;
-    size_t        idx = 0;
+    std::size_t   idx = 0;
 
     // if first part is quoted => user-defined baseName
     if ((parts[idx].size() >= 2) && (parts[idx].front() == '"') && (parts[idx].back() == '"')) { // remove outer quotes
@@ -256,9 +256,9 @@ static std::string replacePlaceholders(std::string param, const std::vector<std:
 
     constexpr std::array placeholders = {"[T]", "[U]", "[A]", "[B]", "[X]", "[Y]", "[Z]", "[S]"};
     for (int i = 0; (i < placeholders.size()) && (i < static_cast<int>(vars.size())); i++) {
-        auto&  val = vars[i];
-        auto   ph  = placeholders[i];
-        size_t pos = 0;
+        auto&       val = vars[i];
+        auto        ph  = placeholders[i];
+        std::size_t pos = 0;
         while ((pos = param.find(ph, pos)) != std::string::npos) {
             param.replace(pos, std::strlen(ph), val);
             pos += val.size();
@@ -341,7 +341,7 @@ int main(int argc, char** argv) try {
     }
 
     std::string line;
-    size_t      lineNum = 0UZ;
+    std::size_t lineNum = 0UZ;
     while (std::getline(fin, line)) {
         lineNum++;
         auto trimmed = detail::trim(line);
@@ -406,7 +406,7 @@ int main(int argc, char** argv) try {
             auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, generatedRegistrationFunctions, options);
             output.registrations << "// To initialize, call " << generatedInitFunction << "\n";
 
-            output.declarations << "extern \"C\" { bool " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
+            output.declarations << "extern \"C\" { std::size_t " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
             output.rawCalls << "result += !" << generatedInitFunction << "(registry);\n";
 
             output.registrations << "// end of auto-generated code\n";
