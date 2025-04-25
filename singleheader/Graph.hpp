@@ -9265,7 +9265,7 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"signal_quantity", std::string, "", "signa
 inline EM_CONSTEXPR_STATIC DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
 inline EM_CONSTEXPR_STATIC DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
 inline EM_CONSTEXPR_STATIC DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
-inline EM_CONSTEXPR_STATIC DefaultTag<"n_dropped_samples", std::size_t, "", "number of dropped samples"> N_DROPPED_SAMPLES;
+inline EM_CONSTEXPR_STATIC DefaultTag<"n_dropped_samples", gr::Size_t, "", "number of dropped samples"> N_DROPPED_SAMPLES;
 inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_name", std::string> TRIGGER_NAME;
 inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
 inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
@@ -18957,7 +18957,10 @@ public:
     constexpr void publishMergedInputTag(auto& outputSpanTuple) noexcept {
         if constexpr (!noDefaultTagForwarding) {
             if (inputTagsPresent()) {
-                for_each_writer_span([this](auto& outSpan) { outSpan.publishTag(_mergedInputTag.map, 0); }, outputSpanTuple);
+                const auto&  autoForwardKeys = settings().autoForwardParameters();
+                property_map onlyAutoForwardMap;
+                std::ranges::copy_if(_mergedInputTag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); });
+                for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
             }
         }
     }
