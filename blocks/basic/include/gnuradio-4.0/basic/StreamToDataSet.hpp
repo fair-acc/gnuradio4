@@ -233,7 +233,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 auto& accState = _accState[i];
 
                 // Note: Tags for pre-samples are not added to DataSet
-                if (n_max.value > ds.signal_values.size()) { // do not add Tags if DataSet is full
+                if (n_max.value == 0UZ || ds.signal_values.size() < n_max.value) { // Add tags only if the DataSet is not full
                     const Tag& mergedTag = this->mergedInputTag();
                     if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
                         ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(ds.signal_values.size()), mergedTag.map);
@@ -253,14 +253,15 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 }
 
                 if (!accState.isPostActive) { // normal data accumulation
-                    const std::size_t nSamplesToCopy = std::min(n_max.value - ds.signal_values.size(), inSamples.size());
+                    const std::size_t nSamplesToCopy = n_max.value == 0UZ ? inSamples.size() : std::min(n_max.value - ds.signal_values.size(), inSamples.size());
                     if (nSamplesToCopy > 0) {
                         ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.begin() + static_cast<std::ptrdiff_t>(nSamplesToCopy));
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nSamplesToCopy);
                         accState.nSamples += nSamplesToCopy;
                     }
-                } else { // post samples data accumulation
-                    const std::size_t nPostSamplesToCopy = std::min({n_max.value - ds.signal_values.size(), accState.nPostSamplesRemain, inSamples.size()});
+                } else {                                                                                                                  // post samples data accumulation
+                    const std::size_t nPostSamplesToCopy = n_max.value == 0UZ ? std::min(accState.nPostSamplesRemain, inSamples.size()) : //
+                                                               std::min({n_max.value - ds.signal_values.size(), accState.nPostSamplesRemain, inSamples.size()});
                     if (nPostSamplesToCopy > 0) {
                         ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy)));
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nPostSamplesToCopy);
