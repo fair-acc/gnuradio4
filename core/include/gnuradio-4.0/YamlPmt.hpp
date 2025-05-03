@@ -890,7 +890,7 @@ struct ConvertList {
 
 enum class FlowType { List, Map };
 template<FlowType Type>
-auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
+inline auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
     using ResultType          = std::conditional_t<Type == FlowType::List, pmtv::pmt, pmtv::map_t>;
     using TemporaryResultType = std::conditional_t<Type == FlowType::List, std::vector<pmtv::pmt>, pmtv::map_t>;
     using ReturnType          = std::expected<ResultType, ParseError>;

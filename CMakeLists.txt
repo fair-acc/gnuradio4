@@ -315,6 +315,8 @@ endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
 # include exprtk header-only - END
 
+set(vir-simd_patch git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-vir-smid-src_constexpr_wrapper_h.patch)
+
 include(FetchContent)
 FetchContent_Declare(
   fmt
@@ -336,7 +338,10 @@ FetchContent_Declare(
 FetchContent_Declare(
   vir-simd
   GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-  GIT_TAG v0.4.0)
+  GIT_TAG v0.4.0
+  PATCH_COMMAND ${vir-simd_patch}
+  UPDATE_DISCONNECTED 1
+)
 
 FetchContent_Declare(
   cpp-httplib

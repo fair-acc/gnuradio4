@@ -74,12 +74,12 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
         }
     } | std::vector{10UZ, 20UZ, 42UZ, 50UZ, 100UZ};
 
-    constexpr std::size_t sizeX = 120;
-    constexpr std::size_t sizeY = 16;
-    constexpr double      xMin  = 0.0;
-    constexpr double      xMax  = 100.0;
-    constexpr double      yMin  = -5.0;
-    constexpr double      yMax  = +5.0;
+    constexpr std::size_t             sizeX = 120;
+    constexpr std::size_t             sizeY = 16;
+    constexpr double                  xMin  = 0.0;
+    constexpr double                  xMax  = 100.0;
+    [[maybe_unused]] constexpr double yMin  = -5.0;
+    [[maybe_unused]] constexpr double yMax  = +5.0;
 
     "basic chart - lines"_test = [&](bool defaultConstructor) {
         using namespace gr::graphs;
