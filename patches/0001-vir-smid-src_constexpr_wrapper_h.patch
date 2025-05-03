@@ -1,0 +1,13 @@
+diff --git a/vir/constexpr_wrapper.h b/vir/constexpr_wrapper.h
+index 0005b7d..4414745 100644
+--- a/vir/constexpr_wrapper.h
++++ b/vir/constexpr_wrapper.h
+@@ -459,7 +459,7 @@ namespace vir
+   namespace literals
+   {
+     template <char... Chars>
+-      constexpr auto operator"" _cw()
++      constexpr auto operator""_cw()
+       { return vir::cw<vir::detail::cw_parse<Chars...>()>; }
+   }
+ 

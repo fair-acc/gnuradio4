@@ -2,6 +2,9 @@ add_library(gr-electrical INTERFACE)
 target_link_libraries(gr-electrical INTERFACE gnuradio-core gnuradio-algorithm)
 target_include_directories(gr-electrical INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                    $<INSTALL_INTERFACE:include/>)
+if(WIN32)
+  target_compile_definitions(gr-electrical INTERFACE BUILDING_MYPLUGIN)
+endif()
 
 gr_add_block_library(
   GrElectricalBlocks

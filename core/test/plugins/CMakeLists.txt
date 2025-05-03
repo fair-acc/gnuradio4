@@ -20,6 +20,9 @@ function(add_non_blocklib_plugin PLUGIN_NAME)
            gnuradio-core
            gnuradio-plugin
            fmt)
+  if(WIN32)
+    target_compile_definitions(gnuradio-plugin INTERFACE BUILDING_MYPLUGIN)
+  endif()
 endfunction()
 
 add_non_blocklib_plugin(good_math_plugin)

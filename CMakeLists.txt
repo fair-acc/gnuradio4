@@ -315,6 +315,8 @@ endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
 # include exprtk header-only - END
 
+set(vir-simd_patch git apply ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-vir-smid-src_constexpr_wrapper_h.patch)
+
 include(FetchContent)
 FetchContent_Declare(
   fmt
@@ -336,7 +338,10 @@ FetchContent_Declare(
 FetchContent_Declare(
   vir-simd
   GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-  GIT_TAG v0.4.0)
+  GIT_TAG v0.4.0
+  PATCH_COMMAND ${vir-simd_patch}
+  UPDATE_DISCONNECTED 1
+)
 
 FetchContent_Declare(
   cpp-httplib
@@ -361,6 +366,13 @@ target_link_libraries(pmtv INTERFACE)
 
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
+
+# the script configure won't run on win32 without asking bash to do it
+if(WIN32)
+  set(BASH "bash.exe")
+else()
+  set(BASH "")
+endif()
 
 # FFTW3 is build 2 times for float and double precisions
 set(FFTW_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/fftw)
@@ -398,6 +410,7 @@ if(EMSCRIPTEN)
 else()
   set(FFTW_CFLAGS "${CFLAGS} -fPIC -w -O2 -g0 -march=native -mtune=native -ffunction-sections -fdata-sections")
   set(FFTW_CONFIG
+      ${BASH}
       ${FFTW_PREFIX}/src/configure
       --enable-silent-rules
       --quiet
@@ -488,6 +501,7 @@ add_subdirectory(meta)
 add_subdirectory(algorithm)
 add_subdirectory(blocks)
 
+option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 if(ENABLE_TESTING AND (UNIX OR APPLE))
   list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
   enable_testing()

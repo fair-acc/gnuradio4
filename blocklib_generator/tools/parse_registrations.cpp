@@ -31,6 +31,14 @@
 #include <string_view>
 #include <vector>
 
+inline std::string pathToString(const std::filesystem::path& path) {
+#if defined(_WIN32)
+    return path.string();
+#else
+    return path;
+#endif
+}
+
 constexpr std::string_view kRegistrationMacroName = "GR_REGISTER_BLOCK";
 
 namespace detail {
@@ -296,9 +304,10 @@ int main(int argc, char** argv) try {
 
     const auto moduleName = options.outDir.filename().string();
 
+
     const auto integratorSourceFile = (options.outDir / "integrator.cpp");
     if (!std::filesystem::exists(integratorSourceFile)) {
-        std::ofstream integrator = openFile(integratorSourceFile);
+        std::ofstream integrator = openFile(pathToString(integratorSourceFile));
         integrator << std::format(R"cppcode(
             #include <gnuradio-4.0/BlockRegistry.hpp>
 
@@ -318,7 +327,7 @@ int main(int argc, char** argv) try {
 
     const auto integratorHeaderFile = (options.outDir / (moduleName + ".hpp"));
     if (!std::filesystem::exists(integratorHeaderFile)) {
-        std::ofstream integrator = openFile(integratorHeaderFile);
+        std::ofstream integrator = openFile(pathToString(integratorHeaderFile));
         integrator << std::format(R"cppcode(
             #ifndef GR_BLOCKLIB_INIT_MODULE_{0}
             #define GR_BLOCKLIB_INIT_MODULE_{0}
