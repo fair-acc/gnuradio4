@@ -52,7 +52,7 @@ namespace detail {
         return {};
     }
     const auto last = std::ranges::find_if(sv.rbegin(), sv.rend(), notSpace).base();
-    return std::string_view{first, static_cast<size_t>(last - first)};
+    return std::string_view{first, static_cast<std::size_t>(last - first)};
 }
 
 constexpr std::expected<std::vector<std::string_view>, std::string> splitTopLevelCommaSeparatedValues(std::string_view input) {
@@ -150,9 +150,9 @@ struct GeneratedFiles {
 }
 
 [[nodiscard]] std::string emitInitAllCode(auto& fout, std::string_view namePrefix, const std::vector<std::string>& generatedRegistrationFunctions, const Options& options) {
-    fout << std::format("\nextern \"C\" {{\nGNURADIO_EXPORT std::size_t gr_blocklib_init_unit_{}(gr::BlockRegistry& registry) {{\n    std::size_t result = true; \n", namePrefix);
+    fout << std::format("\nextern \"C\" {{\nGNURADIO_EXPORT std::size_t gr_blocklib_init_unit_{}(gr::BlockRegistry& registry) {{\n    std::size_t result = 0UZ; \n", namePrefix);
     for (const auto& generatedRegistrationFunction : generatedRegistrationFunctions) {
-        fout << "    result += !" << generatedRegistrationFunction << "(registry);\n";
+        fout << "    result += ( !" << generatedRegistrationFunction << "(registry) ? 1UZ : 0UZ );\n";
     }
     fout << "    return result;\n}\n}\n\n";
 
@@ -184,7 +184,7 @@ static std::expected<RegisterBlock, std::string> parseRegisterBlockMacro(std::st
     auto parts = exParts.value();
 
     RegisterBlock rb;
-    size_t        idx = 0;
+    std::size_t   idx = 0;
 
     // if first part is quoted => user-defined baseName
     if ((parts[idx].size() >= 2) && (parts[idx].front() == '"') && (parts[idx].back() == '"')) { // remove outer quotes
@@ -264,9 +264,9 @@ static std::string replacePlaceholders(std::string param, const std::vector<std:
 
     constexpr std::array placeholders = {"[T]", "[U]", "[A]", "[B]", "[X]", "[Y]", "[Z]", "[S]"};
     for (int i = 0; (i < placeholders.size()) && (i < static_cast<int>(vars.size())); i++) {
-        auto&  val = vars[i];
-        auto   ph  = placeholders[i];
-        size_t pos = 0;
+        auto&       val = vars[i];
+        auto        ph  = placeholders[i];
+        std::size_t pos = 0;
         while ((pos = param.find(ph, pos)) != std::string::npos) {
             param.replace(pos, std::strlen(ph), val);
             pos += val.size();
@@ -325,7 +325,7 @@ int main(int argc, char** argv) try {
             moduleName);
     }
 
-    const auto integratorHeaderFile = (options.outDir / moduleName);
+    const auto integratorHeaderFile = (options.outDir / (moduleName + ".hpp"));
     if (!std::filesystem::exists(integratorHeaderFile)) {
         std::ofstream integrator = openFile(pathToString(integratorHeaderFile));
         integrator << std::format(R"cppcode(
@@ -350,7 +350,7 @@ int main(int argc, char** argv) try {
     }
 
     std::string line;
-    size_t      lineNum = 0UZ;
+    std::size_t lineNum = 0UZ;
     while (std::getline(fin, line)) {
         lineNum++;
         auto trimmed = detail::trim(line);
@@ -415,7 +415,10 @@ int main(int argc, char** argv) try {
             auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, generatedRegistrationFunctions, options);
             output.registrations << "// To initialize, call " << generatedInitFunction << "\n";
 
-            output.declarations << "extern \"C\" { bool " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
+            const std::string declarationsGuard = std::format("HEADER_GUARD_{}_HPP", generatedInitFunction);
+            output.declarations << std::format("#ifndef {}\n#define {}\n", declarationsGuard, declarationsGuard);
+            output.declarations << "extern \"C\" { std::size_t " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
+            output.declarations << std::format("#endif // {}\n", declarationsGuard);
             output.rawCalls << "result += !" << generatedInitFunction << "(registry);\n";
 
             output.registrations << "// end of auto-generated code\n";
@@ -448,7 +451,10 @@ int main(int argc, char** argv) try {
                 auto generatedInitFunction = emitInitAllCode(output.registrations, namePrefix, generatedRegistrationFunctions, options);
                 output.registrations << "// To initialize, call " << generatedInitFunction << "\n";
 
+                const std::string declarationsGuard = std::format("HEADER_GUARD_{}_HPP", generatedInitFunction);
+                output.declarations << std::format("#ifndef {}\n#define {}\n", declarationsGuard, declarationsGuard);
                 output.declarations << "extern \"C\" { bool " << generatedInitFunction << "(gr::BlockRegistry&); }\n";
+                output.declarations << std::format("#endif // {}\n", declarationsGuard);
                 output.rawCalls << "result += !" << generatedInitFunction << "(registry);\n";
 
                 output.registrations << "// end of auto-generated code\n";

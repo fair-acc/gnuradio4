@@ -248,16 +248,16 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
 
     std::vector<std::vector<float>> expectedValues = {{5, 6, 7, 8, 9}, {15, 16, 17, 18, 19, 20, 21, 22, 23, 24}, {20, 21, 22, 23, 24, 25, 26, 27, 28, 29}};
     "start->stop (excluding)"_test                 = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {3UZ, 3UZ, 4UZ}); };
+    "start->stop (excluding) n_max=0"_test         = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {3UZ, 3UZ, 4UZ}, 0UZ); };
 
     expectedValues                           = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},                       //
                                   {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}, //
                                   {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36}};
     "start->stop (excluding +pre/post)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2]", 7, 7, expectedValues, {5UZ, 5UZ, 5UZ}); };
 
-    expectedValues                  = {{5, 6, 7, 8, 9, 10, 11},            //
-                         {15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}, //
-                         {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}};
-    "start->^stop (including)"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {4UZ, 4UZ, 5UZ}); };
+    expectedValues                          = {{5, 6, 7, 8, 9, 10, 11}, {15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}, {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}};
+    "start->^stop (including)"_test         = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {4UZ, 4UZ, 5UZ}); };
+    "start->^stop (including) n_max=0"_test = [&runTestDataSet, &expectedValues] { runTestDataSet(50U, "[CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1, CMD_BP_START/^FAIR.SELECTOR.C=1:S=1:P=2]", 0, 0, expectedValues, {4UZ, 4UZ, 5UZ}, 0UZ); };
 
     expectedValues                             = {{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},                       //
                                     {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33}, //
