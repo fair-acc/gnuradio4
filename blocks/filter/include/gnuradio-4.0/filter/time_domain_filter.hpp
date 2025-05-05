@@ -177,7 +177,7 @@ with selectable filter type (low-pass, high-pass, band-pass, band-stop), and sup
         auto cast_enum = []<typename V>(const V&, const std::string& str) {
             auto result = magic_enum::enum_cast<V>(str);
             if (!result.has_value()) {
-                throw gr::exception(fmt::format("invalid value for {}: {}", magic_enum::enum_type_name<V>(), str));
+                throw gr::exception(std::format("invalid value for {}: {}", magic_enum::enum_type_name<V>(), str));
             }
             return result.value();
         };

@@ -6,9 +6,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <format>
 #include <functional>
 #include <future>
-#include <iostream>
 #include <list>
 #include <mutex>
 #include <span>
@@ -17,11 +17,10 @@
 #include <type_traits>
 #include <utility>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-
 #include "../WaitStrategy.hpp"
 #include "thread_affinity.hpp"
+
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::thread_pool {
 namespace detail {
@@ -300,8 +299,8 @@ concept ThreadPool = requires(T t, std::function<void()>&& func) {
  * // pool for CPU-bound tasks with exactly 1 thread
  * opencmw::BasicThreadPool&lt;opencmw::CPU_BOUND&gt; poolWork("CustomCpuPool", 1, 1);
  * // enqueue and add task to list -- w/o return type
- * poolWork.execute([] { fmt::print("Hello World from thread '{}'!\n", getThreadName()); }); // here: caller thread-name
- * poolWork.execute([](const auto &...args) { fmt::print(fmt::runtime("Hello World from thread '{}'!\n"), args...); }, getThreadName()); // here: executor thread-name
+ * poolWork.execute([] { std::print("Hello World from thread '{}'!\n", getThreadName()); }); // here: caller thread-name
+ * poolWork.execute([](const auto &...args) { std::print("Hello World from thread '{}'!\n", args...); }, getThreadName()); // here: executor thread-name
  * // [..]
  *
  * // pool for IO-bound (potentially blocking) tasks with at least 1 and a max of 1000 threads
@@ -310,16 +309,16 @@ concept ThreadPool = requires(T t, std::function<void()>&& func) {
  * poolIO.waitUntilInitialised();                       // wait until the pool is initialised (optional)
  * poolIO.setAffinityMask({ true, true, true, false }); // allows executor threads to run on the first four CPU cores
  *
- * constexpr auto           func1  = [](const auto &...args) { return fmt::format(fmt::runtime("thread '{1}' scheduled task '{0}'!\n"), getThreadName(), args...); };
+ * constexpr auto           func1  = [](const auto &...args) { return std::format("thread '{1}' scheduled task '{0}'!\n", getThreadName(), args...); };
  * std::future&lt;std::string&gt; result = poolIO.execute&lt;"customTaskName"&gt;(func1, getThreadName()); // N.B. the calling thread is owner of the std::future
  *
  * // execute a task with a name, a priority and single-core affinity (here: 2)
- * poolIO.execute&lt;"task name", 20U, 2&gt;([]() { fmt::print("Hello World from custom thread '{}'!\n", getThreadName()); });
+ * poolIO.execute&lt;"task name", 20U, 2&gt;([]() { std::print("Hello World from custom thread '{}'!\n", getThreadName()); });
  *
  * try {
  *     poolIO.execute&lt;"customName", 20U, 3&gt;([]() {  [..] this potentially long-running task is trackable via it's 'customName' thread name [..] });
  * } catch (const std::invalid_argument &e) {
- *     fmt::print("caught exception: {}\n", e.what());
+ *     std::print("caught exception: {}\n", e.what());
  * }
  * @endcode
  */
@@ -329,7 +328,7 @@ class BasicThreadPool {
     static std::atomic<uint64_t> _globalPoolId;
     static std::atomic<uint64_t> _taskID;
 
-    static std::string generateName() { return fmt::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1)); }
+    static std::string generateName() { return std::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1)); }
 
     std::atomic_bool _initialised = ATOMIC_FLAG_INIT;
     std::atomic_bool _shutdown    = false;
@@ -434,7 +433,7 @@ public:
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
-                throw std::invalid_argument(fmt::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), fmt::join(_affinityMask.begin(), _affinityMask.end(), ", ")));
+                throw std::invalid_argument(std::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
             }
         }
         _numTaskedQueued.fetch_add(1U);
@@ -462,9 +461,9 @@ public:
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
-                throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
+                throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
 #else
-                throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", cpuID, _affinityMask.size(), _affinityMask));
+                throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", cpuID, _affinityMask.size(), _affinityMask));
 #endif
             }
         }
@@ -499,7 +498,7 @@ private:
     }
 
     void updateThreadConstraints(const std::size_t threadID, std::thread& thread) const {
-        thread::setThreadName(fmt::format("{}#{}", _poolName, threadID), thread);
+        thread::setThreadName(std::format("{}#{}", _poolName, threadID), thread);
         thread::setThreadSchedulingParameter(_schedulingPolicy, _schedulingPriority, thread);
         if (!_affinityMask.empty()) {
             if (_taskType == TaskType::IO_BOUND) {
@@ -507,7 +506,7 @@ private:
                 return;
             }
             const std::vector<bool> affinityMask = distributeThreadAffinityAcrossCores(_affinityMask, threadID);
-            std::cout << fmt::format("{}#{} affinity mask: {}", _poolName, threadID, fmt::join(affinityMask.begin(), affinityMask.end(), ",")) << std::endl;
+            std::println("{}#{} affinity mask: {}", _poolName, threadID, gr::join(affinityMask, ","));
             thread::setThreadAffinity(affinityMask);
         }
     }
@@ -606,7 +605,7 @@ private:
                 _recycledTasks.push(std::move(currentTaskContainer));
                 _numTasksRunning.fetch_sub(1);
                 if (nameSet) {
-                    thread::setThreadName(fmt::format("{}#{}", _poolName, threadID));
+                    thread::setThreadName(std::format("{}#{}", _poolName, threadID));
                 }
                 lastUsed     = std::chrono::steady_clock::now();
                 noop_counter = 0;

@@ -17,7 +17,7 @@
 */
 
 #include "exprtk.hpp"
-#include <fmt/core.h>
+#include <format>
 #include <string>
 #include <vector>
 

@@ -133,7 +133,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
             if (newSettings.contains("n_pre") || newSettings.contains("n_post") || newSettings.contains("n_max")) {
                 if (n_max != 0UZ && n_pre + n_post > n_max) {
                     using namespace gr::message;
-                    throw gr::exception(fmt::format("ill-formed settings: n_pre({}) + n_post({}) > n_max({})", n_pre, n_post, n_max));
+                    throw gr::exception(std::format("ill-formed settings: n_pre({}) + n_post({}) > n_max({})", n_pre, n_post, n_max));
                 }
             }
         }

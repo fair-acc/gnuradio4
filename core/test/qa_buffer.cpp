@@ -7,8 +7,7 @@
 
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/BufferSkeleton.hpp>
@@ -53,8 +52,8 @@ const boost::ut::suite BasicConceptsTests = [] {
         const auto      allocator = (std::is_same_v<typename T::Allocator, AllocatorPosix>) ? gr::double_mapped_memory_resource::allocator<int32_t>() : std::pmr::polymorphic_allocator<int32_t>();
         BufferLike auto buffer    = typename T::CircularBuffer(1024, allocator);
 
-        auto typeName = fmt::format("test({}-{})", reflection::type_name<typename T::CircularBuffer>(), reflection::type_name<typename T::Allocator>());
-        fmt::println("BasicConcepts: {}", typeName);
+        auto typeName = std::format("test({}-{})", reflection::type_name<typename T::CircularBuffer>(), reflection::type_name<typename T::Allocator>());
+        std::println("BasicConcepts: {}", typeName);
 
         // N.B. GE because some buffers need to intrinsically allocate more to meet e.g. page-size requirements
         expect(ge(buffer.size(), 1024UZ)) << "for " << typeName << "\n";
@@ -151,7 +150,7 @@ const boost::ut::suite SequenceTests = [] {
 
         std::stringstream ss;
         expect(eq(ss.str().size(), 0UZ));
-        expect(nothrow([&ss, &s3] { ss << fmt::format("{}", *s3); }));
+        expect(nothrow([&ss, &s3] { ss << std::format("{}", *s3); }));
         expect(not ss.str().empty());
     };
 };
@@ -262,22 +261,22 @@ const boost::ut::suite UserApiExamples = [] {
                 expect(eq(pSpan.size(), 5UZ));
                 pSpan.publish(5);
             }
-            expect(eq(reader.available(), (i + 1) * 5)) << fmt::format("iteration: {}", i);
+            expect(eq(reader.available(), (i + 1) * 5)) << std::format("iteration: {}", i);
         }
 
         // N.B. here using a simple read-only (sink) example:
         for (int i = 0; reader.available() != 0; i++) {
             ReaderSpanLike auto fixedLength = reader.get(3); // 'std::span<const int32_t> fixedLength' is not allowed explicitly
             ReaderSpanLike auto available   = reader.get();
-            fmt::print("iteration {} - fixed-size data[{:2}]: [{}]\n", i, fixedLength.size(), fmt::join(fixedLength, ", "));
-            fmt::print("iteration {} - full-size  data[{:2}]: [{}]\n", i, available.size(), fmt::join(available, ", "));
+            std::print("iteration {} - fixed-size data[{:2}]: [{}]\n", i, fixedLength.size(), gr::join(fixedLength, ", "));
+            std::print("iteration {} - full-size  data[{:2}]: [{}]\n", i, available.size(), gr::join(available, ", "));
 
             // consume data -> allows corresponding buffer to be overwritten by writer
             // if there are no other reader claiming that buffer segment
             if (fixedLength.consume(fixedLength.size())) {
                 // for info-only - since available() can change in parallel
                 // N.B. lock-free buffer and other writer may add while processing
-                fmt::print("iteration {} - consumed {} elements - still available: {}\n", i, fixedLength.size(), reader.available());
+                std::print("iteration {} - consumed {} elements - still available: {}\n", i, fixedLength.size(), reader.available());
             } else {
                 throw std::runtime_error("could not consume data");
             }
@@ -293,7 +292,7 @@ const boost::ut::suite CircularBufferTests = [] {
         const auto      allocator = (std::is_same_v<typename T::Allocator, AllocatorPosix>) ? gr::double_mapped_memory_resource::allocator<int32_t>() : std::pmr::polymorphic_allocator<int32_t>();
         BufferLike auto buffer    = typename T::CircularBuffer(1024, allocator);
 
-        fmt::println("CircularBufferTest: {}", fmt::format("test({}-{})", gr::meta::type_name<typename T::CircularBuffer>(), gr::meta::type_name<typename T::Allocator>()));
+        std::println("CircularBufferTest: {}", std::format("test({}-{})", gr::meta::type_name<typename T::CircularBuffer>(), gr::meta::type_name<typename T::Allocator>()));
 
         expect(ge(buffer.size(), 1024u));
 
@@ -428,9 +427,9 @@ const boost::ut::suite CircularBufferTests = [] {
                     expect(eq(writer.nRequestedSamplesToPublish(), 2UZ));
                 }
                 const auto cursor_after = buffer.cursor_sequence().value();
-                expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
+                expect(eq(cursor_initial + 2, cursor_after)) << std::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
                 ReaderSpanLike auto cSpan = reader.get();
-                expect(eq(2UZ, cSpan.size())) << fmt::format("received {} samples instead of expected 2", cSpan.size());
+                expect(eq(2UZ, cSpan.size())) << std::format("received {} samples instead of expected 2", cSpan.size());
                 for (std::size_t i = 0; i < cSpan.size(); i++) {
                     expect(eq(static_cast<int>(i + 1), cSpan[i])) << "read 1: index " << i;
                 }
@@ -453,9 +452,9 @@ const boost::ut::suite CircularBufferTests = [] {
                     expect(eq(writer.nRequestedSamplesToPublish(), 2UZ));
                 }
                 const auto cursor_after = buffer.cursor_sequence().value();
-                expect(eq(cursor_initial + 2, cursor_after)) << fmt::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
+                expect(eq(cursor_initial + 2, cursor_after)) << std::format("cursor sequence moving by two: {} -> {}", cursor_initial, cursor_after);
                 ReaderSpanLike auto cSpan = reader.get();
-                expect(eq(2UZ, cSpan.size())) << fmt::format("received {} samples instead of expected 2", cSpan.size());
+                expect(eq(2UZ, cSpan.size())) << std::format("received {} samples instead of expected 2", cSpan.size());
                 for (std::size_t i = 0; i < cSpan.size(); i++) {
                     expect(eq(static_cast<int>(i + 1), cSpan[i])) << "read 1: index " << i;
                 }
@@ -630,17 +629,17 @@ const boost::ut::suite StreamTagConcept = [] {
 
             WriterSpanLike auto pSpanTag = tagWriter.tryReserve<SpanReleasePolicy::ProcessAll>(1);
             expect(eq(pSpanTag.size(), 1UZ));
-            pSpanTag[0] = {static_cast<int64_t>(offset), fmt::format("<tag data at index {:3}>", offset)};
+            pSpanTag[0] = {static_cast<int64_t>(offset), std::format("<tag data at index {:3}>", offset)};
         }
 
         { // read-only worker (sink) mock-up
-            fmt::print("read position: {}\n", reader.position());
+            std::print("read position: {}\n", reader.position());
             ReaderSpanLike auto cSpanData = reader.get(reader.available());
             ReaderSpanLike auto cSpanTags = tagReader.get(tagReader.available());
 
-            fmt::print("received {} tags\n", cSpanTags.size());
+            std::print("received {} tags\n", cSpanTags.size());
             for (auto& readTag : cSpanTags) {
-                fmt::print("stream-tag @{:3}: '{}'\n", readTag.index, readTag.data);
+                std::print("stream-tag @{:3}: '{}'\n", readTag.index, readTag.data);
             }
 
             expect(cSpanData.consume(cSpanData.size()));
@@ -704,7 +703,7 @@ const boost::ut::suite<"Small Buffers"> _smallBufferTests = [] {
     // the default mmap posix buffer size is typically multiple of the memory page size (e.g. 4096) which would
     // make those buffers quite expensive. Thus, if there are composite types (i.e. other than fundamental or
     // std::complex<> types, the buffer implementation should default to the non-posix/STL C++ allocator
-    fmt::println("start small buffer test");
+    std::println("start small buffer test");
     "std::vector<T>"_test = [] {
         using Type = std::vector<int>;
         static_assert(not std::is_trivially_copyable_v<Type>);
@@ -751,23 +750,23 @@ const boost::ut::suite HistoryBufferTest = [] {
             return std::equal(range1.begin(), range1.end(), range2.begin(), range2.end());
         };
 
-        expect(equal(hb.get_span(0, 3), std::vector{6, 5, 4})) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(0, 3), ", "));
-        expect(equal(hb.get_span(1, 3), std::vector{5, 4, 3})) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(1, 3), ", "));
+        expect(equal(hb.get_span(0, 3), std::vector{6, 5, 4})) << std::format("failed - got [{}]", gr::join(hb.get_span(0, 3), ", "));
+        expect(equal(hb.get_span(1, 3), std::vector{5, 4, 3})) << std::format("failed - got [{}]", gr::join(hb.get_span(1, 3), ", "));
 
-        expect(equal(hb.get_span(0), std::vector{6, 5, 4, 3, 2})) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(0), ", "));
-        expect(equal(hb.get_span(1), std::vector{5, 4, 3, 2})) << fmt::format("failed - got [{}]", fmt::join(hb.get_span(1), ", "));
+        expect(equal(hb.get_span(0), std::vector{6, 5, 4, 3, 2})) << std::format("failed - got [{}]", gr::join(hb.get_span(0), ", "));
+        expect(equal(hb.get_span(1), std::vector{5, 4, 3, 2})) << std::format("failed - got [{}]", gr::join(hb.get_span(1), ", "));
 
         std::vector<int> forward_bracket;
         for (std::size_t i = 0; i < hb.size(); i++) {
             forward_bracket.push_back(hb[i]);
         }
-        expect(equal(forward_bracket, std::vector{6, 5, 4, 3, 2})) << fmt::format("failed - got [{}]", fmt::join(forward_bracket, ", "));
+        expect(equal(forward_bracket, std::vector{6, 5, 4, 3, 2})) << std::format("failed - got [{}]", gr::join(forward_bracket, ", "));
 
         std::vector<int> forward(hb.begin(), hb.end());
-        expect(equal(forward, std::vector{6, 5, 4, 3, 2})) << fmt::format("failed - got [{}]", fmt::join(forward, ", "));
+        expect(equal(forward, std::vector{6, 5, 4, 3, 2})) << std::format("failed - got [{}]", gr::join(forward, ", "));
 
         std::vector<int> reverse(hb.rbegin(), hb.rend());
-        expect(equal(reverse, std::vector{2, 3, 4, 5, 6})) << fmt::format("failed - got [{}]", fmt::join(reverse, ", "));
+        expect(equal(reverse, std::vector{2, 3, 4, 5, 6})) << std::format("failed - got [{}]", gr::join(reverse, ", "));
 
         expect(equal(std::vector(hb.cbegin(), hb.cend()), std::vector(hb.begin(), hb.end()))) << "const non-const iterator equivalency";
         expect(equal(std::vector(hb.crbegin(), hb.crend()), std::vector(hb.rbegin(), hb.rend()))) << "const non-const iterator equivalency";
@@ -787,7 +786,7 @@ const boost::ut::suite HistoryBufferTest = [] {
     };
 
     "HistoryBuffer<T> edge cases"_test = [] {
-        fmt::print("\n\ntesting edge cases:\n");
+        std::print("\n\ntesting edge cases:\n");
         expect(throws<std::out_of_range>([] { HistoryBuffer<int>(0); })) << "throws for 0 capacity";
 
         // Create a history buffer of size 1

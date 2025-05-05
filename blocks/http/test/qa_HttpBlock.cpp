@@ -2,13 +2,13 @@
 
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>

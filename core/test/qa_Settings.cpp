@@ -2,8 +2,9 @@
 
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
+#include <gnuradio-4.0/meta/formatter.hpp>
+
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -13,6 +14,8 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/testing/SettingsChangeRecorder.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 using namespace std::string_literals;
 
@@ -110,6 +113,7 @@ const boost::ut::suite SettingsTests = [] {
     using namespace gr;
     using namespace gr::setting_test;
     using namespace std::string_view_literals;
+    using namespace gr::test;
 
     "basic node settings tag"_test = [] {
         Graph                testGraph;
@@ -215,16 +219,16 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(sink._nSamplesConsumed, n_samples)) << "sink did not consume enough input samples";
 
         for (auto& fwd : src.settings().autoUpdateParameters()) {
-            fmt::println("## src auto {}", fwd);
+            std::println("## src auto {}", fwd);
         }
         for (auto& fwd : block1.settings().autoUpdateParameters()) {
-            fmt::println("## block1 auto {}", fwd);
+            std::println("## block1 auto {}", fwd);
         }
         for (auto& fwd : block2.settings().autoUpdateParameters()) {
-            fmt::println("## block2 auto {}", fwd);
+            std::println("## block2 auto {}", fwd);
         }
         for (auto& fwd : sink.settings().autoUpdateParameters()) {
-            fmt::println("## sink auto {}", fwd);
+            std::println("## sink auto {}", fwd);
         }
 
         expect(eq(src.n_samples_max, n_samples)) << "receive tag announcing max samples";
@@ -333,7 +337,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.settings().stagedParameters().size(), 0UZ)); // clear _staged after applyStagedParameters() call
         expect(eq(block.vector_setting, std::vector{42.f, 2.f, 3.f}));
         expect(eq(block.string_vector_setting.value, std::vector<std::string>{"A", "B", "C"}));
-        expect(eq(block._updateCount, 1)) << fmt::format("actual update count: {}\n", block._updateCount);
+        expect(eq(block._updateCount, 1)) << std::format("actual update count: {}\n", block._updateCount);
         expect(eq(std::get<std::vector<float>>(*block.settings().get("vector_setting")), std::vector{42.f, 2.f, 3.f}));
         expect(eq(std::get<std::vector<std::string>>(*block.settings().get("string_vector_setting")), std::vector<std::string>{"A", "B", "C"}));
     };
@@ -916,9 +920,9 @@ connections:
         try {
             scheduler::Simple sched{loadGrc(loader, std::string(grc))};
             expect(sched.runAndWait().has_value());
-            sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << fmt::format("sample_rate forwarded to {}", block.name()); });
+            sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << std::format("sample_rate forwarded to {}", block.name()); });
         } catch (const std::string& e) {
-            expect(false) << fmt::format("GRC loading failed: {}\n", e);
+            expect(false) << std::format("GRC loading failed: {}\n", e);
         }
     };
 #endif

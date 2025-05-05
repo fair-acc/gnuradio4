@@ -158,7 +158,7 @@ protected:
             });
 
             if (it == what.end()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
             }
 
             return std::get<gr::DynamicPort>(*it);
@@ -168,7 +168,7 @@ protected:
             std::size_t            index = -1UZ;
             auto [_, ec]                 = std::from_chars(indexString.data(), indexString.data() + indexString.size(), index);
             if (ec != std::errc()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, needs to be an integer", what.size(), indexString), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Invalid index {} specified, needs to be an integer", what.size(), indexString), location);
             }
 
             auto collectionIt = std::ranges::find_if(what, [&base](const DynamicPortOrCollection& portOrCollection) {
@@ -177,13 +177,13 @@ protected:
             });
 
             if (collectionIt == what.cend()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid name specified name={}, base={}\n", what.size(), name, base), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Invalid name specified name={}, base={}\n", what.size(), name, base), location);
             }
 
             auto& collection = std::get<NamedPortCollection>(*collectionIt);
 
             if (index >= collection.ports.size()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, out of range. Number of ports is {}", what.size(), index, collection.ports.size()), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Invalid index {} specified, out of range. Number of ports is {}", what.size(), index, collection.ports.size()), location);
             }
 
             return collection.ports[index];
@@ -232,7 +232,7 @@ public:
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -241,7 +241,7 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
@@ -252,7 +252,7 @@ public:
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -261,7 +261,7 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
@@ -322,7 +322,7 @@ public:
             }
         }
 
-        throw gr::exception(fmt::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name));
     }
 
     std::size_t dynamicOutputPortIndex(const std::string& name) const {
@@ -339,7 +339,7 @@ public:
             }
         }
 
-        throw gr::exception(fmt::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name));
     }
 
     virtual ~BlockModel() = default;
@@ -553,15 +553,15 @@ public:
 } // namespace gr
 
 template<>
-struct fmt::formatter<gr::Edge> {
+struct std::formatter<gr::Edge> {
     char formatSpecifier = 's';
 
-    constexpr auto parse(fmt::format_parse_context& ctx) {
+    constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && (*it == 's' || *it == 'l')) {
             formatSpecifier = *it++;
         } else if (it != ctx.end() && *it != '}') {
-            throw fmt::format_error("invalid format specifier");
+            throw std::format_error("invalid format specifier");
         }
         return it;
     }
@@ -574,16 +574,16 @@ struct fmt::formatter<gr::Edge> {
             return std::visit(gr::meta::overloaded(
                                   [](const gr::PortDefinition::IndexBased& index) {
                                       if (index.subIndex == gr::meta::invalid_index) {
-                                          return fmt::format("{}", index.topLevel);
+                                          return std::format("{}", index.topLevel);
                                       } else {
-                                          return fmt::format("{}#{}", index.topLevel, index.subIndex);
+                                          return std::format("{}#{}", index.topLevel, index.subIndex);
                                       }
                                   },
                                   [](const gr::PortDefinition::StringBased& index) { return index.name; }),
                 port.definition);
         };
 
-        return fmt::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
+        return std::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
             name(e._sourceBlock), portIndex(e._sourcePortDefinition),                                         //
             e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            //
             name(e._destinationBlock), portIndex(e._destinationPortDefinition));

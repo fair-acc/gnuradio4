@@ -1,7 +1,7 @@
 #include <boost/ut.hpp>
 #include <complex>
 #include <cstdint>
-#include <fmt/format.h>
+#include <format>
 #include <string>
 #include <variant>
 
@@ -20,14 +20,14 @@ const boost::ut::suite<"pmt safe conversion tests"> _conversionTests = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
 
-    constexpr static auto unexpected = [](auto& exp) { return exp.has_value() ? fmt::format("unexpected value return: {}", exp.value()) : fmt::format("unexpected error return: {}", exp.error()); };
+    constexpr static auto unexpected = [](auto& exp) { return exp.has_value() ? std::format("unexpected value return: {}", exp.value()) : std::format("unexpected error return: {}", exp.error()); };
 
     "integral->integral (in-range)"_test = [] {
         TestVariant v   = 42;
         auto        res = pmtv::convert_safely<std::int64_t>(v);
         expect(res.has_value()) << unexpected(res);
         if (res) {
-            expect(*res == 42_ll) << fmt::format("wrong value, got: {}", res.value());
+            expect(*res == 42_ll) << std::format("wrong value, got: {}", res.value());
         }
     };
 
@@ -49,7 +49,7 @@ const boost::ut::suite<"pmt safe conversion tests"> _conversionTests = [] {
         auto        res = pmtv::convert_safely<float>(v);
         expect(res.has_value()) << unexpected(res);
         if (res) {
-            expect(*res == static_cast<float>((1 << 24) - 1)) << fmt::format("wrong value, got: {}", *res);
+            expect(*res == static_cast<float>((1 << 24) - 1)) << std::format("wrong value, got: {}", *res);
         }
     };
 
@@ -105,7 +105,7 @@ const boost::ut::suite<"pmt safe conversion tests"> _conversionTests = [] {
         expect(res.has_value()) << unexpected(res);
         ;
         if (res) {
-            expect(*res == 123) << fmt::format("wrong parsed value, got: {}", *res);
+            expect(*res == 123) << std::format("wrong parsed value, got: {}", *res);
         }
     };
 
@@ -209,7 +209,7 @@ const boost::ut::suite<"pmt safe conversion tests"> _conversionTests = [] {
     "string->enum (invalid)"_test = [] {
         TestVariant v   = "Magenta"s;
         auto        res = pmtv::convert_safely<test::Colour>(v);
-        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : fmt::format("Should fail invalid enum, got: {}", res.error()));
+        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : std::format("Should fail invalid enum, got: {}", res.error()));
     };
 
     "complex<float> -> complex<double>"_test = [] {
@@ -255,19 +255,19 @@ const boost::ut::suite<"pmt safe conversion tests"> _conversionTests = [] {
     "bool -> complex<float> (should fail)"_test = [] {
         TestVariant v   = true;
         auto        res = pmtv::convert_safely<std::complex<float>>(v);
-        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : fmt::format("should fail, got: {}", res.error()));
+        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : std::format("should fail, got: {}", res.error()));
     };
 
     "complex<float> -> integral (not implemented)"_test = [] {
         TestVariant v   = std::complex<float>(1.0f, 2.0f);
         auto        res = pmtv::convert_safely<int>(v);
-        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : fmt::format("should fail, got: {}", res.error()));
+        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : std::format("should fail, got: {}", res.error()));
     };
 
     "complex<double> (non-real-only) -> float"_test = [] {
         TestVariant v   = std::complex<double>(1.0, -3.32);
         auto        res = pmtv::convert_safely<float>(v);
-        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : fmt::format("should fail, got: {}", res.error()));
+        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : std::format("should fail, got: {}", res.error()));
     };
 
     "complex<double> (real-only) -> floating-point"_test = []<typename T> {
@@ -280,7 +280,7 @@ const boost::ut::suite<"pmt safe conversion tests"> _conversionTests = [] {
     "string -> complex<float> (not implemented)"_test = [] {
         TestVariant v   = "1.0, 2.0"s;
         auto        res = pmtv::convert_safely<std::complex<float>>(v);
-        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : fmt::format("should fail, got: {}", res.error()));
+        expect(!res.has_value()) << (res.has_value() ? "unexpected success, value is present" : std::format("should fail, got: {}", res.error()));
     };
 };
 
@@ -289,7 +289,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
 
     using MinimalNumericVariant = std::variant<std::int8_t, std::int16_t, std::int32_t, std::int64_t, std::uint8_t, float, double>;
 
-    constexpr static auto variantToString = [](const MinimalNumericVariant& v) { return std::visit([](auto val) { return fmt::format("{} (type={})", val, typeid(val).name()); }, v); };
+    constexpr static auto variantToString = [](const MinimalNumericVariant& v) { return std::visit([](auto val) { return std::format("{} (type={})", val, typeid(val).name()); }, v); };
 
     "empty or comment only"_test = [] {
         "empty_string"_test = [] {
@@ -307,7 +307,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         expect(res.has_value()) << "should parse successfully";
         if (res) {
             // check the variant holds int8_t
-            expect(std::holds_alternative<std::int8_t>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<std::int8_t>(*res)) << std::format("wrong type => got {}", variantToString(*res));
             expect(std::get<std::int8_t>(*res) == 127) << "wrong value for int8_t";
         }
     };
@@ -317,7 +317,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         expect(res.has_value()) << "should parse successfully";
         if (res) {
             // because 255 is non-negative and fits in uint8_t
-            expect(std::holds_alternative<std::uint8_t>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<std::uint8_t>(*res)) << std::format("wrong type => got {}", variantToString(*res));
             expect(std::get<std::uint8_t>(*res) == 255) << "wrong value for uint8_t";
         }
     };
@@ -328,7 +328,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         expect(res.has_value()) << "should parse successfully";
         if (res) {
             // with the smallest signed type that can hold -1 => int8_t
-            expect(std::holds_alternative<std::int8_t>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<std::int8_t>(*res)) << std::format("wrong type => got {}", variantToString(*res));
             expect(std::get<std::int8_t>(*res) == -1) << "wrong value for int8_t";
         }
     };
@@ -337,7 +337,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         const auto res = pmtv::parseToMinimalNumeric<MinimalNumericVariant>("300");
         expect(res.has_value());
         if (res) {
-            expect(std::holds_alternative<std::int16_t>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<std::int16_t>(*res)) << std::format("wrong type => got {}", variantToString(*res));
             expect(std::get<std::int16_t>(*res) == 300);
         }
     };
@@ -346,7 +346,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         const auto res = pmtv::parseToMinimalNumeric<MinimalNumericVariant>("40000");
         expect(res.has_value());
         if (res) {
-            expect(std::holds_alternative<std::int32_t>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<std::int32_t>(*res)) << std::format("wrong type => got {}", variantToString(*res));
             expect(std::get<std::int32_t>(*res) == 40000);
         }
     };
@@ -356,7 +356,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         const auto res = pmtv::parseToMinimalNumeric<MinimalNumericVariant>("9999999999");
         expect(res.has_value());
         if (res) {
-            expect(std::holds_alternative<std::int64_t>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<std::int64_t>(*res)) << std::format("wrong type => got {}", variantToString(*res));
             expect(std::get<std::int64_t>(*res) == 9999999999LL);
         }
     };
@@ -375,7 +375,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         const auto res = pmtv::parseToMinimalNumeric<MinimalNumericVariant>("3.14159");
         expect(res.has_value());
         if (res) {
-            expect(std::holds_alternative<float>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<float>(*res)) << std::format("wrong type => got {}", variantToString(*res));
         }
     };
 
@@ -384,7 +384,7 @@ const boost::ut::suite<"parse to minmal numeric type"> _parseToMinimalNumericTyp
         const auto res = pmtv::parseToMinimalNumeric<MinimalNumericVariant>("9.999999e39");
         expect(res.has_value()) << "should parse as double fallback if out-of-range for float";
         if (res) {
-            expect(std::holds_alternative<double>(*res)) << fmt::format("wrong type => got {}", variantToString(*res));
+            expect(std::holds_alternative<double>(*res)) << std::format("wrong type => got {}", variantToString(*res));
         }
     };
 

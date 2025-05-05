@@ -6,7 +6,7 @@
 
 #include <gnuradio-4.0/meta/formatter.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace test::detail {
 
@@ -682,28 +682,28 @@ const boost::ut::suite<"basic UncertainValue<T> tests"> _uncertainValue = [] {
         static_assert(!UncertainValueLike<double>);
 
         // uncorrelated operations
-        fmt::print("uncorrelated values:\n");
-        fmt::print("{} + {} = {}\n", uValueA, uValueB, uValueA + uValueB);
-        fmt::print("{} - {} = {}\n", uValueA, uValueB, uValueA - uValueB);
-        fmt::print("{} * {} = {}\n", uValueA, uValueB, uValueA * uValueB);
-        fmt::print("{} / {} = {}\n", uValueA, uValueB, uValueA / uValueB);
+        std::print("uncorrelated values:\n");
+        std::print("{} + {} = {}\n", uValueA, uValueB, uValueA + uValueB);
+        std::print("{} - {} = {}\n", uValueA, uValueB, uValueA - uValueB);
+        std::print("{} * {} = {}\n", uValueA, uValueB, uValueA * uValueB);
+        std::print("{} / {} = {}\n", uValueA, uValueB, uValueA / uValueB);
 
-        fmt::print("mixed-regular values:\n");
-        fmt::print("{} + {} = {}\n", uValueA, uValueB.value, uValueA + uValueB.value);
-        fmt::print("{} - {} = {}\n", uValueA, uValueB.value, uValueA - uValueB.value);
-        fmt::print("{} * {} = {}\n", uValueA, uValueB.value, uValueA * uValueB.value);
-        fmt::print("{} / {} = {}\n", uValueA, uValueB.value, uValueA / uValueB.value);
+        std::print("mixed-regular values:\n");
+        std::print("{} + {} = {}\n", uValueA, uValueB.value, uValueA + uValueB.value);
+        std::print("{} - {} = {}\n", uValueA, uValueB.value, uValueA - uValueB.value);
+        std::print("{} * {} = {}\n", uValueA, uValueB.value, uValueA * uValueB.value);
+        std::print("{} / {} = {}\n", uValueA, uValueB.value, uValueA / uValueB.value);
 
         // complex values
         using namespace std::complex_literals;
         UncertainValue uValueAC{4. + 1i, +1. + 1i};
         UncertainValue uValueBC{2. - 1i, +2. + 2i};
 
-        fmt::print("uncorrelated values - complex:\n");
-        fmt::print("{} + {} = {}\n", uValueAC, uValueBC, uValueAC + uValueBC);
-        fmt::print("{} - {} = {}\n", uValueAC, uValueBC, uValueAC - uValueBC);
-        fmt::print("{} * {} = {}\n", uValueAC, uValueBC, uValueAC * uValueBC);
-        fmt::print("{} / {} = {}\n", uValueAC, uValueBC, uValueAC / uValueBC);
+        std::print("uncorrelated values - complex:\n");
+        std::print("{} + {} = {}\n", uValueAC, uValueBC, uValueAC + uValueBC);
+        std::print("{} - {} = {}\n", uValueAC, uValueBC, uValueAC - uValueBC);
+        std::print("{} * {} = {}\n", uValueAC, uValueBC, uValueAC * uValueBC);
+        std::print("{} / {} = {}\n", uValueAC, uValueBC, uValueAC / uValueBC);
     };
 };
 

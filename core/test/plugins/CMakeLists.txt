@@ -14,12 +14,7 @@ function(add_non_blocklib_plugin PLUGIN_NAME)
   target_compile_options(${PLUGIN_NAME} PRIVATE -Wall)
 
   target_include_directories(${PLUGIN_NAME} PUBLIC ${CMAKE_BINARY_DIR}/include)
-  target_link_libraries(
-    ${PLUGIN_NAME}
-    PUBLIC gnuradio-options
-           gnuradio-core
-           gnuradio-plugin
-           fmt)
+  target_link_libraries(${PLUGIN_NAME} PUBLIC gnuradio-options gnuradio-core gnuradio-plugin)
 endfunction()
 
 add_non_blocklib_plugin(good_math_plugin)

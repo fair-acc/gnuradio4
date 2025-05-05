@@ -15,9 +15,10 @@ template<typename T>
     if (!convertedValue) { // error
         const std::size_t actualIndex   = value.index();
         const std::size_t requiredIndex = meta::to_typelist<pmtv::pmt>::index_of<T>();
-        return std::unexpected{fmt::format("value for key '{}' has a wrong or not safely convertible type or value {}.\n" //
-                                           "Index of actual type: {} ({}), Index of expected type: {} ({})",              //
-            key, convertedValue.error(), actualIndex, "<missing pmt type>", requiredIndex, gr::meta::type_name<T>())};
+        const std::string typeName      = gr::meta::type_name<T>();
+        return std::unexpected{std::vformat("value for key '{}' has a wrong or not safely convertible type or value {}.\n"
+                                            "Index of actual type: {} ({}), Index of expected type: {} ({})",
+            std::make_format_args(key, convertedValue.error(), actualIndex, "<missing pmt type>", requiredIndex, typeName))};
     }
 
     return convertedValue; // success

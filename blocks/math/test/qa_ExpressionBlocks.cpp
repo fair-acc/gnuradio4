@@ -7,6 +7,9 @@
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/Message.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
+
 namespace gr::blocks::math {
 static_assert(std::is_constructible_v<ExpressionSISO<float>, property_map>, "Block type ExpressionSISO must be constructible from property_map");
 static_assert(std::is_constructible_v<ExpressionDISO<float>, property_map>, "Block type ExpressionDISO must be constructible from property_map");
@@ -76,7 +79,7 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         expect(approx(exprBlock.param_a.value, T(2), T(1e-3f)));
         for (std::size_t i = 0; i < tagSink._samples.size(); ++i) {
             T expected = T(1 + i) * T(2);
-            expect(approx(tagSink._samples[i], expected, T(1e-6))) << fmt::format("should be: output[{}] ({}) == {} * input[{}] ({}) ", i, tagSink._samples[i], exprBlock.param_a, i, expected);
+            expect(approx(tagSink._samples[i], expected, T(1e-6))) << std::format("should be: output[{}] ({}) == {} * input[{}] ({}) ", i, tagSink._samples[i], exprBlock.param_a, i, expected);
         }
     } | std::tuple<float, double>{};
 
@@ -98,12 +101,12 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
 
         try {
             expect(sched.runAndWait().has_value());
-            expect(false) << fmt::format("should have failed");
+            expect(false) << std::format("should have failed");
         } catch (const gr::exception& ex) {
             expect(true);
-            fmt::println("failed correctly with:\n{}\n", ex);
+            std::println("failed correctly with:\n{}\n", ex);
         } catch (...) {
-            expect(false) << fmt::format("caught unknown/unexpected exception");
+            expect(false) << std::format("caught unknown/unexpected exception");
         }
     } | std::vector{true /*, false -- disabled on purpose as this would trigger correctly trigger the ASAN checks*/};
 };

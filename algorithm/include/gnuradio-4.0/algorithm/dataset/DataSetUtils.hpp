@@ -28,7 +28,7 @@ template<DataSetLike TDataSet>
 
     std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataSet);
     if (!dsCheck) {
-        throw gr::exception(fmt::format("draw(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location);
+        throw gr::exception(std::format("draw(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location);
     }
 
     if (config.reset_view == gr::graphs::ResetChartView::RESET) {
@@ -68,11 +68,11 @@ template<DataSetLike TDataSet>
     }
 
     auto chart        = gr::graphs::ImChart<std::dynamic_extent, std::dynamic_extent>({{xMin, xMax}, adjustRange(yMin, yMax)}, config.chart_width, config.chart_height);
-    chart.axis_name_x = fmt::format("{} [{}]", dataSet.axisName(0UZ), dataSet.axisUnit(0UZ));
+    chart.axis_name_x = std::format("{} [{}]", dataSet.axisName(0UZ), dataSet.axisUnit(0UZ));
     if (plotAllSignals) {
-        chart.axis_name_y = fmt::format("{} [{}]", dataSet.signalQuantity(0UZ), dataSet.signalUnit(0UZ));
+        chart.axis_name_y = std::format("{} [{}]", dataSet.signalQuantity(0UZ), dataSet.signalUnit(0UZ));
     } else {
-        chart.axis_name_y = fmt::format("{} [{}]", dataSet.signalQuantity(signalIndex), dataSet.signalUnit(signalIndex));
+        chart.axis_name_y = std::format("{} [{}]", dataSet.signalQuantity(signalIndex), dataSet.signalUnit(signalIndex));
     }
 
     if (plotAllSignals) {
@@ -143,10 +143,10 @@ DataSet<T> merge(const DataSet<T>& first, const TDataSets&... others) {
     // Helper lambda to add data from a single DataSet
     auto addDataSet = [&mergedDataSet](const DataSet<T>& ds, size_t dsIndex) {
         if (ds.axis_values != mergedDataSet.axis_values) {
-            throw gr::exception(fmt::format("incompatible axis_values for DataSet {}", dsIndex));
+            throw gr::exception(std::format("incompatible axis_values for DataSet {}", dsIndex));
         }
         if (ds.signal_names.size() > 1UZ || ds.signal_names.empty()) {
-            throw gr::exception(fmt::format("incompatible signal_name.size={} for DataSet {}", ds.signal_names.size(), dsIndex));
+            throw gr::exception(std::format("incompatible signal_name.size={} for DataSet {}", ds.signal_names.size(), dsIndex));
         }
 
         // append signal values

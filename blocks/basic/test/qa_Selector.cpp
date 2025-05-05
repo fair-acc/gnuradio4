@@ -77,7 +77,7 @@ void execute_selector_test(TestParams params) {
             std::ranges::sort(sinks[i]->_samples);
             std::ranges::sort(params.outValues[i]);
         }
-        expect(std::ranges::equal(sinks[i]->_samples, params.outValues[i])) << fmt::format("sinks[{}]->_samples does not match to expected values:\nSink:{}\nExpected:{}\n", i, sinks[i]->_samples, params.outValues[i]);
+        expect(std::ranges::equal(sinks[i]->_samples, params.outValues[i])) << std::format("sinks[{}]->_samples does not match to expected values:\nSink:{}\nExpected:{}\n", i, sinks[i]->_samples, params.outValues[i]);
     }
 
     for (std::size_t i = 0; i < sinks.size(); i++) {

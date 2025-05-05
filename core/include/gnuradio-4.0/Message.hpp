@@ -14,9 +14,6 @@
 #include <source_location>
 #include <string_view>
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-
 namespace gr {
 
 struct exception : public std::exception {
@@ -28,7 +25,7 @@ struct exception : public std::exception {
 
     [[nodiscard]] const char* what() const noexcept override {
         if (formattedMessage.empty()) {
-            formattedMessage = fmt::format("{} at {}:{}", message, sourceLocation.file_name(), sourceLocation.line());
+            formattedMessage = std::format("{} at {}:{}", message, sourceLocation.file_name(), sourceLocation.line());
         }
         return formattedMessage.c_str();
     }
@@ -50,13 +47,9 @@ struct Error {
 
     explicit Error(const gr::exception& ex) noexcept : Error(ex.message, ex.sourceLocation, ex.errorTime) {}
 
-    [[nodiscard]] std::string srcLoc() const noexcept { return fmt::format("{}", sourceLocation); }
+    [[nodiscard]] std::string srcLoc() const noexcept { return std::format("{}", sourceLocation); }
     [[nodiscard]] std::string methodName() const noexcept { return {sourceLocation.function_name()}; }
-    [[nodiscard]] std::string isoTime() const noexcept {
-        return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:03}",                     // ms-precision ISO time-format
-            fmt::localtime(std::chrono::system_clock::to_time_t(errorTime)), //
-            std::chrono::duration_cast<std::chrono::milliseconds>(errorTime.time_since_epoch()).count() % 1000);
-    }
+    [[nodiscard]] std::string isoTime() const noexcept { return std::format("{}", errorTime); } // ms-precision ISO time-format
 };
 
 static_assert(std::is_default_constructible_v<Error>);
@@ -157,7 +150,7 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
 } // namespace gr
 
 template<>
-struct fmt::formatter<gr::Error> {
+struct std::formatter<gr::Error> {
     char presentation = 's';
 
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
@@ -166,49 +159,50 @@ struct fmt::formatter<gr::Error> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
-            throw fmt::format_error("invalid format");
+            throw std::format_error("invalid format");
         }
         return it;
     }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
-    auto format(const gr::Error& err, FormatContext& ctx) const -> decltype(ctx.out()) {
+    auto format(const gr::Error& err, FormatContext& ctx) const {
+        const auto& loc = err.sourceLocation;
         switch (presentation) {
-        case 't': return fmt::format_to(ctx.out(), "{}: {}: {} in method: {}", err.isoTime(), err.sourceLocation, err.message, err.sourceLocation.function_name());
-        case 'f': return fmt::format_to(ctx.out(), "{}: {} in method: {}", err.sourceLocation, err.message, err.sourceLocation.function_name());
+        case 'f': return std::format_to(ctx.out(), "{}:{} in {}: {}", loc.file_name(), loc.line(), loc.function_name(), err.message);
+        case 't': return std::format_to(ctx.out(), "{}: {}:{}: {} in {}", err.isoTime(), loc.file_name(), loc.line(), err.message, loc.function_name());
         case 's':
-        default: return fmt::format_to(ctx.out(), "{}: {}", err.sourceLocation, err.message);
+        default: return std::format_to(ctx.out(), "{}:{}: {}", loc.file_name(), loc.line(), err.message);
         }
     }
 };
 
 template<>
-struct fmt::formatter<gr::message::Command> {
+struct std::formatter<gr::message::Command> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const gr::message::Command& command, FormatContext& ctx) const -> decltype(ctx.out()) {
-        return fmt::format_to(ctx.out(), "{}", magic_enum::enum_name(command));
+        return std::format_to(ctx.out(), "{}", magic_enum::enum_name(command));
     }
 };
 
 inline std::ostream& operator<<(std::ostream& os, const gr::message::Command& command) { return os << magic_enum::enum_name(command); }
 
 template<>
-struct fmt::formatter<gr::Message> {
+struct std::formatter<gr::Message> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const gr::Message& msg, FormatContext& ctx) const -> decltype(ctx.out()) {
-        return fmt::format_to(ctx.out(), "{{ protocol: '{}', cmd: {}, serviceName: '{}', clientRequestID: '{}', endpoint: '{}', {}, RBAC: '{}' }}", //
+        return std::format_to(ctx.out(), "{{ protocol: '{}', cmd: {}, serviceName: '{}', clientRequestID: '{}', endpoint: '{}', {}, RBAC: '{}' }}", //
             msg.protocol, msg.cmd, msg.serviceName, msg.clientRequestID, msg.endpoint,                                                              //
-            msg.data.has_value() ? fmt::format("data: {}", msg.data.value()) : fmt::format("error: {}", msg.data.error()), msg.rbac);
+            msg.data.has_value() ? std::format("data: {}", msg.data.value()) : std::format("error: {}", msg.data.error()), msg.rbac);
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const gr::Message& msg) { return os << fmt::format("{}", msg); }
+inline std::ostream& operator<<(std::ostream& os, const gr::Message& msg) { return os << std::format("{}", msg); }
 
 #endif // include guard

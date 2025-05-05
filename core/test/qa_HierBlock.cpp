@@ -85,7 +85,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
         for (const auto& block : graph.blocks()) {
-            fmt::println("block in list: {} - state() : {}", block->name(), magic_enum::enum_name(block->state()));
+            std::println("block in list: {} - state() : {}", block->name(), magic_enum::enum_name(block->state()));
         }
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
 
@@ -113,7 +113,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
             const Message reply = getAndConsumeFirstReplyMessage(fromScheduler);
             expect(eq(getNReplyMessages(fromScheduler), 0UZ));
             if (!reply.data.has_value()) {
-                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+                expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
             }
             const auto& data     = reply.data.value();
             const auto& children = std::get<property_map>(data.at("children"s));
@@ -151,13 +151,13 @@ const boost::ut::suite ExportPortsTests_ = [] {
         scheduler.requestStop();
         schedulerThread1.join();
         if (!schedulerRet.has_value()) {
-            expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
 
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
-        expect(scheduler.state() == lifecycle::State::INITIALISED) << fmt::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
+        expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
 };
 
@@ -207,7 +207,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         scheduler.requestStop();
         schedulerThread1.join();
         if (!schedulerRet.has_value()) {
-            expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
 
         expect(neq(sink.count, 0UZ)) << "At least one value should have gone through";
@@ -215,7 +215,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
-        expect(scheduler.state() == lifecycle::State::INITIALISED) << fmt::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
+        expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
 };
 
@@ -261,7 +261,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         scheduler.requestStop();
         schedulerThread1.join();
         if (!schedulerRet.has_value()) {
-            expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
 
         auto applyResult = subGraphDirect->blockRef().settingsRecorder->settings().applyStagedParameters();
@@ -270,7 +270,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
-        expect(scheduler.state() == lifecycle::State::INITIALISED) << fmt::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
+        expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
 };
 

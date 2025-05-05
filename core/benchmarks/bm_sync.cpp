@@ -64,7 +64,7 @@ void runTest() {
     }
 
     gr::scheduler::Simple sched{std::move(graph)};
-    ::benchmark::benchmark<nRepeats>(fmt::format("src->{}->sink", gr::meta::type_name<TBlock>()), nSamples) = [&]() {
+    ::benchmark::benchmark<nRepeats>(std::format("src->{}->sink", gr::meta::type_name<TBlock>()), nSamples) = [&]() {
         sched.runAndWait();
         expect(eq(sinks[0]->_nSamplesProduced, nSamples));
     };

@@ -4,10 +4,14 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cmath>
+#include <cstring>
+#include <format>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <numeric>
+#include <print>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -15,9 +19,6 @@
 #include <variant>
 
 #include <boost/ut.hpp>
-
-#include <fmt/color.h>
-#include <fmt/format.h>
 
 #if __has_include(<unistd.h>)  && __has_include(<sys/ioctl.h>)  && __has_include(<sys/syscall.h>) && __has_include(<linux/perf_event.h>) && !defined(BENCHMARK_NO_PERF_COUNTER)
 #define HAS_LINUX_PERFORMANCE_HEADER
@@ -181,11 +182,11 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
     static void printAccessRightMsg(std::string_view method = "") noexcept {
         try {
             if (errno != 0) {
-                fmt::println(stderr, "PerformanceCounter: could not perform {} in method '{}' - error {}: '{}'", eventIdToStringView(), method, errno, strerror(errno));
+                std::println(stderr, "PerformanceCounter: could not perform {} in method '{}' - error {}: '{}'", eventIdToStringView(), method, errno, strerror(errno));
             } else {
-                fmt::println(stderr, "PerformanceCounter: could not perform {} in method '{}'", eventIdToStringView(), method);
+                std::println(stderr, "PerformanceCounter: could not perform {} in method '{}'", eventIdToStringView(), method);
             }
-            fmt::println(stderr, _sysErrorMessage);
+            std::println(stderr, _sysErrorMessage);
         } catch (const std::exception& e) {
             std::cerr << "Error during logging: " << e.what() << '\n';
         } catch (...) {
@@ -589,7 +590,7 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
 
     std::size_t exponent = 10U;
     if (value == 0.0L) {
-        return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
+        return std::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
     }
     while (value >= base && exponent < si_prefixes.size()) {
         value /= base;
@@ -615,7 +616,7 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
         }
     }
 
-    return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
+    return std::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
 }
 
 } // namespace utils
@@ -711,7 +712,7 @@ public:
             if (ec == std::errc()) {
                 _precision = std::clamp(_precision, 1, 6) - 1;
             } else {
-                fmt::print("Invalid value for BM_DIGITS: '{}'\n", env);
+                std::print("Invalid value for BM_DIGITS: '{}'\n", env);
             }
         }
     }
@@ -796,7 +797,7 @@ public:
                 auto transposed_map = utils::convert<N_ITERATIONS>(marker_iter);
                 for (auto keyID = 0LU; keyID < transposed_map.size(); keyID++) {
                     if (keyID > 0) {
-                        const auto meas = fmt::format("  {}─Marker{}: '{}'→'{}' ", //
+                        const auto meas = std::format("  {}─Marker{}: '{}'→'{}' ", //
                             keyID < transposed_map.size() - 1 ? "├" : "└", keyID, transposed_map[0].first, transposed_map[keyID].first);
 
                         auto& marker_result_map = ResultType::add_result(meas);
@@ -845,14 +846,14 @@ public:
     void on(const ut::events::test_run& test_run) { _printer << "\n \"" << test_run.name << "\"..."; }
 
     constexpr void on(const ut::events::test_skip& bench) const {
-        std::cerr << fmt::format("SKIPPED - {}", bench.name) << std::endl;
+        std::cerr << std::format("SKIPPED - {}", bench.name) << std::endl;
         [[maybe_unused]] const auto& map = benchmark::results::add_result(bench.name);
     }
 
     void on(const ut::events::test_end& test_end) {
         if (_asserts.fail > 0) {
             ++_benchmarks.fail;
-            _printer << _printer.colors().fail << fmt::format("... in benchmark '{}'", test_end.name) << _printer.colors().none << '\n';
+            _printer << _printer.colors().fail << std::format("... in benchmark '{}'", test_end.name) << _printer.colors().none << '\n';
             _asserts.fail--;
         }
     }
@@ -863,9 +864,11 @@ public:
     }
 
     void on(ut::events::exception exception) {
-        _printer << fmt::format("\033[31munexpected exception: \"{}\"\n\033[0m", exception.what());
+        _printer << std::format("\033[31munexpected exception: \"{}\"\n\033[0m", exception.what());
         ++_asserts.fail;
     }
+
+    auto on(ut::events::run_begin) -> void {} // no-op (required for Boost.UT >= v2.3.1)
 
     template<class TExpr>
     void on(ut::events::assertion_pass<TExpr>) {
@@ -884,7 +887,7 @@ public:
     void on(const ut::events::summary&) {
         if (_benchmarks.fail || _asserts.fail) {
             std::cout << _printer.str() << std::endl;
-            std::cout << fmt::format("\033[31m{} micro-benchmark(s) failed:\n\033[m", _benchmarks.fail);
+            std::cout << std::format("\033[31m{} micro-benchmark(s) failed:\n\033[m", _benchmarks.fail);
         } else {
             std::cout << _printer.colors().pass << "all micro-benchmarks passed:\n" << _printer.colors().none;
         }
@@ -897,7 +900,7 @@ public:
     static void print() {
         const auto& data = benchmark::results::data();
         if (data.empty()) {
-            fmt::print("no benchmark tests executed\n");
+            std::print("no benchmark tests executed\n");
         }
         std::vector<std::size_t> v(data.size());
         // N.B. using <algorithm> rather than <ranges> to be compatible with libc/Emscripten
@@ -913,12 +916,12 @@ public:
             if (std::holds_alternative<std::monostate>(value)) {
                 return "";
             } else if (std::holds_alternative<long double>(value)) {
-                return fmt::format("{}", to_si_prefix(std::get<long double>(value), unit, digits));
+                return std::format("{}", to_si_prefix(std::get<long double>(value), unit, digits));
             } else if (std::holds_alternative<uint64_t>(value)) {
-                return fmt::format("{}", to_si_prefix(std::get<uint64_t>(value), unit, digits));
+                return std::format("{}", to_si_prefix(std::get<uint64_t>(value), unit, digits));
             } else if (std::holds_alternative<benchmark::perf_sub_metric>(value)) {
                 const auto stat = std::get<benchmark::perf_sub_metric>(value);
-                return fmt::format("{:>4} / {:>4} = {:4.1f}%", //
+                return std::format("{:>4} / {:>4} = {:4.1f}%", //
                     to_si_prefix(stat.misses, unit, 0), to_si_prefix(stat.total, unit, 0), 100.0 * stat.ratio);
             }
             throw std::invalid_argument("benchmark::results: unhandled ResultMap type");
@@ -941,48 +944,48 @@ public:
         bool first_row = true;
         for (auto& [test_name, result_map] : data) {
             if (first_row) {
-                fmt::print("┌{1:─^{0}}", name_max_size + 2UL, test_case_label);
-                fmt::print("┬{1:─^{0}}", sizeof("PASS") + 1UL, "");
+                std::print("┌{1:─^{0}}", name_max_size + 2UL, test_case_label);
+                std::print("┬{1:─^{0}}", sizeof("PASS") + 1UL, "");
                 for (auto const& [metric_key, max_width] : metric_keys) {
-                    fmt::print("┬{1:─^{0}}", max_width + 2UL, metric_key);
+                    std::print("┬{1:─^{0}}", max_width + 2UL, metric_key);
                 }
-                fmt::print("┐\n");
+                std::print("┐\n");
                 first_row = false;
             } else if (test_name.empty() and result_map.empty()) {
-                fmt::print("├{1:─^{0}}", name_max_size + 2UL, "");
-                fmt::print("┼{1:─^{0}}", sizeof("PASS") + 1UL, "");
+                std::print("├{1:─^{0}}", name_max_size + 2UL, "");
+                std::print("┼{1:─^{0}}", sizeof("PASS") + 1UL, "");
                 for (auto const& [metric_key, max_width] : metric_keys) {
-                    fmt::print("┼{1:─^{0}}", max_width + 2UL, "");
+                    std::print("┼{1:─^{0}}", max_width + 2UL, "");
                 }
-                fmt::print("┤\n");
+                std::print("┤\n");
                 continue;
             }
-            fmt::print("│ {1:<{0}} ", name_max_size, test_name);
+            std::print("│ {1:<{0}} ", name_max_size, test_name);
             if (result_map.empty()) {
-                fmt::print("│ \033[33mSKIP\033[0m ");
+                std::print("│ \033[33mSKIP\033[0m ");
             } else if (result_map.size() == 1) {
-                fmt::print("│ \033[31mFAIL\033[0m ");
+                std::print("│ \033[31mFAIL\033[0m ");
             } else {
-                fmt::print("│ \033[32mPASS\033[0m ");
+                std::print("│ \033[32mPASS\033[0m ");
             }
 
             for (auto& [metric_key, max_width] : metric_keys) {
                 if (result_map.contains(metric_key)) {
                     const auto& [value, unit, digits] = result_map.at(metric_key);
-                    fmt::print("│ {1:>{0}} ", max_width, format(value, unit, digits));
+                    std::print("│ {1:>{0}} ", max_width, format(value, unit, digits));
                 } else {
-                    fmt::print("│ {1:>{0}} ", max_width, "");
+                    std::print("│ {1:>{0}} ", max_width, "");
                 }
             }
-            fmt::print("│\n");
+            std::print("│\n");
         }
 
-        fmt::print("└{1:─^{0}}", name_max_size + 2UL, "");
-        fmt::print("┴{1:─^{0}}", sizeof("PASS") + 1UL, "");
+        std::print("└{1:─^{0}}", name_max_size + 2UL, "");
+        std::print("┴{1:─^{0}}", sizeof("PASS") + 1UL, "");
         for (auto const& [metric_key, max_width] : metric_keys) {
-            fmt::print("┴{1:─^{0}}", max_width + 2UL, "");
+            std::print("┴{1:─^{0}}", max_width + 2UL, "");
         }
-        fmt::print("┘\n");
+        std::print("┘\n");
     }
 };
 } // namespace cfg

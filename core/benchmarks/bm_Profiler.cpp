@@ -20,7 +20,7 @@ inline void run_without_profiler() {
     }
 
     const auto elapsed = detail::clock::now() - start;
-    fmt::print("The sum of sums is {} and it took {}ms\n", r, std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+    std::print("The sum of sums is {} and it took {}ms\n", r, std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
 }
 
 template<ProfilerLike TProfiler>
@@ -41,7 +41,7 @@ inline void run_with_profiler(TProfiler& p) {
     }
 
     const auto elapsed = detail::clock::now() - start;
-    fmt::print("The sum of sums is {} and it took {}ms\n", r, std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+    std::print("The sum of sums is {} and it took {}ms\n", r, std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
 }
 
 [[maybe_unused]] inline const boost::ut::suite profiler_tests = [] {

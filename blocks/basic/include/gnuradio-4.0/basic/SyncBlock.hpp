@@ -150,7 +150,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
             if (inConnected || outConnected) {
                 throw gr::exception("Number of input/output ports cannot be changed after Graph initialization.");
             }
-            fmt::print("{}: configuration changed: n_ports {} -> {}\n", this->name, oldSettings.at("n_ports"), newSettings.at("n_ports"));
+            std::print("{}: configuration changed: n_ports {} -> {}\n", this->name, oldSettings.at("n_ports"), newSettings.at("n_ports"));
             inputs.resize(n_ports);
             outputs.resize(n_ports);
             _nDroppedSamples.resize(n_ports, 0UZ);

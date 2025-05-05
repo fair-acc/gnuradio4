@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
@@ -15,8 +16,7 @@
 #include <string_view>
 #include <variant>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <pmtv/pmt.hpp>
 
@@ -150,7 +150,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
             }
 
             if constexpr (strictCheck) {
-                return std::unexpected(fmt::format("strict-check enabled: source {} and target {} type do not match", typeid(S).name(), typeid(T).name()));
+                return std::unexpected(std::format("strict-check enabled: source {} and target {} type do not match", typeid(S).name(), typeid(T).name()));
             }
 
             // 2) source is bool (special case, needed to be treated first because of overlapping with integral)
@@ -170,7 +170,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 if constexpr (std::is_integral_v<T>) {
                     if constexpr (std::is_unsigned_v<T> && std::is_signed_v<S>) {
                         if (srcValue < 0) {
-                            return std::unexpected(fmt::format("negative integer {} cannot be converted to unsigned type", srcValue));
+                            return std::unexpected(std::format("negative integer {} cannot be converted to unsigned type", srcValue));
                         }
                     }
                     constexpr auto digitsS = std::numeric_limits<S>::digits;
@@ -181,7 +181,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                         if (static_cast<std::int64_t>(srcValue) >= std::numeric_limits<T>::lowest() && static_cast<std::int64_t>(srcValue) <= std::numeric_limits<T>::max()) {
                             return static_cast<T>(srcValue);
                         }
-                        return std::unexpected(fmt::format("out-of-range integer conversion: {} not in [{}..{}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+                        return std::unexpected(std::format("out-of-range integer conversion: {} not in [{}..{}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
                     }
                 }
                 // 3b) target is floating‐point
@@ -195,14 +195,14 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                         using WideType         = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
                         const WideType wideVal = static_cast<WideType>(srcValue);
                         if (wideVal == std::numeric_limits<WideType>::min()) {
-                            return std::unexpected(fmt::format("cannot handle integer min()={} when checking bit width", wideVal));
+                            return std::unexpected(std::format("cannot handle integer min()={} when checking bit width", wideVal));
                         }
                         const auto magnitude = (wideVal < 0) ? -wideVal : wideVal;
                         const auto bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
                         if (bitWidth <= digitsT) {
                             return static_cast<T>(srcValue);
                         }
-                        return std::unexpected(fmt::format("integer bit_width({})={} > floating-point mantissa={}", srcValue, bitWidth, digitsT));
+                        return std::unexpected(std::format("integer bit_width({})={} > floating-point mantissa={}", srcValue, bitWidth, digitsT));
                     }
                 }
                 // 3c) target is std::complex<T>
@@ -211,11 +211,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if (conv.has_value()) {
                         return T{conv.value()};
                     }
-                    return std::unexpected(fmt::format("unsupported complex conversion {}", conv.error()));
+                    return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
                 }
                 // 3d) no match
                 else {
-                    return std::unexpected(fmt::format("no valid safe conversion for <integral {}> -> <{}>", typeid(S).name(), typeid(T).name()));
+                    return std::unexpected(std::format("no valid safe conversion for <integral {}> -> <{}>", typeid(S).name(), typeid(T).name()));
                 }
             }
 
@@ -224,13 +224,13 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 // 4a) target is integral
                 if constexpr (std::is_integral_v<T>) {
                     if (!std::isfinite(srcValue)) {
-                        return std::unexpected(fmt::format("floating-point value {} is not finite (NaN/inf)", srcValue));
+                        return std::unexpected(std::format("floating-point value {} is not finite (NaN/inf)", srcValue));
                     }
                     if (srcValue < static_cast<S>(std::numeric_limits<T>::lowest()) || srcValue > static_cast<S>(std::numeric_limits<T>::max())) {
-                        return std::unexpected(fmt::format("floating-point value {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+                        return std::unexpected(std::format("floating-point value {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
                     }
                     if (srcValue != std::nearbyint(srcValue)) {
-                        return std::unexpected(fmt::format("floating-point value {} is not an integer", srcValue));
+                        return std::unexpected(std::format("floating-point value {} is not an integer", srcValue));
                     }
                     return static_cast<T>(srcValue);
                 }
@@ -239,7 +239,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if (static_cast<long double>(srcValue) >= static_cast<long double>(std::numeric_limits<T>::lowest()) && static_cast<long double>(srcValue) <= static_cast<long double>(std::numeric_limits<T>::max())) {
                         return static_cast<T>(srcValue);
                     }
-                    return std::unexpected(fmt::format("floating-point conversion from {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+                    return std::unexpected(std::format("floating-point conversion from {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
                 }
                 // 4c) target is std::complex<T>
                 else if constexpr (detail::is_complex_v<T>) { // value becomes real-part
@@ -247,11 +247,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if (conv.has_value()) {
                         return T{conv.value()};
                     }
-                    return std::unexpected(fmt::format("unsupported complex conversion {}", conv.error()));
+                    return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
                 }
                 // 4d) no match
                 else {
-                    return std::unexpected(fmt::format("no valid safe conversion for <float {}> src = {} -> <{}>", typeid(S).name(), srcValue, typeid(T).name()));
+                    return std::unexpected(std::format("no valid safe conversion for <float {}> src = {} -> <{}>", typeid(S).name(), srcValue, typeid(T).name()));
                 }
             }
 
@@ -279,18 +279,18 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 // 5b) complex->integral or float (only for real-valued complex)
                 else if constexpr (std::is_arithmetic_v<T>) {
                     if (std::imag(srcValue) != 0) {
-                        return std::unexpected(fmt::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
+                        return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
                             typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
                     }
                     auto conv = convert_safely<T>(std::variant<typename S::value_type>{srcValue.real()});
                     if (conv.has_value()) {
                         return conv.value();
                     }
-                    return std::unexpected(fmt::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}> reason: {}", //
+                    return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}> reason: {}", //
                         typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name(), conv.error()));
                 }
 
-                return std::unexpected(fmt::format("no valid safe conversion for std:complex<{}> src= {} +{}i -> <{}>", //
+                return std::unexpected(std::format("no valid safe conversion for std:complex<{}> src= {} +{}i -> <{}>", //
                     typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
             }
 
@@ -304,9 +304,9 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     auto possibleEnumValues = []<typename U>(const U&) -> std::string {
                         constexpr auto vals  = magic_enum::enum_values<U>();
                         auto           names = vals | std::views::transform(magic_enum::enum_name<U>);
-                        return fmt::format("{}", fmt::join(names, ", "));
+                        return std::format("{}", gr::join(names, ", "));
                     };
-                    return std::unexpected(fmt::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, magic_enum::enum_type_name<T>(), possibleEnumValues(T{})));
+                    return std::unexpected(std::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, magic_enum::enum_type_name<T>(), possibleEnumValues(T{})));
                 }
                 // 6b) string->integral (excluding bool)
                 else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
@@ -314,10 +314,10 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     T          parsedVal{};
                     auto [p, errorCode] = std::from_chars(trimmed.data(), trimmed.data() + trimmed.size(), parsedVal, 10);
                     if (errorCode == std::errc::invalid_argument || p != trimmed.data() + trimmed.size()) {
-                        return std::unexpected(fmt::format("cannot parse '{}' as an integer", srcValue));
+                        return std::unexpected(std::format("cannot parse '{}' as an integer", srcValue));
                     }
                     if (errorCode == std::errc::result_out_of_range) {
-                        return std::unexpected(fmt::format("integer out-of-range: '{}'", srcValue));
+                        return std::unexpected(std::format("integer out-of-range: '{}'", srcValue));
                     }
                     return parsedVal;
                 }
@@ -326,7 +326,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     const auto trimmed = detail::trimAndCutComment(srcValue);
                     auto       result  = detail::parseStringToFloat<T>(trimmed);
                     if (!result) {
-                        return std::unexpected(fmt::format("cannot parse '{}' as floating-point: {}", srcValue, result.error()));
+                        return std::unexpected(std::format("cannot parse '{}' as floating-point: {}", srcValue, result.error()));
                     }
                     return *result;
                 }
@@ -339,11 +339,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     } else if (s == "false" || s == "0") {
                         return false;
                     }
-                    return std::unexpected(fmt::format("cannot parse '{}' as bool", srcValue));
+                    return std::unexpected(std::format("cannot parse '{}' as bool", srcValue));
                 }
                 // fallback
                 else {
-                    return std::unexpected(fmt::format("no safe conversion for std::string src = {} -> <{}>", srcValue, typeid(T).name()));
+                    return std::unexpected(std::format("no safe conversion for std::string src = {} -> <{}>", srcValue, typeid(T).name()));
                 }
             }
 
@@ -352,11 +352,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 if constexpr (std::is_same_v<T, std::string>) {
                     return std::string(magic_enum::enum_name(srcValue));
                 }
-                return std::unexpected(fmt::format("no safe conversion for {} src = {} -> <{}>", magic_enum::enum_type_name<S>(), magic_enum::enum_name(srcValue), typeid(T).name()));
+                return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", magic_enum::enum_type_name<S>(), magic_enum::enum_name(srcValue), typeid(T).name()));
             }
 
             // fallback
-            return std::unexpected(fmt::format("no safe conversion for <{}> -> <{}>", typeid(S).name(), typeid(T).name()));
+            return std::unexpected(std::format("no safe conversion for <{}> -> <{}>", typeid(S).name(), typeid(T).name()));
         },
         v);
 }
@@ -365,7 +365,7 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
 [[nodiscard]] constexpr R parseToMinimalNumeric(std::string_view numericString) {
     const std::string_view str = detail::trimAndCutComment(numericString);
     if (str.empty()) {
-        return std::unexpected(fmt::format("empty or comment-only string: '{}'", numericString));
+        return std::unexpected(std::format("empty or comment-only string: '{}'", numericString));
     }
 
     const bool mightBeFloat = (str.find('.') != std::string_view::npos) || (str.find('e') != std::string_view::npos) || (str.find('E') != std::string_view::npos);
@@ -378,9 +378,9 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
 
             const auto [p, errorCode] = std::from_chars(str.data(), str.data() + str.size(), val, 10);
             if (errorCode == std::errc::invalid_argument || p != str.data() + str.size()) {
-                return std::unexpected(fmt::format("invalid integer - cannot parse '{}'", str));
+                return std::unexpected(std::format("invalid integer - cannot parse '{}'", str));
             } else if (errorCode == std::errc::result_out_of_range) {
-                return std::unexpected(fmt::format("out-of-range for signed 64-bit - cannot parse '{}'", str));
+                return std::unexpected(std::format("out-of-range for signed 64-bit - cannot parse '{}'", str));
             }
 
             // check smallest signed-integer type that can hold `val`
@@ -403,14 +403,14 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
                 return TMinimalNumericVariant(val);
             }
 
-            return std::unexpected(fmt::format("no suitable integral type available (negative) for: {}", val));
+            return std::unexpected(std::format("no suitable integral type available (negative) for: {}", val));
         } else { // needs to be 64-bit unsigned integer
             std::uint64_t valU{};
             auto [p, errorCode] = std::from_chars(str.data(), str.data() + str.size(), valU, 10);
             if (errorCode == std::errc::invalid_argument || p != str.data() + str.size()) {
-                return std::unexpected(fmt::format("invalid integer - cannot parse '{}'", str));
+                return std::unexpected(std::format("invalid integer - cannot parse '{}'", str));
             } else if (errorCode == std::errc::result_out_of_range) {
-                return std::unexpected(fmt::format("out-of-range for unsigned 64-bit - cannot parse '{}'", str));
+                return std::unexpected(std::format("out-of-range for unsigned 64-bit - cannot parse '{}'", str));
             }
 
             // check smallest integer type that can hold `val` with preference to signed-types
@@ -455,7 +455,7 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
                 }
             }
 
-            return std::unexpected(fmt::format("no suitable integral type available (non-negative) for: {}", valU));
+            return std::unexpected(std::format("no suitable integral type available (non-negative) for: {}", valU));
         }
     } else { // mightBeFloat - prefer float if in the variant, fallback to double
         if constexpr (detail::variant_contains_v<TMinimalNumericVariant, float>) {

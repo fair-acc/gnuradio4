@@ -2,7 +2,7 @@
 
 #include <numbers>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/DataSet.hpp>
 
@@ -91,18 +91,18 @@ void testFFT() {
         std::ignore = fft1.settings().applyStagedParameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };
+        ::benchmark::benchmark<nRepetitions>(std::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };
     }
     {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT> fft1({{"fftSize", N}});
         std::ignore = fft1.settings().applyStagedParameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };
+        ::benchmark::benchmark<nRepetitions>(std::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };
     }
 
     if constexpr (gr::meta::complex_like<T>) {
-        ::benchmark::benchmark<nRepetitions>(fmt::format("{} - fftCT", type_name<T>())) = [&signal] {
+        ::benchmark::benchmark<nRepetitions>(std::format("{} - fftCT", type_name<T>())) = [&signal] {
             auto signalCopy = signal;
             computeFFTCooleyTukey<T>(signalCopy);
         };

@@ -7,10 +7,14 @@
 #include <gnuradio-4.0/basic/CommonBlocks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+
 const boost::ut::suite DynamicBlocktests = [] {
     using namespace std::string_literals;
     using namespace boost::ut;
     using namespace gr::testing;
+    using namespace gr::test;
+
     "Change number of ports dynamically"_test = [] {
         const gr::Size_t nInputs = 5;
         // const gr::Size_t nAdditionalInputs = 10; // total inputs = nInputs + nAdditionalInputs
