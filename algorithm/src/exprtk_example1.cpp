@@ -8,7 +8,7 @@
 int main() {
     using T = float;
 
-    T x = T(0);
+    [[maybe_unused]] auto x = T(0); // used by reference within ExprTk
 
     exprtk::function_compositor<T> compositor;
     using function_t = typename exprtk::function_compositor<T>::function;

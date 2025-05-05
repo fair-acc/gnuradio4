@@ -192,13 +192,13 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if constexpr (digitsS <= digitsT) {
                         return static_cast<T>(srcValue);
                     } else {
-                        using WideType         = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
-                        const WideType wideVal = static_cast<WideType>(srcValue);
+                        using WideType     = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
+                        const auto wideVal = static_cast<WideType>(srcValue);
                         if (wideVal == std::numeric_limits<WideType>::min()) {
                             return std::unexpected(std::format("cannot handle integer min()={} when checking bit width", wideVal));
                         }
-                        const auto magnitude = (wideVal < 0) ? -wideVal : wideVal;
-                        const auto bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
+                        const WideType magnitude = (wideVal < 0) ? -wideVal : wideVal;
+                        const auto     bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
                         if (bitWidth <= digitsT) {
                             return static_cast<T>(srcValue);
                         }

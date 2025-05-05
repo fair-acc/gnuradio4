@@ -118,7 +118,7 @@ public:
         return {static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone)};
     }
 
-    std::pair<std::size_t, std::size_t> get() {
+    std::pair<std::size_t, std::size_t> get() const {
         uint64_t oldCounter    = std::atomic_load_explicit(&encodedCounter, std::memory_order_acquire);
         auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
         auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
