@@ -1,8 +1,6 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include <fmt/format.h>
-
-#include <regex>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 std::string gr::meta::detail::makePortableTypeName(std::string_view name) {
     auto trimmed = [](std::string_view view) {
@@ -92,5 +90,5 @@ std::string gr::meta::detail::makePortableTypeName(std::string_view name) {
         cursor++;
     }
     params.push_back(makePortableTypeName(trimmed(view)));
-    return fmt::format("{}<{}>", base, fmt::join(params, ", "));
+    return std::format("{}<{}>", base, gr::join(params, ", "));
 }

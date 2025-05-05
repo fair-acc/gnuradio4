@@ -1,9 +1,11 @@
-#include <fmt/core.h>
-#include <fmt/ranges.h>
+#include <format>
+#include <print>
 #include <ranges>
 #include <string>
 
 #include <exprtk.hpp>
+
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 struct VectorInfo {
     std::size_t size;
@@ -20,7 +22,7 @@ VectorInfo computeVectorInfo(void* base_ptr, void* end_ptr, std::size_t elementS
     auto access = static_cast<std::byte*>(access_ptr);
 
     if (end < base) {
-        throw std::out_of_range(fmt::format("invalid vector boundaries [{}, {}]", base_ptr, end_ptr));
+        throw std::out_of_range(std::format("invalid vector boundaries [{}, {}]", base_ptr, end_ptr));
     }
 
     return {static_cast<std::size_t>(end - base) / elementSize, (access - base) / static_cast<ssize_t>(elementSize)};
@@ -35,8 +37,7 @@ struct vector_access_rtc : public exprtk::vector_access_runtime_check {
 
         const auto typeSize      = static_cast<std::size_t>(context.type_size);
         auto [vecSize, vecIndex] = computeVectorInfo(context.base_ptr, context.end_ptr, typeSize, context.access_ptr);
-        throw std::runtime_error(fmt::format("vector access '{name}[{index}]' outside of [0, {size}[ (typesize: {typesize})", //
-            fmt::arg("name", vector_name), fmt::arg("size", vecSize), fmt::arg("index", vecIndex), fmt::arg("typesize", typeSize)));
+        throw std::runtime_error(std::format("vector access '{}[{}]' outside of [0, {}[ (typesize: {})", vector_name, vecIndex, vecSize, typeSize));
         return false; // should never reach here
     }
 };
@@ -62,29 +63,29 @@ int main() {
       }
    )";
 
-    std::array<T, 7> v{T(9.1), T(2.2), T(1.3), T(5.4), T(7.5), T(4.6), T(3.7)};
-    fmt::println("Input array:  {}", v);
+    std::array<T, 7> arr{T(9.1), T(2.2), T(1.3), T(5.4), T(7.5), T(4.6), T(3.7)};
+    std::println("Input array:  {}", gr::join(arr));
 
     exprtk::symbol_table<T> symbol_table;
-    symbol_table.add_vector("v", v.data(), v.size());
+    symbol_table.add_vector("v", arr.data(), arr.size());
 
     exprtk::expression<T> expression;
     expression.register_symbol_table(symbol_table);
 
     vector_access_rtc vec_rtc;
 
-    vec_rtc.vector_map[v.data()] = "v";
+    vec_rtc.vector_map[arr.data()] = "v";
 
     exprtk::parser<T> parser;
     parser.register_vector_access_runtime_check(vec_rtc);
 
     if (!parser.compile(bubblesort_program, expression)) { // more proper parser error handling
-        fmt::println("Error: {}\tExpression:{}", parser.error(), bubblesort_program);
+        std::println("Error: {}\tExpression:{}", parser.error(), bubblesort_program);
 
         for (std::size_t i = 0; i < parser.error_count(); ++i) {
             const auto error = parser.get_error(i);
 
-            fmt::println("Error: {:2}  Position: {:2} Type: [{:14}] Msg: {}\tExpression: {}", //
+            std::println("Error: {:2}  Position: {:2} Type: [{:14}] Msg: {}\tExpression: {}", //
                 static_cast<unsigned int>(i),                                                 //
                 static_cast<unsigned int>(error.token.position),                              //
                 exprtk::parser_error::to_str(error.mode), error.diagnostic, bubblesort_program);
@@ -96,10 +97,10 @@ int main() {
     try {
         expression.value();                   // evaluate expression
     } catch (std::runtime_error& exception) { // handle runtime errors
-        fmt::println("Caught Exception: {}", exception.what());
+        std::println("Caught Exception: {}", exception.what());
     }
 
-    fmt::println("Sorted array: {}", v);
+    std::println("Sorted array: {}", gr::join(arr));
 
     return 0;
 }

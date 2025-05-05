@@ -1,6 +1,5 @@
-#include <fmt/core.h>
-#include <fmt/ranges.h>
 #include <numbers>
+#include <print>
 #include <random>
 #include <ranges>
 #include <string>
@@ -61,7 +60,7 @@ int main() {
     expression.value(); // evaluate expression
 
     for (std::size_t i = 0; i < v_out.size(); ++i) {
-        fmt::print("{:10.6f}\t{:10.6f}\n", v_in[i], v_out[i]);
+        std::print("{:10.6f}\t{:10.6f}\n", v_in[i], v_out[i]);
     }
 
     return 0;

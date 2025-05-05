@@ -3,6 +3,7 @@
 #include <gnuradio-4.0/PluginLoader.hpp>
 
 #include <cassert>
+#include <print>
 
 // This tests automatic loading of .so files that are not
 // plugins, but ordinary dynamic block libraries -- they
@@ -37,5 +38,5 @@ int main() {
     std::ranges::sort(desired);
 
     assert((std::ranges::includes(known, desired)));
-    std::cout << "All ok\n";
+    std::println("All ok");
 }

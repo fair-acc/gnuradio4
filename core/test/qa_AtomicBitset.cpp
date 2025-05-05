@@ -1,14 +1,12 @@
+#include <boost/ut.hpp>
+
 #include <algorithm>
 #include <array>
 #include <complex>
+#include <format>
 #include <numeric>
 #include <ranges>
 #include <tuple>
-
-#include <boost/ut.hpp>
-
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/BufferSkeleton.hpp>
@@ -16,16 +14,17 @@
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
 #include <gnuradio-4.0/WaitStrategy.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 template<typename TBitset>
 void runAtomicBitsetTest(TBitset& bitset, std::size_t bitsetSize) {
     using namespace boost::ut;
 
-    expect(eq(bitset.size(), bitsetSize)) << fmt::format("Bitset size should be {}", bitsetSize);
+    expect(eq(bitset.size(), bitsetSize)) << std::format("Bitset size should be {}", bitsetSize);
 
     // test default values
     for (std::size_t i = 0; i < bitset.size(); i++) {
-        expect(!bitset.test(i)) << fmt::format("Bit {} should be false", i);
+        expect(!bitset.test(i)) << std::format("Bit {} should be false", i);
     }
 
     // set true for test positions
@@ -37,9 +36,9 @@ void runAtomicBitsetTest(TBitset& bitset, std::size_t bitsetSize) {
     // only test positions should be set
     for (std::size_t i = 0; i < bitset.size(); i++) {
         if (std::ranges::find(testPositions, i) != testPositions.end()) {
-            expect(bitset.test(i)) << fmt::format("Bit {} should be set", i);
+            expect(bitset.test(i)) << std::format("Bit {} should be set", i);
         } else {
-            expect(!bitset.test(i)) << fmt::format("Bit {} should be false", i);
+            expect(!bitset.test(i)) << std::format("Bit {} should be false", i);
         }
     }
 
@@ -50,7 +49,7 @@ void runAtomicBitsetTest(TBitset& bitset, std::size_t bitsetSize) {
 
     // all positions should be reset
     for (std::size_t i = 0; i < bitset.size(); i++) {
-        expect(!bitset.test(i)) << fmt::format("Bit {} should be false", i);
+        expect(!bitset.test(i)) << std::format("Bit {} should be false", i);
     }
 
     // Bulk operations
@@ -60,16 +59,16 @@ void runAtomicBitsetTest(TBitset& bitset, std::size_t bitsetSize) {
 
         for (std::size_t i = 0; i < bitset.size(); ++i) {
             if (i >= pos.first && i < pos.second) {
-                expect(bitset.test(i)) << fmt::format("Bulk [{},{}) Bit {} should be true", pos.first, pos.second, i);
+                expect(bitset.test(i)) << std::format("Bulk [{},{}) Bit {} should be true", pos.first, pos.second, i);
             } else {
-                expect(!bitset.test(i)) << fmt::format("Bulk [{},{}) Bit {} should be false", pos.first, pos.second, i);
+                expect(!bitset.test(i)) << std::format("Bulk [{},{}) Bit {} should be false", pos.first, pos.second, i);
             }
         }
 
         // all positions should be reset
         bitset.reset(pos.first, pos.second);
         for (std::size_t i = 0; i < bitset.size(); i++) {
-            expect(!bitset.test(i)) << fmt::format("Bulk [{},{}) Bit {} should be false", pos.first, pos.second, i);
+            expect(!bitset.test(i)) << std::format("Bulk [{},{}) Bit {} should be false", pos.first, pos.second, i);
         }
     }
 

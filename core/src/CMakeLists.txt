@@ -14,8 +14,7 @@ if(NOT EMSCRIPTEN)
     PUBLIC gnuradio-core
            gnuradio-blocklib-core
            gnuradio-options
-           pmtv
-           fmt)
+           pmtv)
 
   install(
     TARGETS gnuradio-plugin
@@ -29,6 +28,5 @@ if(ENABLE_EXAMPLES)
     main
     PUBLIC gnuradio-options
            gnuradio-core
-           fmt::fmt
            magic_enum)
 endif()

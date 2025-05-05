@@ -44,7 +44,7 @@ namespace detail {
         return {};
     }
     const auto last = std::ranges::find_if(sv.rbegin(), sv.rend(), notSpace).base();
-    return std::string_view{first, static_cast<std::size_t>(last - first)};
+    return sv.substr(static_cast<std::size_t>(first - sv.begin()), static_cast<std::size_t>(last - first));
 }
 
 constexpr std::expected<std::vector<std::string_view>, std::string> splitTopLevelCommaSeparatedValues(std::string_view input) {

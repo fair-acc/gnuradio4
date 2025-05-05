@@ -13,15 +13,15 @@ std::string format_variant(const auto& value) noexcept {
         [](auto& arg) {
             using Type = std::decay_t<decltype(arg)>;
             if constexpr (std::is_arithmetic_v<Type> || std::is_same_v<Type, std::string> || std::is_same_v<Type, std::complex<float>> || std::is_same_v<Type, std::complex<double>>) {
-                return fmt::format("{}", arg);
+                return std::format("{}", arg);
             } else if constexpr (std::is_same_v<Type, std::monostate>) {
-                return fmt::format("monostate");
+                return std::format("monostate");
             } else if constexpr (std::is_same_v<Type, std::vector<std::complex<float>>> || std::is_same_v<Type, std::vector<std::complex<double>>>) {
-                return fmt::format("[{}]", fmt::join(arg, ", "));
+                return std::format("[{}]", gr::join(arg, ", "));
             } else if constexpr (std::is_same_v<Type, std::vector<std::string>> || std::is_same_v<Type, std::vector<bool>> || std::is_same_v<Type, std::vector<unsigned char>> || std::is_same_v<Type, std::vector<unsigned short>> || std::is_same_v<Type, std::vector<unsigned int>> || std::is_same_v<Type, std::vector<unsigned long>> || std::is_same_v<Type, std::vector<signed char>> || std::is_same_v<Type, std::vector<short>> || std::is_same_v<Type, std::vector<int>> || std::is_same_v<Type, std::vector<long>> || std::is_same_v<Type, std::vector<float>> || std::is_same_v<Type, std::vector<double>>) {
-                return fmt::format("[{}]", fmt::join(arg, ", "));
+                return std::format("[{}]", gr::join(arg, ", "));
             } else {
-                return fmt::format("not-yet-supported type {}", gr::meta::type_name<Type>());
+                return std::format("not-yet-supported type {}", gr::meta::type_name<Type>());
             }
         },
         value);
@@ -30,7 +30,7 @@ std::string format_variant(const auto& value) noexcept {
 void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
     for (const auto& [key, newValue] : newMap) {
         if (!oldMap.contains(key)) {
-            fmt::print("    key added '{}` = {}\n", key, format_variant(newValue));
+            std::print("    key added '{}` = {}\n", key, format_variant(newValue));
         } else {
             const auto& oldValue = oldMap.at(key);
             const bool  areEqual = std::visit(
@@ -45,7 +45,7 @@ void printChanges(const property_map& oldMap, const property_map& newMap) noexce
                 oldValue, newValue);
 
             if (!areEqual) {
-                fmt::print("    key value changed: '{}` = {} -> {}\n", key, format_variant(oldValue), format_variant(newValue));
+                std::print("    key value changed: '{}` = {} -> {}\n", key, format_variant(oldValue), format_variant(newValue));
             }
         }
     }
@@ -81,10 +81,10 @@ struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
         _updateCount++;
 
         if (_debug) {
-            fmt::println("block '{}' settings changed - update_count: {}", this->name, _updateCount);
+            std::println("block '{}' settings changed - update_count: {}", this->name, _updateCount);
             utils::printChanges(oldSettings, newSettings);
             for (const auto& [key, value] : fwdSettings) {
-                fmt::println(" -- forward: '{}':{}", key, value);
+                std::println(" -- forward: '{}':{}", key, value);
             }
         }
     }

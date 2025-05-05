@@ -60,7 +60,7 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         if (newSettings.contains("n_periods") || newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max")) {
             if (f_min < 0 || f_max >= sample_rate || f_expected < 0 || f_expected >= sample_rate) {
-                throw gr::exception(fmt::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate: {} (N.B. f_max < 0 -> disable low-pass)", f_min, f_expected, f_max, sample_rate));
+                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate: {} (N.B. f_max < 0 -> disable low-pass)", f_min, f_expected, f_max, sample_rate));
             }
             initialiseFilter();
         }
@@ -220,7 +220,7 @@ This block estimates the frequency of a signal using the frequency-domain algori
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         if (newSettings.contains("n_periods") || newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max") || newSettings.contains("min_fft_size")) {
             if (f_min < 0 || f_max >= sample_rate || f_expected < 0 || f_expected >= sample_rate) {
-                throw gr::exception(fmt::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate: {}", f_min, f_expected, f_max, sample_rate));
+                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate: {}", f_min, f_expected, f_max, sample_rate));
             }
             initialiseFFT();
         }

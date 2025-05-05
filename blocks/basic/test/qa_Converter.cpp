@@ -57,7 +57,7 @@ const boost::ut::suite<"basic Conversion tests"> basicConversion = [] {
             TConvert converter;
             R        result = converter.processOne(/*input*/ static_cast<T>(42));
 
-            expect(eq(result, static_cast<R>(42))) << fmt::format("convert from {} to {} failed\n", gr::meta::type_name<T>(), gr::meta::type_name<R>());
+            expect(eq(result, static_cast<R>(42))) << std::format("convert from {} to {} failed\n", gr::meta::type_name<T>(), gr::meta::type_name<R>());
         } | TArithmeticTypes();
 
         "up-convert std::simd<std::uint8_t> to ..."_test = []<typename R>(R /*noop*/) {
@@ -71,7 +71,7 @@ const boost::ut::suite<"basic Conversion tests"> basicConversion = [] {
             RetType  result = converter.processOne(/*input*/ static_cast<V>(42));
 
             for (size_t i = 0; i < RetType::size(); ++i) {
-                expect(eq(static_cast<R>(result[i]), static_cast<R>(42))) << fmt::format("up-convert from {} to {} failed at index {}\n", gr::meta::type_name<V>(), gr::meta::type_name<RetType>(), i);
+                expect(eq(static_cast<R>(result[i]), static_cast<R>(42))) << std::format("up-convert from {} to {} failed at index {}\n", gr::meta::type_name<V>(), gr::meta::type_name<RetType>(), i);
             }
         } | TArithmeticTypes();
 
@@ -91,7 +91,7 @@ const boost::ut::suite<"basic Conversion tests"> basicConversion = [] {
             }
 
             for (size_t i = 0; i < RetType::size(); ++i) {
-                expect(eq(static_cast<R>(result[i]), static_cast<R>(21))) << fmt::format("down-convert from {} to {} failed at index {}", gr::meta::type_name<V>(), gr::meta::type_name<RetType>(), i);
+                expect(eq(static_cast<R>(result[i]), static_cast<R>(21))) << std::format("down-convert from {} to {} failed at index {}", gr::meta::type_name<V>(), gr::meta::type_name<RetType>(), i);
             }
         } | TArithmeticTypes();
 
@@ -108,7 +108,7 @@ const boost::ut::suite<"basic Conversion tests"> basicConversion = [] {
             RetType result = converter.processOne(/*input*/ static_cast<V>(42));
 
             for (size_t i = 0; i < RetType::size(); ++i) {
-                expect(eq(static_cast<R>(result[i]), static_cast<R>(42))) << fmt::format("down-convert from {} to {} failed at index {}", gr::meta::type_name<V>(), gr::meta::type_name<RetType>(), i);
+                expect(eq(static_cast<R>(result[i]), static_cast<R>(42))) << std::format("down-convert from {} to {} failed at index {}", gr::meta::type_name<V>(), gr::meta::type_name<RetType>(), i);
             }
         } | TArithmeticTypes();
     } | std::tuple<ConvertBlock, ScalingConvertBlock>();
@@ -201,7 +201,7 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
 
             for (T angle = T(0); angle < T(360); angle += T(10)) {
                 T val = rad2deg.processOne(deg2rad.processOne(angle));
-                expect(approx(val, angle, T(1e-3))) << fmt::format("identity {}° - diff {}°", angle, (val - angle));
+                expect(approx(val, angle, T(1e-3))) << std::format("identity {}° - diff {}°", angle, (val - angle));
             }
         };
 

@@ -7,7 +7,6 @@ target_link_libraries(
             gnuradio-meta
             vir
             fftw
-            fmt
             magic_enum)
 
 if(ENABLE_EXAMPLES)

@@ -3,7 +3,7 @@
 #include <cmath>
 #include <random>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -80,7 +80,7 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
             }
 
             // prepare actual unit-test
-            const std::string         testName = fmt::format("{}", gr::meta::type_name<PowerMetrics<T, kNPhases>>());
+            const std::string         testName = std::format("{}", gr::meta::type_name<PowerMetrics<T, kNPhases>>());
             PowerMetrics<T, kNPhases> block;
             block.decimate = sample_rate / output_rate;
             block.initFilters();
@@ -150,26 +150,26 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
                 // last output sample
                 const std::size_t lastIdx = nSamplesOut - 1;
                 if constexpr (std::is_same_v<T, float>) { // T = float
-                    expect(approx(activePower[phase][lastIdx], expected_active_power, tolerance_power)) << fmt::format("{}: active power mismatch", testName);
-                    expect(approx(reactivePower[phase][lastIdx], expected_reactive_power, tolerance_power)) << fmt::format("{}: reactive power mismatch", testName);
-                    expect(approx(apparentPower[phase][lastIdx], expected_apparent_power, tolerance_power)) << fmt::format("{}: Apparent power mismatch", testName);
-                    expect(approx(rmsVoltage[phase][lastIdx], expected_rms_voltage, tolerance_voltage)) << fmt::format("{}: RMS voltage mismatch", testName);
-                    expect(approx(rmsCurrent[phase][lastIdx], expected_rms_current, tolerance_current)) << fmt::format("{}: RMS current mismatch", testName);
+                    expect(approx(activePower[phase][lastIdx], expected_active_power, tolerance_power)) << std::format("{}: active power mismatch", testName);
+                    expect(approx(reactivePower[phase][lastIdx], expected_reactive_power, tolerance_power)) << std::format("{}: reactive power mismatch", testName);
+                    expect(approx(apparentPower[phase][lastIdx], expected_apparent_power, tolerance_power)) << std::format("{}: Apparent power mismatch", testName);
+                    expect(approx(rmsVoltage[phase][lastIdx], expected_rms_voltage, tolerance_voltage)) << std::format("{}: RMS voltage mismatch", testName);
+                    expect(approx(rmsCurrent[phase][lastIdx], expected_rms_current, tolerance_current)) << std::format("{}: RMS current mismatch", testName);
                 } else { // T = gr::UncertainValue<float>
-                    expect(approx(gr::value(activePower[phase][lastIdx]), expected_active_power, tolerance_power)) << fmt::format("{}: Active power value mismatch", testName);
-                    expect(gt(gr::uncertainty(activePower[phase][lastIdx]), 0.0f)) << fmt::format("{}: Active power uncertainty is zero", testName, activePower[phase][lastIdx]);
+                    expect(approx(gr::value(activePower[phase][lastIdx]), expected_active_power, tolerance_power)) << std::format("{}: Active power value mismatch", testName);
+                    expect(gt(gr::uncertainty(activePower[phase][lastIdx]), 0.0f)) << std::format("{}: Active power uncertainty is zero", testName, activePower[phase][lastIdx]);
 
-                    expect(approx(gr::value(reactivePower[phase][lastIdx]), expected_reactive_power, tolerance_power)) << fmt::format("{}: Reactive power value mismatch", testName);
-                    expect(gt(gr::uncertainty(reactivePower[phase][lastIdx]), 0.0f)) << fmt::format("{}: Reactive power uncertainty {} is zero", testName, reactivePower[phase][lastIdx]);
+                    expect(approx(gr::value(reactivePower[phase][lastIdx]), expected_reactive_power, tolerance_power)) << std::format("{}: Reactive power value mismatch", testName);
+                    expect(gt(gr::uncertainty(reactivePower[phase][lastIdx]), 0.0f)) << std::format("{}: Reactive power uncertainty {} is zero", testName, reactivePower[phase][lastIdx]);
 
-                    expect(approx(gr::value(apparentPower[phase][lastIdx]), expected_apparent_power, tolerance_power)) << fmt::format("{}: Apparent power value mismatch", testName);
-                    expect(gt(gr::uncertainty(apparentPower[phase][lastIdx]), 0.0f)) << fmt::format("{}: Apparent power uncertainty {} is zero", testName, apparentPower[phase][lastIdx]);
+                    expect(approx(gr::value(apparentPower[phase][lastIdx]), expected_apparent_power, tolerance_power)) << std::format("{}: Apparent power value mismatch", testName);
+                    expect(gt(gr::uncertainty(apparentPower[phase][lastIdx]), 0.0f)) << std::format("{}: Apparent power uncertainty {} is zero", testName, apparentPower[phase][lastIdx]);
 
-                    expect(approx(gr::value(rmsVoltage[phase][lastIdx]), expected_rms_voltage, tolerance_voltage)) << fmt::format("{}: RMS voltage value mismatch", testName);
-                    expect(gt(gr::uncertainty(rmsVoltage[phase][lastIdx]), 0.0f)) << fmt::format("{}: RMS voltage uncertainty {} is zero", testName, rmsVoltage[phase][lastIdx]);
+                    expect(approx(gr::value(rmsVoltage[phase][lastIdx]), expected_rms_voltage, tolerance_voltage)) << std::format("{}: RMS voltage value mismatch", testName);
+                    expect(gt(gr::uncertainty(rmsVoltage[phase][lastIdx]), 0.0f)) << std::format("{}: RMS voltage uncertainty {} is zero", testName, rmsVoltage[phase][lastIdx]);
 
-                    expect(approx(gr::value(rmsCurrent[phase][lastIdx]), expected_rms_current, tolerance_current)) << fmt::format("{}: RMS current value mismatch", testName);
-                    expect(gt(gr::uncertainty(rmsCurrent[phase][lastIdx]), 0.0f)) << fmt::format("{}: RMS current uncertainty {} is zero", testName, rmsCurrent[phase][lastIdx]);
+                    expect(approx(gr::value(rmsCurrent[phase][lastIdx]), expected_rms_current, tolerance_current)) << std::format("{}: RMS current value mismatch", testName);
+                    expect(gt(gr::uncertainty(rmsCurrent[phase][lastIdx]), 0.0f)) << std::format("{}: RMS current uncertainty {} is zero", testName, rmsCurrent[phase][lastIdx]);
                 }
             }
         } |
@@ -221,8 +221,8 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
         expect(block.processBulk(std::span{spanInP}, std::span{spanInS}, std::span{spanOutPowerFactor}, std::span{spanOutPhaseAngle}) == gr::work::Status::OK);
 
         for (std::size_t phaseIdx = 0; phaseIdx < kNPhases; ++phaseIdx) {
-            expect(approx(spanOutPowerFactor[phaseIdx][0], expectedPowerFactor[phaseIdx], 1e-5)) << fmt::format("power factor mismatch for phase {}", phaseIdx);
-            expect(approx(spanOutPhaseAngle[phaseIdx][0], expectedPhaseAngle[phaseIdx], 1e-5)) << fmt::format("phase angle mismatch for phase {}", phaseIdx);
+            expect(approx(spanOutPowerFactor[phaseIdx][0], expectedPowerFactor[phaseIdx], 1e-5)) << std::format("power factor mismatch for phase {}", phaseIdx);
+            expect(approx(spanOutPhaseAngle[phaseIdx][0], expectedPhaseAngle[phaseIdx], 1e-5)) << std::format("phase angle mismatch for phase {}", phaseIdx);
         }
     } | std::tuple{std::pair<double, std::integral_constant<std::size_t, 1>>{}, std::pair<double, std::integral_constant<std::size_t, 3>>{}};
 

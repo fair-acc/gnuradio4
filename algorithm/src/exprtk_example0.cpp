@@ -13,13 +13,13 @@ int main() {
 
     const std::string exprString = "clamp(-1.0, sin(2 * pi * x) + cos(x / 2 * pi), +1.0)";
     if (exprtk::parser<float> parser; !parser.compile(exprString, expression)) {
-        fmt::println(stderr, "Expression parsing failed.");
+        std::println(stderr, "Expression parsing failed.");
         return -1;
     }
 
     x            = 0.5;
     float result = expression.value(); // evaluate expression
-    fmt::println("Result: {}", result);
+    std::println("Result: {}", result);
 
     return 0;
 }

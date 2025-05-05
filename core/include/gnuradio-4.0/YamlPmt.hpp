@@ -1,4 +1,5 @@
-#pragma once
+#ifndef GNURADIO_YAML_PMT_HPP
+#define GNURADIO_YAML_PMT_HPP
 
 #include <algorithm>
 #include <cassert>
@@ -9,7 +10,6 @@
 #include <cstdio>
 #include <expected>
 #include <iomanip>
-#include <iostream>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -21,7 +21,7 @@
 
 #include <pmtv/pmt.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace pmtv::yaml {
 
@@ -66,7 +66,7 @@ inline std::string escapeString(std::string_view str, bool escapeForQuotedString
         } else if (c == '\b') {
             result.append("\\b");
         } else if (std::iscntrl(static_cast<unsigned char>(c)) && c != '\n') {
-            result.append(fmt::format("\\x{:02x}", static_cast<unsigned char>(c)));
+            result.append(std::format("\\x{:02x}", static_cast<unsigned char>(c)));
         } else {
             result.push_back(c);
         }
@@ -97,9 +97,9 @@ inline void serializeString(std::ostream& os, std::string_view value, int level,
         }
     } else {
         if constexpr (tagMode == TypeTagMode::Auto) {
-            os << fmt::format("\"{}\"\n", escapeString(value, true));
+            os << std::format("\"{}\"\n", escapeString(value, true));
         } else {
-            os << fmt::format("{}\n", escapeString(value, true));
+            os << std::format("{}\n", escapeString(value, true));
         }
     }
 }
@@ -188,7 +188,7 @@ void serialize(std::ostream& os, const pmtv::pmt& var, int level) {
                 for (const auto& [key, val] : value) {
                     indent(os, level + 1);
                     if (key.contains(':') || !std::ranges::all_of(key, ::isprint)) {
-                        os << fmt::format("\"{}\": ", escapeString(key, true));
+                        os << std::format("\"{}\": ", escapeString(key, true));
                     } else {
                         os << key << ": ";
                     }
@@ -516,11 +516,11 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
                 return std::stod(tempParse);
             }
         } catch (std::invalid_argument& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, fmt::format("std::invalid_argument exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
+            return std::unexpected(ValueParseError{0UZ, std::format("std::invalid_argument exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
         } catch (std::out_of_range& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, fmt::format("std::out_of_range exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
+            return std::unexpected(ValueParseError{0UZ, std::format("std::out_of_range exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
         } catch (std::exception& e) { // specifically: std::invalid_argument or std::out_of_range
-            return std::unexpected(ValueParseError{0UZ, fmt::format("std::exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
+            return std::unexpected(ValueParseError{0UZ, std::format("std::exception for expected floating-point value of '{}' - error: {}", tempParse, e.what())});
         }
     } else if constexpr (std::is_integral_v<T>) {
         sv                 = trim(sv); // trim leading and trailing whitespace
@@ -528,7 +528,7 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
             T value;
             const auto [ptr, ec] = std::from_chars(s.begin(), s.end(), value, base);
             if (ec != std::errc{} || ptr != s.end()) {
-                return std::unexpected(ValueParseError{0UZ, fmt::format("Invalid integral-type value '{}' (error: {})", s, std::make_error_code(ec).message())});
+                return std::unexpected(ValueParseError{0UZ, std::format("Invalid integral-type value '{}' (error: {})", s, std::make_error_code(ec).message())});
             }
             return value;
         };
@@ -890,7 +890,7 @@ struct ConvertList {
 
 enum class FlowType { List, Map };
 template<FlowType Type>
-auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
+std::expected<pmtv::pmt, ParseError> parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLevel) {
     using ResultType          = std::conditional_t<Type == FlowType::List, pmtv::pmt, pmtv::map_t>;
     using TemporaryResultType = std::conditional_t<Type == FlowType::List, std::vector<pmtv::pmt>, pmtv::map_t>;
     using ReturnType          = std::expected<ResultType, ParseError>;
@@ -988,9 +988,18 @@ auto parseFlow(ParseContext& ctx, std::string_view typeTag, int parentIndentLeve
 inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int parentIndentLevel) {
     ctx.consumeWhitespaceAndComments();
     if (ctx.consumeIfStartsWith("{")) {
-        auto map = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
+        auto result = parseFlow<FlowType::Map>(ctx, "", parentIndentLevel);
         ctx.skipToNextLine();
-        return map;
+
+        if (!result) {
+            return std::unexpected(result.error());
+        }
+
+        if (!std::holds_alternative<pmtv::map_t>(*result)) {
+            return std::unexpected(ctx.makeError("Expected map in flow-style map"));
+        }
+
+        return std::get<pmtv::map_t>(*result);
     }
 
     pmtv::map_t map;
@@ -1194,27 +1203,27 @@ std::string formatAsLines(std::string_view input, std::size_t line = std::numeri
         }
         auto lineView = input.substr(start, pos - start);
 
-        fmt::format_to(std::back_inserter(out), "{:>{}}:{}{}{}\n", i, width, lineStartMarker.data, lineView, lineEndMarker.data);
+        std::format_to(std::back_inserter(out), "{:>{}}:{}{}{}\n", i, width, lineStartMarker.data, lineView, lineEndMarker.data);
 
         if (i == line) {
             std::size_t col = std::min(column, lineView.size());
-            fmt::format_to(std::back_inserter(out), "{:>{}}", "", width + 2UZ);
+            std::format_to(std::back_inserter(out), "{:>{}}", "", width + 2UZ);
             if (errorMsg.empty()) {
-                fmt::format_to(std::back_inserter(out), "{:>{}}{}\n", ' ', col, chevron.data);
+                std::format_to(std::back_inserter(out), "{:>{}}{}\n", ' ', col, chevron.data);
             } else if (errorMsg.size() < col + 1UZ) {
                 if (col - errorMsg.length() == 0UZ) {
-                    fmt::format_to(std::back_inserter(out), "{}{}\n", errorMsg, chevron.data);
+                    std::format_to(std::back_inserter(out), "{}{}\n", errorMsg, chevron.data);
                 } else {
-                    fmt::format_to(std::back_inserter(out), "{:>{}}{}{}\n", ' ', col - errorMsg.length(), errorMsg, chevron.data);
+                    std::format_to(std::back_inserter(out), "{:>{}}{}{}\n", ' ', col - errorMsg.length(), errorMsg, chevron.data);
                 }
             } else {
                 if (col == 0UZ) {
-                    fmt::format_to(std::back_inserter(out), "{}{}\n", chevron.data, errorMsg);
+                    std::format_to(std::back_inserter(out), "{}{}\n", chevron.data, errorMsg);
                 } else {
-                    fmt::format_to(std::back_inserter(out), "{:>{}}{}{}\n", ' ', col, chevron.data, errorMsg);
+                    std::format_to(std::back_inserter(out), "{:>{}}{}{}\n", ' ', col, chevron.data, errorMsg);
                 }
             }
-            fmt::format_to(std::back_inserter(out), "{:>{}}\n", "", width + 2UZ);
+            std::format_to(std::back_inserter(out), "{:>{}}\n", "", width + 2UZ);
         }
         start = (pos == input.size()) ? pos : pos + 1;
     }
@@ -1227,3 +1236,5 @@ constexpr std::string formatAsLines(std::string_view input, ParseError error = {
 }
 
 } // namespace pmtv::yaml
+
+#endif // GNURADIO_YAML_PMT_HPP

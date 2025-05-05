@@ -325,26 +325,22 @@ set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-
 
 include(FetchContent)
 FetchContent_Declare(
-  fmt
-  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG 10.2.1)
-
-FetchContent_Declare(
   pmt
   GIT_REPOSITORY https://github.com/gnuradio/pmt.git
   GIT_TAG e1a46cb61decb044f6ab0a58a77211beb3630340 # latest as of 2023-12-06
 )
 
+set(BOOST_UT_DISABLE_MODULE ON CACHE BOOL "Disable UT Module Support" FORCE)
 FetchContent_Declare(
   ut
   GIT_REPOSITORY https://github.com/boost-ext/ut.git
-  GIT_TAG v2.0.1 # latest tag as of 2023-12-18
+  GIT_TAG 53e17f25119598c6458d30351b260193096ba67e # latest tag as of 2023-04-02
 )
 
 FetchContent_Declare(
   vir-simd
   GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-  GIT_TAG v0.4.0)
+  GIT_TAG 7e186058318afac4c56cb921d852e9c9e2589889)
 
 FetchContent_Declare(
   cpp-httplib
@@ -352,7 +348,6 @@ FetchContent_Declare(
   GIT_TAG v0.18.1)
 
 FetchContent_MakeAvailable(
-  fmt
   pmt
   ut
   vir-simd

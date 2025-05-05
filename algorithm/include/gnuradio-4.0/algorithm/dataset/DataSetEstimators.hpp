@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Message.hpp>
@@ -472,7 +472,7 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(value)) * period;
         const std::uint64_t timeUncertainty = static_cast<std::uint64_t>(gr::uncertainty(value)) * period;
-        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), fmt::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //,                        //
+        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //,                        //
                               {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},                 //
                               {gr::tag::CONTEXT.shortKey(), context}};
         dataSet.timing_events[signalIndex].push_back({idx, std::move(data)});
@@ -495,7 +495,7 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
 
     std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds, "", location);
     if (!dsCheck.has_value()) {
-        throw gr::exception(fmt::format("Invalid DataSet for step/pulse start detection: {}", dsCheck.error()), location);
+        throw gr::exception(std::format("Invalid DataSet for step/pulse start detection: {}", dsCheck.error()), location);
     }
     indexMax = detail::checkIndexRange(ds, indexMin, indexMax, signalIndex, location);
 
@@ -543,7 +543,7 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(xAxis[index])) * period;
         const std::uint64_t timeUncertainty = 0UZ;
-        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), fmt::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //
+        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //
                               {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},                 //
                               {gr::tag::CONTEXT.shortKey(), context}};
         ds.timing_events[signalIndex].push_back({index, std::move(data)});

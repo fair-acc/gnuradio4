@@ -16,7 +16,7 @@ inline std::string formatParserError(const auto& parser, std::string_view expres
     for (std::size_t i = 0; i < parser.error_count(); ++i) {
         const auto error = parser.get_error(i);
 
-        ss << fmt::format("ExprTk Parser Error({:2}):  Position: {:2}\nType: [{:14}] Msg: {}; expression:\n{}\n", //
+        ss << std::format("ExprTk Parser Error({:2}):  Position: {:2}\nType: [{:14}] Msg: {}; expression:\n{}\n", //
             static_cast<unsigned int>(i),                                                                         //
             static_cast<unsigned int>(error.token.position),                                                      //
             exprtk::parser_error::to_str(error.mode), error.diagnostic, expression);
@@ -39,7 +39,7 @@ inline VectorInfo computeVectorInfo(void* base_ptr, void* end_ptr, std::size_t e
     auto access = static_cast<std::byte*>(access_ptr);
 
     if (end < base) {
-        throw std::out_of_range(fmt::format("invalid vector boundaries [{}, {}]", base_ptr, end_ptr));
+        throw std::out_of_range(std::format("invalid vector boundaries [{}, {}]", base_ptr, end_ptr));
     }
 
     return {static_cast<std::size_t>(end - base) / elementSize, (access - base) / static_cast<ssize_t>(elementSize)};
@@ -54,8 +54,7 @@ struct vector_access_rtc : public exprtk::vector_access_runtime_check {
 
         const auto typeSize      = static_cast<std::size_t>(context.type_size);
         auto [vecSize, vecIndex] = computeVectorInfo(context.base_ptr, context.end_ptr, typeSize, context.access_ptr);
-        throw gr::exception(fmt::format("vector access '{name}[{index}]' outside of [0, {size}[ (typesize: {typesize})", //
-            fmt::arg("name", vector_name), fmt::arg("size", vecSize), fmt::arg("index", vecIndex), fmt::arg("typesize", typeSize)));
+        throw gr::exception(std::format("vector access '{}[{}]' outside of [0, {}[ (typesize: {})", vector_name, vecIndex, vecSize, typeSize));
         return false; // should never reach here
     }
 };

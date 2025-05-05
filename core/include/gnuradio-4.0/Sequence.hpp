@@ -6,10 +6,11 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <new>
 #include <ranges>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace gr {
 
@@ -161,11 +162,10 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
 } // namespace gr
 
-#include <fmt/core.h>
-#include <fmt/ostream.h>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 template<>
-struct fmt::formatter<gr::Sequence> {
+struct std::formatter<gr::Sequence> {
     template<typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
         return ctx.begin();
@@ -173,12 +173,12 @@ struct fmt::formatter<gr::Sequence> {
 
     template<typename FormatContext>
     auto format(gr::Sequence const& value, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", value.value());
+        return std::format_to(ctx.out(), "{}", value.value());
     }
 };
 
 namespace gr {
-inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << fmt::format("{}", v.value()); }
+inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << std::format("{}", v.value()); }
 } // namespace gr
 
 #endif // GNURADIO_SEQUENCE_HPP

@@ -1,6 +1,6 @@
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/thread/thread_affinity.hpp>
 
@@ -48,7 +48,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
                 equal = false;
             }
         }
-        expect(equal) << fmt::format("set {{{}}} affinity map does not match get {{{}}} map", fmt::join(threadMap, ", "), fmt::join(affinity, ", "));
+        expect(equal) << std::format("set {{{}}} affinity map does not match get {{{}}} map", gr::join(threadMap, ", "), gr::join(affinity, ", "));
 
         // tests w/o thread argument
         constexpr std::array threadMapOn = {true, true};
@@ -59,7 +59,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
                 equal = false;
             }
         }
-        expect(equal) << fmt::format("set {{{}}} affinity map does not match get {{{}}} map", fmt::join(threadMap, ", "), fmt::join(affinity, ", "));
+        expect(equal) << std::format("set {{{}}} affinity map does not match get {{{}}} map", gr::join(threadMap, ", "), gr::join(affinity, ", "));
 
         std::thread bogusThread;
         expect(throws<std::system_error>([&] { thread::getThreadAffinity(bogusThread); }));
@@ -80,7 +80,7 @@ const boost::ut::suite ThreadAffinityTests = [] {
                 equal = false;
             }
         }
-        expect(equal) << fmt::format("set {{{}}} affinity map does not match get {{{}}} map", fmt::join(threadMap, ", "), fmt::join(affinity, ", "));
+        expect(equal) << std::format("set {{{}}} affinity map does not match get {{{}}} map", gr::join(threadMap, ", "), gr::join(affinity, ", "));
         constexpr std::array threadMapOn = {true, true, true, true};
         thread::setProcessAffinity(threadMapOn);
         expect(throws<std::system_error>([&] { thread::getProcessAffinity(-1); }));

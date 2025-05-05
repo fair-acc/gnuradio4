@@ -12,8 +12,7 @@
 #include <pmtv/base64/base64.h>
 #include <pmtv/pmt.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
 
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
@@ -21,11 +20,6 @@
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-nonliteral"
-#include <fmt/chrono.h>
-#pragma GCC diagnostic pop
 
 #if defined(__clang__)
 #define NO_INLINE [[gnu::noinline]]
@@ -482,7 +476,7 @@ public:
         storeDefaults();
 
         if (const property_map failed = set(_initBlockParameters); !failed.empty()) {
-            throw gr::exception(fmt::format("settings could not be applied: {}", failed));
+            throw gr::exception(std::format("settings could not be applied: {}", failed));
         }
 
         if (const auto failed = activateContext(); failed == std::nullopt) {
@@ -829,16 +823,17 @@ public:
                                         std::ignore = staged; // help clang to see why staged is not unused
                                     }
                                 } else {
-                                    // TODO: replace with pmt error message on msgOut port (to note: clang compiler bug/issue)
-                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                    const auto  fieldName     = refl::data_member_name<TBlock, kIdx>.view();
+                                    const char* validatorInfo = RawType::LimitType::ValidatorFunc == nullptr ? "not" : "";
+                                    std::string msg           = std::vformat(" cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                                  std::make_format_args(
 #if !defined(__EMSCRIPTEN__) && !defined(__clang__)
-                                        _block->unique_name, _block->name,
+                                            _block->unique_name, _block->name,
 #else
-                                        "_block->uniqueName", "_block->name",
+                                            "_block->uniqueName", "_block->name",
 #endif
-                                        member, std::get<Type>(stagedValue), refl::data_member_name<TBlock, kIdx>.view(), RawType::LimitType::MinRange,
-                                        RawType::LimitType::MaxRange, //
-                                        RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+                                            fieldName, member, std::get<Type>(stagedValue), RawType::LimitType::MinRange, RawType::LimitType::MaxRange, validatorInfo));
+                                    std::fputs(msg.c_str(), stderr);
                                 }
                             } else {
                                 member = std::get<Type>(stagedValue);
@@ -928,7 +923,7 @@ public:
         }
 
         if (const property_map failed = set(newProperties, ctx); !failed.empty()) {
-            throw gr::exception(fmt::format("settings from property_map could not be loaded: {}", failed));
+            throw gr::exception(std::format("settings from property_map could not be loaded: {}", failed));
         }
     }
 

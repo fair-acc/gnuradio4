@@ -78,13 +78,13 @@ const boost::ut::suite TagTests = [] {
         scheduler::Simple sched{std::move(testGraph)};
 
         std::thread uiLoop([&uiSink]() {
-            fmt::println("start UI thread");
+            std::println("start UI thread");
             while (uiSink.draw({{"reset_view", true}}) != work::Status::DONE) { // mocks UI update loop with 25 Hz repetition
                 std::this_thread::sleep_for(std::chrono::milliseconds(40));     // 25 Hz <-> 40 ms period
             }
-            fmt::println("asked to finish UI thread");
+            std::println("asked to finish UI thread");
             std::this_thread::sleep_for(std::chrono::seconds(2)); // wait for another 2 seconds before closing down
-            fmt::println("finished UI thread");
+            std::println("finished UI thread");
         });
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";

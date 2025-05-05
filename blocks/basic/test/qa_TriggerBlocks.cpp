@@ -101,7 +101,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                 expect(sched.runAndWait().has_value()) << "runAndWait";
             }
 
-            expect(eq(tagSink._tags.size(), 7UZ)) << fmt::format("test {} : expected total number of tags", magic_enum::enum_name(Method::value));
+            expect(eq(tagSink._tags.size(), 7UZ)) << std::format("test {} : expected total number of tags", magic_enum::enum_name(Method::value));
 
             // filter tags for those generated on rising and falling edges
             std::vector<std::size_t> rising_edge_indices;
@@ -118,15 +118,15 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                     falling_edge_indices.push_back(tag.index);
                 }
             }
-            expect(eq(rising_edge_indices.size(), 1UZ)) << fmt::format("test {} : expected one rising edge", magic_enum::enum_name(Method::value));
-            expect(eq(falling_edge_indices.size(), 1UZ)) << fmt::format("test {} : expected one falling edge", magic_enum::enum_name(Method::value));
+            expect(eq(rising_edge_indices.size(), 1UZ)) << std::format("test {} : expected one rising edge", magic_enum::enum_name(Method::value));
+            expect(eq(falling_edge_indices.size(), 1UZ)) << std::format("test {} : expected one falling edge", magic_enum::enum_name(Method::value));
 
             if (Method::value == NO_INTERPOLATION) { // edge position once crossing the threshold
-                expect(approx(rising_edge_indices[0], 278UZ, 2UZ)) << fmt::format("test {} : detected rising edge index", magic_enum::enum_name(Method::value));
-                expect(approx(falling_edge_indices[0], 678UZ, 2UZ)) << fmt::format("test {} : detected falling edge index", magic_enum::enum_name(Method::value));
+                expect(approx(rising_edge_indices[0], 278UZ, 2UZ)) << std::format("test {} : detected rising edge index", magic_enum::enum_name(Method::value));
+                expect(approx(falling_edge_indices[0], 678UZ, 2UZ)) << std::format("test {} : detected falling edge index", magic_enum::enum_name(Method::value));
             } else { // exact edge position
-                expect(approx(rising_edge_indices[0], 250UZ, 2UZ)) << fmt::format("test {} : detected rising edge index", magic_enum::enum_name(Method::value));
-                expect(approx(falling_edge_indices[0], 650UZ, 2UZ)) << fmt::format("test {} : detected falling edge index", magic_enum::enum_name(Method::value));
+                expect(approx(rising_edge_indices[0], 250UZ, 2UZ)) << std::format("test {} : detected rising edge index", magic_enum::enum_name(Method::value));
+                expect(approx(falling_edge_indices[0], 650UZ, 2UZ)) << std::format("test {} : detected falling edge index", magic_enum::enum_name(Method::value));
             }
         } |
         std::tuple<std::integral_constant<gr::trigger::InterpolationMethod, LINEAR_INTERPOLATION>, //

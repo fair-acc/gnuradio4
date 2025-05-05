@@ -22,7 +22,7 @@ struct MultiPortTestSource : public gr::Block<MultiPortTestSource<T, nPorts>> {
     template<gr::OutputSpanLike TOutSpan>
     gr::work::Status processBulk(std::span<TOutSpan>& outs) {
         if (active_indices.empty()) {
-            fmt::println(std::cerr, "MultiPortTestSource::processBulk active_indices is empty");
+            std::println(std::cerr, "MultiPortTestSource::processBulk active_indices is empty");
         }
 
         std::size_t nSamples = 0UZ;

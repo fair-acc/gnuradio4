@@ -28,7 +28,7 @@ const boost::ut::suite TagTests = [] {
     result += gr::blocklib::initGrHttpBlocks(registry);
     result += gr::blocklib::initGrTestingBlocks(registry);
     if (result) {
-        fmt::print("Warning: Failed to init {} blocks\n", result);
+        std::print("Warning: Failed to init {} blocks\n", result);
     }
 
     "CheckAvailableBlocks"_test = [&] {

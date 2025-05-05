@@ -3,13 +3,15 @@
 
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 #if !DISABLE_SIMD
 namespace gr::test {
@@ -345,7 +347,7 @@ struct IntDecTestData {
     std::size_t exp_out{};
     std::size_t exp_counter{};
 
-    std::string to_string() const { return fmt::format("n_samples: {}, output_chunk_size: {}, input_chunk_size: {}, out_port_min: {}, out_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}", n_samples, output_chunk_size, input_chunk_size, out_port_min, out_port_max, exp_in, exp_out, exp_counter); }
+    std::string to_string() const { return std::format("n_samples: {}, output_chunk_size: {}, input_chunk_size: {}, out_port_min: {}, out_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}", n_samples, output_chunk_size, input_chunk_size, out_port_min, out_port_max, exp_in, exp_out, exp_counter); }
 };
 
 struct StrideTestData {
@@ -362,7 +364,7 @@ struct StrideTestData {
     std::size_t      exp_total_out{0};
     std::vector<int> exp_in_vector{};
 
-    std::string to_string() const { return fmt::format("n_samples: {}, output_chunk_size: {}, input_chunk_size: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}", n_samples, output_chunk_size, input_chunk_size, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out); }
+    std::string to_string() const { return std::format("n_samples: {}, output_chunk_size: {}, input_chunk_size: {}, stride: {}, in_port_min: {}, in_port_max: {}, exp_in: {}, exp_out: {}, exp_counter: {}, exp_total_in: {}, exp_total_out: {}", n_samples, output_chunk_size, input_chunk_size, stride, in_port_min, in_port_max, exp_in, exp_out, exp_counter, exp_total_in, exp_total_out); }
 };
 
 template<typename T>
@@ -494,7 +496,7 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
             std::ignore = InvalidSettingBlock();
             expect(false) << "unsupported std::tuple setting not caught";
         } catch (const std::exception& e) {
-            fmt::println("correctly thrown exception:\n{}", e.what());
+            std::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
             expect(false);
@@ -504,7 +506,7 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
             std::ignore = BlockSignaturesNone<float>();
             expect(false) << "missing process function not caught";
         } catch (const std::exception& e) {
-            fmt::println("correctly thrown exception:\n{}", e.what());
+            std::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
             expect(false);
@@ -514,7 +516,7 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
             std::ignore = MissingProcessSignature1();
             expect(false) << "missing process function not caught";
         } catch (const std::exception& e) {
-            fmt::println("correctly thrown exception:\n{}", e.what());
+            std::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
             expect(false);
@@ -524,7 +526,7 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
             std::ignore = MissingProcessSignature2();
             expect(false) << "missing process function not caught";
         } catch (const std::exception& e) {
-            fmt::println("correctly thrown exception:\n{}", e.what());
+            std::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
             expect(false);
@@ -534,7 +536,7 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
             std::ignore = MissingProcessSignature3();
             expect(false) << "missing process function not caught";
         } catch (const std::exception& e) {
-            fmt::println("correctly thrown exception:\n{}", e.what());
+            std::println("correctly thrown exception:\n{}", e.what());
             expect(true);
         } catch (...) {
             expect(false);
@@ -571,6 +573,7 @@ void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<g
 void stride_test(const StrideTestData& data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
     using namespace boost::ut;
     using namespace gr::testing;
+    using namespace gr::test;
     using scheduler = gr::scheduler::Simple<>;
 
     const bool write_to_vector{data.exp_in_vector.size() != 0};
@@ -615,7 +618,7 @@ void syncOrAsyncTest() {
     auto&             tagSrc     = testGraph.emplaceBlock<TagSource<float>>({{"n_samples_max", n_samples}});
     auto&             asyncBlock = testGraph.emplaceBlock<BlockType>();
     auto&             sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
-    const std::string testInfo   = fmt::format("syncOrAsyncTest<{}, {}>", isInputAsync, isOutputAsync);
+    const std::string testInfo   = std::format("syncOrAsyncTest<{}, {}>", isInputAsync, isOutputAsync);
     expect(asyncBlock.in.kIsSynch == !isInputAsync) << testInfo;
     expect(asyncBlock.out.kIsSynch == !isOutputAsync) << testInfo;
 
@@ -834,8 +837,8 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
         for (std::size_t i = 0UZ; i < sinks.size(); i++) {
-            expect(sinks[i]->_nSamplesProduced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
-            expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << fmt::format("sinks[{}]->_samples does not match to expected values", i);
+            expect(sinks[i]->_nSamplesProduced == nSamples) << std::format("sinks[{}] mismatch in number of produced samples", i);
+            expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << std::format("sinks[{}]->_samples does not match to expected values", i);
         }
     };
 
@@ -879,8 +882,8 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
         for (std::size_t i = 0UZ; i < sinks.size(); i++) {
-            expect(sinks[i]->_nSamplesProduced == nSamples) << fmt::format("sinks[{}] mismatch in number of produced samples", i);
-            expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << fmt::format("sinks[{}]->_samples does not match to expected values", i);
+            expect(sinks[i]->_nSamplesProduced == nSamples) << std::format("sinks[{}] mismatch in number of produced samples", i);
+            expect(std::ranges::equal(sinks[i]->_samples, expected_values[i])) << std::format("sinks[{}]->_samples does not match to expected values", i);
         }
     };
 };

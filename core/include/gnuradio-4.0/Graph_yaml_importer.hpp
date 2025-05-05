@@ -38,7 +38,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
             for (const auto& exportedPort_ : exportedPorts) {
                 auto exportedPort = std::get<std::vector<pmtv::pmt>>(exportedPort_);
                 if (exportedPort.size() != 3) {
-                    throw fmt::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
+                    throw std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
                 }
 
                 auto& block = subGraphDirect->findFirstBlockWithName(std::get<std::string>(exportedPort[0]));
@@ -51,7 +51,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         } else {
             auto currentBlock = loader.instantiate(blockType);
             if (!currentBlock) {
-                throw fmt::format("Unable to create block of type '{}'", blockType);
+                throw std::format("Unable to create block of type '{}'", blockType);
             }
 
             currentBlock->setName(blockName);
@@ -85,14 +85,14 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
     for (const auto& conn : connections) {
         auto connection = std::get<std::vector<pmtv::pmt>>(conn);
         if (connection.size() < 4) {
-            throw fmt::format("Unable to parse connection ({} instead of >=4 elements)", connection.size());
+            throw std::format("Unable to parse connection ({} instead of >=4 elements)", connection.size());
         }
 
         auto parseBlockPort = [&](const auto& blockField, const auto& portField) {
             const auto blockName = std::get<std::string>(blockField);
             auto       block     = createdBlocks.find(blockName);
             if (block == createdBlocks.end()) {
-                throw fmt::format("Unknown block '{}'", blockName);
+                throw std::format("Unknown block '{}'", blockName);
             }
 
             struct result {
@@ -102,7 +102,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
             if (const auto portFields = std::get_if<std::vector<pmtv::pmt>>(&portField)) {
                 if (portFields->size() != 2) {
-                    throw fmt::format("Port definition has invalid length ({} instead of 2)", portFields->size());
+                    throw std::format("Port definition has invalid length ({} instead of 2)", portFields->size());
                 }
                 const auto index    = std::get<std::int64_t>(portFields->at(0));
                 const auto subIndex = std::get<std::int64_t>(portFields->at(1));
@@ -151,7 +151,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                 map.emplace("id", "SUBGRAPH");
                 auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(std::addressof(block));
                 if (subGraphDirect == nullptr) {
-                    throw gr::Error(fmt::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block.uniqueName(), rootGraph.unique_name));
+                    throw gr::Error(std::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block.uniqueName(), rootGraph.unique_name));
                 }
                 property_map graphYaml = detail::saveGraphToMap(loader, subGraphDirect->blockRef());
 
@@ -275,7 +275,7 @@ inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::so
     Graph      resultGraph;
     const auto yaml = pmtv::yaml::deserialize(yamlSrc);
     if (!yaml) {
-        throw gr::exception(fmt::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc));
+        throw gr::exception(std::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc));
     }
 
     detail::loadGraphFromMap(loader, resultGraph, *yaml, location);

@@ -1,5 +1,5 @@
 #include <boost/ut.hpp>
-#include <fmt/format.h>
+#include <format>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -21,10 +21,10 @@ auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::ch
             }
             std::this_thread::sleep_for(pollingPeriod);
         }
-        fmt::println("watchdog kicked in");
+        std::println("watchdog kicked in");
         externalInterventionNeeded->store(true, std::memory_order_relaxed);
         sched.requestStop();
-        fmt::println("requested scheduler to stop");
+        std::println("requested scheduler to stop");
     });
 
     return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
@@ -49,8 +49,8 @@ int main(int argc, char* argv[]) {
     if (argc >= 4) {
         outFilePath = std::string(argv[3]);
     }
-    fmt::println("3 optional settings are available: qa_PerformanceMonitor <run_time>[in sec] <test_case_id>[1:no tags,2:moderate,3:1-to-1] <output_file_path>");
-    fmt::println("<run_time>:{} s, <test_case_id>:{}, <output_file_path>:{}", runTime, testCaseId, outFilePath);
+    std::println("3 optional settings are available: qa_PerformanceMonitor <run_time>[in sec] <test_case_id>[1:no tags,2:moderate,3:1-to-1] <output_file_path>");
+    std::println("<run_time>:{} s, <test_case_id>:{}, <output_file_path>:{}", runTime, testCaseId, outFilePath);
 
     auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 

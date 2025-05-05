@@ -10,6 +10,8 @@
 
 #include "message_utils.hpp"
 
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
@@ -27,6 +29,7 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
+    using namespace gr::test;
 
     "Edge formatter tests"_test = [] {
         Graph                  graph;
@@ -35,22 +38,22 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
         Edge                   edge{graph.blocks()[0UZ].get(), {1}, graph.blocks()[1UZ].get(), {2}, 1024, 1, "test_edge"};
 
         "default"_test = [&edge] {
-            std::string result = fmt::format("{:s}", edge);
-            fmt::println("Edge formatter - default:   {}", result);
+            std::string result = std::format("{:s}", edge);
+            std::println("Edge formatter - default:   {}", result);
 
             expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, state: WaitingToBeConnected) ⟶")) << result;
         };
 
         "short names"_test = [&edge] {
-            std::string result = fmt::format("{:s}", edge);
-            fmt::println("Edge formatter - short 's': {}", result);
+            std::string result = std::format("{:s}", edge);
+            std::println("Edge formatter - short 's': {}", result);
 
             expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, state: WaitingToBeConnected) ⟶")) << result;
         };
 
         "long names"_test = [&edge] {
-            std::string result = fmt::format("{:l}", edge);
-            fmt::println("Edge formatter - long  'l': {}", result);
+            std::string result = std::format("{:l}", edge);
+            std::println("Edge formatter - long  'l': {}", result);
 
             expect(result.contains(" ⟶ (name: 'test_edge', size: 1024, weight:  1, state: WaitingToBeConnected) ⟶")) << result;
         };
@@ -62,12 +65,13 @@ const boost::ut::suite NonRunningGraphTests = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
+    using namespace gr::test;
     using enum gr::message::Command;
 
     expect(fatal(gt(context->registry.keys().size(), 0UZ))) << "didn't register any blocks";
-    fmt::println("registered blocks:");
+    std::println("registered blocks:");
     for (const auto& blockName : context->registry.keys()) {
-        fmt::println("    block: {}", blockName);
+        std::println("    block: {}", blockName);
     }
 
     "Block addition tests"_test = [] {
@@ -86,7 +90,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
             const Message reply = getAndConsumeFirstReplyMessage(fromGraph, graph::property::kBlockEmplaced);
             if (!reply.data.has_value()) {
-                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+                expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
             }
             expect(eq(testGraph.blocks().size(), 1UZ));
         };
@@ -132,7 +136,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
             const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             if (!reply.data.has_value()) {
-                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+                expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
             }
             expect(eq(testGraph.blocks().size(), 1UZ));
         };
@@ -178,7 +182,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
             const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             if (!reply.data.has_value()) {
-                expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+                expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
             }
         };
 
@@ -234,7 +238,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
             const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
             if (!reply.data.has_value()) {
-                expect(false) << fmt::format("edge not being placed - error: {}", reply.data.error());
+                expect(false) << std::format("edge not being placed - error: {}", reply.data.error());
             }
         };
 
@@ -301,7 +305,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
                     expect(false) << "`types` key not found or data type is not a `property_map`";
                 }
             } else {
-                expect(false) << fmt::format("data has no value - error: {}", reply.data.error());
+                expect(false) << std::format("data has no value - error: {}", reply.data.error());
             }
         };
     };
@@ -336,7 +340,7 @@ const boost::ut::suite RunningGraphTests = [] {
     expect(eq(scheduler.graph().edges().size(), 1UZ)) << "added one edge";
 
     expect(awaitCondition(1s, [&sink] { return sink.count >= 10U; })) << "sink received enough data";
-    fmt::println("executed basic graph");
+    std::println("executed basic graph");
 
     // Adding a few blocks
     auto multiply1 = sendAndWaitMessageEmplaceBlock(toGraph, fromGraph, "gr::testing::Copy<float32>"s, property_map{});
@@ -344,7 +348,7 @@ const boost::ut::suite RunningGraphTests = [] {
     scheduler.processScheduledMessages();
 
     for (const auto& block : scheduler.graph().blocks()) {
-        fmt::println("block in list: {} - state() : {}", block->name(), magic_enum::enum_name(block->state()));
+        std::println("block in list: {} - state() : {}", block->name(), magic_enum::enum_name(block->state()));
     }
     expect(eq(scheduler.graph().blocks().size(), 4UZ)) << "should contain sink->multiply1->multiply2->sink";
 
@@ -365,7 +369,7 @@ const boost::ut::suite RunningGraphTests = [] {
         const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
         expect(eq(getNReplyMessages(fromGraph), 0UZ));
         if (!reply.data.has_value()) {
-            expect(false) << fmt::format("reply.data has no value:{}\n", reply.data.error());
+            expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
         }
 
         const auto& data     = reply.data.value();
@@ -381,37 +385,37 @@ const boost::ut::suite RunningGraphTests = [] {
     scheduler.requestStop();
     schedulerThread1.join();
     if (!schedulerRet.has_value()) {
-        expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+        expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
     }
 
     // return to initial state
     expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
     expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
-    expect(scheduler.state() == lifecycle::State::INITIALISED) << fmt::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
+    expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
 
     std::thread schedulerThread2(runScheduler);
     expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
     for (const auto& edge : scheduler.graph().edges()) {
-        fmt::println("edge in list({}): {}", scheduler.graph().edges().size(), edge);
+        std::println("edge in list({}): {}", scheduler.graph().edges().size(), edge);
     }
     expect(eq(scheduler.graph().edges().size(), 4UZ)) << "added three new edges, one previously registered with connect";
 
     // FIXME: edge->connection is not performed
     //    expect(awaitCondition(1s, [&sink] {
     //        std::this_thread::sleep_for(100ms);
-    //        fmt::println("sink has received {} samples - parents: {}", sink.count, sink.in.buffer().streamBuffer.n_writers());
+    //        std::println("sink has received {} samples - parents: {}", sink.count, sink.in.buffer().streamBuffer.n_writers());
     //        return sink.count >= 10U;
     //    })) << "sink received enough data";
 
     scheduler.requestStop();
 
-    fmt::print("Counting sink counted to {}\n", sink.count);
+    std::print("Counting sink counted to {}\n", sink.count);
 
     schedulerThread2.join();
     if (!schedulerRet.has_value()) {
-        expect(false) << fmt::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
+        expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
     }
 };
 

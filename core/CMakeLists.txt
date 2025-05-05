@@ -39,8 +39,7 @@ target_include_directories(
 
 target_link_libraries(
   gnuradio-core
-  PUBLIC fmt
-         gnuradio-options
+  PUBLIC gnuradio-options
          gnuradio-meta
          magic_enum
          pmtv

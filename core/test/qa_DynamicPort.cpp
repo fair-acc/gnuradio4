@@ -1,6 +1,6 @@
-#include <fmt/ranges.h>
-
 #include <boost/ut.hpp>
+
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -53,7 +53,7 @@ public:
 
     GR_MAKE_REFLECTABLE(cout_sink, sink);
 
-    void processOne(T value) { fmt::print("Sinking a value: {}\n", value); }
+    void processOne(T value) { std::print("Sinking a value: {}\n", value); }
 };
 
 static_assert(gr::BlockLike<cout_sink<float>>);
@@ -126,7 +126,8 @@ const boost::ut::suite PortApiTests = [] {
 
         WriterSpanLike auto pSpan = writer.reserve<SpanReleasePolicy::ProcessAll>(32UZ);
         std::iota(pSpan.begin(), pSpan.end(), 1);
-        fmt::print("typed-port connected output vector: {}\n", pSpan);
+        std::string list = gr::join(pSpan, ", ");
+        std::println("typed-port connected output vector: {}", list);
     };
 
     "RuntimePortApi"_test = [] {
@@ -167,7 +168,7 @@ const boost::ut::suite PortApiTests = [] {
             expect(!scaled.original.isConnected());
         };
 
-        fmt::println("after final test");
+        std::println("after final test");
     };
 
     "ConnectionApi - Graph-level"_test = [] {
@@ -240,7 +241,7 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(output_port.buffer().n_readers(), 0U));
         const auto old_size = writer.available();
         expect(eq(source->port<OUTPUT>("out0").value()->resizeBuffer(old_size + 1), connection_result_t::SUCCESS));
-        expect(gt(writer.available(), old_size)) << fmt::format("runtime increase of buffer size {} -> {}", old_size, writer.available());
+        expect(gt(writer.available(), old_size)) << std::format("runtime increase of buffer size {} -> {}", old_size, writer.available());
 
         // test runtime connection between ports
         expect(eq(output_port.buffer().n_readers(), 0U));
@@ -249,13 +250,13 @@ const boost::ut::suite PortApiTests = [] {
         expect(eq(source->port<OUTPUT>("out0").value()->connect(*sink->port<INPUT>("in1").value()), connection_result_t::SUCCESS)) << "second connection";
 
         const BufferReader auto& reader = input_port.reader();
-        expect(eq(reader.available(), 0U)) << fmt::format("reader already has some bytes pending: {}", reader.available());
+        expect(eq(reader.available(), 0U)) << std::format("reader already has some bytes pending: {}", reader.available());
 
         expect(eq(output_port.buffer().n_readers(), 2U));
 
         constexpr auto lambda = [](auto& w) {
             std::iota(w.begin(), w.end(), 0U);
-            fmt::print("dyn_port connected sink output: {}\n", w);
+            std::print("dyn_port connected sink output: {}\n", w);
         };
 
         expect(writer.try_publish(lambda, 32U));

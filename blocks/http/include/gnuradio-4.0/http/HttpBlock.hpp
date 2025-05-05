@@ -215,7 +215,7 @@ The result is provided on a single output port as a map with the following keys:
         }),
             [this](std::thread* t) {
                 if (auto ret = this->changeStateTo(gr::lifecycle::State::REQUESTED_STOP); !ret) {
-                    throw std::invalid_argument(fmt::format("{}::startThread() could not change state to REQUESTED_STOP", this->name));
+                    throw std::invalid_argument(std::format("{}::startThread() could not change state to REQUESTED_STOP", this->name));
                 }
                 _shutdownThread = true;
                 _ready.release();
@@ -230,7 +230,7 @@ The result is provided on a single output port as a map with the following keys:
                 _shutdownThread = false;
                 delete t;
                 if (auto ret = this->changeStateTo(gr::lifecycle::State::STOPPED); !ret) {
-                    throw std::invalid_argument(fmt::format("{}::startThread() could not change state to STOPPED", this->name));
+                    throw std::invalid_argument(std::format("{}::startThread() could not change state to STOPPED", this->name));
                 }
             });
     }

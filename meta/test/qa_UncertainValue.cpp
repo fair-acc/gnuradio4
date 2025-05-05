@@ -6,7 +6,7 @@
 
 #include <gnuradio-4.0/meta/formatter.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace test::detail {
 
@@ -123,8 +123,8 @@ const boost::ut::suite<"basic UncertainValue<T> tests"> _uncertainValue = [] {
         constexpr double b{10.0};
 
         constexpr UncertainValue<double> result = a - b;
-        expect(constant<10.0_d == result.value>) << "value: 20. - 10.";
-        expect(constant<0.0_d == result.uncertainty>) << "uncertainty: 0.0 (no change)";
+        expect(constant < 10.0_d == result.value >) << "value: 20. - 10.";
+        expect(constant < 0.0_d == result.uncertainty >) << "uncertainty: 0.0 (no change)";
     };
 
     "operator -= UncertainValue"_test = [] {
@@ -164,8 +164,8 @@ const boost::ut::suite<"basic UncertainValue<T> tests"> _uncertainValue = [] {
         constexpr double                 a{4.0};
         constexpr UncertainValue<double> b{3.0, 0.5};
 
-        expect(constant<12.0_d == (a * b).value>) << "value: 4. * 3.";
-        expect(constant<2.0_d == (a * b).uncertainty>) << "uncertainty: 0.5 * 4 = 1.5";
+        expect(constant < 12.0_d == (a * b).value >) << "value: 4. * 3.";
+        expect(constant < 2.0_d == (a * b).uncertainty >) << "uncertainty: 0.5 * 4 = 1.5";
     };
 
     "multiplication arithmetic value * arithmetic value"_test = [] {
@@ -173,8 +173,8 @@ const boost::ut::suite<"basic UncertainValue<T> tests"> _uncertainValue = [] {
         constexpr double b{3.0};
 
         constexpr UncertainValue<double> result = a * b;
-        expect(constant<12.0_d == result.value>) << "value: 4. * 3.";
-        expect(constant<0.0_d == result.uncertainty>) << "uncertainty: 0.0 (no change)";
+        expect(constant < 12.0_d == result.value >) << "value: 4. * 3.";
+        expect(constant < 0.0_d == result.uncertainty >) << "uncertainty: 0.0 (no change)";
     };
 
     "operator *= UncertainValue"_test = [] {
@@ -215,8 +215,8 @@ const boost::ut::suite<"basic UncertainValue<T> tests"> _uncertainValue = [] {
         constexpr double b{4.0};
 
         constexpr UncertainValue<double> result = a / b;
-        expect(constant<4.0_d == result.value>) << "value: 16. / 4.";
-        expect(constant<0.0_d == result.uncertainty>) << "uncertainty: 0.0 (no change)";
+        expect(constant < 4.0_d == result.value >) << "value: 16. / 4.";
+        expect(constant < 0.0_d == result.uncertainty >) << "uncertainty: 0.0 (no change)";
     };
 
     "operator /= UncertainValue"_test = [] {
@@ -682,28 +682,28 @@ const boost::ut::suite<"basic UncertainValue<T> tests"> _uncertainValue = [] {
         static_assert(!UncertainValueLike<double>);
 
         // uncorrelated operations
-        fmt::print("uncorrelated values:\n");
-        fmt::print("{} + {} = {}\n", uValueA, uValueB, uValueA + uValueB);
-        fmt::print("{} - {} = {}\n", uValueA, uValueB, uValueA - uValueB);
-        fmt::print("{} * {} = {}\n", uValueA, uValueB, uValueA * uValueB);
-        fmt::print("{} / {} = {}\n", uValueA, uValueB, uValueA / uValueB);
+        std::print("uncorrelated values:\n");
+        std::print("{} + {} = {}\n", uValueA, uValueB, uValueA + uValueB);
+        std::print("{} - {} = {}\n", uValueA, uValueB, uValueA - uValueB);
+        std::print("{} * {} = {}\n", uValueA, uValueB, uValueA * uValueB);
+        std::print("{} / {} = {}\n", uValueA, uValueB, uValueA / uValueB);
 
-        fmt::print("mixed-regular values:\n");
-        fmt::print("{} + {} = {}\n", uValueA, uValueB.value, uValueA + uValueB.value);
-        fmt::print("{} - {} = {}\n", uValueA, uValueB.value, uValueA - uValueB.value);
-        fmt::print("{} * {} = {}\n", uValueA, uValueB.value, uValueA * uValueB.value);
-        fmt::print("{} / {} = {}\n", uValueA, uValueB.value, uValueA / uValueB.value);
+        std::print("mixed-regular values:\n");
+        std::print("{} + {} = {}\n", uValueA, uValueB.value, uValueA + uValueB.value);
+        std::print("{} - {} = {}\n", uValueA, uValueB.value, uValueA - uValueB.value);
+        std::print("{} * {} = {}\n", uValueA, uValueB.value, uValueA * uValueB.value);
+        std::print("{} / {} = {}\n", uValueA, uValueB.value, uValueA / uValueB.value);
 
         // complex values
         using namespace std::complex_literals;
         UncertainValue uValueAC{4. + 1i, +1. + 1i};
         UncertainValue uValueBC{2. - 1i, +2. + 2i};
 
-        fmt::print("uncorrelated values - complex:\n");
-        fmt::print("{} + {} = {}\n", uValueAC, uValueBC, uValueAC + uValueBC);
-        fmt::print("{} - {} = {}\n", uValueAC, uValueBC, uValueAC - uValueBC);
-        fmt::print("{} * {} = {}\n", uValueAC, uValueBC, uValueAC * uValueBC);
-        fmt::print("{} / {} = {}\n", uValueAC, uValueBC, uValueAC / uValueBC);
+        std::print("uncorrelated values - complex:\n");
+        std::print("{} + {} = {}\n", uValueAC, uValueBC, uValueAC + uValueBC);
+        std::print("{} - {} = {}\n", uValueAC, uValueBC, uValueAC - uValueBC);
+        std::print("{} * {} = {}\n", uValueAC, uValueBC, uValueAC * uValueBC);
+        std::print("{} / {} = {}\n", uValueAC, uValueBC, uValueAC / uValueBC);
     };
 };
 

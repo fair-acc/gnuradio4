@@ -1,7 +1,7 @@
 #ifndef DATASETMATH_HPP
 #define DATASETMATH_HPP
 
-#include <fmt/format.h>
+#include <format>
 #include <random>
 
 #include <gnuradio-4.0/DataSet.hpp>
@@ -145,7 +145,7 @@ std::vector<T> computeDerivative(const DataSet<T>& ds, std::size_t signalIndex =
 template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 DataSet<T> addNoise(const DataSet<T>& ds, TValue noiseLevel, std::size_t signalIndex = 0UZ, std::uint64_t seed = 0U) {
     if (noiseLevel < TValue(0)) {
-        throw gr::exception(fmt::format("noiseLevel {} must be a positive number.", noiseLevel));
+        throw gr::exception(std::format("noiseLevel {} must be a positive number.", noiseLevel));
     }
 
     DataSet<T> noisy;
@@ -199,7 +199,7 @@ DataSet<T> applyMovingAverage(const DataSet<T>& ds, std::size_t windowSize, std:
 template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 constexpr DataSet<T> applyMedian(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     if (windowSize == 0) {
-        throw gr::exception(fmt::format("windowSize: {} must be a positive number.", windowSize), location);
+        throw gr::exception(std::format("windowSize: {} must be a positive number.", windowSize), location);
     }
 
     DataSet<T> filtered;
@@ -240,7 +240,7 @@ constexpr DataSet<T> applyMedian(const DataSet<T>& ds, std::size_t windowSize, s
 template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 constexpr DataSet<T> applyRms(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     if (windowSize == 0UZ) {
-        throw gr::exception(fmt::format("windowSize: {} must be a positive number.", windowSize), location);
+        throw gr::exception(std::format("windowSize: {} must be a positive number.", windowSize), location);
     }
 
     DataSet<T> filtered;
@@ -279,7 +279,7 @@ constexpr DataSet<T> applyRms(const DataSet<T>& ds, std::size_t windowSize, std:
 template<ProcessMode mode = ProcessMode::Copy, typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T>>
 constexpr DataSet<T> applyPeakToPeak(const DataSet<T>& ds, std::size_t windowSize, std::size_t signalIndex = 0UZ, std::source_location location = std::source_location::current()) {
     if (windowSize == 0UZ) {
-        throw gr::exception(fmt::format("windowSize: {} must be a positive number.", windowSize), location);
+        throw gr::exception(std::format("windowSize: {} must be a positive number.", windowSize), location);
     }
 
     DataSet<T> filtered;

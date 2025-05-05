@@ -91,7 +91,7 @@ public:
     ~SchedulerBase() {
         if (this->state() == lifecycle::RUNNING) {
             if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
-                fmt::println(std::cerr, "Failed to stop execution at destruction of scheduler: {} ({})", e.error().message, e.error().srcLoc());
+                std::println(std::cerr, "Failed to stop execution at destruction of scheduler: {} ({})", e.error().message, e.error().srcLoc());
                 std::abort();
             }
         }
@@ -113,7 +113,7 @@ public:
 
         forAllUnmanagedBlocks([this, &toSchedulerBuffer](auto& block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block->msgIn)) {
-                this->emitErrorMessage("connectBlockMessagePorts()", fmt::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
+                this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
             }
 
             block->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
@@ -162,7 +162,7 @@ public:
             // nobody is listening on messages -> convert errors to exceptions
             for (const auto& msg : messagesFromChildren) {
                 if (!msg.data.has_value()) {
-                    throw gr::exception(fmt::format("scheduler {}: throwing ignored exception {:t}", this->name, msg.data.error()));
+                    throw gr::exception(std::format("scheduler {}: throwing ignored exception {:t}", this->name, msg.data.error()));
                 }
             }
             return;

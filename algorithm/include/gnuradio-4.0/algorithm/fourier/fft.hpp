@@ -35,7 +35,7 @@ struct FFT {
         }
 
         if (!std::has_single_bit(in.size())) {
-            throw std::invalid_argument(fmt::format("Input data must have 2^N samples, input size: ", in.size()));
+            throw std::invalid_argument(std::format("Input data must have 2^N samples, input size: ", in.size()));
         }
         if (fftSize != in.size()) {
             fftSize = in.size();

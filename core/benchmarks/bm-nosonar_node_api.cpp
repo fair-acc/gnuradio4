@@ -456,7 +456,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         using copy = ::copy<float, 1, N_MAX, true, true>;
         std::vector<copy*> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
-            cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({{"name", fmt::format("copy {} at {}", i, gr::this_source_location())}}));
+            cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({{"name", std::format("copy {} at {}", i, gr::this_source_location())}}));
 
             if (i == 0) {
                 expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*cpy[i])));
@@ -519,8 +519,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         std::vector<DivideConst<T>*>   div1;
         std::vector<add<T, -1>*>       add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"factor", factor}, {"name", fmt::format("mult1.{}", i)}})));
-            div1.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"factor", factor}, {"name", fmt::format("div1.{}", i)}})));
+            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"factor", factor}, {"name", std::format("mult1.{}", i)}})));
+            div1.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"factor", factor}, {"name", std::format("div1.{}", i)}})));
             add1.emplace_back(std::addressof(testGraph.emplaceBlock<add<T, -1>>()));
         }
 
@@ -586,9 +586,9 @@ inline const boost::ut::suite _simd_tests = [] {
         std::vector<multiply_SIMD<float>*> mult2;
         std::vector<add_SIMD<float>*>      add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 2.0f}, {"name", fmt::format("mult1.{}", i)}})));
-            mult2.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 0.5f}, {"name", fmt::format("mult2.{}", i)}})));
-            add1.emplace_back(std::addressof(testGraph.emplaceBlock<add_SIMD<float>>({{"value", -1.0f}, {"name", fmt::format("add.{}", i)}})));
+            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 2.0f}, {"name", std::format("mult1.{}", i)}})));
+            mult2.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 0.5f}, {"name", std::format("mult2.{}", i)}})));
+            add1.emplace_back(std::addressof(testGraph.emplaceBlock<add_SIMD<float>>({{"value", -1.0f}, {"name", std::format("add.{}", i)}})));
         }
 
         for (std::size_t i = 0; i < add1.size(); i++) {

@@ -83,12 +83,12 @@ def process_bulk(ins, outs):
         std::vector<std::span<const std::int32_t>> ins     = {data1, data2};
         std::span<std::span<const std::int32_t>>   spanIns = ins;
         for (const auto& span : ins) {
-            fmt::println("InPort[{}] : [{}]", count++, fmt::join(span, ", "));
+            std::println("InPort[{}] : [{}]", count++, gr::join(span, ", "));
         }
-        fmt::println("");
+        std::println("");
 
         for (std::size_t i = 0; i < 3; i++) {
-            fmt::println("C++ processing iteration: {}", i);
+            std::println("C++ processing iteration: {}", i);
             std::vector<std::span<const std::int32_t>> constOuts(outs.begin(), outs.end());
             std::span<std::span<const std::int32_t>>   constSpanOuts = constOuts;
             std::span<std::span<std::int32_t>>         spanOuts      = outs;
@@ -100,16 +100,16 @@ def process_bulk(ins, outs):
                     myBlock.processBulk(constSpanOuts, spanOuts);
                 }
             } catch (const std::exception& ex) {
-                fmt::println(stderr, "myBlock.processBulk(...) - threw unexpected exception:\n {}", ex.what());
+                std::println(stderr, "myBlock.processBulk(...) - threw unexpected exception:\n {}", ex.what());
                 expect(false) << "nominal example should not throw";
             }
 
-            fmt::println("C++ side got:");
-            fmt::println("settings: {}", myBlock._settingsMap);
+            std::println("C++ side got:");
+            std::println("settings: {}", myBlock._settingsMap);
             for (const auto& span : outs) {
-                fmt::println("OutPort[{}] : [{}]", count++, fmt::join(span, ", "));
+                std::println("OutPort[{}] : [{}]", count++, gr::join(span, ", "));
             }
-            fmt::println("");
+            std::println("");
         }
 
         expect(eq(outs[0][0], 8)) << "out1[0] should be 8";
@@ -140,7 +140,7 @@ def process_bulk(ins, outs):
             std::ignore = myBlock.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
         } catch (const std::exception& ex) {
             throws = true;
-            fmt::println("myBlock.processBulk(...) - correctly threw SyntaxError exception:\n {}", ex.what());
+            std::println("myBlock.processBulk(...) - correctly threw SyntaxError exception:\n {}", ex.what());
         }
         expect(throws) << "SyntaxError should throw";
     };
@@ -169,7 +169,7 @@ def process_bulk(ins, outs):
             myBlock.processBulk(std::span(ins), std::span(outs));
         } catch (const std::exception& ex) {
             throws = true;
-            fmt::println("myBlock.processBulk(...) - correctly threw RuntimeWarning as exception:\n {}", ex.what());
+            std::println("myBlock.processBulk(...) - correctly threw RuntimeWarning as exception:\n {}", ex.what());
         }
         expect(throws) << "RuntimeWarning should throw";
     };
@@ -197,12 +197,12 @@ def process_bulk(ins, outs):
             expect(sched.runAndWait().has_value());
         } catch (const std::exception& ex) {
             throws = true;
-            fmt::println("sched.runAndWait() unexpectedly threw an exception:\n {}", ex.what());
+            std::println("sched.runAndWait() unexpectedly threw an exception:\n {}", ex.what());
         }
         expect(!throws);
 
         expect(eq(sink._nSamplesProduced, 5U)) << "sinkOne did not consume enough input samples";
-        expect(eq(sink._samples, std::vector<std::int32_t>{0, 2, 4, 6, 8})) << fmt::format("mismatch of vector {}", sink._samples);
+        expect(eq(sink._samples, std::vector<std::int32_t>{0, 2, 4, 6, 8})) << std::format("mismatch of vector {}", sink._samples);
     };
 
     "Python Execution - Lifecycle method tests"_test = [] {
@@ -261,12 +261,12 @@ def process_bulk(ins, outs):
             expect(sched.runAndWait().has_value());
         } catch (const std::exception& ex) {
             throws = true;
-            fmt::println("sched.runAndWait() unexpectedly threw an exception:\n {}", ex.what());
+            std::println("sched.runAndWait() unexpectedly threw an exception:\n {}", ex.what());
         }
         expect(!throws);
 
         expect(eq(sink._nSamplesProduced, 5U)) << "sinkOne did not consume enough input samples";
-        expect(eq(sink._samples, std::vector<float>{0.f, 2.f, 4.f, 6.f, 8.f})) << fmt::format("mismatch of vector {}", sink._samples);
+        expect(eq(sink._samples, std::vector<float>{0.f, 2.f, 4.f, 6.f, 8.f})) << std::format("mismatch of vector {}", sink._samples);
     };
 };
 

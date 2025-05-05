@@ -69,8 +69,8 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         std::span<OutType>   outSpan(v);
 
         expect(gr::work::Status::OK == fftBlock.processBulk(signal, outSpan));
-        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(v[0], fmt::format("TestDataSet({} -> {})", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>()));
-        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(v[0], std::format("TestDataSet({} -> {})", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>()));
+        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
 
         // check for DataSet equality
         const auto& dataSet = v[0];
@@ -79,25 +79,25 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
 
         const auto N_mag = fftBlock._magnitudeSpectrum.size();
         auto const freq  = static_cast<ValueType>(sample_rate) / static_cast<ValueType>(fftBlock.fftSize);
-        expect(ge(dataSet.axisValues(0UZ).size(), dataSet.signalValues(0UZ).size())) << fmt::format("<{}> DataSet axis size {} vs. signal size {}", type_name<T>(), dataSet.axisValues(0UZ).size(), dataSet.signalValues(0UZ).size());
-        expect(ge(dataSet.signalValues(0UZ).size(), N_mag)) << fmt::format("<{}> DataSet signal length {} vs. magnitude size {}", type_name<T>(), dataSet.signalValues(0UZ).size(), N_mag);
+        expect(ge(dataSet.axisValues(0UZ).size(), dataSet.signalValues(0UZ).size())) << std::format("<{}> DataSet axis size {} vs. signal size {}", type_name<T>(), dataSet.axisValues(0UZ).size(), dataSet.signalValues(0UZ).size());
+        expect(ge(dataSet.signalValues(0UZ).size(), N_mag)) << std::format("<{}> DataSet signal length {} vs. magnitude size {}", type_name<T>(), dataSet.signalValues(0UZ).size(), N_mag);
         if (N_mag == fftBlock.fftSize) { // complex input
-            expect(approx(dataSet.axisValues(0UZ).front(), -(static_cast<ValueType>(N_mag) / ValueType(2.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
-            expect(approx(dataSet.axisValues(0UZ).back(), (static_cast<ValueType>(N_mag) / ValueType(2.f) - ValueType(1.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
+            expect(approx(dataSet.axisValues(0UZ).front(), -(static_cast<ValueType>(N_mag) / ValueType(2.f)) * freq, tolerance)) << std::format("<{}> equal DataSet frequency[0]", type_name<T>());
+            expect(approx(dataSet.axisValues(0UZ).back(), (static_cast<ValueType>(N_mag) / ValueType(2.f) - ValueType(1.f)) * freq, tolerance)) << std::format("<{}> equal DataSet frequency[0]", type_name<T>());
         } else { // real input
-            expect(approx(dataSet.axisValues(0UZ).front(), 0 * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
-            expect(approx(dataSet.axisValues(0UZ).back(), (static_cast<ValueType>(N_mag) - ValueType(1.f)) * freq, tolerance)) << fmt::format("<{}> equal DataSet frequency[0]", type_name<T>());
+            expect(approx(dataSet.axisValues(0UZ).front(), 0 * freq, tolerance)) << std::format("<{}> equal DataSet frequency[0]", type_name<T>());
+            expect(approx(dataSet.axisValues(0UZ).back(), (static_cast<ValueType>(N_mag) - ValueType(1.f)) * freq, tolerance)) << std::format("<{}> equal DataSet frequency[0]", type_name<T>());
         };
 
-        expect(gr::test::eq_collections(dataSet.signalValues(0UZ), fftBlock._magnitudeSpectrum)) << fmt::format("<{}> equal DataSet magnitude", type_name<T>());
-        expect(gr::test::eq_collections(dataSet.signalValues(1UZ), fftBlock._phaseSpectrum)) << fmt::format("<{}> equal DataSet phase", type_name<T>());
-        expect(gr::test::approx_collections(dataSet.signalValues(2UZ), std::span{fftBlock._outData}.last(N_mag) | std::views::transform([](const auto& c) { return c.real(); }), tolerance)) << fmt::format("<{}> equal DataSet FFT real output", type_name<T>());
-        expect(gr::test::approx_collections(dataSet.signalValues(3UZ), std::span{fftBlock._outData}.last(N_mag) | std::views::transform([](const auto& c) { return c.imag(); }), tolerance)) << fmt::format("<{}> equal DataSet FFT imaginary output", type_name<T>());
+        expect(gr::test::eq_collections(dataSet.signalValues(0UZ), fftBlock._magnitudeSpectrum)) << std::format("<{}> equal DataSet magnitude", type_name<T>());
+        expect(gr::test::eq_collections(dataSet.signalValues(1UZ), fftBlock._phaseSpectrum)) << std::format("<{}> equal DataSet phase", type_name<T>());
+        expect(gr::test::approx_collections(dataSet.signalValues(2UZ), std::span{fftBlock._outData}.last(N_mag) | std::views::transform([](const auto& c) { return c.real(); }), tolerance)) << std::format("<{}> equal DataSet FFT real output", type_name<T>());
+        expect(gr::test::approx_collections(dataSet.signalValues(3UZ), std::span{fftBlock._outData}.last(N_mag) | std::views::transform([](const auto& c) { return c.imag(); }), tolerance)) << std::format("<{}> equal DataSet FFT imaginary output", type_name<T>());
 
         for (std::size_t i = 0UZ; i < dataSet.size(); i++) {
             const auto [min, max] = std::ranges::minmax_element(dataSet.signalValues(i));
-            expect(approx(*min, dataSet.signalRange(i).min, tolerance)) << fmt::format("signal '{}' min mismatch: LHS={} vs RHS={}", dataSet.signalName(i), *min, dataSet.signalRange(i).min);
-            expect(approx(*max, dataSet.signalRange(i).max, tolerance)) << fmt::format("signal '{}' max mismatch: LHS={} vs RHS={}", dataSet.signalName(i), *max, dataSet.signalRange(i).max);
+            expect(approx(*min, dataSet.signalRange(i).min, tolerance)) << std::format("signal '{}' min mismatch: LHS={} vs RHS={}", dataSet.signalName(i), *min, dataSet.signalRange(i).min);
+            expect(approx(*max, dataSet.signalRange(i).max, tolerance)) << std::format("signal '{}' max mismatch: LHS={} vs RHS={}", dataSet.signalName(i), *max, dataSet.signalRange(i).max);
         }
 
         // check for matching test frequency peak
@@ -105,7 +105,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         expect(approx(peak, ValueType(testFrequency), ValueType(1) / ValueType(N_mag))) << "detected test frequency mismatch";
 
         // plot magnitude spectrum
-        fmt::println("\nplot magnitude spectrum for case: {}->{}", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>());
+        std::println("\nplot magnitude spectrum for case: {}->{}", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>());
         gr::dataset::draw(dataSet, {.chart_width = 130UZ, .chart_height = 28UZ}, 0UZ);
     } | AllTypesToTest{};
 
@@ -171,19 +171,19 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             std::vector<OutType> resultingDataSets(1);
             expect(gr::work::Status::OK == fftBlock.processBulk(signal, resultingDataSets));
 
-            expect(eq(fftBlock.fftSize, N)) << fmt::format("<{}> equal fft size", type_name<T>());
-            expect(eq(fftBlock._window.size(), N)) << fmt::format("<{}> equal window vector size", type_name<T>());
-            expect(eq(fftBlock.window.value, magic_enum::enum_name(window))) << fmt::format("<{}> equal window function", type_name<T>());
+            expect(eq(fftBlock.fftSize, N)) << std::format("<{}> equal fft size", type_name<T>());
+            expect(eq(fftBlock._window.size(), N)) << std::format("<{}> equal window vector size", type_name<T>());
+            expect(eq(fftBlock.window.value, magic_enum::enum_name(window))) << std::format("<{}> equal window function", type_name<T>());
 
             std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(window, N);
             for (std::size_t i = 0; i < N; i++) {
                 if constexpr (gr::meta::complex_like<InType>) {
                     const auto expValue = static_cast<value_type>(signal[i].real()) * windowFunc[i];
-                    expect(approx(fftBlock._inData[i].real(), expValue, tolerance)) << fmt::format("<{}> equal fftwIn complex.real", type_name<T>());
-                    expect(approx(fftBlock._inData[i].imag(), expValue, tolerance)) << fmt::format("<{}> equal fftwIn complex.imag", type_name<T>());
+                    expect(approx(fftBlock._inData[i].real(), expValue, tolerance)) << std::format("<{}> equal fftwIn complex.real", type_name<T>());
+                    expect(approx(fftBlock._inData[i].imag(), expValue, tolerance)) << std::format("<{}> equal fftwIn complex.imag", type_name<T>());
                 } else {
                     const value_type expValue = static_cast<value_type>(signal[i]) * static_cast<value_type>(windowFunc[i]);
-                    expect(approx(fftBlock._inData[i], expValue, tolerance)) << fmt::format("<{}> equal fftwIn", type_name<T>());
+                    expect(approx(fftBlock._inData[i], expValue, tolerance)) << std::format("<{}> equal fftwIn", type_name<T>());
                 }
             }
         }

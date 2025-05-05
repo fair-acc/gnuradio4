@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
 #ifndef __clang__

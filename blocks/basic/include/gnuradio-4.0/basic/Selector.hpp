@@ -101,7 +101,7 @@ you can set the `backPressure` property to false.
 
     void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
         if (newSettings.contains("n_inputs") || newSettings.contains("n_outputs")) {
-            fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.at("n_inputs"), newSettings.contains("n_inputs") ? newSettings.at("n_inputs") : "same", oldSettings.at("n_outputs"), newSettings.contains("n_outputs") ? newSettings.at("n_outputs") : "same");
+            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.at("n_inputs"), newSettings.contains("n_inputs") ? newSettings.at("n_inputs") : "same", oldSettings.at("n_outputs"), newSettings.contains("n_outputs") ? newSettings.at("n_outputs") : "same");
             inputs.resize(n_inputs);
             outputs.resize(n_outputs);
         }
@@ -123,14 +123,14 @@ you can set the `backPressure` property to false.
                 _internalMappingOutIn[outIdx].push_back(inIdx);
 
                 if (!duplicateSet.insert({inIdx, outIdx}).second) { // check for duplicates
-                    throw std::invalid_argument(fmt::format("Duplicate pair (in:{}, out:{}) at i={}", inIdx, outIdx, i));
+                    throw std::invalid_argument(std::format("Duplicate pair (in:{}, out:{}) at i={}", inIdx, outIdx, i));
                 }
 
                 if (inIdx >= n_inputs) { // range checks
-                    throw std::invalid_argument(fmt::format("map_in[{}] = {} is >= n_inputs ({})", i, inIdx, n_inputs));
+                    throw std::invalid_argument(std::format("map_in[{}] = {} is >= n_inputs ({})", i, inIdx, n_inputs));
                 }
                 if (outIdx >= n_outputs) {
-                    throw std::invalid_argument(fmt::format("map_out[{}] = {} is >= n_outputs ({})", i, outIdx, n_outputs));
+                    throw std::invalid_argument(std::format("map_out[{}] = {} is >= n_outputs ({})", i, outIdx, n_outputs));
                 }
             }
         }

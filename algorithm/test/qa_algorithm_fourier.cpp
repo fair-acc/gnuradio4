@@ -1,12 +1,12 @@
 #include <array>
 #include <cassert>
+#include <format>
 #include <numbers>
 #include <numeric>
 
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
@@ -99,8 +99,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             const auto peakFrequency{static_cast<double>(peakIndex) * t.sample_rate / static_cast<double>(t.N)};
 
             const auto expectedAmplitude = t.outputInDb ? 20. * log10(std::abs(t.amplitude)) : t.amplitude;
-            expect(approx(static_cast<double>(peakAmplitude), expectedAmplitude, tolerance)) << fmt::format("{} equal amplitude", type_name<T>());
-            expect(approx(peakFrequency, t.frequency, tolerance)) << fmt::format("{} equal frequency", type_name<T>());
+            expect(approx(static_cast<double>(peakAmplitude), expectedAmplitude, tolerance)) << std::format("{} equal amplitude", type_name<T>());
+            expect(approx(peakFrequency, t.frequency, tolerance)) << std::format("{} equal frequency", type_name<T>());
         }
     } | AllTypesToTest{};
 
@@ -145,10 +145,10 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             const auto peakIndex{static_cast<std::size_t>(std::distance(magnitudeSpectrum.begin(), std::ranges::max_element(magnitudeSpectrum)))};
             const auto peakAmplitude{magnitudeSpectrum[peakIndex]};
 
-            expect(eq(peakIndex, expectedPeakIndex)) << fmt::format("<{}> equal peak index", type_name<T>());
-            expect(approx(static_cast<double>(peakAmplitude), expectedPeakAmplitude, tolerance)) << fmt::format("<{}> equal amplitude", type_name<T>());
-            expect(approx(static_cast<double>(fftResult[0].real()), static_cast<double>(expectedFft0.real()), tolerance)) << fmt::format("<{}> equal fft[0].real()", type_name<T>());
-            expect(approx(static_cast<double>(fftResult[0].imag()), static_cast<double>(expectedFft0.imag()), tolerance)) << fmt::format("<{}> equal fft[0].imag()", type_name<T>());
+            expect(eq(peakIndex, expectedPeakIndex)) << std::format("<{}> equal peak index", type_name<T>());
+            expect(approx(static_cast<double>(peakAmplitude), expectedPeakAmplitude, tolerance)) << std::format("<{}> equal amplitude", type_name<T>());
+            expect(approx(static_cast<double>(fftResult[0].real()), static_cast<double>(expectedFft0.real()), tolerance)) << std::format("<{}> equal fft[0].real()", type_name<T>());
+            expect(approx(static_cast<double>(fftResult[0].imag()), static_cast<double>(expectedFft0.imag()), tolerance)) << std::format("<{}> equal fft[0].imag()", type_name<T>());
         }
     } | ComplexTypesToTest{};
 
@@ -196,32 +196,32 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
 
         // check all windows for unwanted changes
         using enum gr::algorithm::window::Type;
-        expect(equalVectors(create<T>(None, 8), RectangularRef)) << fmt::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(None, 8), RectangularRef);
-        expect(equalVectors(create<T>(Rectangular, 8), RectangularRef)) << fmt::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(Rectangular, 8), RectangularRef);
-        expect(equalVectors(create<T>(Hamming, 8), HammingRef)) << fmt::format("<{}> equal Hamming vector {} vs. ref: {}", type_name<T>(), create<T>(Hamming, 8), HammingRef);
-        expect(equalVectors(create<T>(Hann, 8), HannRef)) << fmt::format("<{}> equal Hann vector {} vs. ref: {}", type_name<T>(), create<T>(Hann, 8), HannRef);
-        expect(equalVectors(create<T>(Blackman, 8), BlackmanRef)) << fmt::format("<{}> equal Blackman vvector {} vs. ref: {}", type_name<T>(), create<T>(Blackman, 8), BlackmanRef);
-        expect(equalVectors(create<T>(BlackmanHarris, 8), BlackmanHarrisRef)) << fmt::format("<{}> equal BlackmanHarris vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanHarris, 8), BlackmanHarrisRef);
-        expect(equalVectors(create<T>(BlackmanNuttall, 8), BlackmanNuttallRef)) << fmt::format("<{}> equal BlackmanNuttall vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanNuttall, 8), BlackmanNuttallRef);
-        expect(equalVectors(create<T>(Exponential, 8), ExponentialRef)) << fmt::format("<{}> equal Exponential vector {} vs. ref: {}", type_name<T>(), create<T>(Exponential, 8), ExponentialRef);
-        expect(equalVectors(create<T>(FlatTop, 8), FlatTopRef)) << fmt::format("<{}> equal FlatTop vector {} vs. ref: {}", type_name<T>(), create<T>(FlatTop, 8), FlatTopRef);
-        expect(equalVectors(create<T>(HannExp, 8), HannExpRef)) << fmt::format("<{}> equal HannExp vector {} vs. ref: {}", type_name<T>(), create<T>(HannExp, 8), HannExpRef);
-        expect(equalVectors(create<T>(Nuttall, 8), NuttallRef)) << fmt::format("<{}> equal Nuttall vector {} vs. ref: {}", type_name<T>(), create<T>(Nuttall, 8), NuttallRef);
-        expect(equalVectors(create<T>(Kaiser, 8), KaiserRef)) << fmt::format("<{}> equal Kaiser vector {} vs. ref: {}", type_name<T>(), create<T>(Kaiser, 8), KaiserRef);
+        expect(equalVectors(create<T>(None, 8), RectangularRef)) << std::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(None, 8), RectangularRef);
+        expect(equalVectors(create<T>(Rectangular, 8), RectangularRef)) << std::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(Rectangular, 8), RectangularRef);
+        expect(equalVectors(create<T>(Hamming, 8), HammingRef)) << std::format("<{}> equal Hamming vector {} vs. ref: {}", type_name<T>(), create<T>(Hamming, 8), HammingRef);
+        expect(equalVectors(create<T>(Hann, 8), HannRef)) << std::format("<{}> equal Hann vector {} vs. ref: {}", type_name<T>(), create<T>(Hann, 8), HannRef);
+        expect(equalVectors(create<T>(Blackman, 8), BlackmanRef)) << std::format("<{}> equal Blackman vvector {} vs. ref: {}", type_name<T>(), create<T>(Blackman, 8), BlackmanRef);
+        expect(equalVectors(create<T>(BlackmanHarris, 8), BlackmanHarrisRef)) << std::format("<{}> equal BlackmanHarris vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanHarris, 8), BlackmanHarrisRef);
+        expect(equalVectors(create<T>(BlackmanNuttall, 8), BlackmanNuttallRef)) << std::format("<{}> equal BlackmanNuttall vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanNuttall, 8), BlackmanNuttallRef);
+        expect(equalVectors(create<T>(Exponential, 8), ExponentialRef)) << std::format("<{}> equal Exponential vector {} vs. ref: {}", type_name<T>(), create<T>(Exponential, 8), ExponentialRef);
+        expect(equalVectors(create<T>(FlatTop, 8), FlatTopRef)) << std::format("<{}> equal FlatTop vector {} vs. ref: {}", type_name<T>(), create<T>(FlatTop, 8), FlatTopRef);
+        expect(equalVectors(create<T>(HannExp, 8), HannExpRef)) << std::format("<{}> equal HannExp vector {} vs. ref: {}", type_name<T>(), create<T>(HannExp, 8), HannExpRef);
+        expect(equalVectors(create<T>(Nuttall, 8), NuttallRef)) << std::format("<{}> equal Nuttall vector {} vs. ref: {}", type_name<T>(), create<T>(Nuttall, 8), NuttallRef);
+        expect(equalVectors(create<T>(Kaiser, 8), KaiserRef)) << std::format("<{}> equal Kaiser vector {} vs. ref: {}", type_name<T>(), create<T>(Kaiser, 8), KaiserRef);
 
         // test zero length
-        expect(eq(create<T>(None, 0).size(), 0u)) << fmt::format("<{}> zero size None vectors", type_name<T>());
-        expect(eq(create<T>(Rectangular, 0).size(), 0u)) << fmt::format("<{}> zero size Rectangular vectors", type_name<T>());
-        expect(eq(create<T>(Hamming, 0).size(), 0u)) << fmt::format("<{}> zero size Hamming vectors", type_name<T>());
-        expect(eq(create<T>(Hann, 0).size(), 0u)) << fmt::format("<{}> zero size Hann vectors", type_name<T>());
-        expect(eq(create<T>(Blackman, 0).size(), 0u)) << fmt::format("<{}> zero size Blackman vectors", type_name<T>());
-        expect(eq(create<T>(BlackmanHarris, 0).size(), 0u)) << fmt::format("<{}> zero size BlackmanHarris vectors", type_name<T>());
-        expect(eq(create<T>(BlackmanNuttall, 0).size(), 0u)) << fmt::format("<{}> zero size BlackmanNuttall vectors", type_name<T>());
-        expect(eq(create<T>(Exponential, 0).size(), 0u)) << fmt::format("<{}> zero size Exponential vectors", type_name<T>());
-        expect(eq(create<T>(FlatTop, 0).size(), 0u)) << fmt::format("<{}> zero size FlatTop vectors", type_name<T>());
-        expect(eq(create<T>(HannExp, 0).size(), 0u)) << fmt::format("<{}> zero size HannExp vectors", type_name<T>());
-        expect(eq(create<T>(Nuttall, 0).size(), 0u)) << fmt::format("<{}> zero size Nuttall vectors", type_name<T>());
-        expect(eq(create<T>(Kaiser, 0).size(), 0u)) << fmt::format("<{}> zero size Kaiser vectors", type_name<T>());
+        expect(eq(create<T>(None, 0).size(), 0u)) << std::format("<{}> zero size None vectors", type_name<T>());
+        expect(eq(create<T>(Rectangular, 0).size(), 0u)) << std::format("<{}> zero size Rectangular vectors", type_name<T>());
+        expect(eq(create<T>(Hamming, 0).size(), 0u)) << std::format("<{}> zero size Hamming vectors", type_name<T>());
+        expect(eq(create<T>(Hann, 0).size(), 0u)) << std::format("<{}> zero size Hann vectors", type_name<T>());
+        expect(eq(create<T>(Blackman, 0).size(), 0u)) << std::format("<{}> zero size Blackman vectors", type_name<T>());
+        expect(eq(create<T>(BlackmanHarris, 0).size(), 0u)) << std::format("<{}> zero size BlackmanHarris vectors", type_name<T>());
+        expect(eq(create<T>(BlackmanNuttall, 0).size(), 0u)) << std::format("<{}> zero size BlackmanNuttall vectors", type_name<T>());
+        expect(eq(create<T>(Exponential, 0).size(), 0u)) << std::format("<{}> zero size Exponential vectors", type_name<T>());
+        expect(eq(create<T>(FlatTop, 0).size(), 0u)) << std::format("<{}> zero size FlatTop vectors", type_name<T>());
+        expect(eq(create<T>(HannExp, 0).size(), 0u)) << std::format("<{}> zero size HannExp vectors", type_name<T>());
+        expect(eq(create<T>(Nuttall, 0).size(), 0u)) << std::format("<{}> zero size Nuttall vectors", type_name<T>());
+        expect(eq(create<T>(Kaiser, 0).size(), 0u)) << std::format("<{}> zero size Kaiser vectors", type_name<T>());
     } | std::tuple<float, double>();
 
     "basic window tests"_test = [](auto& val) {
@@ -235,8 +235,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             return; // min max out of [0, 1] by design and/or numerical corner cases
         }
         const auto [min, max] = std::ranges::minmax_element(w);
-        expect(ge(*min, 0.f)) << fmt::format("window {} min value\n", windowName);
-        expect(le(*max, 1.f)) << fmt::format("window {} max value\n", windowName);
+        expect(ge(*min, 0.f)) << std::format("window {} min value\n", windowName);
+        expect(le(*max, 1.f)) << std::format("window {} max value\n", windowName);
     } | magic_enum::enum_entries<gr::algorithm::window::Type>();
 
     "window corner cases"_test = []<typename T>() {

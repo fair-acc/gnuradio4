@@ -1,6 +1,6 @@
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
+#include <format>
 #include <map>
 #include <stdexcept>
 #include <thread>
@@ -150,7 +150,7 @@ const boost::ut::suite StateMachineTest = [] {
                 bool isValid = isValidTransition(fromState, toState);
 
                 // Assert that the function's validity matches the expected validity
-                expect(isValid == isAllowed) << fmt::format("Transition from {} to {} should be {}", magic_enum::enum_name(fromState), magic_enum::enum_name(toState), isAllowed ? "allowed" : "disallowed");
+                expect(isValid == isAllowed) << std::format("Transition from {} to {} should be {}", magic_enum::enum_name(fromState), magic_enum::enum_name(toState), isAllowed ? "allowed" : "disallowed");
             });
         });
     };
@@ -246,8 +246,8 @@ const boost::ut::suite StateMachineTest = [] {
 
         auto ret1 = machine.changeStateTo(State::RUNNING);
         expect(!ret1.has_value());
-        fmt::println("error1.message: {}", ret1.error().message);
-        fmt::println("error1.location: {}", ret1.error().sourceLocation);
+        std::println("error1.message: {}", ret1.error().message);
+        std::println("error1.location: {}", ret1.error().sourceLocation);
         expect(machine.state() == State::ERROR);
         expect(eq(machine.startCalled, 1)) << "start() called once";
         expect(machine.changeStateTo(State::INITIALISED).has_value()) << "reset()";
@@ -256,8 +256,8 @@ const boost::ut::suite StateMachineTest = [] {
 
         auto ret2 = machine.changeStateTo(State::REQUESTED_STOP);
         expect(!ret2.has_value());
-        fmt::println("error2.message: {}", ret2.error().message);
-        fmt::println("error2.message: {}", ret2.error().sourceLocation);
+        std::println("error2.message: {}", ret2.error().message);
+        std::println("error2.message: {}", ret2.error().sourceLocation);
         expect(machine.state() == State::ERROR);
         expect(eq(machine.stopCalled, 1)) << "stop() called once";
         expect(machine.changeStateTo(State::INITIALISED).has_value()) << "reset()";

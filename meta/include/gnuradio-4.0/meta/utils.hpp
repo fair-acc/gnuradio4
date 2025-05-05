@@ -4,8 +4,9 @@
 #include <complex>
 #include <cstdint>
 #include <cxxabi.h>
-#include <iostream>
 #include <map>
+#include <new>
+#include <print>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -82,7 +83,7 @@ struct print_types;
     } else {
         struct handle {
             [[noreturn]] static void failure() {
-                std::clog << "failed precondition\n";
+                std::println(stderr, "failed precondition");
                 __builtin_trap();
             }
         };
@@ -692,7 +693,7 @@ concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detai
 } // namespace meta
 
 #if HAVE_SOURCE_LOCATION
-inline auto this_source_location(std::source_location l = std::source_location::current()) { return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
+inline auto this_source_location(std::source_location l = std::source_location::current()) { return std::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
 #else
 inline auto this_source_location() { return "not yet implemented"; }
 #endif // HAVE_SOURCE_LOCATION

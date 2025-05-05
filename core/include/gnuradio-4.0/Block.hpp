@@ -7,8 +7,9 @@
 
 #include <pmtv/pmt.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -19,7 +20,7 @@
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <gnuradio-4.0/Settings.hpp>
-#include <gnuradio-4.0/annotated.hpp> // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
+#include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/LifeCycle.hpp>
@@ -321,7 +322,7 @@ enum class Category {
  *             break;
  *           case Unsubscribe: // handle unsubscription
  *             break;
- *           default: throw gr::exception(fmt::format("unsupported command {} for property {}", message.cmd, propertyName));
+ *           default: throw gr::exception(std::format("unsupported command {} for property {}", message.cmd, propertyName));
  *         }
  *       return std::nullopt; // no reply needed for Set, Subscribe, Unsubscribe
  *     }
@@ -389,7 +390,7 @@ public:
 
     // TODO: These are not involved in move operations, might be a problem later
     const std::size_t unique_id   = _uniqueIdCounter++;
-    const std::string unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    const std::string unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
@@ -583,7 +584,7 @@ public:
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow input_chunk_size and output_chunk_size must implement processBulk(...) method. Remove 'Resampling<>' from the block definition.");
         } else {
             if (input_chunk_size != 1ULL || output_chunk_size != 1ULL) {
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `Resampling<>`, but input_chunk_size = {}, output_chunk_size = {}, they both must equal to 1.", input_chunk_size, output_chunk_size));
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Block is not defined as `Resampling<>`, but input_chunk_size = {}, output_chunk_size = {}, they both must equal to 1.", input_chunk_size, output_chunk_size));
                 requestStop();
                 return;
             }
@@ -592,7 +593,7 @@ public:
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
             if (stride != 0ULL) {
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
                 requestStop();
                 return;
             }
@@ -600,22 +601,22 @@ public:
         const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         if (minSyncIn > maxSyncIn) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
             requestStop();
             return;
         }
         if (minSyncOut > maxSyncOut) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
             requestStop();
             return;
         }
         if (input_chunk_size > maxSyncIn) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling input_chunk_size ({}) is larger then max samples for input ports ({})", input_chunk_size, maxSyncIn));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("resampling input_chunk_size ({}) is larger then max samples for input ports ({})", input_chunk_size, maxSyncIn));
             requestStop();
             return;
         }
         if (output_chunk_size > maxSyncOut) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling output_chunk_size ({}) is larger then max samples for output ports ({})", output_chunk_size, maxSyncOut));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("resampling output_chunk_size ({}) is larger then max samples for output ports ({})", output_chunk_size, maxSyncOut));
             requestStop();
             return;
         }
@@ -805,7 +806,7 @@ public:
             auto& lastTag = _outputTags.back();
 #ifndef NDEBUG
             if (lastTag.index > tagOffset) { // check the order of published Tags.index
-                fmt::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
+                std::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
                 // std::abort();
             }
 #endif
@@ -849,7 +850,7 @@ public:
             } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
                 self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
                 if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
-                    throw gr::exception(fmt::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
+                    throw gr::exception(std::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
                 }
             } else {
                 return;
@@ -881,7 +882,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackEcho(std::string_view propertyName, Message message) {
@@ -892,7 +893,7 @@ protected:
             return message; // mirror message as is
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackLifecycleState(std::string_view propertyName, Message message) {
@@ -901,27 +902,27 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value() || !message.data.value().contains("state")) { // Changed '&&' to '||'
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
             }
 
             const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
             auto        it      = dataMap.find("state");
             if (it == dataMap.end()) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
             }
 
             const std::string* stateStr = std::get_if<std::string>(&it->second); // Used std::get_if instead of std::get and try-catch block
             if (!stateStr) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
             }
 
             auto state = magic_enum::enum_cast<lifecycle::State>(*stateStr); // Changed to dereference stateStr
             if (!state.has_value()) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", *stateStr, message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", *stateStr, message));
             }
 
             if (auto e = this->changeStateTo(state.value()); !e) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", e.error().message, e.error().sourceLocation, e.error().errorTime));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - error in state transition - what: {}", e.error().message, e.error().sourceLocation, e.error().errorTime));
             }
 
             return std::nullopt;
@@ -944,7 +945,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
+        throw gr::exception(std::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackSettings(std::string_view propertyName, Message message) {
@@ -953,7 +954,7 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
             // delegate to 'propertyCallbackStagedSettings' since we cannot set but only stage new settings due to mandatory real-time/non-real-time decoupling
             // settings are applied during the next work(...) invocation.
@@ -972,7 +973,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
@@ -991,7 +992,7 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
 
             property_map notSet          = self().settings().setStaged(*message.data);
@@ -1006,7 +1007,7 @@ protected:
                 return std::nullopt;
             }
 
-            throw gr::exception(fmt::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(std::move(notSet)), keys(settings().get())));
+            throw gr::exception(std::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(std::move(notSet)), keys(settings().get())));
         } else if (message.cmd == Get) {
             message.data = self().settings().stagedParameters();
             return message;
@@ -1020,7 +1021,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackStoreDefaults(std::string_view propertyName, Message message) {
@@ -1032,7 +1033,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackResetDefaults(std::string_view propertyName, Message message) {
@@ -1044,7 +1045,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackActiveContext(std::string_view propertyName, Message message) {
@@ -1053,7 +1054,7 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
 
             const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
@@ -1063,10 +1064,10 @@ protected:
                 if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                     contextStr = *stringPtr;
                 } else {
-                    throw gr::exception(fmt::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
+                    throw gr::exception(std::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
                 }
             } else {
-                throw gr::exception(fmt::format("propertyCallbackActiveContext - context name not found, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackActiveContext - context name not found, msg: {}", message));
             }
 
             std::uint64_t time = 0;
@@ -1082,7 +1083,7 @@ protected:
             });
 
             if (!ctx.has_value()) {
-                throw gr::exception(fmt::format("propertyCallbackActiveContext - failed to activate context {}, msg: {}", contextStr, message));
+                throw gr::exception(std::format("propertyCallbackActiveContext - failed to activate context {}, msg: {}", contextStr, message));
             }
         }
 
@@ -1092,7 +1093,7 @@ protected:
             return message;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackSettingsCtx(std::string_view propertyName, Message message) {
@@ -1100,7 +1101,7 @@ protected:
         assert(propertyName == block::property::kSettingsCtx);
 
         if (!message.data.has_value()) {
-            throw gr::exception(fmt::format("block {} (aka. {}) cannot get/set {} w/o data msg: {}", unique_name, name, propertyName, message));
+            throw gr::exception(std::format("block {} (aka. {}) cannot get/set {} w/o data msg: {}", unique_name, name, propertyName, message));
         }
 
         const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
@@ -1110,10 +1111,10 @@ protected:
             if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                 contextStr = *stringPtr;
             } else {
-                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
             }
         } else {
-            throw gr::exception(fmt::format("propertyCallbackSettingsCtx - context name not found, msg: {}", message));
+            throw gr::exception(std::format("propertyCallbackSettingsCtx - context name not found, msg: {}", message));
         }
 
         std::uint64_t time = 0;
@@ -1161,16 +1162,16 @@ protected:
         // Removed a Context
         if (message.cmd == Disconnect) {
             if (ctx.context == "") {
-                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
             }
 
             if (!settings().removeContext(ctx)) {
-                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - could not delete context {}, msg: {}", ctx.context, message));
+                throw gr::exception(std::format("propertyCallbackSettingsCtx - could not delete context {}, msg: {}", ctx.context, message));
             }
             return message;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackSettingsContexts(std::string_view propertyName, Message message) {
@@ -1198,7 +1199,7 @@ protected:
             return message;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
 protected:
@@ -1649,7 +1650,7 @@ protected:
 
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
-                emitErrorMessage("Block::workInternal:", fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
+                emitErrorMessage("Block::workInternal:", std::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
                 requestStop();
                 processedIn  = 0;
                 processedOut = 0;
@@ -1879,7 +1880,7 @@ public:
                 retMessage->data = std::unexpected(Error(e));
             } catch (...) {
                 retMessage       = Message{message};
-                retMessage->data = std::unexpected(Error(fmt::format("unknown exception in Block {} property '{}'\n request message: {} ", unique_name, message.endpoint, message)));
+                retMessage->data = std::unexpected(Error(std::format("unknown exception in Block {} property '{}'\n request message: {} ", unique_name, message.endpoint, message)));
             }
 
             if (!retMessage.has_value()) {
@@ -1890,7 +1891,7 @@ public:
             retMessage->serviceName     = unique_name;
             WriterSpanLike auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
-                throw gr::exception(fmt::format("{}::processMessages() can not reserve span for message\n", name));
+                throw gr::exception(std::format("{}::processMessages() can not reserve span for message\n", name));
             } else {
                 msgSpan[0] = *retMessage;
             }
@@ -1936,7 +1937,7 @@ void checkBlockContracts() {
                     // N.B. this function is compile-time ready but static_assert does not allow for configurable error
                     // messages
                     if constexpr (!gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) {
-                        throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
+                        throw std::invalid_argument(std::format("block {} {}member '{}' has unsupported setting type '{}'", //
                             gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>()));
                     }
                 }(),
@@ -1958,50 +1959,50 @@ void checkBlockContracts() {
         const auto b1 = (TOutputTypes::size.value == 1UZ) ? "" : "{ "; // optional opening brackets
         const auto b2 = (TOutputTypes::size.value == 1UZ) ? "" : " }"; // optional closing brackets
                                                                        // clang-format off
-        std::string signatureProcessOne = fmt::format("* Option Ia (pure function):\n\n{}\n\n* Option Ib (allows modifications: settings, Tags, state, errors,...):\n\n{}\n\n* Option Ic (explicit return types):\n\n{}\n\n", //
-fmt::format(R"(auto processOne({}) const noexcept {{
+        std::string signatureProcessOne = std::format("* Option Ia (pure function):\n\n{}\n\n* Option Ib (allows modifications: settings, Tags, state, errors,...):\n\n{}\n\n* Option Ic (explicit return types):\n\n{}\n\n", //
+std::format(R"(auto processOne({}) const noexcept {{
     /* add code here */
     return {}{}{};
 }})",
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }),
-    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2),
-fmt::format(R"(auto processOne({}) {{
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("{} in{}", detail::shortTypeName<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}()", detail::shortTypeName<T>()); }), b2),
+std::format(R"(auto processOne({}) {{
     /* add code here */
     return {}{}{};
 }})",
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }),
-    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2),
-fmt::format(R"(std::tuple<{}> processOne({}) {{
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("{} in{}", detail::shortTypeName<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}()", detail::shortTypeName<T>()); }), b2),
+std::format(R"(std::tuple<{}> processOne({}) {{
     /* add code here */
     return {}{}{};
 }})",
-   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}", detail::shortTypeName<T>()); }), //
-   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }), //
-   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2)
+   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}", detail::shortTypeName<T>()); }), //
+   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("{} in{}", detail::shortTypeName<T>(), index); }), //
+   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}()", detail::shortTypeName<T>()); }), b2)
 );
 
-std::string signaturesProcessBulk = fmt::format("* Option II:\n\n{}\n\nadvanced:* Option III:\n\n{}\n\n\n",
-fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+std::string signaturesProcessBulk = std::format("* Option II:\n\n{}\n\nadvanced:* Option III:\n\n{}\n\n\n",
+std::format(R"(gr::work::Status processBulk({}{}{}) {{
     /* add code here */
     return gr::work::Status::OK;
 }})", //
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<{}> out{}", detail::shortTypeName<T>(), index); })),
-fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return std::format("std::span<{}> out{}", detail::shortTypeName<T>(), index); })),
+std::format(R"(gr::work::Status processBulk({}{}{}) {{
     /* add code here */
     return gr::work::Status::OK;
 }})", //
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("OutputSpanLike auto out{}", detail::shortTypeName<T>(), index); })));
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return std::format("OutputSpanLike auto out{}", detail::shortTypeName<T>(), index); })));
         // clang-format on
 
         bool has_port_collection = false;
         TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
-        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
+        throw std::invalid_argument(std::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
     }
 
     // test for optional Drawable interface
@@ -2029,32 +2030,32 @@ template<BlockLike TBlock>
     constexpr bool kIsBlocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
 
     // re-enable once string and constexpr static is supported by all compilers
-    /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
+    /*constexpr*/ std::string ret = std::format("# {}\n{}\n{}\n**supported data types:**", //
         gr::meta::type_name<DerivedBlock>(), TBlock::description, kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
     gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto&& t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
-        ret += fmt::format("{}:{} ", index, type_name);
+        ret += std::format("{}:{} ", index, type_name);
     });
-    ret += fmt::format("\n**Parameters:**\n");
+    ret += std::format("\n**Parameters:**\n");
     if constexpr (refl::reflectable<DerivedBlock>) {
         refl::for_each_data_member_index<DerivedBlock>([&](auto kIdx) {
             using RawType = std::remove_cvref_t<refl::data_member_type<DerivedBlock, kIdx>>;
             using Type    = unwrap_if_wrapped_t<RawType>;
             if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
                 if constexpr (is_annotated<RawType>()) {
-                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
+                    ret += std::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                         RawType::visible() ? "" : "_",                                                   //
                         refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view(), //
                         RawType::description(), RawType::unit(),
                         RawType::documentation(), //
                         RawType::visible() ? "" : "_");
                 } else {
-                    ret += fmt::format("_{:10} {}_\n", refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view());
+                    ret += std::format("_{:10} {}_\n", refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view());
                 }
             }
         });
     }
-    ret += fmt::format("\n~~Ports:~~\ntbd.");
+    ret += std::format("\n~~Ports:~~\ntbd.");
     return ret;
 }
 
@@ -2275,18 +2276,18 @@ inline constexpr auto for_each_writer_span(Function&& function, Tuple&& tuple, T
 } // namespace gr
 
 template<>
-struct fmt::formatter<gr::work::Result> {
-    static constexpr auto parse(const format_parse_context& ctx) {
-        const auto it = ctx.begin();
+struct std::formatter<gr::work::Result, char> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
-            throw format_error("invalid format");
+            throw std::format_error("invalid format");
         }
         return it;
     }
 
     template<typename FormatContext>
-    auto format(const gr::work::Result& work_return, FormatContext& ctx) {
-        return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, magic_enum::enum_name(work_return.status));
+    auto format(const gr::work::Result& result, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", result.requested_work, result.performed_work, magic_enum::enum_name(result.status));
     }
 };
 

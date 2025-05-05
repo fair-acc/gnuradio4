@@ -28,7 +28,7 @@ const boost::ut::suite TagTests = [] {
     auto clockSourceTest = []<bool useIoThreadPool>(bool verbose = false) {
         // useIoThreadPool - true: scheduler/graph-provided thread, false: use user-provided call-back or thread
         if (verbose) {
-            fmt::println("started ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
+            std::println("started ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
         }
         constexpr gr::Size_t n_samples   = 1900;
         constexpr float      sample_rate = 2000.f;
@@ -52,19 +52,19 @@ const boost::ut::suite TagTests = [] {
         scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
         if (verbose) {
-            fmt::println("finished ClockSource sched.runAndWait() w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
+            std::println("finished ClockSource sched.runAndWait() w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
         }
 
         expect(eq(src.n_samples_max, n_samples)) << "src did not accept require max input samples";
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(static_cast<gr::Size_t>(sink1._nSamplesProduced), n_samples)) << fmt::format("sink1 did not consume enough input samples ({} vs. {})", sink1._nSamplesProduced, n_samples);
-        expect(eq(static_cast<gr::Size_t>(sink2._nSamplesProduced), n_samples)) << fmt::format("sink2 did not consume enough input samples ({} vs. {})", sink2._nSamplesProduced, n_samples);
+        expect(eq(static_cast<gr::Size_t>(sink1._nSamplesProduced), n_samples)) << std::format("sink1 did not consume enough input samples ({} vs. {})", sink1._nSamplesProduced, n_samples);
+        expect(eq(static_cast<gr::Size_t>(sink2._nSamplesProduced), n_samples)) << std::format("sink2 did not consume enough input samples ({} vs. {})", sink2._nSamplesProduced, n_samples);
 
         // TODO: last decimator/interpolator + stride addition seems to break the limiting the input samples to the min of available vs. n_samples-until next tags
         // expect(equal_tag_lists(src.tags, sink1._tags)) << "sink1 (USE_PROCESS_ONE) did not receive the required tags";
         // expect(equal_tag_lists(src.tags, sink2._tags)) << "sink2 (USE_PROCESS_BULK) did not receive the required tags";
         if (verbose) {
-            fmt::println("finished ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T>-provided thread" : "user-provided thread");
+            std::println("finished ClockSource test w/ {}", useIoThreadPool ? "Graph/Block<T>-provided thread" : "user-provided thread");
         }
     };
 
@@ -86,7 +86,7 @@ const boost::ut::suite TagTests = [] {
             for (std::size_t i = 0; i < N; i++) {
                 const auto val = signalGen.processOne(0);
                 const auto exp = expResults[sig][i] + offset;
-                expect(approx(exp, val, 1e-5)) << fmt::format("SignalGenerator for signal: {} and i: {} does not match.", sig, i);
+                expect(approx(exp, val, 1e-5)) << std::format("SignalGenerator for signal: {} and i: {} does not match.", sig, i);
             }
         }
     };
@@ -102,7 +102,7 @@ const boost::ut::suite TagTests = [] {
             std::iota(xValues.begin(), xValues.end(), 0);
             std::ranges::generate(yValues, [&signalGen]() { return signalGen.processOne(0); });
 
-            fmt::println("Chart {}\n\n", sig);
+            std::println("Chart {}\n\n", sig);
             auto chart = gr::graphs::ImChart<128, 16>({{0., static_cast<double>(N)}, {-2.6, 2.6}});
             chart.draw(xValues, yValues, sig);
             chart.draw();
@@ -153,12 +153,12 @@ const boost::ut::suite TagTests = [] {
         for (const auto& sig : signals) {
             expect(funcGen.settings().activateContext(SettingsCtx{now, static_cast<int>(sig)}) != std::nullopt);
             const auto applyResult = funcGen.settings().applyStagedParameters();
-            expect(expect(eq(applyResult.forwardParameters.size(), 6UZ))) << fmt::format("incorrect number of to be forwarded settings. forward keys: {}\n", fmt::join(mismatchedKey(applyResult.forwardParameters), ", "));
+            expect(expect(eq(applyResult.forwardParameters.size(), 6UZ))) << std::format("incorrect number of to be forwarded settings. forward keys: {}\n", gr::join(mismatchedKey(applyResult.forwardParameters), ", "));
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
             std::ranges::generate(yValues, [&funcGen]() { return funcGen.processOne(0.); });
-            fmt::println("Chart {}\n\n", toString(sig));
+            std::println("Chart {}\n\n", toString(sig));
             auto chart = gr::graphs::ImChart<128, 32>({{0., static_cast<double>(N)}, {7., 22.}});
             chart.draw(xValues, yValues, toString(sig));
             chart.draw();
@@ -204,14 +204,14 @@ const boost::ut::suite TagTests = [] {
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
         expect(eq(sink._tags.size(), clockSrc.tags.size())) << [&]() {
-            std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
+            std::string ret = std::format("DataSet nTags: {}\n", sink._tags.size());
             for (const auto& tag : sink._tags) {
-                ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+                ret += std::format("tag.index: {} .map: {}\n", tag.index, tag.map);
             }
             return ret;
         }();
 
-        fmt::println("\n\nChart FunctionGenerator + ClockSource test\n\n");
+        std::println("\n\nChart FunctionGenerator + ClockSource test\n\n");
         std::vector<double> xValues(N);
         std::vector<double> yValues(sink._samples.begin(), sink._samples.end());
         std::iota(xValues.begin(), xValues.end(), 0);
@@ -269,14 +269,14 @@ const boost::ut::suite TagTests = [] {
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
         expect(eq(sink._tags.size(), 9UZ)) << [&]() {
-            std::string ret = fmt::format("DataSet nTags: {}\n", sink._tags.size());
+            std::string ret = std::format("DataSet nTags: {}\n", sink._tags.size());
             for (const auto& tag : sink._tags) {
-                ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+                ret += std::format("tag.index: {} .map: {}\n", tag.index, tag.map);
             }
             return ret;
         }();
 
-        fmt::println("\n\nFunctionGenerator + ClockSource FAIR test\n\n");
+        std::println("\n\nFunctionGenerator + ClockSource FAIR test\n\n");
         std::vector<double> xValues(N);
         std::vector<double> yValues(sink._samples.begin(), sink._samples.end());
         std::iota(xValues.begin(), xValues.end(), 0);

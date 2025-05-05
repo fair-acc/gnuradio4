@@ -3,10 +3,10 @@
 
 #include "CircularBuffer.hpp"
 
-#include <fmt/format.h>
-
 #include <chrono>
+#include <format>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -47,11 +47,11 @@ inline std::string format_args(const std::vector<arg_value>& args) {
             r += ",";
         }
         if (std::holds_alternative<std::string>(args[i].second)) {
-            r += fmt::format("\"{}\":\"{}\"", args[i].first, std::get<std::string>(args[i].second));
+            r += std::format("\"{}\":\"{}\"", args[i].first, std::get<std::string>(args[i].second));
         } else if (std::holds_alternative<double>(args[i].second)) {
-            r += fmt::format("\"{}\":{}", args[i].first, std::get<double>(args[i].second));
+            r += std::format("\"{}\":{}", args[i].first, std::get<double>(args[i].second));
         } else {
-            r += fmt::format("\"{}\":{}", args[i].first, std::get<int>(args[i].second));
+            r += std::format("\"{}\":{}", args[i].first, std::get<int>(args[i].second));
         }
     }
     r += "}";
@@ -75,13 +75,13 @@ struct alignas(256) TraceEvent { // fills up to power of 2 size, see static_asse
         case DurationBegin:
         case DurationEnd:
         case Counter:
-        case Instant: return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
-        case Complete: return fmt::format(R"({{"name": "{}", "ph": "X", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": {}}})", name, ts.count(), pid, tid, dur.count(), cat, format_args(args));
+        case Instant: return std::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
+        case Complete: return std::format(R"({{"name": "{}", "ph": "X", "ts": {}, "pid": {}, "tid": {}, "dur": {}, "cat": "{}", "args": {}}})", name, ts.count(), pid, tid, dur.count(), cat, format_args(args));
         case AsyncStart:
         case AsyncStep:
-        case AsyncEnd: return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "id": "{}", "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, id, cat, format_args(args));
+        case AsyncEnd: return std::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "id": "{}", "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, id, cat, format_args(args));
         default: // TODO
-            return fmt::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
+            return std::format(R"({{"name": "{}", "ph": "{}", "ts": {}, "pid": {}, "tid": {}, "cat": "{}", "args": {}}})", name, static_cast<char>(type), ts.count(), pid, tid, cat, format_args(args));
         }
 
         return {};
@@ -298,7 +298,7 @@ public:
             std::ofstream out_file;
             if (file_name.empty() && options.output_mode == OutputMode::File) {
                 static std::atomic<int> counter = 0;
-                file_name                       = fmt::format("profile.{}.{}.trace", getpid(), counter++);
+                file_name                       = std::format("profile.{}.{}.trace", getpid(), counter++);
                 out_file                        = std::ofstream(file_name, std::ios::out | std::ios::binary);
             }
 
@@ -309,7 +309,7 @@ public:
             std::unordered_map<std::thread::id, int> mapped_threads;
             bool                                     seen_finished = false;
 
-            fmt::print(out_stream, "[\n");
+            std::print(out_stream, "[\n");
             bool is_first = true;
             while (!seen_finished) {
                 seen_finished = finished;
@@ -320,15 +320,15 @@ public:
                         it = mapped_threads.emplace(event[0].thread_id, static_cast<int>(mapped_threads.size())).first;
                     }
                     if (!is_first) {
-                        fmt::print(out_stream, ",\n{}", event[0].toJSON(pid, it->second));
+                        std::print(out_stream, ",\n{}", event[0].toJSON(pid, it->second));
                     } else {
-                        fmt::print(out_stream, "{}", event[0].toJSON(pid, it->second));
+                        std::print(out_stream, "{}", event[0].toJSON(pid, it->second));
                     }
                     is_first    = false;
                     std::ignore = event.consume(1);
                 }
             }
-            fmt::println(out_stream, "\n]");
+            std::println(out_stream, "\n]");
         });
 
         reset();

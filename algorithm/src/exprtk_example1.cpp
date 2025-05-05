@@ -1,4 +1,5 @@
-#include <fmt/core.h>
+#include <format>
+#include <print>
 #include <ranges>
 #include <string>
 
@@ -43,7 +44,7 @@ int main() {
         x              = static_cast<T>(i);
         const T result = expression.value(); // evaluate expression
 
-        fmt::println("fibonacci({:3}) = {:10.0f}", i, result);
+        std::println("fibonacci({:3}) = {:10.0f}", i, result);
     }
 
     return 0;

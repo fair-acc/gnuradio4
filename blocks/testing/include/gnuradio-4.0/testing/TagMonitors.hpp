@@ -3,12 +3,10 @@
 
 #include <limits>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 namespace gr::testing {
@@ -20,10 +18,10 @@ enum class ProcessFunction {
 
 inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) noexcept {
     if (tag.map.empty()) {
-        fmt::print("{} @index= {}: map: {{ <empty map> }}\n", prefix, tag.index);
+        std::print("{} @index= {}: map: {{ <empty map> }}\n", prefix, tag.index);
         return;
     }
-    fmt::print("{} @index= {}: map: {{ {} }}\n", prefix, tag.index, fmt::join(tag.map, ", "));
+    std::print("{} @index= {}: map: {{ {} }}\n", prefix, tag.index, gr::join(tag.map, ", "));
 }
 
 template<typename MapType>
@@ -36,9 +34,9 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         }
         const auto it = map2.find(key);
         if (it == map2.end()) {
-            fmt::print("    key '{}' is present in {} but not in {}\n", key, name1, name2);
+            std::print("    key '{}' is present in {} but not in {}\n", key, name1, name2);
         } else if (it->second != value) {
-            fmt::print("    key '{}' has different values ('{}' vs '{}')\n", key, value, it->second);
+            std::print("    key '{}' has different values ('{}' vs '{}')\n", key, value, it->second);
         }
     }
 
@@ -46,20 +44,20 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         if (skipKey(key) || map1.contains(key)) {
             continue;
         }
-        fmt::print("    key '{}' is present in {} but not in {}\n", key, name2, name1);
+        std::print("    key '{}' is present in {} but not in {}\n", key, name2, name1);
     }
 }
 
 template<typename IterType>
 inline constexpr void mismatch_report(const IterType& mismatchedTag1, const IterType& mismatchedTag2, const IterType& tags1_begin, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
     const auto index = static_cast<std::size_t>(std::distance(tags1_begin, mismatchedTag1));
-    fmt::print("mismatch at index {}", index);
+    std::print("mismatch at index {}", index);
     if (mismatchedTag1->index != mismatchedTag2->index) {
-        fmt::print("  - different index: {} vs {}\n", mismatchedTag1->index, mismatchedTag2->index);
+        std::print("  - different index: {} vs {}\n", mismatchedTag1->index, mismatchedTag2->index);
     }
 
     if (mismatchedTag1->map != mismatchedTag2->map) {
-        fmt::print("  - different map content:\n");
+        std::print("  - different map content:\n");
         map_diff_report(mismatchedTag1->map, mismatchedTag2->map, "the first map", "the second", ignoreKeys);
         map_diff_report(mismatchedTag2->map, mismatchedTag1->map, "the second map", "the first", ignoreKeys);
     }
@@ -67,7 +65,7 @@ inline constexpr void mismatch_report(const IterType& mismatchedTag1, const Iter
 
 inline constexpr bool equal_tag_lists(const std::vector<Tag>& tags1, const std::vector<Tag>& tags2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
     if (tags1.size() != tags2.size()) {
-        fmt::println("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
+        std::println("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
         return false;
     }
 
@@ -221,7 +219,7 @@ private:
         const auto nSamplesRemainder = getNProducedSamplesRemainder();
         if (_tagIndex < _tags.size() && static_cast<gr::Size_t>(_tags[_tagIndex].index) <= nSamplesRemainder) {
             if (verbose_console) {
-                print_tag(_tags[_tagIndex], fmt::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
+                print_tag(_tags[_tagIndex], std::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
             publishTagFn(_tags[_tagIndex].map, 0UZ);
             this->_outputTagsChanged = true;
@@ -265,7 +263,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
 
     void start() {
         if (verbose_console) {
-            fmt::println("started TagMonitor {} aka. '{}'", this->unique_name, this->name);
+            std::println("started TagMonitor {} aka. '{}'", this->unique_name, this->name);
         }
         _samples.clear();
         if (log_samples) {
@@ -280,7 +278,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
         if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
-                print_tag(tag, fmt::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
+                print_tag(tag, std::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
             }
             if (log_tags) {
                 _tags.emplace_back(_nSamplesProduced, tag.map);
@@ -299,7 +297,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
         if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
-                print_tag(tag, fmt::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
+                print_tag(tag, std::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
             }
             if (log_tags) {
                 _tags.emplace_back(_nSamplesProduced, tag.map);
@@ -340,7 +338,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 
     void start() {
         if (verbose_console) {
-            fmt::println("started sink {} aka. '{}'", this->unique_name, this->name);
+            std::println("started sink {} aka. '{}'", this->unique_name, this->name);
         }
         _samples.clear();
         if (log_samples) {
@@ -351,7 +349,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 
     void stop() {
         if (verbose_console) {
-            fmt::println("stopped sink {} aka. '{}'", this->unique_name, this->name);
+            std::println("stopped sink {} aka. '{}'", this->unique_name, this->name);
         }
     }
 
@@ -361,7 +359,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
         if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
-                print_tag(tag, fmt::format("{}::processOne(...1)    \t received tag at {:6}", this->name, _nSamplesProduced));
+                print_tag(tag, std::format("{}::processOne(...1)    \t received tag at {:6}", this->name, _nSamplesProduced));
             }
             if (log_tags) {
                 _tags.emplace_back(_nSamplesProduced, tag.map);
@@ -383,7 +381,7 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
         if (this->inputTagsPresent()) {
             const Tag& tag = this->mergedInputTag();
             if (verbose_console) {
-                print_tag(tag, fmt::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));
+                print_tag(tag, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));
             }
             if (log_tags) {
                 _tags.emplace_back(_nSamplesProduced, tag.map);

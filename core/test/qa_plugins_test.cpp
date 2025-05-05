@@ -4,8 +4,7 @@
 
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/basic/CommonBlocks.hpp>

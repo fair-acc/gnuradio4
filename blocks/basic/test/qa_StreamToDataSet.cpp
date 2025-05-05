@@ -93,7 +93,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
         });
 
         gr::scheduler::Simple sched{std::move(graph)};
-        expect(sched.runAndWait().has_value()) << fmt::format("runAndWait - filter {}", filter);
+        expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter);
 
         expect(eq(clockSrc.sample_rate, sample_rate));
         expect(eq(funcGen.sample_rate, sample_rate));
@@ -148,9 +148,9 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filterStreamToStream).template to<"in">(streamSink)));
 
         gr::scheduler::Simple sched{std::move(graph)};
-        fmt::println("start -> Stream-to-Stream with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
-        expect(sched.runAndWait().has_value()) << fmt::format("runAndWait - filter {}", filter);
-        fmt::println("done -> Stream-to-Stream with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
+        std::println("start -> Stream-to-Stream with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
+        expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter);
+        std::println("done -> Stream-to-Stream with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
 
         expect(eq(tagSrc.sample_rate, sample_rate));
         expect(eq(filterStreamToStream.sample_rate, sample_rate));
@@ -160,9 +160,9 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
         expect(std::ranges::equal(streamSink._samples, expectedValues));
 
         expect(eq(streamSink._tags.size(), nTags)) << [&]() {
-            std::string ret = fmt::format("Stream nTags: {}\n", streamSink._tags.size());
+            std::string ret = std::format("Stream nTags: {}\n", streamSink._tags.size());
             for (const auto& tag : streamSink._tags) {
-                ret += fmt::format("tag.index: {} .map: {}\n", tag.index, tag.map);
+                ret += std::format("tag.index: {} .map: {}\n", tag.index, tag.map);
             }
             return ret;
         }();
@@ -219,9 +219,9 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filterStreamToDataSet).template to<"in">(dataSetSink)));
 
         gr::scheduler::Simple sched{std::move(graph)};
-        fmt::println("start -> Stream-to-DataSet with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
-        expect(sched.runAndWait().has_value()) << fmt::format("runAndWait - filter {}", filter);
-        fmt::println("done -> Stream-to-DataSet with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
+        std::println("start -> Stream-to-DataSet with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
+        expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter);
+        std::println("done -> Stream-to-DataSet with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
 
         expect(eq(tagSrc.sample_rate, sample_rate));
         expect(eq(filterStreamToDataSet.sample_rate, sample_rate));
@@ -231,15 +231,15 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
         for (std::size_t i = 0; i < dataSetSink._samples.size(); i++) {
             const DataSet<float>&          ds      = dataSetSink._samples.at(i);
             std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(ds, "TestDataSet");
-            expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+            expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
             expect(std::ranges::equal(ds.signal_values, expectedValues[i]));
 
             expect(fatal(eq(ds.timing_events.size(), 1UZ)));
             const auto& timingEvt0 = ds.timing_events[0];
             expect(eq(timingEvt0.size(), nTags[i])) << [&]() {
-                std::string ret = fmt::format("DataSet nTags: {}\n", timingEvt0.size());
+                std::string ret = std::format("DataSet nTags: {}\n", timingEvt0.size());
                 for (const auto& tag : timingEvt0) {
-                    ret += fmt::format("tag.index: {} .map: {}\n", tag.first, tag.second);
+                    ret += std::format("tag.index: {} .map: {}\n", tag.first, tag.second);
                 }
                 return ret;
             }();

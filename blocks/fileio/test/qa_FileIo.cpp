@@ -5,7 +5,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace {
 using namespace std::chrono_literals;
@@ -21,10 +21,10 @@ auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::ch
             }
             std::this_thread::sleep_for(pollingPeriod);
         }
-        fmt::println("watchdog kicked in");
+        std::println("watchdog kicked in");
         externalInterventionNeeded->store(true, std::memory_order_relaxed);
         sched.requestStop();
-        fmt::println("requested scheduler to stop");
+        std::println("requested scheduler to stop");
     });
 
     return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
@@ -40,11 +40,11 @@ void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thre
     constexpr gr::Size_t nSamples    = 1024U;
     const gr::Size_t     maxFileSize = mode == gr::blocks::fileio::Mode::multi ? 256U : 0U;
     std::string          modeName{magic_enum::enum_name(mode)};
-    std::string          fileName = fmt::format("/tmp/gr4_file_sink_test/TestFileName_{}.bin", modeName);
+    std::string          fileName = std::format("/tmp/gr4_file_sink_test/TestFileName_{}.bin", modeName);
     gr::blocks::fileio::detail::deleteFilesContaining(fileName);
 
     "BasicFileSink"_test = [&] { // NOSONAR capture all
-        std::string testCaseName = fmt::format("BasicFileSink: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
+        std::string testCaseName = std::format("BasicFileSink: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
         gr::Graph   flow;
 
         auto& source   = flow.emplaceBlock<ConstantSource<DataType>>({{"n_samples_max", nSamples}});
@@ -82,7 +82,7 @@ void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thre
 
     // N.B. test directory contains the output files from the previous sink test
     "BasicFileSource"_test = [&] { // NOSONAR capture all
-        std::string testCaseName = fmt::format("BasicFileSource: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
+        std::string testCaseName = std::format("BasicFileSource: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
         gr::Graph   flow;
         auto&       fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}});
         auto&       sink       = flow.emplaceBlock<CountingSink<DataType>>();
@@ -105,7 +105,7 @@ void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thre
     "BasicFileSource with offset and length"_test = [&] { // NOSONAR capture all
         constexpr gr::Size_t offsetSamples = 8U;
         constexpr gr::Size_t lengthSamples = 8U;
-        std::string          testCaseName  = fmt::format("BasicFileSource with offset and length: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
+        std::string          testCaseName  = std::format("BasicFileSource with offset and length: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
         gr::Graph            flow;
         auto&                fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"offset", offsetSamples}, {"length", lengthSamples}});
         auto&                sink       = flow.emplaceBlock<CountingSink<DataType>>();

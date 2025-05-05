@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
 #include <chrono>
@@ -38,7 +39,7 @@ struct CountSource : public gr::Block<CountSource<T>> {
 
     ~CountSource() {
         if (count != n_samples_max) {
-            fmt::println(stderr, "Error: CountSource did not process expected number of samples: {} vs. {}", count, n_samples_max);
+            std::println(stderr, "Error: CountSource did not process expected number of samples: {} vs. {}", count, n_samples_max);
         }
     }
 
@@ -68,10 +69,10 @@ struct ExpectSink : public gr::Block<ExpectSink<T>> {
 
     ~ExpectSink() { // TODO: throwing exceptions in destructor is bad -> need to refactor test
         if (count != n_samples_max) {
-            fmt::println(stderr, "Error: ExpectSink did not process expected number of samples: {} vs. {}", count, n_samples_max);
+            std::println(stderr, "Error: ExpectSink did not process expected number of samples: {} vs. {}", count, n_samples_max);
         }
         if (false_count != 0) {
-            fmt::println(stderr, "Error: ExpectSink false count {} is not zero", false_count);
+            std::println(stderr, "Error: ExpectSink false count {} is not zero", false_count);
         }
     }
 
@@ -235,7 +236,7 @@ template<typename TBlock>
 void checkBlockNames(const std::vector<TBlock>& joblist, std::set<std::string> set) {
     boost::ut::expect(boost::ut::that % joblist.size() == set.size());
     for (auto& block : joblist) {
-        boost::ut::expect(boost::ut::that % set.contains(std::string(block->name()))) << fmt::format("{} not in {}\n", block->name(), set);
+        boost::ut::expect(boost::ut::that % set.contains(std::string(block->name()))) << std::format("{} not in {{{}}}\n", block->name(), gr::join(set));
     }
 }
 
@@ -309,7 +310,7 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
             return gr::lifecycle::isActive(this->state()) ? INSUFFICIENT_OUTPUT_ITEMS : DONE;
         }
 
-        fmt::println("##BusyLoopBlock produces data _invokeCount: {}", _invokeCount.value());
+        std::println("##BusyLoopBlock produces data _invokeCount: {}", _invokeCount.value());
         std::ranges::copy(input.begin(), input.end(), output.begin());
         produceCount = _produceCount.subAndGet(1L);
         return OK;
@@ -436,7 +437,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         checkBlockNames(sched.jobs()->at(1), {"mult1", "out"});
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
-        expect(boost::ut::that % t.size() >= 8u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
+        expect(boost::ut::that % t.size() >= 8u) << std::format("execution order incomplete: {}", gr::join(t, ", "));
     };
 
     "SimpleScheduler_parallel_multi_threaded"_test = [] {
@@ -446,7 +447,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto                    sched = scheduler{getGraphParallel(trace), threadPool};
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
-        expect(boost::ut::that % t.size() >= 14u) << fmt::format("execution order incomplete: {}", fmt::join(t, ", "));
+        expect(boost::ut::that % t.size() >= 14u) << std::format("execution order incomplete: {}", gr::join(t, ", "));
     };
 
     "BreadthFirstScheduler_parallel_multi_threaded"_test = [] {
@@ -547,7 +548,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(ge(source.count, 0U));
         expect(shutDownByWatchdog.load(std::memory_order_relaxed));
         expect(sched.state() == gr::lifecycle::State::STOPPED);
-        fmt::println("N.B by-design infinite loop correctly stopped after having emitted {} samples", source.count);
+        std::println("N.B by-design infinite loop correctly stopped after having emitted {} samples", source.count);
     };
 
     // create and return a watchdog thread and its control flag
@@ -566,10 +567,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
                 std::this_thread::sleep_for(pollingPeriod);
             }
             // time-out reached, need to force termination of scheduler
-            fmt::println("watchdog kicked in");
+            std::println("watchdog kicked in");
             externalInterventionNeeded->store(true, std::memory_order_relaxed);
             sched.requestStop();
-            fmt::println("requested scheduler to stop");
+            std::println("requested scheduler to stop");
         });
 
         return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
@@ -598,7 +599,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(source.count, 1024U));
         expect(eq(sink.count, 1024U));
 
-        fmt::println("N.B. 'propagate source DONE state: down-stream using EOS tag' test finished");
+        std::println("N.B. 'propagate source DONE state: down-stream using EOS tag' test finished");
     };
 
     "propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports"_test = [&createWatchdog] {
@@ -624,7 +625,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(monitor.count, 1024U));
         expect(eq(sink.count, 1024U));
 
-        fmt::println("N.B. 'propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports' test finished");
+        std::println("N.B. 'propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports' test finished");
     };
 
     "propagate sink DONE status: upstream via disconnecting ports"_test = [&createWatchdog] {
@@ -649,7 +650,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
         expect(eq(sink.count, 1024U));
 
-        fmt::println("N.B. 'propagate sink DONE status: upstream via disconnecting ports' test finished");
+        std::println("N.B. 'propagate sink DONE status: upstream via disconnecting ports' test finished");
     };
 
     "blocking scheduler"_test = [] {
@@ -709,28 +710,28 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         std::this_thread::sleep_for(200ms); // wait for time-out
         const auto invokeCount1 = estInvokeCount();
 
-        expect(ge(invokeCount0, invokeCount1)) << fmt::format("info: invoke counts when active: {} sleeping: {}", invokeCount0, invokeCount1);
-        fmt::println("info: invoke counts when active: {} sleeping: {}", invokeCount0, invokeCount1);
+        expect(ge(invokeCount0, invokeCount1)) << std::format("info: invoke counts when active: {} sleeping: {}", invokeCount0, invokeCount1);
+        std::println("info: invoke counts when active: {} sleeping: {}", invokeCount0, invokeCount1);
         expect(eq(scheduler.graph().progress().value(), progressAfterInit)) << "after thread started definition (0) - mark2";
 
         monitor._produceCount.setValue(1L);
         const auto invokeCount2 = estInvokeCount();
-        expect(ge(invokeCount2, invokeCount1)) << fmt::format("info: invoke counts when active: {} sleeping: {}", invokeCount2, invokeCount1);
-        fmt::println("info: invoke counts when active: {} sleeping: {}", invokeCount2, invokeCount1);
+        expect(ge(invokeCount2, invokeCount1)) << std::format("info: invoke counts when active: {} sleeping: {}", invokeCount2, invokeCount1);
+        std::println("info: invoke counts when active: {} sleeping: {}", invokeCount2, invokeCount1);
 
         expect(ge(scheduler.graph().progress().value(), progressAfterInit)) << "final progress definition (>0)";
-        fmt::println("final progress {}", scheduler.graph().progress().value());
+        std::println("final progress {}", scheduler.graph().progress().value());
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "is running";
-        fmt::println("request to shut-down");
+        std::println("request to shut-down");
         scheduler.requestStop();
 
         schedulerThread.join();
-        std::string errorMsg = schedulerResult.has_value() ? "" : fmt::format("nested scheduler execution failed:\n{:f}\n", schedulerResult.error());
+        std::string errorMsg = schedulerResult.has_value() ? "" : std::format("nested scheduler execution failed:\n{:f}\n", schedulerResult.error());
         expect(schedulerResult.has_value()) << errorMsg;
     };
 
-    fmt::println("N.B. test-suite finished");
+    std::println("N.B. test-suite finished");
 };
 
 int main() { /* tests are statically executed */ }

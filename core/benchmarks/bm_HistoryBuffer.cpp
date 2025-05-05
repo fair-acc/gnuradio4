@@ -4,7 +4,7 @@
 #include <iostream>
 #include <thread>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/CircularBuffer.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
@@ -32,7 +32,7 @@ inline const boost::ut::suite _buffer_tests = [] {
                 }
                 ReaderSpanLike auto data = reader.get(1);
                 if (data[0] != counter) {
-                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
+                    throw std::runtime_error(std::format("write {} read {} mismatch", counter, data[0]));
                 }
                 boost::ut::expect(data.consume(1));
                 counter++;
@@ -55,7 +55,7 @@ inline const boost::ut::suite _buffer_tests = [] {
                 }
                 ReaderSpanLike auto data = reader.get(1);
                 if (data[0] != counter) {
-                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
+                    throw std::runtime_error(std::format("write {} read {} mismatch", counter, data[0]));
                 }
                 boost::ut::expect(data.consume(1));
                 counter++;
@@ -78,7 +78,7 @@ inline const boost::ut::suite _buffer_tests = [] {
                 }
                 ReaderSpanLike auto data = reader.get(1);
                 if (data[0] != counter) {
-                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data[0]));
+                    throw std::runtime_error(std::format("write {} read {} mismatch", counter, data[0]));
                 }
                 boost::ut::expect(data.consume(1));
                 counter++;
@@ -96,7 +96,7 @@ inline const boost::ut::suite _buffer_tests = [] {
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_front(counter);
                 if (const auto data = buffer[0] != counter) {
-                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
+                    throw std::runtime_error(std::format("write {} read {} mismatch", counter, data));
                 }
                 counter++;
             }
@@ -106,7 +106,7 @@ inline const boost::ut::suite _buffer_tests = [] {
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_back(counter);
                 if (const auto data = buffer[buffer.size() - 1UZ] != counter) {
-                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
+                    throw std::runtime_error(std::format("write {} read {} mismatch", counter, data));
                 }
                 counter++;
             }
@@ -120,7 +120,7 @@ inline const boost::ut::suite _buffer_tests = [] {
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_front(counter);
                 if (const auto data = buffer[0] != counter) {
-                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
+                    throw std::runtime_error(std::format("write {} read {} mismatch", counter, data));
                 }
                 counter++;
             }
@@ -131,7 +131,7 @@ inline const boost::ut::suite _buffer_tests = [] {
             for (std::size_t i = 0; i < samples; i++) {
                 buffer.push_back(counter);
                 if (const auto data = buffer[buffer.size() - 1UZ] != counter) {
-                    throw std::runtime_error(fmt::format("write {} read {} mismatch", counter, data));
+                    throw std::runtime_error(std::format("write {} read {} mismatch", counter, data));
                 }
                 counter++;
             }

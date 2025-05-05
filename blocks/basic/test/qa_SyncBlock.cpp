@@ -4,7 +4,7 @@
 #include <gnuradio-4.0/basic/SyncBlock.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 struct TestParams {
     std::string   testName       = "";
@@ -76,7 +76,7 @@ void runTest(const TestParams& par) {
         if (par.expectedValues.empty()) {
             expect(eq(par.expectedNSamples, sinks[i]->_nSamplesProduced));
         } else {
-            expect(std::ranges::equal(sinks[i]->_samples, par.expectedValues[i])) << fmt::format("sinks[{}]->_samples does not match to expected values:\nSink:{}\nExpected:{}\n", i, sinks[i]->_samples, par.expectedValues[i]);
+            expect(std::ranges::equal(sinks[i]->_samples, par.expectedValues[i])) << std::format("sinks[{}]->_samples does not match to expected values:\nSink:{}\nExpected:{}\n", i, sinks[i]->_samples, par.expectedValues[i]);
         }
     }
 

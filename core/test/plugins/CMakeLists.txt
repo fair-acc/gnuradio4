@@ -18,8 +18,7 @@ function(add_non_blocklib_plugin PLUGIN_NAME)
     ${PLUGIN_NAME}
     PUBLIC gnuradio-options
            gnuradio-core
-           gnuradio-plugin
-           fmt)
+           gnuradio-plugin)
 endfunction()
 
 add_non_blocklib_plugin(good_math_plugin)

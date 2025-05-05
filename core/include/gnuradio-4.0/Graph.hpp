@@ -13,7 +13,6 @@
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <algorithm>
-#include <iostream>
 #include <map>
 #include <tuple>
 #include <variant>
@@ -94,7 +93,7 @@ public:
     void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
         if (infoFound == exportFlag) {
-            throw Error(fmt::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
+            throw Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
         }
 
         auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName);
@@ -136,7 +135,7 @@ public:
                 return *block;
             }
         }
-        throw Error(fmt::format("Block {} not found in {}", uniqueBlockName, this->uniqueName()));
+        throw Error(std::format("Block {} not found in {}", uniqueBlockName, this->uniqueName()));
     }
 
     BlockModel& findFirstBlockWithName(std::string blockName) {
@@ -145,7 +144,7 @@ public:
                 return *block;
             }
         }
-        throw Error(fmt::format("Block {} not found in {}", blockName, this->uniqueName()));
+        throw Error(std::format("Block {} not found in {}", blockName, this->uniqueName()));
     }
 
 private:
@@ -221,7 +220,7 @@ private:
         }();
 
         if (it == _blocks.end()) {
-            throw std::runtime_error(fmt::format("No such block in this graph"));
+            throw std::runtime_error(std::format("No such block in this graph"));
         }
         return *it;
     }
@@ -256,7 +255,7 @@ private:
             auto* destinationBlock = self.findBlock(destinationBlockRaw).get();
 
             if (sourceBlock == nullptr || destinationBlock == nullptr) {
-                fmt::print("Source {} and/or destination {} do not belong to this graph\n", sourceBlockRaw.name, destinationBlockRaw.name);
+                std::print("Source {} and/or destination {} do not belong to this graph\n", sourceBlockRaw.name, destinationBlockRaw.name);
                 return ConnectionResult::FAILED;
             }
 
@@ -408,7 +407,7 @@ public:
 
             return newBlock;
         }
-        throw gr::exception(fmt::format("Can not create block {}", type));
+        throw gr::exception(std::format("Can not create block {}", type));
     }
 
     static property_map serializeEdge(const auto& edge) {
@@ -532,7 +531,7 @@ public:
 
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
         gr::Message reply;
@@ -549,7 +548,7 @@ public:
         auto               it         = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
 
         if (it == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
         std::erase_if(_edges, [&it](const Edge& edge) { //
@@ -577,13 +576,13 @@ public:
 
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
         auto newBlock    = gr::globalPluginLoader().instantiate(type, properties);
         auto newBlockRaw = newBlock.get();
         if (!newBlock) {
-            throw gr::exception(fmt::format("Can not create block {}", type));
+            throw gr::exception(std::format("Can not create block {}", type));
         }
 
         addBlock(std::move(newBlock), false); // false == do not emit message
@@ -623,25 +622,25 @@ public:
 
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
         }
 
         auto destinationBlockIt = std::ranges::find_if(_blocks, [&destinationBlock](const auto& block) { return block->uniqueName() == destinationBlock; });
         if (destinationBlockIt == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", destinationBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", destinationBlock, this->unique_name));
         }
 
         auto& sourcePortRef      = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
         auto& destinationPortRef = (*destinationBlockIt)->dynamicInputPort(destinationPort);
 
         if (sourcePortRef.typeName() != destinationPortRef.typeName()) {
-            throw gr::exception(fmt::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
+            throw gr::exception(std::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
         auto connectionResult = sourcePortRef.connect(destinationPortRef);
 
         if (connectionResult != ConnectionResult::SUCCESS) {
-            throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
+            throw gr::exception(std::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
         const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
@@ -661,13 +660,13 @@ public:
 
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
         }
 
         auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
 
         if (sourcePortRef.disconnect() == ConnectionResult::FAILED) {
-            throw gr::exception(fmt::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
         }
         message.endpoint = graph::property::kEdgeRemoved;
         return message;
@@ -801,10 +800,10 @@ public:
                 edge._destinationPort       = std::addressof(destinationPort);
             }
         } catch (gr::exception& e) {
-            fmt::println("applyEdgeConnection({}): {}", edge, e.what());
+            std::println("applyEdgeConnection({}): {}", edge, e.what());
             edge._state = Edge::EdgeState::PortNotFound;
         } catch (...) {
-            fmt::println("applyEdgeConnection({}): unknown exception", edge);
+            std::println("applyEdgeConnection({}): unknown exception", edge);
             edge._state = Edge::EdgeState::PortNotFound;
         }
 
@@ -864,7 +863,7 @@ public:
                 applyEdgeConnection(edge);
                 const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
                 if (!wasConnected) {
-                    fmt::print("Edge could not be connected {}\n", edge);
+                    std::print("Edge could not be connected {}\n", edge);
                 }
                 allConnected = allConnected && wasConnected;
             }
@@ -991,7 +990,7 @@ public:
     // already is a member of the Block base class, this is shadowing that member with a different value. No other block
     // does this.)
     const std::size_t unique_id   = _unique_id_counter++;
-    const std::string unique_name = fmt::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
+    const std::string unique_name = std::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
 
 private:
     // copy-paste from above, keep in sync
