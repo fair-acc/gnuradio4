@@ -4,7 +4,7 @@
 
 int main() {
     exprtk::symbol_table<float> symbol_table;
-    float                       x = 1.f;
+    [[maybe_unused]] float      x = 1.f; // used by reference within ExprTk
     symbol_table.add_variable("x", x);
     symbol_table.add_constants();
 

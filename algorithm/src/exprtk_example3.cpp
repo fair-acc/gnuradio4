@@ -42,10 +42,16 @@ int main() {
     std::uniform_real_distribution<T> noise_dist(-0.25, 0.25);
 
     // generate signal with noise
-    for (T t = T(-5); t <= T(5); t += T(10.0 / n)) {
-        const T noise = noise_dist(rng);
-        v_in.push_back(std::sin(2.f * std::numbers::pi_v<T> * t) + noise);
-    }
+    constexpr T t_min = -5;
+    constexpr T t_max = 5;
+    constexpr T dt    = (t_max - t_min) / T(n);
+
+    auto time_range = std::views::iota(0UZ, n + 1UZ) | std::views::transform([&rng, &noise_dist](std::size_t i) {
+        T t = t_min + dt * T(i);
+        return std::sin(2.f * std::numbers::pi_v<T> * t) + noise_dist(rng);
+    });
+
+    v_in.assign(time_range.begin(), time_range.end());
 
     exprtk::symbol_table<T> symbol_table;
     symbol_table.add_vector("v_in", v_in);
