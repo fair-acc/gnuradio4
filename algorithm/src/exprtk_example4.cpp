@@ -21,9 +21,6 @@
 #include <string>
 #include <vector>
 
-template<typename T>
-void real_1d_discrete_fourier_transform() {}
-
 int main() {
     using T = float;
 
