@@ -47,8 +47,8 @@ void plotTimeDomain(const std::vector<std::complex<T>>& dataIn, const std::vecto
 
     chart.draw(time, inRe, "Re(in)");
     chart.draw(time, inIm, "Im(in)");
-    chart.draw(time, outRe, fmt::format("out: Re({})", label));
-    chart.draw(time, outIm, fmt::format("out: Im({})", label));
+    chart.draw(time, outRe, std::format("out: Re({})", label));
+    chart.draw(time, outIm, std::format("out: Im({})", label));
     chart.draw();
 }
 

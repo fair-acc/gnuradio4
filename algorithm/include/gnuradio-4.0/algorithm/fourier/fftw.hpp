@@ -175,7 +175,7 @@ public:
         }
 
         if (!std::has_single_bit(in.size())) {
-            throw std::invalid_argument(fmt::format("Input data must have 2^N samples, input size: ", in.size()));
+            throw std::invalid_argument(std::format("Input data must have 2^N samples, input size: ", in.size()));
         }
 
         if (fftSize != in.size()) {
@@ -184,7 +184,7 @@ public:
         }
 
         if (out.size() < fftSize) {
-            throw std::out_of_range(fmt::format("Output vector size ({}) is not enough, at least {} needed. ", out.size(), fftSize));
+            throw std::out_of_range(std::format("Output vector size ({}) is not enough, at least {} needed. ", out.size(), fftSize));
         }
 
         // precision is defined by output type, if needed cast input

@@ -4,8 +4,9 @@
 #include <complex>
 #include <cstdint>
 #include <cxxabi.h>
-#include <iostream>
 #include <map>
+#include <new>
+#include <print>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -82,7 +83,7 @@ struct print_types;
     } else {
         struct handle {
             [[noreturn]] static void failure() {
-                std::clog << "failed precondition\n";
+                std::println(stderr, "failed precondition");
                 __builtin_trap();
             }
         };
@@ -414,7 +415,108 @@ template<typename T>
     }
 }
 
-std::string makePortableTypeName(std::string_view name);
+inline std::string makePortableTypeName(std::string_view name) {
+    auto trimmed = [](std::string_view view) {
+        while (view.front() == ' ') {
+            view.remove_prefix(1);
+        }
+        while (view.back() == ' ') {
+            view.remove_suffix(1);
+        }
+        return view;
+    };
+
+    using namespace std::string_literals;
+    using gr::meta::detail::local_type_name;
+    static const auto typeMapping = std::array<std::pair<std::string, std::string>, 13>{{
+        {local_type_name<std::int8_t>(), "int8"s}, {local_type_name<std::int16_t>(), "int16"s}, {local_type_name<std::int32_t>(), "int32"s}, {local_type_name<std::int64_t>(), "int64"s},         //
+        {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
+        {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
+        {local_type_name<std::string>(), "string"s},                                                                                                                                              //
+        {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s},                                                            //
+    }};
+
+    const auto it = std::ranges::find_if(typeMapping, [&](const auto& pair) { return pair.first == name; });
+    if (it != typeMapping.end()) {
+        return it->second;
+    }
+
+    auto stripStdPrivates = [](std::string_view _name) -> std::string {
+        // There's an issue in std::regex in libstdcpp which tries to construct
+        // a vector of larger-than-possible size in some cases. Need to
+        // implement this manually. To simplify, we will remove any namespace
+        // starting with an underscore.
+        // static const std::regex stdPrivate("::_[A-Z_][a-zA-Z0-9_]*");
+        // return std::regex_replace(std::string(_name), stdPrivate, std::string());
+        std::string result(_name);
+        std::size_t oldStart = 0UZ;
+        while (true) {
+            auto delStart = result.find("::_"s, oldStart);
+            if (delStart == std::string::npos) {
+                break;
+            }
+
+            auto delEnd = delStart + 3;
+            while (delEnd < result.size() && (std::isalnum(result[delEnd]) || result[delEnd] == '_')) {
+                delEnd++;
+            }
+
+            result.erase(delStart, delEnd - delStart);
+            oldStart = delStart;
+        }
+        return result;
+    };
+
+    std::string_view view   = name;
+    auto             cursor = view.find("<");
+    if (cursor == std::string_view::npos) {
+        return stripStdPrivates(std::string{name});
+    }
+    auto base = view.substr(0, cursor);
+
+    view.remove_prefix(cursor + 1);
+    if (!view.ends_with(">")) {
+        return stripStdPrivates(std::string{name});
+    }
+    view.remove_suffix(1);
+    while (view.back() == ' ') {
+        view.remove_suffix(1);
+    }
+
+    std::vector<std::string> params;
+
+    std::size_t depth = 0;
+    cursor            = 0;
+
+    while (cursor < view.size()) {
+        if (view[cursor] == '<') {
+            depth++;
+        } else if (view[cursor] == '>') {
+            depth--;
+        } else if (view[cursor] == ',' && depth == 0) {
+            auto param = trimmed(view.substr(0, cursor));
+            params.push_back(makePortableTypeName(param));
+            view.remove_prefix(cursor + 1);
+            cursor = 0;
+            continue;
+        }
+        cursor++;
+    }
+    params.push_back(makePortableTypeName(trimmed(view)));
+    auto join = [](const auto& range, std::string_view sep = ", ") -> std::string {
+        std::string out;
+        auto        it2  = std::ranges::begin(range);
+        const auto  end2 = std::ranges::end(range);
+        if (it2 != end2) {
+            out += std::format("{}", *it2);
+            while (++it2 != end2) {
+                out += std::format("{}{}", sep, *it2);
+            }
+        }
+        return out;
+    };
+    return std::format("{}<{}>", base, join(params, ", "));
+}
 
 } // namespace detail
 
@@ -692,7 +794,7 @@ concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detai
 } // namespace meta
 
 #if HAVE_SOURCE_LOCATION
-inline auto this_source_location(std::source_location l = std::source_location::current()) { return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
+inline auto this_source_location(std::source_location l = std::source_location::current()) { return std::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
 #else
 inline auto this_source_location() { return "not yet implemented"; }
 #endif // HAVE_SOURCE_LOCATION

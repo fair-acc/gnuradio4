@@ -87,7 +87,7 @@ struct StreamingPoller {
 
     StreamingPoller(std::size_t minRequiredSamples_, std::size_t maxRequiredSamples_) : minRequiredSamples(minRequiredSamples_), maxRequiredSamples(maxRequiredSamples_) {
         if (minRequiredSamples > maxRequiredSamples) {
-            throw gr::exception(fmt::format("Failed to create StreamingPoller: minRequiredSamples ({}) > maxRequiredSamples ({})", minRequiredSamples, maxRequiredSamples));
+            throw gr::exception(std::format("Failed to create StreamingPoller: minRequiredSamples ({}) > maxRequiredSamples ({})", minRequiredSamples, maxRequiredSamples));
         }
     }
 
@@ -131,7 +131,7 @@ struct DataSetPoller {
 
     DataSetPoller(std::size_t minRequiredSamples_, std::size_t maxRequiredSamples_) : minRequiredSamples(minRequiredSamples_), maxRequiredSamples(maxRequiredSamples_) {
         if (minRequiredSamples > maxRequiredSamples) {
-            throw gr::exception(fmt::format("Failed to create DataSetPoller: minRequiredSamples ({}) > maxRequiredSamples ({})", minRequiredSamples, maxRequiredSamples));
+            throw gr::exception(std::format("Failed to create DataSetPoller: minRequiredSamples ({}) > maxRequiredSamples ({})", minRequiredSamples, maxRequiredSamples));
         }
     }
 
@@ -179,7 +179,7 @@ public:
         }
 
         if (_sink_by_signal_name.contains(sink->signal_name)) {
-            throw gr::exception(fmt::format("Failed to register sink `{}`. Sink with the signal_name `{}` is already registered.", sink->name, sink->signal_name), location);
+            throw gr::exception(std::format("Failed to register sink `{}`. Sink with the signal_name `{}` is already registered.", sink->name, sink->signal_name), location);
         }
 
         _sinks.push_back(sink);
@@ -203,15 +203,15 @@ public:
         std::lock_guard lg{_mutex};
 
         if (oldName.empty()) {
-            throw gr::exception(fmt::format("Failed to update signal_name of sink `{}`. The old signal_name is an empty string.", sink->name), location);
+            throw gr::exception(std::format("Failed to update signal_name of sink `{}`. The old signal_name is an empty string.", sink->name), location);
         }
 
         if (newName.empty()) {
-            throw gr::exception(fmt::format("Failed to update signal_name of sink `{}`. The new signal_name is an empty string.", sink->name), location);
+            throw gr::exception(std::format("Failed to update signal_name of sink `{}`. The new signal_name is an empty string.", sink->name), location);
         }
 
         if (_sink_by_signal_name.contains(std::string{newName})) {
-            throw gr::exception(fmt::format("Failed to update signal_name of sink `{}`. Sink with signal_name `{}` is already registered.", sink->name, newName), location);
+            throw gr::exception(std::format("Failed to update signal_name of sink `{}`. Sink with signal_name `{}` is already registered.", sink->name, newName), location);
         }
 
         _sink_by_signal_name.erase(std::string(oldName));

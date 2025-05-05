@@ -83,7 +83,7 @@ const boost::ut::suite ThreadPoolTests = [] {
 
         for (const auto [minThreads, maxThreads] : bounds) {
             for (const auto taskCount : {2, 8, 32}) {
-                fmt::print("## Test with min={} and max={} and taskCount={}\n", minThreads, maxThreads, taskCount);
+                std::print("## Test with min={} and max={} and taskCount={}\n", minThreads, maxThreads, taskCount);
                 std::atomic<int> counter{0};
 
                 // Pool with min and max thread count

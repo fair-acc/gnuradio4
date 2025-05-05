@@ -31,19 +31,6 @@ if(NOT MSVC)
 
   set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
 
-  if(NOT EMSCRIPTEN)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
-       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13
-       AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
-      message(STATUS "GCC <15 detected – disabling LTO due to known IPA/modref crash issues.")
-    else()
-      set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto=auto -fno-fat-lto-objects")
-      set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -flto=auto -fno-fat-lto-objects")
-      set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -flto=auto -fno-fat-lto-objects")
-      set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -flto=auto -fno-fat-lto-objects")
-    endif()
-  endif()
-
   find_program(MOLD_BIN ld.mold)
   if(MOLD_BIN)
     set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=mold")
@@ -305,46 +292,32 @@ target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_part
                                          "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
 if(EMSCRIPTEN)
   target_compile_options(exprtk PRIVATE -O1 -g0)
-elseif(
-  CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
-  AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13
-  AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS_EQUAL 14)
-  message(STATUS "GCC <15 detected – disabling LTO for exprtk due to known IPA/modref crash issues.")
+elseif()
   target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
-else()
-  target_compile_options(
-    exprtk
-    PRIVATE -O1
-            -g0
-            -flto=auto
-            -ffat-lto-objects
-            -fvisibility=hidden)
 endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
 # include exprtk header-only - END
 
 include(FetchContent)
 FetchContent_Declare(
-  fmt
-  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG 10.2.1)
-
-FetchContent_Declare(
   pmt
   GIT_REPOSITORY https://github.com/gnuradio/pmt.git
   GIT_TAG e1a46cb61decb044f6ab0a58a77211beb3630340 # latest as of 2023-12-06
 )
 
+set(BOOST_UT_DISABLE_MODULE
+    ON
+    CACHE BOOL "Disable UT Module Support" FORCE)
 FetchContent_Declare(
   ut
   GIT_REPOSITORY https://github.com/boost-ext/ut.git
-  GIT_TAG v2.0.1 # latest tag as of 2023-12-18
+  GIT_TAG 53e17f25119598c6458d30351b260193096ba67e # latest tag as of 2023-04-02
 )
 
 FetchContent_Declare(
   vir-simd
   GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-  GIT_TAG v0.4.0)
+  GIT_TAG v0.4.4)
 
 FetchContent_Declare(
   cpp-httplib
@@ -352,7 +325,6 @@ FetchContent_Declare(
   GIT_TAG v0.18.1)
 
 FetchContent_MakeAvailable(
-  fmt
   pmt
   ut
   vir-simd

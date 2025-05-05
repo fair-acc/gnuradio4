@@ -1,9 +1,7 @@
 #include <boost/ut.hpp>
 
+#include <format>
 #include <vector>
-
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 
 #include <gnuradio-4.0/algorithm/SchmittTrigger.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
@@ -33,31 +31,31 @@ template<typename T, gr::fixed_string testCaseName, typename Trigger, typename E
 void test_schmitt_trigger_with_signal(Trigger& trigger, const std::vector<T>& signal, const std::vector<std::tuple<EdgeDetection, EdgeType>>& expected_edges) {
     using enum gr::trigger::EdgeDetection;
     using value_t                  = gr::meta::fundamental_base_value_type_t<T>;
-    const std::string fullTestName = fmt::format("{} - data: {}({})", testCaseName.c_str(), gr::meta::type_name<T>(), signal);
+    const std::string fullTestName = std::format("{} - data: {}({})", testCaseName.c_str(), gr::meta::type_name<T>(), gr::join(signal));
 
-    fmt::println("test: {}", fullTestName);
+    std::println("test: {}", fullTestName);
     std::vector<std::tuple<EdgeDetection, EdgeType>> detected_edges;
     std::ptrdiff_t                                   dataIndex = 0;
     for (const auto& sample : signal) {
         if (trigger.processOne(sample) != NONE) {
             EdgeType sample_index = EdgeType{static_cast<float>(dataIndex + trigger.lastEdgeIdx)} + trigger.lastEdgeOffset;
             detected_edges.emplace_back(trigger.lastEdge, sample_index);
-            fmt::println("   {:7} edge detected at sample index: {:.4f} (Idx: {}, Offset: {:.3f})", //
+            std::println("   {:7} edge detected at sample index: {:.4f} (Idx: {}, Offset: {:.3f})", //
                 magic_enum::enum_name(trigger.lastEdge), sample_index, trigger.lastEdgeIdx, trigger.lastEdgeOffset);
         }
         dataIndex = dataIndex + 1;
     }
 
-    expect(eq(detected_edges.size(), expected_edges.size())) << fmt::format("{}: n detected ({}) vs. expected ({}) edges does not match", fullTestName, detected_edges.size(), expected_edges.size());
+    expect(eq(detected_edges.size(), expected_edges.size())) << std::format("{}: n detected ({}) vs. expected ({}) edges does not match", fullTestName, detected_edges.size(), expected_edges.size());
 
     for (std::size_t i = 0; i < expected_edges.size(); ++i) {
         auto [expected_edge, expected_index] = expected_edges[i];
         auto [detected_edge, detected_index] = detected_edges[i];
 
-        expect(detected_edge == expected_edge) << fmt::format("{}: detected {} edge type does not match expected {} at index {}\n", //
+        expect(detected_edge == expected_edge) << std::format("{}: detected {} edge type does not match expected {} at index {}\n", //
             fullTestName, magic_enum::enum_name(detected_edge), magic_enum::enum_name(expected_edge), i);
         expect(approx(gr::value(detected_index), gr::value(expected_index), std::is_floating_point_v<value_t> ? static_cast<value_t>(0.1f) : 0.1f)) //
-            << fmt::format("{}: detected edge ({}): is {} vs. expected {}\n", fullTestName, i, gr::value(detected_index), gr::value(expected_index));
+            << std::format("{}: detected edge ({}): is {} vs. expected {}\n", fullTestName, i, gr::value(detected_index), gr::value(expected_index));
     }
 }
 } // namespace

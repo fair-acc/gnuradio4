@@ -4,14 +4,26 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-W#warnings"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcpp"
+#endif
+#include <SoapySDR/Device.hpp> // needed for existing C++ return types that are ABI stable (i.e. header-only defined), to note: not compatible with GCC15
 #include <SoapySDR/Formats.h>
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
-#include <SoapySDR/Device.hpp> // needed for existing C++ return types that are ABI stable (i.e. header-only defined)
-
-#include <fmt/ranges.h>
 #include <map>
 #include <string>
 #include <vector>
+
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 #include "SoapyRaiiWrapper.hpp" // using SoapySDR's C-API as intermediate interface to mitigate ABI-issues between stdlibc++ and libc++
 
@@ -154,7 +166,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
 
         std::size_t nChannelMax = _device.getNumChannels(SOAPY_SDR_RX);
         if (nChannelMax < rx_channels->size() || (nPorts != std::dynamic_extent && nChannelMax != rx_channels->size())) {
-            throw gr::exception(fmt::format("device {} max channel mismatch: specified: {} vs max. {}", device.value, rx_channels->size(), nChannelMax));
+            throw gr::exception(std::format("device {} max channel mismatch: specified: {} vs max. {}", device.value, rx_channels->size(), nChannelMax));
         }
 
         setSampleRate();
@@ -177,7 +189,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         }
 
         if (!detail::equalWithinOnePercent(actualSampleRates, std::vector<double>(nChannels, static_cast<double>(sample_rate)))) {
-            throw gr::exception(fmt::format("sample rate mismatch:\nSet: {} vs. Actual: {}\n", sample_rate, fmt::join(actualSampleRates, ", ")));
+            throw gr::exception(std::format("sample rate mismatch:\nSet: {} vs. Actual: {}\n", sample_rate, gr::join(actualSampleRates, ", ")));
         }
     }
 
@@ -207,7 +219,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         }
 
         if (!detail::equalWithinOnePercent(rx_center_frequency_actual, rx_center_frequency.value)) {
-            throw gr::exception(fmt::format("center frequency mismatch:\nSet: {} vs. Actual: {}\n", fmt::join(rx_center_frequency.value, ", "), fmt::join(rx_center_frequency_actual, ", ")));
+            throw gr::exception(std::format("center frequency mismatch:\nSet: {} vs. Actual: {}\n", gr::join(rx_center_frequency.value, ", "), gr::join(rx_center_frequency_actual, ", ")));
         }
     }
 
@@ -235,7 +247,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
             }
             _overFlowCount = 0U;
             if (max_fragment_count > 0 && _fragmentCount > max_fragment_count) {
-                throw gr::exception(fmt::format("SOAPY_SDR_MORE_FRAGMENTS for Block {} Device {}: reached {} of requested max {} -> DAQ read-out/Scheduler/graph is too slow", this->name, device, _fragmentCount, max_fragment_count));
+                throw gr::exception(std::format("SOAPY_SDR_MORE_FRAGMENTS for Block {} Device {}: reached {} of requested max {} -> DAQ read-out/Scheduler/graph is too slow", this->name, device, _fragmentCount, max_fragment_count));
             }
         } else {
             switch (ret) {
@@ -243,15 +255,15 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
             case SOAPY_SDR_OVERFLOW: {
                 _overFlowCount++;
                 if (max_overflow_count > 0 && _overFlowCount > max_overflow_count) {
-                    throw gr::exception(fmt::format("SOAPY_SDR_OVERFLOW for Block {} Device {}: reached {} of requested max {}", this->name, device, _overFlowCount, max_overflow_count));
+                    throw gr::exception(std::format("SOAPY_SDR_OVERFLOW for Block {} Device {}: reached {} of requested max {}", this->name, device, _overFlowCount, max_overflow_count));
                 }
                 return work::Status::OK;
             }
             case SOAPY_SDR_CORRUPTION: {
-                throw gr::exception(fmt::format("SOAPY_SDR_CORRUPTION for Block {} Device {}", this->name, device));
+                throw gr::exception(std::format("SOAPY_SDR_CORRUPTION for Block {} Device {}", this->name, device));
                 return work::Status::ERROR;
             }
-            default: throw gr::exception(fmt::format("unknown SoapySDR return type: {}", ret));
+            default: throw gr::exception(std::format("unknown SoapySDR return type: {}", ret));
             }
         }
         return work::Status::OK;

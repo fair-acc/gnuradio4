@@ -414,7 +414,7 @@ struct MyBlock : public Block<MyBlock> {
             break;
          case Unsubscribe: // handle unsubscription
            break;
-         default: throw gr::exception(fmt::format("unsupported command {} for property {}", message.cmd, propertyName));
+         default: throw gr::exception(std::format("unsupported command {} for property {}", message.cmd, propertyName));
      }
      return std::nullopt; // no reply needed for Set, Subscribe, Unsubscribe
     }

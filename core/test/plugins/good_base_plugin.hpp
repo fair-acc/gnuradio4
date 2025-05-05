@@ -1,6 +1,8 @@
 #ifndef GR_EXAMPLE_GOOD_PLUGIN_HPP
 #define GR_EXAMPLE_GOOD_PLUGIN_HPP
 
+#include <print>
+
 #include <gnuradio-4.0/Plugin.hpp>
 #include <pmtv/pmt.hpp>
 
@@ -20,7 +22,7 @@ struct cout_sink : public gr::Block<cout_sink<T>> {
     void processOne(T value) {
         total_count--;
         if (total_count == 0) {
-            std::cerr << "last value was: " << value << "\n";
+            std::println(stderr, "last value was: {}", value);
         }
     }
 };

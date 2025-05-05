@@ -11,7 +11,7 @@
 #include <sys/ioctl.h>
 #include <vector>
 
-#include <fmt/format.h> // TODO: remove for fmt::print until std::format and std::print is available in gcc & emscripten
+#include <format>
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
 #ifndef __clang__
@@ -76,7 +76,7 @@ struct LogAxisTransform {
     template<typename T>
     [[nodiscard]] static constexpr std::size_t toScreen(T value, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         if (value <= 0 || axisMin <= 0 || axisMax <= axisMin) {
-            throw std::invalid_argument(fmt::format("{} not defined for non-positive value {} in [{}, {}].", gr::meta::type_name<LogAxisTransform>(), value, axisMin, axisMax));
+            throw std::invalid_argument(std::format("{} not defined for non-positive value {} in [{}, {}].", gr::meta::type_name<LogAxisTransform>(), value, axisMin, axisMax));
         }
 
         const T log_min    = std::log10(axisMin);
@@ -87,7 +87,7 @@ struct LogAxisTransform {
     template<std::floating_point T>
     [[nodiscard]] static constexpr T fromScreen(std::size_t screenCoordinate, T axisMin, T axisMax, std::size_t screenOffset, std::size_t screenSize) {
         if (axisMin <= 0UZ || axisMax <= axisMin) {
-            throw std::invalid_argument(fmt::format("{} not defined for non-positive ranges [{}, {}].", gr::meta::type_name<LogAxisTransform>(), axisMin, axisMax));
+            throw std::invalid_argument(std::format("{} not defined for non-positive ranges [{}, {}].", gr::meta::type_name<LogAxisTransform>(), axisMin, axisMax));
         }
 
         const T proportion = static_cast<T>(screenCoordinate - screenOffset) / (static_cast<T>(screenSize - screenOffset - 1UZ)); // convert screen coordinates back to a proportion of the axis
@@ -117,7 +117,7 @@ inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth
 
 } // namespace detail
 
-inline void resetView() { fmt::println("\033[2J\033[H"); }
+inline void resetView() { std::puts("\033[2J\033[H"); }
 
 /**
  * @brief compact class for ASCII charting in terminal environments, supporting custom dimensions and styles.
@@ -337,15 +337,18 @@ public:
                 if (!datasetInvolved) {
                     continue;
                 }
-                const auto     colourStr     = Color::get(_lastColor);
-                constexpr auto defaultColour = Color::get(Color::Type::Default);
-                auto&          screen        = _screen[bRowIdx / kCellHeight][bColIdx / kCellWidth];
+                const auto colourStr = Color::get(_lastColor);
+                auto&      screen    = _screen[bRowIdx / kCellHeight][bColIdx / kCellWidth];
+                screen.clear();
+                screen += colourStr;
+
                 switch (style) {
-                case Style::Bars: screen.assign(fmt::format("{}{}{}", colourStr, kBars[dot], defaultColour)); break;
-                case Style::Marker: screen.assign(fmt::format("{}{}{}", colourStr, kMarker[_n_datasets - 1], Color::get(Color::Type::Default))); break;
+                case Style::Bars: screen += kBars[dot]; break;
+                case Style::Marker: screen += kMarker[_n_datasets - 1]; break;
                 case Style::Braille:
-                default: screen.assign(fmt::format("{}{}{}", colourStr, kBrailleCharacter[dot], Color::get(Color::Type::Default))); break;
+                default: screen += kBrailleCharacter[dot]; break;
                 }
+                screen += Color::get(Color::Type::Default);
             }
         }
         _lastColor = Color::next(_lastColor);
@@ -368,17 +371,17 @@ public:
         _n_datasets = 0UZ;
     }
 
-    void reset() const noexcept { fmt::print("\033[0;0H"); }
+    void reset() const noexcept { std::puts("\033[0;0H"); }
 
     void printScreen() const noexcept {
         for (const auto& row : _screen) {
             for (const auto& cell : row) {
-                fmt::print("{}", cell);
+                std::fwrite(cell.data(), 1, cell.size(), stdout);
             }
-            fmt::print("\n");
+            std::fputs("\n", stdout);
         }
         // Reset terminal colour after printing
-        fmt::print("{}", Color::get(Color::Type::Default));
+        std::fputs(Color::get(Color::Type::Default), stdout);
     }
 
     void printSourceLocation() {
@@ -389,7 +392,7 @@ public:
             std::size_t cutPosition = fullPath.find_last_of('/', fullPath.size() - maxLength);
             fullPath                = (cutPosition != std::string::npos) ? "[..]" + fullPath.substr(cutPosition) : std::move(fullPath);
         }
-        std::string srcLocation = fmt::format("{}:{}", fullPath, _location.line());
+        std::string srcLocation = std::format("{}:{}", fullPath, _location.line());
 
         // calculate starting position, clamping to screen width
         std::size_t startX = std::max(0LU, _screen_width - srcLocation.size() - 1UZ);
@@ -409,7 +412,7 @@ public:
     [[nodiscard]] constexpr std::size_t getVerticalAxisPositionX() const noexcept {
         auto y_axis_x = std::is_same_v<horAxisTransform, LogAxisTransform> ? 0UZ : static_cast<std::size_t>((std::max(0. - axis_min_x, 0.) / (axis_max_x - axis_min_x)) * static_cast<double>(_screen_width - 1UZ));
         // adjust for axis labels
-        std::size_t y_label_width = std::max(fmt::format("{:G}", axis_min_y).size(), fmt::format("{:G}", axis_max_y).size());
+        std::size_t y_label_width = std::max(std::format("{:G}", axis_min_y).size(), std::format("{:G}", axis_max_y).size());
         return std::clamp(y_axis_x, y_label_width + 3, _screen_width); // Ensure axis positions are within screen bounds
     }
 
@@ -428,7 +431,7 @@ public:
         }
 
         // x-axis labels and ticks
-        const std::size_t maxHorLabelWidth = std::max(fmt::format("{:+G}", axis_min_x).size(), fmt::format("{:+G}", axis_max_x).size());
+        const std::size_t maxHorLabelWidth = std::max(std::format("{:+G}", axis_min_x).size(), std::format("{:+G}", axis_max_x).size());
         for (const auto& relTickScreenPos : detail::optimalTickScreenPositions(_screen_width - horOffset, 1UZ)) {
             const std::size_t tickPos   = horOffset + relTickScreenPos;
             const double      tickValue = horAxisTransform::fromScreen(tickPos, axis_min_x, axis_max_x, horOffset, _screen_width);
@@ -437,8 +440,8 @@ public:
             }
             _screen[horAxisPosY][tickPos] = relTickScreenPos == 0 ? "┌" : ((tickPos + 1) >= _screen_width) ? "┐" : "┬"; // NOSONAR
 
-            const std::string rawLabel = axis_min_x < 0 ? fmt::format("{:+G}", tickValue) : fmt::format("{:G}", tickValue);
-            const std::string label    = fmt::format("{:.{}}", rawLabel, maxHorLabelWidth);
+            const std::string rawLabel = axis_min_x < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
+            const std::string label    = std::format("{:.{}}", rawLabel, maxHorLabelWidth);
 
             // Calculate the start and end positions for the label to be centred around tickPos and clamp to ensure they're within screen bounds
             const std::size_t start_pos = std::clamp((tickPos >= label.size() / 2) ? tickPos - label.size() / 2 : 0, 0UZ, _screen_width - label.size());
@@ -458,8 +461,8 @@ public:
             }
             _screen[tickPos][verAxisPosX] = relTickScreenPos == 0 ? "┘" : (tickPos < _screen_height) ? "┤" : (axis_max_y == 0) ? "┬" : "┐"; // NOSONAR
 
-            const std::string rawLabel = axis_min_y < 0 ? fmt::format("{:+G}", tickValue) : fmt::format("{:G}", tickValue);
-            const std::string label    = fmt::format("{:.{}}", rawLabel, verAxisPosX - 2UZ);
+            const std::string rawLabel = axis_min_y < 0 ? std::format("{:+G}", tickValue) : std::format("{:G}", tickValue);
+            const std::string label    = std::format("{:.{}}", rawLabel, verAxisPosX - 2UZ);
 
             // Calculate the starting position for the label ensuring it's within bounds.
             const std::size_t label_start_pos = (verAxisPosX > label.size() + 1UZ) ? verAxisPosX - label.size() - 1UZ : 0UZ;

@@ -43,7 +43,7 @@ given 'sample_rate' in Hz (N.B sample_rate is normalised to '1' by default).
         } else if (!newSettings.contains("frequency_shift") && newSettings.contains("phase_increment")) {
             frequency_shift = static_cast<float>(phase_increment / (value_type(2) * std::numbers::pi_v<value_type>)) * sample_rate;
         } else if (newSettings.contains("frequency_shift") && newSettings.contains("phase_increment")) {
-            throw gr::exception(fmt::format("cannot set both 'frequency_shift' and 'phase_increment' in new setting (XOR): {}", newSettings));
+            throw gr::exception(std::format("cannot set both 'frequency_shift' and 'phase_increment' in new setting (XOR): {}", newSettings));
         }
         _accumulated_phase = initial_phase;
     }

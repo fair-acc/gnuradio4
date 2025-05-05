@@ -10,13 +10,12 @@
 #include <random>
 #include <thread>
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -65,24 +64,24 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
 
     void start() {
         if (verbose_console) {
-            fmt::println("starting {}", this->name);
+            std::println("starting {}", this->name);
         }
         n_samples_produced = 0U;
         tryStartThread();
         if (verbose_console) {
-            fmt::println("started {}", this->name);
+            std::println("started {}", this->name);
         }
         _nextTimePoint = ClockSourceType::now();
     }
 
     void stop() {
         if (verbose_console) {
-            fmt::println("stop {}", this->name);
+            std::println("stop {}", this->name);
         }
         this->requestStop();
         if constexpr (!useIoThread) {
             if (verbose_console) {
-                fmt::println("joining user-provided {}joinable thread in block {}", userProvidedThread->joinable() ? "" : "non-", this->name);
+                std::println("joining user-provided {}joinable thread in block {}", userProvidedThread->joinable() ? "" : "non-", this->name);
             }
             userProvidedThread->join();
         }
@@ -143,7 +142,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
             if (_nextTagIndex < tags.size() && samplesToNextTag <= samplesToProduce) {
                 const auto tagDeltaIndex = tags[_nextTagIndex].index - static_cast<std::size_t>(n_samples_produced); // position w.r.t. start of this chunk
                 if (verbose_console) {
-                    gr::testing::print_tag(tags[_nextTagIndex], fmt::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced + tagDeltaIndex));
+                    gr::testing::print_tag(tags[_nextTagIndex], std::format("{}::processBulk(...)\t publish tag at  {:6}", this->name, n_samples_produced + tagDeltaIndex));
                 }
                 outSpan.publishTag(tags[_nextTagIndex].map, tagDeltaIndex);
                 samplesToProduce = samplesToNextTag;
@@ -166,7 +165,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
                 triggerTag[tag::CONTEXT.shortKey()]           = triggerContext;
                 triggerTag[tag::TRIGGER_META_INFO.shortKey()] = property_map{};
                 if (verbose_console) {
-                    fmt::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times.value[_nextTimeTag]);
+                    std::println("{}::processBulk(...)\t publish tag-time at  {:6}, time:{}ns", this->name, samplesToNextTimeTag, tag_times.value[_nextTimeTag]);
                 }
                 outSpan.publishTag(triggerTag, samplesToNextTimeTag);
                 samplesToProduce = samplesToNextTimeTag;
@@ -200,19 +199,19 @@ private:
             return false; // use Block<T>::work generated thread
         }
         if (verbose_console) {
-            fmt::println("initial ClockSource state: {}", magic_enum::enum_name(this->state()));
+            std::println("initial ClockSource state: {}", magic_enum::enum_name(this->state()));
         }
         if (lifecycle::State expectedThreadState = lifecycle::State::INITIALISED; this->_state.compare_exchange_strong(expectedThreadState, lifecycle::State::RUNNING, std::memory_order_acq_rel)) {
             // mocks re-using a user-provided thread
             if (verbose_console) {
-                fmt::println("mocking a user-provided io-Thread for {}", this->name);
+                std::println("mocking a user-provided io-Thread for {}", this->name);
             }
             this->_state.notify_all();
             auto createManagedThread = [](auto&& threadFunction, auto&& threadDeleter) { return std::shared_ptr<std::thread>(new std::thread(std::forward<decltype(threadFunction)>(threadFunction)), std::forward<decltype(threadDeleter)>(threadDeleter)); };
             userProvidedThread       = createManagedThread(
                 [this]() {
                     if (verbose_console) {
-                        fmt::println("started user-provided thread");
+                        std::println("started user-provided thread");
                     }
                     lifecycle::State actualThreadState = this->state();
                     while (lifecycle::isActive(actualThreadState)) {
@@ -228,7 +227,7 @@ private:
                     }
 
                     if (verbose_console) {
-                        fmt::println("stopped user-provided thread - state: {}", magic_enum::enum_name(this->state()));
+                        std::println("stopped user-provided thread - state: {}", magic_enum::enum_name(this->state()));
                     }
                     if (auto ret = this->changeStateTo(lifecycle::State::STOPPED); !ret) {
                         using namespace gr::message;
@@ -244,10 +243,10 @@ private:
                         t->join();
                     }
                     delete t;
-                    fmt::println("user-provided thread deleted");
+                    std::println("user-provided thread deleted");
                 });
             if (verbose_console) {
-                fmt::println("launched user-provided thread");
+                std::println("launched user-provided thread");
             }
             return true;
         }

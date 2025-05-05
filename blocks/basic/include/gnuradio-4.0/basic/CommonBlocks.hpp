@@ -72,7 +72,7 @@ struct MultiAdder : public gr::Block<MultiAdder<T>> {
             if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 this->emitErrorMessage("settingsChanged(..)", gr::Error("Number of input ports cannot be changed after Graph initialization."));
             }
-            fmt::print("{}: configuration changed: n_inputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.at("n_inputs"));
+            std::print("{}: configuration changed: n_inputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.at("n_inputs"));
             inputs.resize(n_inputs);
         }
     }

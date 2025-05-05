@@ -23,7 +23,7 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <stdexcept>
 #include <system_error>
 
-#include <fmt/format.h>
+#include <format>
 
 // header for creating/opening or POSIX shared memory objects
 #include <cerrno>
@@ -81,9 +81,9 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
             try {
                 return do_allocate_internal(required_size, alignment);
             } catch (const std::system_error& e) { // explicitly caught for retry
-                fmt::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+                std::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
             } catch (const std::invalid_argument& e) { // explicitly caught for retry
-                fmt::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+                std::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
             }
         }
         return do_allocate_internal(required_size, alignment);
@@ -93,36 +93,36 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
         const std::size_t size = 2 * required_size;
         if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
-            throw std::invalid_argument(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
+            throw std::invalid_argument(std::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
         }
         const std::size_t size_half = size / 2;
 
         static std::size_t _counter;
-        const auto         buffer_name  = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        const auto         buffer_name  = std::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
         const auto         memfd_create = [name = buffer_name.c_str()](unsigned int flags) { return syscall(__NR_memfd_create, name, flags); };
         auto               shm_fd       = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
-            throw std::system_error(errno, std::system_category(), fmt::format("{} - memfd_create error {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errno, std::system_category(), std::format("{} - memfd_create error {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - ftruncate {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, std::format("{} - ftruncate {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
         if (first_copy == MAP_FAILED) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, std::format("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         // unmap the 2nd half
         if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, std::format("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         // Map the first half into the now available hole.
@@ -135,11 +135,11 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
             if (result == MAP_FAILED) {
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno)));
+                throw std::system_error(errorCode, std::format("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno)));
             } else {
                 ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
                 ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, fmt::ptr(result), fmt::ptr(first_copy), fmt::ptr(second_copy_addr), diff2, diff1, 2 * size_half));
+                throw std::system_error(errorCode, std::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, gr::ptr(result), gr::ptr(first_copy), gr::ptr(second_copy_addr), diff2, diff1, 2 * size_half));
             }
         }
 
@@ -157,7 +157,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     void do_deallocate(void* p, std::size_t size, std::size_t alignment) override { // NOSONAR
 
         if (munmap(p, size) == -1) {
-            throw std::system_error(errno, std::system_category(), fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
+            throw std::system_error(errno, std::system_category(), std::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
         }
     }
 #else
@@ -338,13 +338,13 @@ class CircularBuffer {
 #ifndef NDEBUG
                 if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
-                        fmt::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
+                        std::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
                         std::abort();
                     }
 
                 } else {
                     if (!_parent->_internalSpan.empty() && !isPublishRequested()) {
-                        fmt::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
+                        std::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
                     }
                 }
@@ -478,7 +478,7 @@ class CircularBuffer {
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
             if constexpr (std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>) {
                 if (_internalSpan.size() - _nRequestedSamplesToPublish != 0) {
-                    fmt::print(stderr,
+                    std::print(stderr,
                         "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
                         "a previous WriterSpan was not fully published, {} samples remain unpublished.",
                         _internalSpan.size() - _nRequestedSamplesToPublish);
@@ -487,7 +487,7 @@ class CircularBuffer {
 
             } else {
                 if (!_internalSpan.empty() && !_isPublishRequested) {
-                    fmt::print(stderr,
+                    std::print(stderr,
                         "An error occurred: The method CircularBuffer::SingleWriter::reserve() was invoked for the second time in succession "
                         "without calling publish() for a previous WriterSpan, {} samples was reserved.",
                         _internalSpan.size());

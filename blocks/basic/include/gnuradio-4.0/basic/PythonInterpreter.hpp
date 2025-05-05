@@ -154,7 +154,7 @@ inline void throwCurrentPythonError(std::string_view msg, std::source_location l
     if (!exception) {
         throw gr::exception(std::format("{}\nPython error: <unknown exception>\ntrace-back: {}", msg, toLineCountAnnotated(pythonCode)), location);
     }
-    // fmt::println("detailed debug info: {}", getDebugPythonObjectAttributes(exception))
+    // std::println("detailed debug info: {}", getDebugPythonObjectAttributes(exception))
 
     std::size_t min    = 0UZ;
     std::size_t max    = std::numeric_limits<std::size_t>::max();
@@ -244,7 +244,7 @@ std::string sanitizedPythonBlockName() {
 #pragma GCC diagnostic pop
 #endif
 
-#include <fmt/format.h>
+#include <format>
 #include <stdexcept>
 #include <vector>
 
@@ -296,7 +296,7 @@ public:
         }
         _pCapsule = PyObjectGuard(PyCapsule_New(static_cast<void*>(classReference), _moduleDefinitions->m_name, nullptr));
         if (!_pCapsule) {
-            python::throwCurrentPythonError(fmt::format("Interpreter(*{}) - failed to create a capsule", gr::meta::type_name<T>()));
+            python::throwCurrentPythonError(std::format("Interpreter(*{}) - failed to create a capsule", gr::meta::type_name<T>()));
         }
         PyDict_SetItemString(_pMainDict, "capsule", _pCapsule);
         python::PyIncRef(_pCapsule); // need to explicitly increas count for the Python interpreter not to delete the reference by 'accident'
@@ -308,10 +308,10 @@ public:
             int ret = PyDict_SetItemString(PyImport_GetModuleDict(), moduleDefinitions->m_name, m);
             python::PyDecRef(m); // The module dict holds a reference now.
             if (ret != 0) {
-                python::throwCurrentPythonError(fmt::format("Error inserting module {}.", _moduleDefinitions->m_name), location);
+                python::throwCurrentPythonError(std::format("Error inserting module {}.", _moduleDefinitions->m_name), location);
             }
         } else {
-            python::throwCurrentPythonError(fmt::format("failed to create the module {}.", _moduleDefinitions->m_name), location);
+            python::throwCurrentPythonError(std::format("failed to create the module {}.", _moduleDefinitions->m_name), location);
         }
         if (PyDict_GetItemString(PyImport_GetModuleDict(), moduleDefinitions->m_name)) { // module successfully inserted - performing some additional checks
             assert(python::getDictionary(moduleDefinitions->m_name).size() > 0 && "dictionary exist for module");
@@ -319,10 +319,10 @@ public:
             if (PyObject* imported_module = PyImport_ImportModule(moduleDefinitions->m_name); imported_module != nullptr) {
                 python::PyDecRef(imported_module);
             } else {
-                python::throwCurrentPythonError(fmt::format("Check import of {} failed.", _moduleDefinitions->m_name), location);
+                python::throwCurrentPythonError(std::format("Check import of {} failed.", _moduleDefinitions->m_name), location);
             }
         } else {
-            python::throwCurrentPythonError(fmt::format("Manual import of {} failed.", _moduleDefinitions->m_name), location);
+            python::throwCurrentPythonError(std::format("Manual import of {} failed.", _moduleDefinitions->m_name), location);
         }
     }
 
@@ -366,7 +366,7 @@ public:
         const bool hasFunction = PyObject_HasAttrString(getModule(), functionName.data());
         if constexpr (forced == EnforceFunction::MANDATORY) {
             if (!hasFunction) {
-                python::throwCurrentPythonError(fmt::format("getFunction('{}', '{}') Python function not found or is not callable", functionName, python::toString(functionArguments)), location);
+                python::throwCurrentPythonError(std::format("getFunction('{}', '{}') Python function not found or is not callable", functionName, python::toString(functionArguments)), location);
             }
         } else {
             if (!hasFunction) {

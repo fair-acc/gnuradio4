@@ -9,8 +9,8 @@
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::testing {
 
@@ -75,11 +75,11 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
     }
 
     void start() {
-        fmt::println("started sink {} aka. '{}'", this->unique_name, this->name);
+        std::println("started sink {} aka. '{}'", this->unique_name, this->name);
         in.max_samples = 10UZ;
     }
 
-    void stop() { fmt::println("stopped sink {} aka. '{}'", this->unique_name, this->name); }
+    void stop() { std::println("stopped sink {} aka. '{}'", this->unique_name, this->name); }
 
     constexpr void processOne(const T& input) {
         TimePoint nowStamp = ClockSourceType::now();
@@ -88,7 +88,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
         if constexpr (std::is_arithmetic_v<T>) {
             if constexpr (drawAsynchronously) {
-                in.max_samples = static_cast<std::size_t>(2.f * sample_rate / 25.f);
+                in.max_samples = static_cast<std::size_t>(2.f * sample_rate * static_cast<float>(timeout_ms) / 1000.f);
             }
             const T Ts = T(1.0f) / T(sample_rate);
             _historyBufferX.push_back(static_cast<T>(_n_samples_total) * static_cast<T>(Ts));
@@ -152,7 +152,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
             if (reset_view) {
                 gr::graphs::resetView();
             }
-            fmt::println("\nPlot Graph for '{}' - #samples total: {}", signal_name, _n_samples_total);
+            std::println("\nPlot Graph for '{}' - #samples total: {}", signal_name, _n_samples_total);
 
             auto adjustRange = [](T min, T max) {
                 min            = std::min(min, T(0));
@@ -179,16 +179,14 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
     }
 
     void plotTiming() {
-        fmt::println("\nPast Timing Events for '{}'", signal_name);
+        std::println("\nPast Timing Events for '{}'", signal_name);
         for (auto const& tag : _historyTags) {
             auto isoTime = [](TimePoint time) noexcept {
-                return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:03}",                // ms-precision ISO time-format
-                    fmt::localtime(std::chrono::system_clock::to_time_t(time)), //
-                    std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count() % 1000);
+                return std::format("{}", time); // ms-precision ISO time-format
             };
             std::uint64_t nsSinceEpoch = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(tag.timestamp.time_since_epoch()).count());
 
-            fmt::println("{:10} {:1} {:24} {} {}", tag.index, tag.merged ? 'M' : 'T', isoTime(tag.timestamp), nsSinceEpoch, tag.map);
+            std::println("{:10} {:1} {:24} {} {}", tag.index, tag.merged ? 'M' : 'T', isoTime(tag.timestamp), nsSinceEpoch, tag.map);
         }
     }
 };

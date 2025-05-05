@@ -76,12 +76,15 @@ jobs:
           - cc: gcc-14
             cxx: g++-14
             cmake_flags: "-DADDRESS_SANITIZER=ON"
-          - cc: gcc-13
-            cxx: g++-13
-            cmake_flags: "-DADDRESS_SANITIZER=OFF"
+          - cc: gcc-15
+            cxx: g++-15
+            cmake_flags: "-DADDRESS_SANITIZER=ON"
           - cc: clang-18
             cxx: clang++-18
             cmake_flags: "-DADDRESS_SANITIZER=ON -DCMAKE_LINKER=/usr/bin/clang-18"
+          - cc: clang-20
+            cxx: clang++-20
+            cmake_flags: "-DADDRESS_SANITIZER=ON -DCMAKE_LINKER=/usr/bin/clang-20"
           - cmake_wrapper: emcmake
             cc: emcc
             cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14"
@@ -164,7 +167,7 @@ jobs:
         if: matrix.compiler.cmake_wrapper != null
         working-directory: ${{runner.workspace}}/build
         shell: bash
-        run: node --experimental-wasm-threads ./core/src/main.js
+        run: node ./core/src/main.js
 
       - name: Show final ccache stats
         run: ccache --show-stats

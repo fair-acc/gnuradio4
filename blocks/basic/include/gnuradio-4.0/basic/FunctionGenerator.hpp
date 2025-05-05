@@ -42,7 +42,7 @@ requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
 constexpr T parse(std::string_view name) {
     auto type = magic_enum::enum_cast<T>(name, magic_enum::case_insensitive);
     if (!type.has_value()) {
-        throw std::invalid_argument(fmt::format("parser error, unknown function_generator::{} - '{}'", meta::type_name<T>(), name));
+        throw std::invalid_argument(std::format("parser error, unknown function_generator::{} - '{}'", meta::type_name<T>(), name));
     }
     return type.value();
 }

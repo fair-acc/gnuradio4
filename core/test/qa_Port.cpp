@@ -1,12 +1,12 @@
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
 
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 template<>
-struct fmt::formatter<gr::Tag> {
+struct std::formatter<gr::Tag> {
     template<typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
         return ctx.begin();
@@ -14,7 +14,7 @@ struct fmt::formatter<gr::Tag> {
 
     template<typename FormatContext>
     constexpr auto format(const gr::Tag& tag, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "  {}->{{ {} }}\n", tag.index, tag.map);
+        return std::format_to(ctx.out(), "  {}->{{ {} }}\n", tag.index, tag.map);
     }
 };
 

@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-std::ostream& operator<<(std::ostream& os, const gr::trigger::MatchResult& result) { return os << fmt::format("{}", result); }
+std::ostream& operator<<(std::ostream& os, const gr::trigger::MatchResult& result) { return os << std::format("{}", result); }
 
 #include <boost/ut.hpp>
 

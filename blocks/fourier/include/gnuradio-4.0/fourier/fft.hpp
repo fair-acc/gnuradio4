@@ -196,9 +196,9 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         // define nSignals and allocate the required storage space
-        ds.signal_names      = {fmt::format("Magnitude({})", signal_name), fmt::format("Phase({})", signal_name), fmt::format("Re(FFT({}))", signal_name), fmt::format("Im(FFT({}))", signal_name)};
+        ds.signal_names      = {std::format("Magnitude({})", signal_name), std::format("Phase({})", signal_name), std::format("Re(FFT({}))", signal_name), std::format("Im(FFT({}))", signal_name)};
         ds.signal_quantities = {"Magnitude(FFT)", "Phase(FFT)", "Re(FFT)", "Im(FFT)"};
-        ds.signal_units      = {fmt::format("{}/√Hz", signal_unit), "rad", fmt::format("Re{}", signal_unit) /* real part */, fmt::format("Im{}", signal_unit) /* imaginary part */};
+        ds.signal_units      = {std::format("{}/√Hz", signal_unit), "rad", std::format("Re{}", signal_unit) /* real part */, std::format("Im{}", signal_unit) /* imaginary part */};
         assert(ds.signal_names.size() == nSignals);
         assert(ds.signal_quantities.size() == nSignals);
         assert(ds.signal_units.size() == nSignals);

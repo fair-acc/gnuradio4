@@ -146,13 +146,13 @@ protected:
             return {};
         } catch (const gr::exception& e) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), e.sourceLocation, e.errorTime});
+            return std::unexpected(Error{std::format("Block '{}' throws: {}", getBlockName(), e.what()), e.sourceLocation, e.errorTime});
         } catch (const std::exception& e) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location});
+            return std::unexpected(Error{std::format("Block '{}' throws: {}", getBlockName(), e.what()), location});
         } catch (...) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location});
+            return std::unexpected(Error{std::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location});
         }
     }
 
@@ -183,7 +183,7 @@ public:
         }
 
         if (!isValidTransition(oldState, newState)) {
-            return std::unexpected(Error{fmt::format("Block '{}' invalid state transition in {} from {} -> to {}", //
+            return std::unexpected(Error{std::format("Block '{}' invalid state transition in {} from {} -> to {}", //
                                              getBlockName(), gr::meta::type_name<TDerived>(),                      //
                                              magic_enum::enum_name(state()), magic_enum::enum_name(newState)),
                 location});

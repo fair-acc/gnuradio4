@@ -21,8 +21,8 @@ void create_cascade(gr::Graph& testGraph, Sink& src, Source& sink, std::size_t d
     std::vector<MultiplyConst<T>*> mult1;
     std::vector<DivideConst<T>*>   mult2;
     for (std::size_t i = 0; i < depth; i++) {
-        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"value", T(2)}, {"name", fmt::format("mult.{}", i)}})));
-        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"value", T(2)}, {"name", fmt::format("div.{}", i)}})));
+        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"value", T(2)}, {"name", std::format("mult.{}", i)}})));
+        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"value", T(2)}, {"name", std::format("div.{}", i)}})));
     }
 
     for (std::size_t i = 0; i < mult1.size(); i++) {
@@ -67,7 +67,7 @@ gr::Graph test_graph_bifurcated(std::size_t depth = 1) {
 void exec_bm(auto& scheduler, const std::string& test_case) {
     using namespace boost::ut;
     using namespace benchmark;
-    expect(scheduler.runAndWait().has_value()) << fmt::format("scheduler failure for test-case: {}", test_case);
+    expect(scheduler.runAndWait().has_value()) << std::format("scheduler failure for test-case: {}", test_case);
 }
 
 [[maybe_unused]] inline const boost::ut::suite scheduler_tests = [] {

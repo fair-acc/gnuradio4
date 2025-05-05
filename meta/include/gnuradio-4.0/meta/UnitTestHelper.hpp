@@ -4,7 +4,7 @@
 #include <boost/ut.hpp>
 #include <concepts>
 #include <cstddef>
-#include <fmt/format.h>
+#include <format>
 #include <ranges>
 
 #include "formatter.hpp"
@@ -18,7 +18,25 @@ concept HasSize = requires(const T c) {
 };
 
 template<typename T>
-concept Collection = std::ranges::range<T> && HasSize<T>;
+concept Collection = std::ranges::range<T> && HasSize<T> && !std::is_convertible_v<T, std::string_view> && !std::is_same_v<std::remove_cvref_t<T>, std::string>;
+} // namespace gr::test
+
+namespace boost::ut {
+template<gr::test::Collection RangeLHS, gr::test::Collection RangeRHS>
+requires std::is_same_v<std::ranges::range_value_t<RangeLHS>, std::ranges::range_value_t<RangeRHS>>
+auto eq(const RangeLHS& lhs, const RangeRHS& rhs);
+
+template<gr::test::Collection RangeLHS, gr::test::Collection RangeRHS, typename T = std::ranges::range_value_t<RangeRHS>>
+requires std::is_same_v<std::ranges::range_value_t<RangeLHS>, std::ranges::range_value_t<RangeRHS>>
+auto eq(const RangeLHS& lhs, const RangeRHS& rhs, T tolerance);
+
+template<typename Enum>
+requires std::is_enum_v<Enum>
+auto eq(Enum lhs, Enum rhs);
+} // namespace boost::ut
+
+namespace gr::test {
+using namespace boost::ut;
 
 struct eq_collection_result {
     bool                 success{};
@@ -35,12 +53,12 @@ auto eq_collections(const RangeLHS& LHS, const RangeRHS& RHS, std::size_t contex
     const auto sizeLHS = LHS.size();
     const auto sizeRHS = RHS.size();
     if (sizeLHS != sizeRHS) {
-        return {false, fmt::format("Collections size mismatch: LHS.size()={}, RHS.size()={}", sizeLHS, sizeRHS), location};
+        return {false, std::format("Collections size mismatch: LHS.size()={}, RHS.size()={}", sizeLHS, sizeRHS), location};
     }
 
     auto firstMismatch = std::ranges::mismatch(LHS, RHS);
     if (firstMismatch.in1 == LHS.end()) { // ferfect match
-        return {true, fmt::format("Collections match ({} elements)", sizeLHS), location};
+        return {true, std::format("Collections match ({} elements)", sizeLHS), location};
     }
 
     // define context window around first mismatched value
@@ -55,9 +73,9 @@ auto eq_collections(const RangeLHS& LHS, const RangeRHS& RHS, std::size_t contex
     }
 
     return {false,
-        fmt::format("Collections differ at index={idx}; LHS[{idx}]={lhs} vs RHS[{idx}]={rhs}\nContext window [{ctx_start}, {ctx_end}]:\n  left:  {lhs_context}\n  right: {rhs_context}", //
-            fmt::arg("idx", idx), fmt::arg("lhs", *firstMismatch.in1), fmt::arg("rhs", *firstMismatch.in2),                                                                              //
-            fmt::arg("ctx_start", ctxStartIdx), fmt::arg("ctx_end", ctxStopIdx - 1), fmt::arg("lhs_context", ctxLHS.str()), fmt::arg("rhs_context", ctxRHS.str())),
+        std::format("Collections differ at index={0}; LHS[{0}]={1} vs RHS[{0}]={2}\n"
+                    "Context window [{3}, {4}]:\n  left:  {5}\n  right: {6}",
+            idx, *firstMismatch.in1, *firstMismatch.in2, ctxStartIdx, ctxStopIdx - 1, ctxLHS.str(), ctxRHS.str()),
         location};
 }
 
@@ -67,7 +85,7 @@ auto approx_collections(const RangeLHS& LHS, const RangeRHS& RHS, T tolerance, s
     const auto sizeLHS = LHS.size();
     const auto sizeRHS = RHS.size();
     if (sizeLHS != sizeRHS) {
-        return {false, fmt::format("Collections size mismatch: LHS.size()={}, RHS.size()={}", sizeLHS, sizeRHS), location};
+        return {false, std::format("Collections size mismatch: LHS.size()={}, RHS.size()={}", sizeLHS, sizeRHS), location};
     }
 
     const auto pred = [tolerance](auto const& lhsValue, auto const& rhsValue) noexcept {
@@ -78,7 +96,7 @@ auto approx_collections(const RangeLHS& LHS, const RangeRHS& RHS, T tolerance, s
     // define context window around first mismatched value with custom predicate
     auto firstMismatch = std::ranges::mismatch(LHS, RHS, pred);
     if (firstMismatch.in1 == LHS.end()) {
-        return {true, fmt::format("Collections approx match ({} elements) within tolerance={}", sizeLHS, tolerance), location};
+        return {true, std::format("Collections approx match ({} elements) within tolerance={}", sizeLHS, tolerance), location};
     }
 
     // define context window around first mismatched value
@@ -93,12 +111,41 @@ auto approx_collections(const RangeLHS& LHS, const RangeRHS& RHS, T tolerance, s
     }
 
     return {false,
-        fmt::format("Collections differ (approx) at index={idx}; LHS[{idx}]={lhs} vs RHS[{idx}]={rhs} (tolerance={tol})\nContext window [{ctx_start}, {ctx_end}]:\n  left:  {lhs_context}\n  right: {rhs_context}", //
-            fmt::arg("idx", idx), fmt::arg("lhs", *firstMismatch.in1), fmt::arg("rhs", *firstMismatch.in2), fmt::arg("tol", tolerance),                                                                             //
-            fmt::arg("ctx_start", ctxStartIdx), fmt::arg("ctx_end", ctxStopIdx - 1), fmt::arg("lhs_context", ctxLHS.str()), fmt::arg("rhs_context", ctxRHS.str())),
+        std::format("Collections differ (approx) at index={0}; LHS[{0}]={1} vs RHS[{0}]={2} (tolerance={3})\n"
+                    "Context window [{4}, {5}]:\n  left:  {6}\n  right: {7}",
+            idx, *firstMismatch.in1, *firstMismatch.in2, tolerance, ctxStartIdx, ctxStopIdx - 1, ctxLHS.str(), ctxRHS.str()),
         location};
 }
 
 } // namespace gr::test
+
+template<gr::test::Collection RangeLHS, gr::test::Collection RangeRHS>
+requires std::is_same_v<std::ranges::range_value_t<RangeLHS>, std::ranges::range_value_t<RangeRHS>>
+auto boost::ut::eq(const RangeLHS& lhs, const RangeRHS& rhs) {
+    return gr::test::eq_collections(lhs, rhs);
+}
+
+template<gr::test::Collection RangeLHS, gr::test::Collection RangeRHS, typename T>
+requires std::is_same_v<std::ranges::range_value_t<RangeLHS>, std::ranges::range_value_t<RangeRHS>>
+auto boost::ut::eq(const RangeLHS& lhs, const RangeRHS& rhs, T tolerance) {
+    return gr::test::approx_collections(lhs, rhs, tolerance);
+}
+
+template<typename Enum>
+requires std::is_enum_v<Enum>
+auto boost::ut::eq(Enum lhs, Enum rhs) {
+    return lhs == rhs;
+}
+
+template<typename Enum>
+requires std::is_enum_v<Enum>
+std::ostream& operator<<(std::ostream& os, Enum e) {
+    if constexpr (std::is_enum_v<Enum>) {
+        if (auto name = magic_enum::enum_name(e); !name.empty()) {
+            return os << name;
+        }
+    }
+    return os << static_cast<std::underlying_type_t<Enum>>(e);
+}
 
 #endif // UNITTESTHELPER_HPP

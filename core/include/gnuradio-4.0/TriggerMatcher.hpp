@@ -79,7 +79,7 @@ namespace detail {
 inline void parse(const std::string_view& trigger, std::string& triggerName, bool& triggerNameEnds, std::string& triggerCtx, bool& triggerCtxEnds) {
     if (const size_t first_pos = trigger.find(SEPARATOR); first_pos != std::string::npos) {
         if (trigger.find(SEPARATOR, first_pos + SEPARATOR.size()) != std::string::npos) {
-            throw gr::exception(fmt::format("invalid trigger input: multiple '{}' separators found: '{}'", SEPARATOR, trigger));
+            throw gr::exception(std::format("invalid trigger input: multiple '{}' separators found: '{}'", SEPARATOR, trigger));
         }
 
         // separator found, split the trigger name and context
@@ -166,7 +166,7 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
     if ((criteria.front() == '[') && (criteria.back() == ']')) { // strip surrounding brackets if needed
         criteria = criteria.substr(1, criteria.size() - 2);
     } else if ((criteria.front() == '[') xor (criteria.back() == ']')) {
-        throw gr::exception(fmt::format("unmatched bracket pair: '{}'", criteria));
+        throw gr::exception(std::format("unmatched bracket pair: '{}'", criteria));
     }
 
     std::string_view startPart;
@@ -225,7 +225,7 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
     const auto startCtx         = std::get<std::string>(filterState[key::kStartCtx]);
     const auto stopTriggerName  = std::get<std::string>(filterState[key::kStopTriggerName]);
     const auto stopCtx          = std::get<std::string>(filterState[key::kStopCtx]);
-    /// fmt::println("filter {} -> '{}'/'{}' & '{}'/'{}'\nfilter state: {}", filterDefinition, startTriggerName, startCtx, stopTriggerName, stopCtx, filterState);
+    /// std::println("filter {} -> '{}'/'{}' & '{}'/'{}'\nfilter state: {}", filterDefinition, startTriggerName, startCtx, stopTriggerName, stopCtx, filterState);
 
     std::string triggerName;
     std::string triggerCtx;
@@ -292,13 +292,13 @@ static_assert(Matcher<Filter>);
 } // namespace gr::trigger
 
 template<>
-struct fmt::formatter<gr::trigger::MatchResult> {
+struct std::formatter<gr::trigger::MatchResult> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const gr::trigger::MatchResult& ret, FormatContext& ctx) const -> decltype(ctx.out()) {
-        return fmt::format_to(ctx.out(), "{}", magic_enum::enum_name(ret));
+        return std::format_to(ctx.out(), "{}", magic_enum::enum_name(ret));
     }
 };
 

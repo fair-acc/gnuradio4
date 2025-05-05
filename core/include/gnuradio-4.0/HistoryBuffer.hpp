@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <memory>
 #include <span>
@@ -10,7 +11,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace gr {
 
@@ -282,14 +283,14 @@ public:
 
     [[nodiscard]] constexpr T& at(std::size_t index) noexcept(false) {
         if (index >= _size) {
-            throw std::out_of_range(fmt::format("index {} out of range [0, {})", index, _size));
+            throw std::out_of_range(std::format("index {} out of range [0, {})", index, _size));
         }
         return _buffer[map_index(index)];
     }
 
     [[nodiscard]] constexpr const T& at(std::size_t index) const noexcept(false) {
         if (index >= _size) {
-            throw std::out_of_range(fmt::format("index {} out of range [0, {})", index, _size));
+            throw std::out_of_range(std::format("index {} out of range [0, {})", index, _size));
         }
         return _buffer[map_index(index)];
     }

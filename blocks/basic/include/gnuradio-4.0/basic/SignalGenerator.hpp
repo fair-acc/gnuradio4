@@ -19,7 +19,7 @@ inline static constexpr gr::meta::fixed_string TypeNames = "[Const, Sin, Cos, Sq
 constexpr Type parse(std::string_view name) {
     auto signalType = magic_enum::enum_cast<Type>(name, magic_enum::case_insensitive);
     if (!signalType.has_value()) {
-        throw std::invalid_argument(fmt::format("unknown signal generator type '{}'", name));
+        throw std::invalid_argument(std::format("unknown signal generator type '{}'", name));
     }
     return signalType.value();
 }
