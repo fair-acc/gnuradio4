@@ -27,8 +27,8 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-             docker:
-               - 'docker/Dockerfile'
+            docker:
+              - 'docker/Dockerfile'
 
       - name: Set up Docker Label
         id: docker-label
