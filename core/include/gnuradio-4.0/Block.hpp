@@ -2091,13 +2091,13 @@ int registerBlock(auto& registerInstance) {
     constexpr auto name     = refl::class_name<TBlock>;
     constexpr auto longname = refl::type_name<TBlock>;
     if constexpr (OverrideName != "") {
-        registerInstance.template addBlockType<TBlock>(OverrideName, {});
+        registerInstance.template insert<TBlock>(OverrideName, {});
 
     } else if constexpr (name != longname) {
         constexpr auto tmpl = longname.substring(name.size + 1_cw, longname.size - 2_cw - name.size);
-        registerInstance.template addBlockType<TBlock>(name, tmpl);
+        registerInstance.template insert<TBlock>(name, tmpl);
     } else {
-        registerInstance.template addBlockType<TBlock>(name, {});
+        registerInstance.template insert<TBlock>(name, {});
     }
     return 0;
 }
@@ -2124,7 +2124,7 @@ template<fixed_string Alias, template<typename...> typename TBlock, typename TBl
 int registerBlock(auto& registerInstance) {
     using List0     = std::conditional_t<meta::is_instantiation_of<TBlockParameter0, BlockParameters>, TBlockParameter0, BlockParameters<TBlockParameter0>>;
     using ThisBlock = typename List0::template apply<TBlock>;
-    registerInstance.template addBlockType<ThisBlock>(Alias, List0::toString());
+    registerInstance.template insert<ThisBlock>(Alias, List0::toString());
     if constexpr (sizeof...(TBlockParameters) != 0) {
         return registerBlock<Alias, TBlock, TBlockParameters...>(registerInstance);
     } else {

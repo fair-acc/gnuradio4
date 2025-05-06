@@ -15,7 +15,7 @@
 int main() {
     gr::globalPluginLoader();
 
-    auto known = gr::globalBlockRegistry().knownBlocks();
+    auto known = gr::globalBlockRegistry().keys();
     std::ranges::sort(known);
     std::vector<std::string> desired{
         //

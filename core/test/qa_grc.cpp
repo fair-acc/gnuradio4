@@ -142,7 +142,7 @@ connections:
     "Basic graph loading and storing"_test = [&] {
         try {
             using namespace gr;
-            for (const auto& block : context->loader.knownBlocks()) {
+            for (const auto& block : context->loader.availableBlocks()) {
                 fmt::print("Block {} is known\n", block);
             }
 

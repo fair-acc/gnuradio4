@@ -146,7 +146,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
             pmtv::map_t map;
             map["name"] = std::string(block.name());
 
-            const auto& fullTypeName = loader.registry().blockTypeName(block);
+            const auto& fullTypeName = loader.registry().typeName(block);
             if (fullTypeName == "gr::Graph") {
                 map.emplace("id", "SUBGRAPH");
                 auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(std::addressof(block));

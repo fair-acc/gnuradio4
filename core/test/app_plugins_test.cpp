@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
         assert(plugin.first.ends_with("bad_plugin.so"));
     }
 
-    auto        known = context.loader.knownBlocks();
+    auto        known = context.loader.availableBlocks();
     std::vector requireds{names::cout_sink, names::fixed_source, names::divide, names::multiply};
 
     for (const auto& plugin : known) {

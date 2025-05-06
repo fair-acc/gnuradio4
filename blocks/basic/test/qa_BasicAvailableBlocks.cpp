@@ -8,14 +8,14 @@
 
 #include <GrBasicBlocks.hpp>
 
-const boost::ut::suite KnownBlockTests = [] {
+const boost::ut::suite AvailableBlockTests = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
 
     gr::blocklib::initGrBasicBlocks(gr::globalBlockRegistry());
 
     "Registered"_test = [] {
-        auto known = gr::globalBlockRegistry().knownBlocks();
+        auto known = gr::globalBlockRegistry().keys();
         std::ranges::sort(known);
         std::vector<std::string> desired{
             //

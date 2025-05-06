@@ -40,14 +40,14 @@ const boost::ut::suite PluginLoaderTests = [] {
     };
 
     "BadPlugins"_test = [&] {
-        expect(!context->loader.failed_plugins().empty());
-        for (const auto& plugin : context->loader.failed_plugins()) {
+        expect(!context->loader.failedPlugins().empty());
+        for (const auto& plugin : context->loader.failedPlugins()) {
             expect(plugin.first.ends_with("bad_plugin.so"));
         }
     };
 
-    "KnownBlocksList"_test = [&] {
-        auto       known = context->loader.knownBlocks();
+    "AvailableBlocksList"_test = [&] {
+        auto       known = context->loader.availableBlocks();
         std::array requireds{"good::cout_sink<float64>", "good::cout_sink<float32>", "good::fixed_source<float64>", "good::fixed_source<float32>", "good::divide<float64>", "good::divide<float32>", "builtin_multiply<float64>", "builtin_multiply<float32>"};
 
         for (const auto& required : requireds) {
@@ -61,7 +61,7 @@ const boost::ut::suite BlockInstantiationTests = [] {
     using namespace gr;
     auto context = makeTestContext();
 
-    "KnownBlocksInstantiate"_test = [&] {
+    "AvailableBlocksInstantiate"_test = [&] {
         expect(context->loader.instantiate("good::fixed_source<float64>") != nullptr);
         expect(context->loader.instantiate("good::cout_sink<float64>") != nullptr);
         expect(context->loader.instantiate("good::multiply<float64>") != nullptr);
@@ -75,7 +75,7 @@ const boost::ut::suite BlockInstantiationTests = [] {
         expect(context->loader.instantiate("good::convert<float32, float32>") == nullptr);
     };
 
-    "UnknownBlocks"_test = [&] { expect(context->loader.instantiate("ThisBlockDoesNotExist<float64>") == nullptr); };
+    "NotAvailableBlocks"_test = [&] { expect(context->loader.instantiate("ThisBlockDoesNotExist<float64>") == nullptr); };
 };
 
 const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
