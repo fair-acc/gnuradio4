@@ -68,7 +68,7 @@ public:
 
 namespace bts = gr::traits::block;
 
-auto registerMultiply = gr::registerBlock<good::multiply, float, double>(grPluginInstance());
+auto registerMultiply = gr::registerBlock<good::multiply, float, double>(static_cast<gr::BlockRegistry&>(grPluginInstance()));
 
 static_assert(bts::all_input_ports<good::multiply<float>>::size == 1);
 static_assert(std::is_same_v<bts::all_input_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
@@ -79,4 +79,4 @@ static_assert(std::is_same_v<bts::all_output_port_types<good::multiply<float>>, 
 static_assert(bts::stream_output_ports<good::multiply<float>>::size == 1);
 static_assert(std::is_same_v<bts::stream_output_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
 
-auto registerDivide = gr::registerBlock<good::divide, float, double>(grPluginInstance());
+auto registerDivide = gr::registerBlock<good::divide, float, double>(static_cast<gr::BlockRegistry&>(grPluginInstance()));

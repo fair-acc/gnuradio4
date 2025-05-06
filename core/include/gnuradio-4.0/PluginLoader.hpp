@@ -40,7 +40,7 @@ private:
     std::string _status;
 
     void release() {
-        if (_instance) {
+        if (_instance && _destroy_fn) {
             _destroy_fn(_instance);
             _instance = nullptr;
         }
@@ -88,7 +88,7 @@ public:
             return;
         }
 
-        if (_instance->abi_version() != GR_PLUGIN_CURRENT_ABI_VERSION) {
+        if (_instance->abiVersion() != GR_PLUGIN_CURRENT_ABI_VERSION) {
             _status = "Wrong ABI version";
             release();
             return;
@@ -120,16 +120,15 @@ public:
 
 class PluginLoader {
 private:
-    std::vector<PluginHandler>                       _handlers;
-    std::unordered_map<std::string, gr_plugin_base*> _handlerForName;
+    std::vector<PluginHandler>                       _pluginHandlers;
+    std::unordered_map<std::string, gr_plugin_base*> _pluginForBlockName;
     std::unordered_map<std::string, std::string>     _failedPlugins;
     std::unordered_set<std::string>                  _loadedPluginFiles;
 
-    BlockRegistry*           _registry;
-    std::vector<std::string> _knownBlocks;
+    BlockRegistry* _registry;
 
-    gr_plugin_base* handlerForName(std::string_view name) const {
-        if (auto it = _handlerForName.find(std::string(name)); it != _handlerForName.end()) {
+    gr_plugin_base* pluginForBlockName(std::string_view name) const {
+        if (auto it = _pluginForBlockName.find(std::string(name)); it != _pluginForBlockName.end()) {
             return it->second;
         } else {
             return nullptr;
@@ -154,12 +153,11 @@ public:
                     _loadedPluginFiles.insert(fileString);
 
                     if (PluginHandler handler(file.path().string()); handler) {
-                        for (std::string_view block_name : handler->providedBlocks()) {
-                            _handlerForName.emplace(std::string(block_name), handler.operator->());
-                            _knownBlocks.emplace_back(block_name);
+                        for (std::string_view blockName : handler->availableBlocks()) {
+                            _pluginForBlockName.emplace(std::string(blockName), handler.operator->());
                         }
 
-                        _handlers.push_back(std::move(handler));
+                        _pluginHandlers.push_back(std::move(handler));
 
                     } else {
                         _failedPlugins[file.path()] = handler.status();
@@ -171,47 +169,54 @@ public:
 
     BlockRegistry& registry() { return *_registry; }
 
-    const auto& plugins() const { return _handlers; }
+    const auto& plugins() const { return _pluginHandlers; }
 
-    const auto& failed_plugins() const { return _failedPlugins; }
+    const auto& failedPlugins() const { return _failedPlugins; }
 
-    auto knownBlocks() const {
-        auto        result  = _knownBlocks;
-        const auto& builtin = _registry->knownBlocks();
+    std::vector<std::string> availableBlocks() const {
+        auto                     keysView = _pluginForBlockName | std::views::keys;
+        std::vector<std::string> result(keysView.begin(), keysView.end());
+
+        const auto& builtin = _registry->keys();
         result.insert(result.end(), builtin.begin(), builtin.end());
+
+        // remove duplicates
+        std::ranges::sort(result);
+        auto newEnd = std::ranges::unique(result).begin();
+        result.erase(newEnd, result.end());
         return result;
     }
 
     std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
         // Try to create a node from the global registry
-        if (auto result = _registry->createBlock(name, params)) {
+        if (auto result = _registry->create(name, params)) {
             return result;
         }
 
-        auto* handler = handlerForName(name);
-        if (handler == nullptr) {
+        auto* plugin = pluginForBlockName(name);
+        if (plugin == nullptr) {
 #ifndef NDEBUG
-            fmt::print("Known blocks in the registry\n");
-            for (const auto& knownBlock : _registry->knownBlocks()) {
-                fmt::print("    {}\n", knownBlock);
+            fmt::print("Available blocks in the registry\n");
+            for (const auto& block : _registry->keys()) {
+                fmt::print("    {}\n", block);
             }
             fmt::print("]\n");
 
-            fmt::print("Known handlers from plugins [\n", name);
-            for (const auto& [handlerName, _] : _handlerForName) {
-                fmt::print("    {}\n", handlerName);
+            fmt::print("Available blocks from plugins [\n", name);
+            for (const auto& [blockName, _] : _pluginForBlockName) {
+                fmt::print("    {}\n", blockName);
             }
             fmt::print("]\n");
 #endif
-            fmt::print("Error: Handler not found for '{}', returning nullptr.\n", name);
+            fmt::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
             return {};
         }
 
-        auto result = handler->createBlock(name, params);
+        auto result = plugin->createBlock(name, params);
         return result;
     }
 
-    bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block) || handlerForName(block) != nullptr; }
+    bool isBlockAvailable(std::string_view block) const { return _registry->contains(block) || pluginForBlockName(block) != nullptr; }
 };
 #else
 // PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
@@ -225,11 +230,11 @@ public:
 
     BlockRegistry& registry() { return *_registry; }
 
-    auto knownBlocks() const { return _registry->knownBlocks(); }
+    auto availableBlocks() const { return _registry->keys(); }
 
-    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->createBlock(name, params); }
+    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->create(name, params); }
 
-    bool isBlockKnown(std::string_view block) const { return _registry->isBlockKnown(block); }
+    bool isBlockAvailable(std::string_view block) const { return _registry->contains(block); }
 };
 #endif
 

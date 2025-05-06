@@ -23,4 +23,4 @@ public:
 // Another is to use the same macro for both single-parametrised
 // and mulciple-parametrised nodes, just to have the parameter
 // packs wrapped in some special type like this:
-auto registerConvert = gr::registerBlock<good::convert, gr::BlockParameters<double, float>, gr::BlockParameters<float, double>>(grPluginInstance());
+auto registerConvert = gr::registerBlock<good::convert, gr::BlockParameters<double, float>, gr::BlockParameters<float, double>>(static_cast<gr::BlockRegistry&>(grPluginInstance()));
