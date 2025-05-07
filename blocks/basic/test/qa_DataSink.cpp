@@ -946,10 +946,13 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq_collections(receivedDataSets[0UZ].signalValues(0UZ), getIota(300, 300.f)));
         expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"s));
         expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"s));
-        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 0UZ));
+        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 1UZ));
+        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ)[0UZ].first, 100));
         expect(eq_collections(receivedDataSets[1UZ].signalValues(0UZ), getIota(300, 700.f)));
         expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"s));
         expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[1UZ].timingEvents(0UZ).size(), 1UZ));
+        expect(eq(receivedDataSets[1UZ].timingEvents(0UZ)[0UZ].first, 100));
     };
 
     "data set callback"_test = [] {
@@ -990,10 +993,13 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq_collections(receivedDataSets[0UZ].signalValues(0UZ), getIota(300, 300.f)));
         expect(eq(receivedDataSets[0UZ].signalName(0UZ), "test signal"s));
         expect(eq(receivedDataSets[0UZ].signalUnit(0UZ), "test unit"s));
-        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 0UZ));
+        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ).size(), 1UZ));
+        expect(eq(receivedDataSets[0UZ].timingEvents(0UZ)[0UZ].first, 100));
         expect(eq_collections(receivedDataSets[1UZ].signalValues(0UZ), getIota(300, 700.f)));
         expect(eq(receivedDataSets[1UZ].signalName(0UZ), "test signal"s));
         expect(eq(receivedDataSets[1UZ].signalUnit(0UZ), "test unit"s));
+        expect(eq(receivedDataSets[1UZ].timingEvents(0UZ).size(), 1UZ));
+        expect(eq(receivedDataSets[1UZ].timingEvents(0UZ)[0UZ].first, 100));
     };
 };
 

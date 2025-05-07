@@ -232,14 +232,6 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 auto& ds       = _tempDataSets[i];
                 auto& accState = _accState[i];
 
-                // Note: Tags for pre-samples are not added to DataSet
-                if (n_max.value == 0UZ || ds.signal_values.size() < n_max.value) { // Add tags only if the DataSet is not full
-                    const Tag& mergedTag = this->mergedInputTag();
-                    if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
-                        ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(ds.signal_values.size()), mergedTag.map);
-                    }
-                }
-
                 // pre samples data accumulation
                 if (accState.isPreActive) {
                     // no need to check for n_max here: n_pre + n_post <= n_max
@@ -250,6 +242,14 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                     accState.isPreActive = false;
                     accState.nPreSamples = nPreSamplesToCopy;
                     accState.nSamples += nPreSamplesToCopy;
+                }
+
+                // Note: Tags for pre-samples are not added to DataSet
+                if (n_max.value == 0UZ || ds.signal_values.size() < n_max.value) { // Add tags only if the DataSet is not full
+                    const Tag& mergedTag = this->mergedInputTag();
+                    if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
+                        ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(ds.signal_values.size()), mergedTag.map);
+                    }
                 }
 
                 if (!accState.isPostActive) { // normal data accumulation
