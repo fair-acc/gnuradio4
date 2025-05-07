@@ -511,7 +511,8 @@ if(ENABLE_TESTING
   ) # fortify_source is not possible without optimization
   target_link_libraries(gnuradio-options INTERFACE --coverage)
   append_coverage_compiler_flags()
-  set(GCOVR_ADDITIONAL_ARGS "--merge-mode-functions=merge-use-line-min")
+  set(GCOVR_ADDITIONAL_ARGS "--merge-mode-functions=merge-use-line-min"
+                            "--gcov-ignore-parse-errors=negative_hits.warn_once_per_file")
   setup_target_for_coverage_gcovr_xml(
     NAME
     coverage
