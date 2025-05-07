@@ -120,6 +120,13 @@ option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 
+if(ENABLE_TESTING AND (UNIX OR APPLE))
+  include(CTest)
+  list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
+  enable_testing()
+  message("Building Tests and benchmarks.")
+endif()
+
 if(EMSCRIPTEN OR NOT GR_ENABLE_BLOCK_REGISTRY)
   set(INTERNAL_ENABLE_BLOCK_PLUGINS OFF)
 endif()
@@ -488,71 +495,68 @@ add_subdirectory(meta)
 add_subdirectory(algorithm)
 add_subdirectory(blocks)
 
-if(ENABLE_TESTING AND (UNIX OR APPLE))
-  list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
-  enable_testing()
-  if(ENABLE_COVERAGE)
-    message("Coverage reporting enabled")
-    include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake #
-    # (License: BSL-1.0)
-    target_compile_options(
-      gnuradio-options
-      INTERFACE --coverage
-                -Og
-                -g1
-                -gz
-                # -gdwarf-2 -gstrict-dwarf
-      # -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
-    ) # fortify_source is not possible without optimization
-    target_link_libraries(gnuradio-options INTERFACE --coverage)
-    append_coverage_compiler_flags()
-    set(GCOVR_ADDITIONAL_ARGS "--merge-mode-functions=merge-use-line-min")
-    setup_target_for_coverage_gcovr_xml(
-      NAME
-      coverage
-      EXECUTABLE
-      ctest
-      EXECUTABLE_ARGS
-      "--output-on-failure"
-      DEPENDENCIES
-      qa_buffer
-      qa_DataSink
-      qa_DynamicPort
-      qa_DynamicBlock
-      qa_HierBlock
-      qa_filter
-      qa_Settings
-      qa_Tags
-      qa_Scheduler
-      qa_thread_pool
-      qa_thread_affinity
-      qa_YamlPmt
-      EXCLUDE
-      "$CMAKE_BUILD_DIR/*")
-    setup_target_for_coverage_gcovr_html(
-      NAME
-      coverage_html
-      EXECUTABLE
-      ctest
-      EXECUTABLE_ARGS
-      "--output-on-failure"
-      DEPENDENCIES
-      qa_buffer
-      qa_DataSink
-      qa_DynamicPort
-      qa_DynamicBlock
-      qa_HierBlock
-      qa_filter
-      qa_Settings
-      qa_Tags
-      qa_Scheduler
-      qa_thread_pool
-      qa_thread_affinity
-      qa_YamlPmt
-      EXCLUDE
-      "$CMAKE_BUILD_DIR/*")
-  endif()
-  message("Building Tests and benchmarks.")
+if(ENABLE_TESTING
+   AND (UNIX OR APPLE)
+   AND ENABLE_COVERAGE)
+  message("Coverage reporting enabled")
+  include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake #
+  # (License: BSL-1.0)
+  target_compile_options(
+    gnuradio-options
+    INTERFACE --coverage
+              -Og
+              -g1
+              -gz
+    # -gdwarf-2 -gstrict-dwarf -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
+  ) # fortify_source is not possible without optimization
+  target_link_libraries(gnuradio-options INTERFACE --coverage)
+  append_coverage_compiler_flags()
+  set(GCOVR_ADDITIONAL_ARGS "--merge-mode-functions=merge-use-line-min"
+                            "--gcov-ignore-parse-errors=negative_hits.warn_once_per_file")
+  setup_target_for_coverage_gcovr_xml(
+    NAME
+    coverage
+    EXECUTABLE
+    ctest
+    EXECUTABLE_ARGS
+    "--output-on-failure"
+    DEPENDENCIES
+    qa_buffer
+    qa_DataSink
+    qa_DynamicPort
+    qa_DynamicBlock
+    qa_HierBlock
+    qa_filter
+    qa_Settings
+    qa_Tags
+    qa_Scheduler
+    qa_thread_pool
+    qa_thread_affinity
+    qa_YamlPmt
+    EXCLUDE
+    "$CMAKE_BUILD_DIR/*")
+  setup_target_for_coverage_gcovr_html(
+    NAME
+    coverage_html
+    EXECUTABLE
+    ctest
+    EXECUTABLE_ARGS
+    "--output-on-failure"
+    DEPENDENCIES
+    qa_buffer
+    qa_DataSink
+    qa_DynamicPort
+    qa_DynamicBlock
+    qa_HierBlock
+    qa_filter
+    qa_Settings
+    qa_Tags
+    qa_Scheduler
+    qa_thread_pool
+    qa_thread_affinity
+    qa_YamlPmt
+    EXCLUDE
+    "$CMAKE_BUILD_DIR/*")
 endif()
 
 # print effective options
