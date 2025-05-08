@@ -6,7 +6,7 @@
 
 #include <build_configure.hpp>
 
-#include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/YamlPmt.hpp>
 #include <gnuradio-4.0/basic/CommonBlocks.hpp>

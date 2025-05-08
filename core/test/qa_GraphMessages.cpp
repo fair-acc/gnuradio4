@@ -10,6 +10,8 @@
 
 #include "message_utils.hpp"
 
+#include <filesystem>
+
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
@@ -304,6 +306,47 @@ const boost::ut::suite NonRunningGraphTests = [] {
                 expect(false) << fmt::format("data has no value - error: {}", reply.data.error());
             }
         };
+    };
+
+    "GRC tests"_test = [] {
+        gr::MsgPortOut toGraph;
+        gr::Graph      testGraph(context->loader);
+        gr::MsgPortIn  fromGraph;
+
+        expect(eq(ConnectionResult::SUCCESS, toGraph.connect(testGraph.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.msgOut.connect(fromGraph)));
+
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+
+        expect(eq(getNReplyMessages(fromGraph), 2UZ)); // consume 2 messages from emplace
+        consumeAllReplyMessages(fromGraph);
+        expect(eq(getNReplyMessages(fromGraph), 0UZ));
+
+        sendMessage<Get>(toGraph, testGraph.unique_name, graph::property::kGraphGRC, {});
+        expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
+
+        expect(eq(getNReplyMessages(fromGraph), 1UZ));
+        const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+
+        expect(reply.data.has_value()) << "Reply should contain data";
+        if (reply.data.has_value()) {
+            const auto& data = reply.data.value();
+            expect(data.contains("value")) << "Reply should contain 'value' field";
+            const auto& yaml = std::get<std::string>(data.at("value"));
+            expect(!yaml.empty()) << "YAML string should not be empty";
+            fmt::println("YAML content:\n{}", yaml);
+
+            // verify well formed by loading from yaml
+            auto graphFromYaml = gr::loadGrc(context->loader, yaml);
+            expect(eq(graphFromYaml.blocks().size(), 2UZ)) << fmt::format("Expected 2 blocks in loaded graph, got {} blocks", graphFromYaml.blocks().size());
+
+            "Set GRC YAML"_test = [&] {
+                sendMessage<Set>(toGraph, testGraph.unique_name, graph::property::kGraphGRC, {{"value", yaml}});
+                expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
+                expect(eq(testGraph.blocks().size(), 2UZ)) << "Expected 2 blocks after reloading GRC";
+            };
+        }
     };
 };
 
