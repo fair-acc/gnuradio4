@@ -11,7 +11,7 @@ using namespace std::string_literals;
 int main() {
     gr_blocklib_init_module_GrBasicBlocks(gr::globalBlockRegistry());
 
-    auto known = gr::globalBlockRegistry().knownBlocks();
+    auto known = gr::globalBlockRegistry().keys();
     std::ranges::sort(known);
     std::vector<std::string> desired{
         "gr::basic::DataSink<float32>"s,          //

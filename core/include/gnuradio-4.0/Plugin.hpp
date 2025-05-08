@@ -29,9 +29,9 @@ public:
 
     virtual ~gr_plugin_base();
 
-    virtual std::uint8_t abi_version() const = 0;
+    virtual std::uint8_t abiVersion() const = 0;
 
-    virtual std::span<const std::string>    providedBlocks() const                                             = 0;
+    virtual std::vector<std::string>        availableBlocks() const                                            = 0;
     virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const gr::property_map& params) = 0;
 };
 
@@ -44,16 +44,11 @@ private:
 public:
     plugin() {}
 
-    std::uint8_t abi_version() const override { return ABI_VERSION; }
+    std::uint8_t abiVersion() const override { return ABI_VERSION; }
 
-    std::span<const std::string> providedBlocks() const override { return registry.providedBlocks(); }
+    std::vector<std::string> availableBlocks() const override { return registry.keys(); }
 
-    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const property_map& params) override { return registry.createBlock(name, params); }
-
-    template<typename TBlock>
-    void addBlockType(std::string_view alias = "", std::string_view aliasParameters = "") {
-        registry.addBlockType<TBlock>(alias, aliasParameters);
-    }
+    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const property_map& params) override { return registry.create(name, params); }
 
     operator gr::BlockRegistry&() { return registry; }
 };

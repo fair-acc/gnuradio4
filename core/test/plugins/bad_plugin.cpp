@@ -12,9 +12,9 @@ private:
 public:
     std::unique_ptr<gr::BlockModel> createBlock(std::string_view /*name*/, const gr::property_map&) override { return {}; }
 
-    [[nodiscard]] std::uint8_t abi_version() const override { return 0; }
+    [[nodiscard]] std::uint8_t abiVersion() const override { return 0; }
 
-    [[nodiscard]] std::span<const std::string> providedBlocks() const override { return block_types; }
+    [[nodiscard]] std::vector<std::string> availableBlocks() const override { return block_types; }
 };
 
 } // namespace

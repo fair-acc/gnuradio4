@@ -703,7 +703,7 @@ public:
 
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kRegistryBlockTypes);
-        message.data = property_map{{"types", _pluginLoader->knownBlocks()}};
+        message.data = property_map{{"types", _pluginLoader->availableBlocks()}};
         return message;
     }
 

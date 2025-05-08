@@ -64,9 +64,9 @@ const boost::ut::suite NonRunningGraphTests = [] {
     using namespace gr::testing;
     using enum gr::message::Command;
 
-    expect(fatal(gt(context->registry.knownBlocks().size(), 0UZ))) << "didn't register any blocks";
+    expect(fatal(gt(context->registry.keys().size(), 0UZ))) << "didn't register any blocks";
     fmt::println("registered blocks:");
-    for (const auto& blockName : context->registry.knownBlocks()) {
+    for (const auto& blockName : context->registry.keys()) {
         fmt::println("    block: {}", blockName);
     }
 
@@ -292,7 +292,7 @@ const boost::ut::suite NonRunningGraphTests = [] {
                 auto        foundTypes = dataMap.find("types");
                 if (foundTypes != dataMap.end() || !std::holds_alternative<std::vector<std::string>>(foundTypes->second)) {
                     PluginLoader& loader             = context->loader;
-                    auto          expectedBlockTypes = loader.knownBlocks();
+                    auto          expectedBlockTypes = loader.availableBlocks();
                     std::ranges::sort(expectedBlockTypes);
                     auto blockTypes = std::get<std::vector<std::string>>(foundTypes->second);
                     std::ranges::sort(blockTypes);
