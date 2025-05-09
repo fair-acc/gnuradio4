@@ -81,6 +81,9 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_GraphMessages)
   target_link_libraries(qa_GraphMessages PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
 
+  add_ut_test(qa_SchedulerMessages)
+  target_link_libraries(qa_SchedulerMessages PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+
   add_subdirectory(plugins)
   add_app_test(qa_plugins_test)
   target_link_libraries(qa_plugins_test PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
