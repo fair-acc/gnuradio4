@@ -6,7 +6,7 @@
 #include <mutex>
 #include <queue>
 #include <set>
-#include <source_location>
+
 #include <thread>
 #include <utility>
 
@@ -21,6 +21,21 @@
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
 using namespace gr::message;
+
+namespace property {
+
+inline static const char* kEmplaceBlock = "EmplaceBlock";
+inline static const char* kRemoveBlock  = "RemoveBlock";
+inline static const char* kReplaceBlock = "ReplaceBlock";
+inline static const char* kEmplaceEdge  = "EmplaceEdge";
+inline static const char* kRemoveEdge   = "RemoveEdge";
+
+inline static const char* kBlockEmplaced = "BlockEmplaced";
+inline static const char* kBlockRemoved  = "BlockRemoved";
+inline static const char* kBlockReplaced = "BlockReplaced";
+inline static const char* kEdgeEmplaced  = "EdgeEmplaced";
+inline static const char* kEdgeRemoved   = "EdgeRemoved";
+} // namespace property
 
 enum class ExecutionPolicy {
     singleThreaded,        ///
@@ -86,7 +101,13 @@ public:
     explicit SchedulerBase(gr::Graph&&   graph,                                                                                                  //
         std::shared_ptr<BasicThreadPool> thread_pool       = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND), //
         const profiling::Options&        profiling_options = {})                                                                                        //
-        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(std::move(thread_pool)) {}
+        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(std::move(thread_pool)) {
+        this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
+        this->propertyCallbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
+        this->propertyCallbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
+        this->propertyCallbacks[scheduler::property::kEmplaceEdge]  = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
+        this->propertyCallbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
+    }
 
     ~SchedulerBase() {
         if (this->state() == lifecycle::RUNNING) {
@@ -415,6 +436,95 @@ protected:
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
         forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
+    }
+
+    std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kEmplaceBlock);
+        using namespace std::string_literals;
+        const auto&         data       = message.data.value();
+        const std::string&  type       = std::get<std::string>(data.at("type"s));
+        const property_map& properties = [&] {
+            if (auto it = data.find("properties"s); it != data.end()) {
+                return std::get<property_map>(it->second);
+            } else {
+                return property_map{};
+            }
+        }();
+
+        auto& newBlock = _graph.emplaceBlock(type, properties);
+
+        this->emitMessage(scheduler::property::kBlockEmplaced, Graph::serializeBlock(std::addressof(newBlock)));
+
+        // Message is sent as a reaction to emplaceBlock, no need for a separate one
+        return {};
+    }
+
+    std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kRemoveBlock);
+        using namespace std::string_literals;
+        const auto&        data       = message.data.value();
+        const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
+
+        _graph.removeBlockByName(uniqueName);
+
+        message.endpoint = scheduler::property::kBlockRemoved;
+        return {message};
+    }
+
+    std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kRemoveEdge);
+        using namespace std::string_literals;
+        const auto&        data        = message.data.value();
+        const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
+        const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
+
+        _graph.removeEdgeBySourcePort(sourceBlock, sourcePort);
+
+        message.endpoint = scheduler::property::kEdgeRemoved;
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackEmplaceEdge([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kEmplaceEdge);
+        using namespace std::string_literals;
+        const auto&                         data             = message.data.value();
+        const std::string&                  sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
+        const std::string&                  sourcePort       = std::get<std::string>(data.at("sourcePort"s));
+        const std::string&                  destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
+        const std::string&                  destinationPort  = std::get<std::string>(data.at("destinationPort"s));
+        [[maybe_unused]] const std::size_t  minBufferSize    = std::get<gr::Size_t>(data.at("minBufferSize"s));
+        [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
+        const std::string                   edgeName         = std::get<std::string>(data.at("edgeName"s));
+
+        _graph.emplaceEdge(sourceBlock, sourcePort, destinationBlock, destinationPort, minBufferSize, weight, edgeName);
+
+        message.endpoint = scheduler::property::kEdgeEmplaced;
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kReplaceBlock);
+        using namespace std::string_literals;
+        const auto&         data       = message.data.value();
+        const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
+        const std::string&  type       = std::get<std::string>(data.at("type"s));
+        const property_map& properties = [&] {
+            if (auto it = data.find("properties"s); it != data.end()) {
+                return std::get<property_map>(it->second);
+            } else {
+                return property_map{};
+            }
+        }();
+
+        auto newBlockRaw = _graph.replaceBlock(uniqueName, type, properties);
+
+        std::optional<Message> result = gr::Message{};
+        result->endpoint              = scheduler::property::kBlockReplaced;
+        result->data                  = Graph::serializeBlock(newBlockRaw);
+
+        (*result->data)["replacedBlockUniqueName"s] = uniqueName;
+
+        return result;
     }
 };
 

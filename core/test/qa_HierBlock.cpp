@@ -98,8 +98,9 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
         // Make connections
-        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph.uniqueName()), "in", graph.unique_name);
-        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, std::string(subGraph.uniqueName()), "out", sink.unique_name, "in", graph.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph.uniqueName()), "in", scheduler.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, std::string(subGraph.uniqueName()), "out", sink.unique_name, "in", scheduler.unique_name);
+
         expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
         // Get the whole graph
