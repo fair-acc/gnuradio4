@@ -220,6 +220,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's lib
     message(STATUS "Enable TIMETRACE: ${TIMETRACE}")
   endif()
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(ENABLE_TBB)
     find_package(TBB REQUIRED)
