@@ -57,6 +57,9 @@ protected:
     std::recursive_mutex                _jobListsMutex; // only used when modifying and copying the graph->local job list
     JobLists                            _jobLists = std::make_shared<std::vector<std::vector<BlockModel*>>>();
 
+    std::mutex                               _zombieBlocksMutex;
+    std::vector<std::unique_ptr<BlockModel>> _zombieBlocks;
+
     MsgPortOutForChildren    _toChildMessagePort;
     MsgPortInFromChildren    _fromChildMessagePort;
     std::vector<gr::Message> _pendingMessagesToChildren;
@@ -356,6 +359,11 @@ protected:
                 if (runnerID == 0UZ || _nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
                 }
+
+                // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
+                // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
+                cleanupZombieBlocks(localBlockList);
+
                 std::ranges::for_each(localBlockList, [](auto& block) { block->processScheduledMessages(); });
                 activeState = this->state();
                 msgToCount++;
@@ -376,10 +384,6 @@ protected:
                     break;
                 }
             } else if (activeState == lifecycle::State::PAUSED) {
-                if (_graph.hasTopologyChanged()) {
-                    // TODO: update localBlockList topology if needed
-                    _graph.ackTopologyChange();
-                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
                 msgToCount = 0UZ;
             } else { // other states
@@ -416,6 +420,7 @@ protected:
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::STOPPED));
             }
         });
+
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->IDLE", this->changeStateTo(lifecycle::State::IDLE));
     }
@@ -465,7 +470,8 @@ protected:
         const auto&        data       = message.data.value();
         const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
 
-        _graph.removeBlockByName(uniqueName);
+        auto removedBlock = _graph.removeBlockByName(uniqueName);
+        makeZombie(std::move(removedBlock));
 
         message.endpoint = scheduler::property::kBlockRemoved;
         return {message};
@@ -502,6 +508,101 @@ protected:
         return message;
     }
 
+    /*
+      Zombie Tutorial:
+
+      Blocks can't be deleted unless stopped, but since stopping can take time (async) we move such blocks
+      to the "zombie list" and disconnect them immediately from the graph. This allows them to stop and be deleted
+      safely.
+
+      Periodically, we call cleanupZombieBlocks(), which iterates the zombie list and deletes the blocks that are now stopped.
+
+      cleanupZombieBlocks() is called *per-thread*, since we also need to update the localBlockList, i.e.: removing dangling block pointers
+      from the localBlockList.
+
+      We also update the _jobLists member variable, but probably that member can be removed, seems unneeded and only used so unit-tests can
+      query it.
+     */
+    void cleanupZombieBlocks(std::vector<BlockModel*>& localBlockList) {
+        if (localBlockList.empty()) {
+            return;
+        }
+
+        std::lock_guard guard(_zombieBlocksMutex);
+
+        auto it = _zombieBlocks.begin();
+
+        while (it != _zombieBlocks.end()) {
+            auto localBlockIt = std::find(localBlockList.begin(), localBlockList.end(), it->get());
+            if (localBlockIt == localBlockList.end()) {
+                // we only care about the blocks local to our thread.
+                ++it;
+                continue;
+            }
+
+            bool shouldDelete = false;
+
+            switch ((*it)->state()) {
+            case lifecycle::State::IDLE:
+            case lifecycle::State::STOPPED:
+            case lifecycle::State::INITIALISED:
+                // This block can be deleted immediately
+                shouldDelete = true;
+                break;
+            case lifecycle::State::ERROR:
+                // Delete as well. (Separate case block, as better ideas welcome)
+                shouldDelete = true;
+                break;
+            case lifecycle::State::REQUESTED_STOP:
+                // This block will be deleted later
+                break;
+            case lifecycle::State::REQUESTED_PAUSE:
+                // This block will be deleted later
+                // There's no transition from REQUESTED_PAUSE to REQUESTED_STOP
+                // Will be moved to REQUESTED_STOP as soon as it's possible
+                break;
+            case lifecycle::State::PAUSED:
+                // This zombie was in REQUESTED_PAUSE and now finally in PAUSED. Can be stopped now.
+                // Will be deleted in a next zombie maintenance period
+                this->emitErrorMessageIfAny("cleanupZombieBlocks", (*it)->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                break;
+            case lifecycle::State::RUNNING: assert(false && "Doesn't happen: zombie blocks are never running"); break;
+            }
+
+            if (shouldDelete) {
+                localBlockList.erase(localBlockIt);
+
+                BlockModel* zombieRaw = it->get();
+                it                    = _zombieBlocks.erase(it); // ~Block() runs here
+
+                // We need to remove zombieRaw from jobLists as well, in case Scheduler ever goes to INITIALIZED
+                // again.
+                // TODO: I'd argue we should remove _jobLists to minimize having to maintain state. Instead, a job list can be
+                // calculated in start().
+                std::lock_guard lock(_jobListsMutex);
+                for (auto& jobList : *this->_jobLists) {
+                    auto job_it = std::remove(jobList.begin(), jobList.end(), zombieRaw);
+                    if (job_it != jobList.end()) {
+                        jobList.erase(job_it, jobList.end());
+                        break;
+                    }
+                }
+
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    void makeZombie(std::unique_ptr<BlockModel> block) {
+        if (block->state() == lifecycle::State::PAUSED || block->state() == lifecycle::State::RUNNING) {
+            this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+        }
+
+        std::lock_guard guard(_zombieBlocksMutex);
+        _zombieBlocks.push_back(std::move(block));
+    }
+
     std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kReplaceBlock);
         using namespace std::string_literals;
@@ -516,7 +617,8 @@ protected:
             }
         }();
 
-        auto newBlockRaw = _graph.replaceBlock(uniqueName, type, properties);
+        auto [oldBlock, newBlockRaw] = _graph.replaceBlock(uniqueName, type, properties);
+        makeZombie(std::move(oldBlock));
 
         std::optional<Message> result = gr::Message{};
         result->endpoint              = scheduler::property::kBlockReplaced;
