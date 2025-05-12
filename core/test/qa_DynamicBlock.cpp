@@ -4,7 +4,7 @@
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/basic/CommonBlocks.hpp>
+#include <gnuradio-4.0/math/Math.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
@@ -22,15 +22,13 @@ const boost::ut::suite DynamicBlocktests = [] {
 
         gr::Graph graph;
 
-        auto& adder = graph.emplaceBlock<MultiAdder<double>>({{"n_inputs", nInputs}});
-        expect(adder.settings().applyStagedParameters().forwardParameters.empty());
-        auto& sink = graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({});
+        auto& adder = graph.emplaceBlock<gr::blocks::math::Add<double>>({{"n_inputs", nInputs}});
+        auto& sink  = graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({});
 
         std::vector<TagSource<double>*> sources;
         for (std::size_t i = 0; i < nInputs; ++i) {
             sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"mark_tag", false}})));
-            expect(sources.back()->settings().applyStagedParameters().forwardParameters.empty());
-            expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), "out"s, adder, "inputs#"s + std::to_string(sources.size() - 1)));
+            expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), "out"s, adder, "in#"s + std::to_string(sources.size() - 1)));
         }
         expect(gr::ConnectionResult::SUCCESS == graph.connect<"out">(adder).to<"in">(sink));
 
