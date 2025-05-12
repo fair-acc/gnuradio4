@@ -493,7 +493,7 @@ public:
         return {reply};
     }
 
-    void removeBlockByName(std::string_view uniqueName) {
+    std::unique_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
 
         if (it == _blocks.end()) {
@@ -504,10 +504,13 @@ public:
             return std::addressof(edge.sourceBlock()) == it->get() || std::addressof(edge.destinationBlock()) == it->get();
         });
 
+        std::unique_ptr<BlockModel> removedBlock = std::move(*it);
         _blocks.erase(it);
+
+        return removedBlock;
     }
 
-    gr::BlockModel* replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
+    std::pair<std::unique_ptr<BlockModel>, BlockModel*> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
             throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
@@ -521,19 +524,20 @@ public:
 
         addBlock(std::move(newBlock));
 
-        BlockModel* oldBlock = it->get();
         for (auto& edge : _edges) {
-            if (edge._sourceBlock == oldBlock) {
+            if (edge._sourceBlock == it->get()) {
                 edge._sourceBlock = newBlockRaw;
             }
 
-            if (edge._destinationBlock == oldBlock) {
+            if (edge._destinationBlock == it->get()) {
                 edge._destinationBlock = newBlockRaw;
             }
         }
+
+        std::unique_ptr<BlockModel> oldBlock = std::move(*it);
         _blocks.erase(it);
 
-        return newBlockRaw;
+        return {std::move(oldBlock), newBlockRaw};
     }
 
     void emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
