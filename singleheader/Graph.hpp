@@ -4368,8 +4368,8 @@ struct message_type {};
 template<class... T>
 constexpr bool always_false = false;
 
-constexpr std::size_t invalid_index              = -1UZ;
-constexpr std::size_t default_message_port_index = -2UZ;
+constexpr std::size_t invalid_index              = std::numeric_limits<std::size_t>::max();
+constexpr std::size_t default_message_port_index = std::numeric_limits<std::size_t>::max() - 1UZ;
 
 /**
  * T is tuple-like if it implements std::tuple_size, std::tuple_element, and std::get.
@@ -16246,29 +16246,30 @@ private:
         updateThreadConstraints(nThreads + 1, thread);
     }
 
+    template<typename F, typename... A>
+    auto getTaskImpl(F&& f, A&&... args) {
+        auto extracted = _recycledTasks.pop();
+        if (extracted.empty()) {
+            if constexpr (sizeof...(A) == 0) {
+                extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::forward<F>(f)});
+            } else {
+                extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::bind_front(std::forward<F>(f), std::forward<A>(args)...)});
+            }
+        } else {
+            auto& task = extracted.front();
+            task.id    = _taskID.fetch_add(1U) + 1U;
+            if constexpr (sizeof...(A) == 0) {
+                task.func = std::forward<F>(f);
+            } else {
+                task.func = std::bind_front(std::forward<F>(f), std::forward<A>(args)...);
+            }
+        }
+        return extracted;
+    }
+
     template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args>
     auto createTask(Callable&& func, Args&&... funcArgs) {
-        const auto getTask = [&recycledTasks = _recycledTasks](Callable&& f, Args&&... args) {
-            auto extracted = recycledTasks.pop();
-            if (extracted.empty()) {
-                if constexpr (sizeof...(Args) == 0) {
-                    extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::move(f)});
-                } else {
-                    extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::move(std::bind_front(std::forward<decltype(func)>(f), std::forward<decltype(func)>(args)...))});
-                }
-            } else {
-                auto& task = extracted.front();
-                task.id    = _taskID.fetch_add(1U) + 1U;
-                if constexpr (sizeof...(Args) == 0) {
-                    task.func = std::move(f);
-                } else {
-                    task.func = std::move(std::bind_front(std::forward<decltype(func)>(f), std::forward<decltype(func)>(args)...));
-                }
-            }
-            return extracted;
-        };
-
-        auto  taskContainer = getTask(std::forward<decltype(func)>(func), std::forward<decltype(func)>(funcArgs)...);
+        auto  taskContainer = getTaskImpl(std::forward<Callable>(func), std::forward<Args>(funcArgs)...);
         auto& task          = taskContainer.front();
 
         if constexpr (!taskName.empty()) {
@@ -16785,13 +16786,13 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if constexpr (digitsS <= digitsT) {
                         return static_cast<T>(srcValue);
                     } else {
-                        using WideType         = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
-                        const WideType wideVal = static_cast<WideType>(srcValue);
+                        using WideType     = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
+                        const auto wideVal = static_cast<WideType>(srcValue);
                         if (wideVal == std::numeric_limits<WideType>::min()) {
                             return std::unexpected(std::format("cannot handle integer min()={} when checking bit width", wideVal));
                         }
-                        const auto magnitude = (wideVal < 0) ? -wideVal : wideVal;
-                        const auto bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
+                        const WideType magnitude = (wideVal < 0) ? -wideVal : wideVal;
+                        const auto     bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
                         if (bitWidth <= digitsT) {
                             return static_cast<T>(srcValue);
                         }
@@ -18683,7 +18684,7 @@ public:
         return {static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone)};
     }
 
-    std::pair<std::size_t, std::size_t> get() {
+    std::pair<std::size_t, std::size_t> get() const {
         uint64_t oldCounter    = std::atomic_load_explicit(&encodedCounter, std::memory_order_acquire);
         auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
         auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
