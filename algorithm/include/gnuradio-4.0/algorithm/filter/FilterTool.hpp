@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <execution>
+#include <format>
 #include <iterator>
 #include <numbers>
 #include <numeric>
@@ -12,9 +13,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-#include <fmt/std.h>
 #ifdef __GNUC__
 #pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
 #ifndef __clang__
@@ -656,13 +654,14 @@ template<typename T, std::ranges::input_range Range>
 
         if (static_cast<T>(std::abs(root.imag())) > epsilon) { // complex root
             if (i + 1 >= roots.size()) {
-                throw std::runtime_error(fmt::format("Unmatched complex root at i={}: {}", i, root)); // Unpaired complex root.
+                throw std::runtime_error(std::format("Unmatched complex root at i={}: {}", i, root)); // Unpaired complex root.
             }
 
             // ensure the next root is the conjugate pair.
             const auto& next_root = roots[i + 1];
             if (static_cast<T>(std::abs(root.real() - next_root.real())) > epsilon || static_cast<T>(std::abs(root.imag() + next_root.imag())) > epsilon) {
-                throw std::runtime_error(fmt::format("Complex roots {} vs. {} are not conjugate pairs.\nroots:\n{}", root, next_root, roots));
+                std::string fmt = "Complex roots {} vs. {} are not conjugate pairs.\nroots:\n{}"; // workaround for missing std::runtime_format (C++26)
+                throw std::runtime_error(std::vformat(fmt, std::make_format_args(root, next_root, roots)));
             }
 
             // use the quadratic factor for the complex root and its conjugate.
@@ -879,7 +878,7 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
         if (ok) {
             return singleSection;
         }
-        throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     } else { // Step 4: convert the poles and zeros into biquad sections.
         constexpr double epsilon = 1e-10;
@@ -909,7 +908,7 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
             if (ok) {
                 sections.push_back(section);
             } else {
-                throw std::invalid_argument(fmt::format("({}, {}, {}) biquad gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+                throw std::invalid_argument(std::format("({}, {}, {}) biquad gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
                     magic_enum::enum_name(filterDesign), magic_enum::enum_name(filterType), params.order, actualGain, params.gain, params.fs, params.fLow, params.fHigh));
             }
         }
@@ -920,10 +919,10 @@ requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pai
 template<std::floating_point T>
 FilterCoefficients<T> designResonatorDigital(T samplingRate, T frequency, T poleRadius, std::source_location location = std::source_location::current()) {
     if (samplingRate <= T(0) || frequency <= T(0) || frequency >= samplingRate / T(2)) {
-        throw gr::exception(fmt::format("samplingRateHz {} and frequencyHz {} must be > 0.", samplingRate, frequency), location);
+        throw gr::exception(std::format("samplingRateHz {} and frequencyHz {} must be > 0.", samplingRate, frequency), location);
     }
     if (poleRadius <= T(0) || poleRadius >= T(1)) {
-        throw gr::exception(fmt::format("poleRadius {} must be in (0,1).", poleRadius), location);
+        throw gr::exception(std::format("poleRadius {} must be in (0,1).", poleRadius), location);
     }
 
     const T theta = T(2) * std::numbers::pi_v<T> * frequency / samplingRate;
@@ -935,10 +934,10 @@ FilterCoefficients<T> designResonatorDigital(T samplingRate, T frequency, T pole
 template<std::floating_point T>
 FilterCoefficients<T> designResonatorPhysical(T samplingRate, T frequency, T zetaDamping, std::source_location location = std::source_location::current()) {
     if (frequency <= T(0)) {
-        throw gr::exception(fmt::format("frequency {} must be > 0.", frequency), location);
+        throw gr::exception(std::format("frequency {} must be > 0.", frequency), location);
     }
     if (zetaDamping < T(0)) {
-        throw gr::exception(fmt::format("zetaDamping {} must be >= 0.", zetaDamping), location);
+        throw gr::exception(std::format("zetaDamping {} must be >= 0.", zetaDamping), location);
     }
     T rApprox = std::exp(-zetaDamping * T(2) * std::numbers::pi_v<T> * frequency / samplingRate); // approximation: r ~ exp(-ζ * omega0 / fs))
     return designResonatorDigital<T>(samplingRate, frequency, std::min(rApprox, T(0.9999)), location);
@@ -947,10 +946,10 @@ FilterCoefficients<T> designResonatorPhysical(T samplingRate, T frequency, T zet
 template<std::floating_point T>
 FilterCoefficients<T> designResonatorRF(T samplingRateHz, T frequency, T Q, std::source_location location = std::source_location::current()) {
     if (frequency <= 0.0) {
-        throw gr::exception(fmt::format("frequency {} must be > 0.", frequency), location);
+        throw gr::exception(std::format("frequency {} must be > 0.", frequency), location);
     }
     if (Q <= 0.0) {
-        throw gr::exception(fmt::format("Q {} must be > 0.", Q), location);
+        throw gr::exception(std::format("Q {} must be > 0.", Q), location);
     }
 
     const T BW      = frequency / Q;                                            // approximates 3dB BW
@@ -1016,7 +1015,7 @@ template<std::floating_point T>
         if (ok) {
             return lowPassCoefficients;
         }
-        throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     case Type::HIGHPASS: {
@@ -1032,7 +1031,7 @@ template<std::floating_point T>
         if (ok) {
             return highPassCoefficients;
         }
-        throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     case Type::BANDPASS: {
@@ -1045,7 +1044,7 @@ template<std::floating_point T>
         if (ok) {
             return bandPassCoefficients;
         }
-        throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     case Type::BANDSTOP: {
@@ -1064,7 +1063,7 @@ template<std::floating_point T>
         if (ok) {
             return bandStopCoefficients;
         }
-        throw std::invalid_argument(fmt::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
+        throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
     }

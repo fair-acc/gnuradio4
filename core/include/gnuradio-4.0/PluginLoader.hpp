@@ -1,9 +1,8 @@
-#ifndef GNURADIO_PLUGIN_LOADER_H
-#define GNURADIO_PLUGIN_LOADER_H
+#ifndef GNURADIO_PLUGIN_LOADER_HPP
+#define GNURADIO_PLUGIN_LOADER_HPP
 
 #include <algorithm>
 #include <filesystem>
-#include <iostream>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -138,8 +137,6 @@ private:
 public:
     PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
         for (const auto& directory : plugin_directories) {
-            std::cerr << std::filesystem::current_path() << std::endl;
-
             if (!std::filesystem::is_directory(directory)) {
                 continue;
             }
@@ -196,19 +193,19 @@ public:
         auto* plugin = pluginForBlockName(name);
         if (plugin == nullptr) {
 #ifndef NDEBUG
-            fmt::print("Available blocks in the registry\n");
+            std::print("Available blocks in the registry\n");
             for (const auto& block : _registry->keys()) {
-                fmt::print("    {}\n", block);
+                std::print("    {}\n", block);
             }
-            fmt::print("]\n");
+            std::print("]\n");
 
-            fmt::print("Available blocks from plugins [\n", name);
+            std::print("Available blocks from plugins [\n", name);
             for (const auto& [blockName, _] : _pluginForBlockName) {
-                fmt::print("    {}\n", blockName);
+                std::print("    {}\n", blockName);
             }
-            fmt::print("]\n");
+            std::print("]\n");
 #endif
-            fmt::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
+            std::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
             return {};
         }
 
@@ -275,4 +272,4 @@ inline auto& globalPluginLoader() {
 
 } // namespace gr
 
-#endif // include guard
+#endif // GNURADIO_PLUGIN_LOADER_HPP

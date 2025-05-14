@@ -2,9 +2,7 @@
 #include <boost/ut.hpp>
 
 #include <cstdint>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
-#include <fmt/std.h>
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/YamlPmt.hpp>
 #include <limits>
@@ -106,7 +104,7 @@ template<typename T>
 std::string formatResult(const std::expected<T, pmtv::yaml::ParseError>& result) {
     if (!result.has_value()) {
         const auto& error = result.error();
-        return fmt::format("Error in {}:{}: {}", error.line, error.column, error.message);
+        return std::format("Error in {}:{}: {}", error.line, error.column, error.message);
     } else {
         return "<no error>";
     }
@@ -117,9 +115,9 @@ void testYAML(std::string_view src, const pmtv::map_t expected, std::source_loca
     // First test that the deserialized map matches the expected map
     const auto deserializedMap = pmtv::yaml::deserialize(src);
     if (deserializedMap) {
-        expect(eq(diff(expected, *deserializedMap), false)) << fmt::format("testYAML unexpected error at: {}\n\n", location);
+        expect(eq(diff(expected, *deserializedMap), false)) << std::format("testYAML unexpected error at: {}\n\n", location);
     } else {
-        expect(false) << fmt::format("testYAML unexpected error at: {}:\n{}\n\n", location, pmtv::yaml::formatAsLines(src, deserializedMap.error()));
+        expect(false) << std::format("testYAML unexpected error at: {}:\n{}\n\n", location, pmtv::yaml::formatAsLines(src, deserializedMap.error()));
         return;
     }
 
@@ -127,9 +125,9 @@ void testYAML(std::string_view src, const pmtv::map_t expected, std::source_loca
     const auto serializedStr    = pmtv::yaml::serialize(expected);
     const auto deserializedMap2 = pmtv::yaml::deserialize(serializedStr);
     if (deserializedMap2) {
-        expect(eq(diff(expected, *deserializedMap2), false)) << fmt::format("testYAML unexpected error at: {} - string:\n{}\n\n", location, serializedStr);
+        expect(eq(diff(expected, *deserializedMap2), false)) << std::format("testYAML unexpected error at: {} - string:\n{}\n\n", location, serializedStr);
     } else {
-        expect(false) << fmt::format("testYAML unexpected error at: {}:\n {}\nYAML:\n{}", location, formatResult(deserializedMap2), serializedStr);
+        expect(false) << std::format("testYAML unexpected error at: {}:\n {}\nYAML:\n{}", location, formatResult(deserializedMap2), serializedStr);
         ;
     }
 }
@@ -796,10 +794,10 @@ const boost::ut::suite<"yaml error formatter"> _yamlFormatter = [] {
 
     constexpr auto testString = "Line one\nLine two with spaces at the end    \nLine three with extra text\nAnother line\nFinal line";
 
-    "no error message"_test              = [] { expect(nothrow([] { fmt::println("no error message:\n{}", yaml::formatAsLines(testString, 2, 5)); })); };
-    "short error message"_test           = [] { expect(nothrow([] { fmt::println("short error message:\n{}", yaml::formatAsLines(testString, 2, 5, "error")); })); };
-    "long error message"_test            = [] { expect(nothrow([] { fmt::println("long error message:\n{}", yaml::formatAsLines(testString, 2, 5, "long error @column=5")); })); };
-    "long error message @ column=0"_test = [] { expect(nothrow([] { fmt::println("long error message:\n{}", yaml::formatAsLines(testString, 2, 0, "long error @column=0")); })); };
+    "no error message"_test              = [] { expect(nothrow([] { std::println("no error message:\n{}", yaml::formatAsLines(testString, 2, 5)); })); };
+    "short error message"_test           = [] { expect(nothrow([] { std::println("short error message:\n{}", yaml::formatAsLines(testString, 2, 5, "error")); })); };
+    "long error message"_test            = [] { expect(nothrow([] { std::println("long error message:\n{}", yaml::formatAsLines(testString, 2, 5, "long error @column=5")); })); };
+    "long error message @ column=0"_test = [] { expect(nothrow([] { std::println("long error message:\n{}", yaml::formatAsLines(testString, 2, 0, "long error @column=0")); })); };
 };
 
 int main() { /* tests are statically executed */ }

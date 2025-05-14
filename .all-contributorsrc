@@ -144,6 +144,15 @@
       "contributions": [
         "infra"
       ]
+    },
+    {
+      "login": "iamsergio",
+      "name": "Sergio Martins",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20387?v=4",
+      "profile": "https://github.com/iamsergio",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "commitType": "docs",

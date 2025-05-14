@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
-#include <fmt/format.h>
+#include <format>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -30,25 +30,25 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
         {"rx_bandwdith", std::vector<double>{bandwidth, bandwidth}},                        //
         {"rx_gains", std::vector<double>{rxGains, rxGains}},
     });
-    fmt::println("set parameter:\n   sample_rate: {} SP/s\n   rx_center_frequency: {} Hz\n   rx_bandwdith: {} Hz\n   rx_gains: {} [dB]", //
+    std::println("set parameter:\n   sample_rate: {} SP/s\n   rx_center_frequency: {} Hz\n   rx_bandwdith: {} Hz\n   rx_gains: {} [dB]", //
         sampleRate, rxCenterFrequency, bandwidth, rxGains);
 
     if (fileName1.contains("null")) {
-        fmt::println("write channel0 to NullSink");
+        std::println("write channel0 to NullSink");
         auto& fileSink1 = flow.emplaceBlock<testing::NullSink<TDataType>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink1))) << "error connecting NullSink1";
     } else {
-        fmt::println("write to fileName1: {}", fileName1);
+        std::println("write to fileName1: {}", fileName1);
         auto& fileSink1 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", fileName1}, {"mode", "multi"}, {"max_bytes_per_file", maxFileSize}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink1))) << "error connecting BasicFileSink1";
     }
 
     if (fileName2.contains("null")) {
-        fmt::println("write channel1 to NullSink");
+        std::println("write channel1 to NullSink");
         auto& fileSink2 = flow.emplaceBlock<testing::NullSink<TDataType>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink2))) << "error connecting NullSink2";
     } else {
-        fmt::println("write to fileName2: {}", fileName2);
+        std::println("write to fileName2: {}", fileName2);
         auto& fileSink2 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", fileName2}, {"mode", "multi"}, {"max_bytes_per_file", maxFileSize}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink2))) << "error connecting BasicFileSink2";
     }
@@ -73,7 +73,7 @@ int main(int argc, char* argv[]) {
     std::filesystem::path exePath    = std::filesystem::current_path();
     auto                  parsedArgs = parseArguments(argc, argv, exePath / "test_ch0.bin", exePath / "test_ch1.bin", defaultMaxFileSize, defaultSampleRate, defaultRxCenterFrequency, defaultBandwidth, defaultRxGains);
     if (!parsedArgs) {
-        fmt::println(R"(
+        std::println(R"(
 Usage:
   {0} <baseName>
     Sets fileName1 to <baseName>_ch0.bin and fileName2 to <baseName>_ch1.bin
@@ -97,7 +97,7 @@ Default:
     auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 10UZ);
     auto sched      = gr::scheduler::Simple<>{std::move(flow), threadPool};
     auto retVal     = sched.runAndWait();
-    expect(retVal.has_value()) << fmt::format("scheduler execution error: {}", retVal.error());
+    expect(retVal.has_value()) << std::format("scheduler execution error: {}", retVal.error());
 
     return 0;
 }

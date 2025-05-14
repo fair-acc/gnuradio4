@@ -3,10 +3,9 @@
 #include <barrier>
 #include <chrono>
 #include <cstddef>
-#include <iostream>
 #include <thread>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/Buffer.hpp> // new buffer header interface
 #include <gnuradio-4.0/BufferSkeleton.hpp>
@@ -25,14 +24,13 @@ using namespace gr;
 void setCpuAffinity(const int cpuID) // N.B. pthread is not portable
 {
     const std::size_t nCPU = std::thread::hardware_concurrency();
-    // fmt::print("set CPU affinity to core {}\n", cpuID % nCPU);
+    // std::print("set CPU affinity to core {}\n", cpuID % nCPU);
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(static_cast<std::size_t>(cpuID) % nCPU, &cpuset);
     int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
-        constexpr auto fmt = "pthread_setaffinity_np({} of {}): {} - {}\n";
-        fmt::print(stderr, fmt, cpuID, nCPU, rc, strerror(rc));
+        std::print(stderr, "pthread_setaffinity_np({} of {}): {} - {}\n", cpuID, nCPU, rc, strerror(rc));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20)); // to force re-scheduling
 }
@@ -97,7 +95,7 @@ void runTest(BufferLike auto& buffer, const std::size_t vectorLength, const std:
                     nSamplesConsumed += input.size();
 
                     if (!input.consume(input.size())) {
-                        throw std::runtime_error(fmt::format("could not consume {} samples", input.size()));
+                        throw std::runtime_error(std::format("could not consume {} samples", input.size()));
                     }
                 }
                 barrier.arrive_and_wait();
@@ -107,7 +105,7 @@ void runTest(BufferLike auto& buffer, const std::size_t vectorLength, const std:
 
     // all producers and consumer are ready, waiting to give the sign
     barrier.arrive_and_wait();
-    ::benchmark::benchmark<nRepeat>(fmt::format("{:>8}: {} producers -<{:^4}>-> {} consumers", name, nProducer, vectorLength, nConsumer), minSamples) = [&]() {
+    ::benchmark::benchmark<nRepeat>(std::format("{:>8}: {} producers -<{:^4}>-> {} consumers", name, nProducer, vectorLength, nConsumer), minSamples) = [&]() {
         barrier.arrive_and_wait();
         barrier.arrive_and_wait();
     };

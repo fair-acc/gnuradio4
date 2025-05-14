@@ -1,4 +1,4 @@
-add_library(gnuradio-core STATIC src/PmtTypeHelpers.cpp src/Settings.cpp src/utils.cpp)
+add_library(gnuradio-core STATIC src/PmtTypeHelpers.cpp src/Settings.cpp)
 
 set(public_headers
     include/gnuradio-4.0/annotated.hpp
@@ -39,8 +39,7 @@ target_include_directories(
 
 target_link_libraries(
   gnuradio-core
-  PUBLIC fmt
-         gnuradio-options
+  PUBLIC gnuradio-options
          gnuradio-meta
          magic_enum
          pmtv

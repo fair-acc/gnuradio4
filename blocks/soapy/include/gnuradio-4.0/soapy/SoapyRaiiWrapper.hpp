@@ -1,10 +1,24 @@
 #ifndef SOAPYRAIIWRAPPER_HPP
 #define SOAPYRAIIWRAPPER_HPP
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-W#warnings"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcpp"
+#endif
 #include <SoapySDR/Device.h> // using SoapySDR's C-API as intermediate interface to mitigate ABI-issues between stdlibc++ and libc++
 #include <SoapySDR/Formats.h>
 #include <SoapySDR/Modules.h>
 #include <SoapySDR/Version.h>
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+#include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::blocks::soapy {
 
@@ -181,16 +195,16 @@ constexpr const char* toSoapySDRFormat() {
         flagNames.emplace_back("WAIT_TRIGGER"s);
     }
 
-    return fmt::format("{}", fmt::join(flagNames, ", "));
+    return std::format("{}", gr::join(flagNames, ", "));
 }
 
 inline void printSoapyReturnDebugInfo(int ret, int flags, long long time_ns) {
     if (ret == SOAPY_SDR_TIMEOUT) {
-        fmt::print("TIMEOUT - ");
+        std::print("TIMEOUT - ");
     } else if (ret < 0) {
-        fmt::print("ERROR ({}) - '{}' - ", ret, SoapySDR_errToStr(ret));
+        std::print("ERROR ({}) - '{}' - ", ret, SoapySDR_errToStr(ret));
     }
-    fmt::println("ret = {}, flags({}) = [{}], time_ns = {}", ret, flags, getSoapyFlagNames(flags), time_ns);
+    std::println("ret = {}, flags({}) = [{}], time_ns = {}", ret, flags, getSoapyFlagNames(flags), time_ns);
 }
 
 } // namespace detail
@@ -252,7 +266,7 @@ public:
      */
     Device(const SoapySDR::Kwargs& args = SoapySDR::Kwargs(), std::source_location location = std::source_location::current()) {
         if (std::string_view(SOAPY_SDR_ABI_VERSION) != std::string_view(SoapySDR_getABIVersion())) {
-            throw gr::exception(fmt::format("SoapySDR ABI mismatch: this {} vs. library {}", SOAPY_SDR_ABI_VERSION, SoapySDR_getABIVersion()), location);
+            throw gr::exception(std::format("SoapySDR ABI mismatch: this {} vs. library {}", SOAPY_SDR_ABI_VERSION, SoapySDR_getABIVersion()), location);
         }
 
         _device.reset(SoapySDRDevice_make(detail::KwargsWrapper(args)), [location](SoapySDRDevice* device) {
@@ -260,11 +274,11 @@ public:
                 return;
             }
             if (int ret = SoapySDRDevice_unmake(device); ret) {
-                throw gr::exception(fmt::format("error({}) closing Device: '{}'", ret, SoapySDR_errToStr(ret)), location);
+                throw gr::exception(std::format("error({}) closing Device: '{}'", ret, SoapySDR_errToStr(ret)), location);
             }
         });
         if (!_device) {
-            throw gr::exception(fmt::format("Device({}) - SoapySDRDevice_make failed", args), location);
+            throw gr::exception(std::format("Device({}) - SoapySDRDevice_make failed", args), location);
         }
     }
 
@@ -293,7 +307,7 @@ public:
 
     void setAntenna(int direction, std::size_t channel, std::string_view antennaName, std::source_location location = std::source_location::current()) {
         if (int error = SoapySDRDevice_setAntenna(_device.get(), direction, channel, antennaName.data()); error) {
-            throw gr::exception(fmt::format("Soapy error ({}): {}", error, SoapySDR_errToStr(error)), location);
+            throw gr::exception(std::format("Soapy error ({}): {}", error, SoapySDR_errToStr(error)), location);
         }
     }
 
@@ -317,7 +331,7 @@ public:
 
     void setAutomaticGainControl(int direction, std::size_t channel, bool automatic, std::source_location location = std::source_location::current()) {
         if (int error = SoapySDRDevice_setGainMode(_device.get(), direction, channel, automatic); error) {
-            throw gr::exception(fmt::format("setGain({}, {}, {}) - Soapy error ({}): {}", direction, channel, automatic, error, SoapySDR_errToStr(error), location));
+            throw gr::exception(std::format("setGain({}, {}, {}) - Soapy error ({}): {}", direction, channel, automatic, error, SoapySDR_errToStr(error), location));
         }
     }
 
@@ -327,7 +341,7 @@ public:
         if (int error = (gainElement.empty() ? SoapySDRDevice_setGain(_device.get(), direction, channel, gain_dB) //
                                              : SoapySDRDevice_setGainElement(_device.get(), direction, channel, gainElement.data(), gain_dB));
             error) {
-            throw gr::exception(fmt::format("setGain({}, {}, {}) - Soapy error ({}): {}", direction, channel, gain_dB, error, SoapySDR_errToStr(error), location));
+            throw gr::exception(std::format("setGain({}, {}, {}) - Soapy error ({}): {}", direction, channel, gain_dB, error, SoapySDR_errToStr(error), location));
         }
     }
 
@@ -352,7 +366,7 @@ public:
 
     void setBandwidth(int direction, std::size_t channel, double bandwidthHz, std::source_location location = std::source_location::current()) {
         if (int error = SoapySDRDevice_setBandwidth(_device.get(), direction, channel, bandwidthHz); error) {
-            throw gr::exception(fmt::format("setBandwidth({}, {}, {}) - Soapy error ({}): {}", direction, channel, bandwidthHz, error, SoapySDR_errToStr(error)), location);
+            throw gr::exception(std::format("setBandwidth({}, {}, {}) - Soapy error ({}): {}", direction, channel, bandwidthHz, error, SoapySDR_errToStr(error)), location);
         }
     }
 
@@ -407,7 +421,7 @@ public:
      */
     void setCenterFrequency(int direction, std::size_t channel, double frequency, const SoapySDR::Kwargs& args = SoapySDR::Kwargs(), std::source_location location = std::source_location::current()) {
         if (int error = SoapySDRDevice_setFrequency(_device.get(), direction, channel, frequency, detail::KwargsWrapper(args)); error) {
-            throw gr::exception(fmt::format("setFrequency({}, {}, {}, {}) - Soapy error ({}): {}", direction, channel, frequency, args, error, SoapySDR_errToStr(error)), location);
+            throw gr::exception(std::format("setFrequency({}, {}, {}, {}) - Soapy error ({}): {}", direction, channel, frequency, args, error, SoapySDR_errToStr(error)), location);
         }
     }
 
@@ -427,7 +441,7 @@ public:
 
     void setSampleRate(int direction, std::size_t channel, double rate, std::source_location location = std::source_location::current()) {
         if (int error = SoapySDRDevice_setSampleRate(_device.get(), direction, channel, rate); error) {
-            throw gr::exception(fmt::format("setSampleRate({}, {}, {}) - Soapy error ({}): {}", direction, channel, rate, error, SoapySDR_errToStr(error)), location);
+            throw gr::exception(std::format("setSampleRate({}, {}, {}) - Soapy error ({}): {}", direction, channel, rate, error, SoapySDR_errToStr(error)), location);
         }
     }
 
@@ -451,7 +465,7 @@ public:
 
     void setTimeSource(const std::string& source, std::source_location location = std::source_location::current()) {
         if (int error = SoapySDRDevice_setTimeSource(_device.get(), source.c_str()); error) {
-            throw gr::exception(fmt::format("Soapy error ({}): {}", error, SoapySDR_errToStr(error)), location);
+            throw gr::exception(std::format("Soapy error ({}): {}", error, SoapySDR_errToStr(error)), location);
         }
     }
 
@@ -459,7 +473,7 @@ public:
 
     void setHardwareTime(long long timeNs, const std::string& event = "", std::source_location location = std::source_location::current()) {
         if (int error = SoapySDRDevice_setHardwareTime(_device.get(), timeNs, event.empty() ? nullptr : event.c_str()); error) {
-            throw gr::exception(fmt::format("Soapy error ({}): {}", error, SoapySDR_errToStr(error)), location);
+            throw gr::exception(std::format("Soapy error ({}): {}", error, SoapySDR_errToStr(error)), location);
         }
     }
 
@@ -481,7 +495,7 @@ public:
                       return;
                   }
                   if (int ret = SoapySDRDevice_closeStream(device.get(), stream); ret) {
-                      throw gr::exception(fmt::format("error({}) closing Device: '{}'", ret, SoapySDR_errToStr(ret)));
+                      throw gr::exception(std::format("error({}) closing Device: '{}'", ret, SoapySDR_errToStr(ret)));
                   }
               }) {}
         friend class Device;
@@ -533,7 +547,7 @@ public:
         [[maybe_unused]] int activate(int flags = 0, long long timeNs = 0, std::size_t numElems = 0UZ) {
             int ret = SoapySDRDevice_activateStream(_device.get(), _stream.get(), flags, timeNs, numElems);
             if (ret != 0) {
-                throw gr::exception(fmt::format("failed to activate(flags= {}, timeNs= {}, numElems= {}), stream - error({}) - '{}'", //
+                throw gr::exception(std::format("failed to activate(flags= {}, timeNs= {}, numElems= {}), stream - error({}) - '{}'", //
                     flags, timeNs, numElems, ret, SoapySDR_errToStr(ret)));
             }
             return ret;
@@ -555,7 +569,7 @@ public:
         [[maybe_unused]] int deactivate(int flags = 0, long long timeNs = 0) {
             int ret = SoapySDRDevice_deactivateStream(_device.get(), _stream.get(), flags, timeNs);
             if (ret != 0) {
-                throw gr::exception(fmt::format("failed to deactivate(flags= {}, timeNs= {}), stream - error({}) - '{}'", //
+                throw gr::exception(std::format("failed to deactivate(flags= {}, timeNs= {}), stream - error({}) - '{}'", //
                     flags, timeNs, ret, SoapySDR_errToStr(ret)));
             }
             return ret;
@@ -688,7 +702,7 @@ public:
 
         SoapySDRStream* stream = SoapySDRDevice_setupStream(_device.get(), direction, detail::toSoapySDRFormat<TValueType>(), channels_converted.data(), channels_converted.size(), nullptr);
         if (stream == nullptr) {
-            throw gr::exception(fmt::format("failed to setup Stream<{},{}>([{}]) : {}", meta::type_name<TValueType>(), direction, fmt::join(channels, ", "), SoapySDRDevice_lastError()));
+            throw gr::exception(std::format("failed to setup Stream<{},{}>([{}]) : {}", meta::type_name<TValueType>(), direction, gr::join(channels, ", "), SoapySDRDevice_lastError()));
         }
         return Stream<TValueType, direction>(_device, stream);
     }
@@ -710,7 +724,7 @@ public:
     void writeSetting(const std::string& key, const std::string& value) {
         int ret = SoapySDRDevice_writeSetting(_device.get(), key.c_str(), value.c_str());
         if (ret != 0) {
-            throw gr::exception(fmt::format("Error writing setting ({}): '{}'", ret, SoapySDR_errToStr(ret)));
+            throw gr::exception(std::format("Error writing setting ({}): '{}'", ret, SoapySDR_errToStr(ret)));
         }
     }
 
@@ -739,7 +753,7 @@ public:
     void writeChannelSetting(int direction, std::size_t channel, const std::string& key, const std::string& value) {
         int ret = SoapySDRDevice_writeChannelSetting(_device.get(), direction, channel, key.c_str(), value.c_str());
         if (ret != 0) {
-            throw gr::exception(fmt::format("Error writing channel setting ({}): '{}'", ret, SoapySDR_errToStr(ret)));
+            throw gr::exception(std::format("Error writing channel setting ({}): '{}'", ret, SoapySDR_errToStr(ret)));
         }
     }
 
@@ -779,12 +793,12 @@ static_assert(std::is_default_constructible_v<Device::Stream<float, SOAPY_SDR_RX
 } // namespace gr::blocks::soapy
 
 template<>
-struct fmt::formatter<SoapySDRRange> {
-    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept { return ctx.begin(); }
+struct std::formatter<SoapySDRRange> {
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept { return ctx.begin(); }
 
     template<typename FormatContext>
     auto format(const gr::blocks::soapy::Range& range, FormatContext& ctx) const noexcept {
-        return fmt::format_to(ctx.out(), "Range{{min: {}, max: {}, step: {}}}", range.minimum, range.maximum, range.step);
+        return std::format_to(ctx.out(), "Range{{min: {}, max: {}, step: {}}}", range.minimum, range.maximum, range.step);
     }
 };
 

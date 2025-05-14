@@ -2,7 +2,7 @@
 #include <cassert>
 #include <iostream>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
 
     TestContext context(std::move(paths));
 
-    fmt::print("PluginLoaderTests\n");
+    std::print("PluginLoaderTests\n");
     using namespace gr;
 
     for (const auto& plugin [[maybe_unused]] : context.loader.plugins()) {
@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
     std::vector requireds{names::cout_sink, names::fixed_source, names::divide, names::multiply};
 
     for (const auto& plugin : known) {
-        fmt::print("Known: {}\n", plugin);
+        std::print("Known: {}\n", plugin);
     }
 
     for (const auto& required [[maybe_unused]] : requireds) {
@@ -106,6 +106,6 @@ int main(int argc, char* argv[]) {
         std::ignore = block_sink.work(std::numeric_limits<std::size_t>::max());
     }
 
-    fmt::print("repeats {} event_count {}\n", repeats, builtin_counter<double>::s_event_count);
+    std::print("repeats {} event_count {}\n", repeats, builtin_counter<double>::s_event_count);
     assert(builtin_counter<double>::s_event_count == repeats);
 }

@@ -1,6 +1,6 @@
 #include <boost/ut.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
@@ -84,9 +84,9 @@ const boost::ut::suite SequenceTests = [] {
         expect(eq(iir_settling_time1, 5u)) << "IIR (I) settling time";
         expect(eq(iir_settling_time2, 5u)) << "IIR (II) settling time";
 
-        fmt::println("FIR      filter settling time: {} ms", fir_settling_time);
-        fmt::println("IIR (I)  filter settling time: {} ms", iir_settling_time1);
-        fmt::println("IIR (II) filter settling time: {} ms", iir_settling_time2);
+        std::println("FIR      filter settling time: {} ms", fir_settling_time);
+        std::println("IIR (I)  filter settling time: {} ms", iir_settling_time1);
+        std::println("IIR (II) filter settling time: {} ms", iir_settling_time2);
     };
 
     "IIR equality tests"_test = [] {
@@ -118,7 +118,7 @@ const boost::ut::suite SequenceTests = [] {
             expect(approx(form_II_T, form_I, tolerance)) << "direct form II - transposed";
 
 #if defined(__GNUC__) && !defined(__OPTIMIZE__)
-            fmt::print("input[{:2}]={}-> IIR= {:4.2f} (I) {:4.2f} (II) {:4.2f} (I-T) {:4.2f} (II-T)\n", //
+            std::print("input[{:2}]={}-> IIR= {:4.2f} (I) {:4.2f} (II) {:4.2f} (I-T) {:4.2f} (II-T)\n", //
                 i, input, form_I, form_II, form_I_T, form_II_T);
 #endif
         }
@@ -174,7 +174,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 }
 
                 ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
-                expect(ge(maxOutput, static_cast<ValueType>(.9f))) << fmt::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
+                expect(ge(maxOutput, static_cast<ValueType>(.9f))) << std::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
             };
 
             "verify out-of-band signal is attenuated"_test = [&filter] {
@@ -192,7 +192,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 }
 
                 ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
-                expect(le(maxOutput, static_cast<ValueType>(.2f))) << fmt::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
+                expect(le(maxOutput, static_cast<ValueType>(.2f))) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
             };
         } |
         std::tuple<std::pair<float, meta::constexpr_string<"FIR">>,           //
@@ -241,7 +241,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "second processing failed";
 
             double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
-            expect(ge(maxOutput, T{0.9})) << fmt::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
+            expect(ge(maxOutput, T{0.9})) << std::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
         };
 
         "verify out-of-band signal is attenuated"_test = [&filter] {
@@ -260,7 +260,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "second processing failed";
 
             double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
-            expect(le(maxOutput, T{0.2})) << fmt::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
+            expect(le(maxOutput, T{0.2})) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
         };
     } | std::vector<std::string>({"FIR", "IIR"});
 

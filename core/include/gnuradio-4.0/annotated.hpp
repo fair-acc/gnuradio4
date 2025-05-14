@@ -1,12 +1,13 @@
 #ifndef GNURADIO_ANNOTATED_HPP
 #define GNURADIO_ANNOTATED_HPP
 
+#include <format>
+#include <sstream>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 
-#include <fmt/format.h>
-
+#include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 namespace gr {
@@ -439,9 +440,9 @@ template<typename... Ts>
 struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
 
 template<typename T, gr::meta::fixed_string description, typename... Arguments>
-struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
+struct std::formatter<gr::Annotated<T, description, Arguments...>> {
     using Type = std::remove_const_t<T>;
-    fmt::formatter<Type> value_formatter;
+    std::formatter<Type> value_formatter;
 
     template<typename FormatContext>
     constexpr auto parse(FormatContext& ctx) {
@@ -450,7 +451,6 @@ struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
 
     template<typename FormatContext>
     constexpr auto format(const gr::Annotated<T, description, Arguments...>& annotated, FormatContext& ctx) const {
-        // TODO: add switch for printing only brief and/or meta-information
         return value_formatter.format(annotated.value, ctx);
     }
 };
@@ -459,7 +459,7 @@ namespace gr {
 template<typename T, gr::meta::fixed_string description, typename... Arguments>
 inline std::ostream& operator<<(std::ostream& os, const gr::Annotated<T, description, Arguments...>& v) {
     // TODO: add switch for printing only brief and/or meta-information
-    return os << fmt::format("{}", v.value);
+    return os << std::format("{}", v.value);
 }
 } // namespace gr
 

@@ -39,21 +39,21 @@ void testFrequencyEstimator(EstimatorType& estimator, ProcessFunc processFunc, c
         float deviation     = std::abs(estimatedFreq - trueFreq);
         deviations.push_back(deviation);
 
-        expect(approx(estimatedFreq, trueFreq, tolerance)) << fmt::format("Estimator {}: Estimated {:.6f} Hz vs true frequency {:.6f} Hz - diff: {:.6f} Hz", gr::meta::type_name<EstimatorType>(), estimatedFreq, trueFreq, estimatedFreq - trueFreq);
+        expect(approx(estimatedFreq, trueFreq, tolerance)) << std::format("Estimator {}: Estimated {:.6f} Hz vs true frequency {:.6f} Hz - diff: {:.6f} Hz", gr::meta::type_name<EstimatorType>(), estimatedFreq, trueFreq, estimatedFreq - trueFreq);
     }
 
     if (!deviations.empty()) {
         float maxDeviation = *std::ranges::max_element(deviations);
         if (maxDeviation > tolerance) {
-            fmt::println("Frequency estimates for {} exceed tolerance of {:.6f} Hz (max deviation: {:.6f} Hz):\ntrue [Hz], estimated [Hz], deviation [Hz]", gr::meta::type_name<EstimatorType>(), tolerance, maxDeviation);
+            std::println("Frequency estimates for {} exceed tolerance of {:.6f} Hz (max deviation: {:.6f} Hz):\ntrue [Hz], estimated [Hz], deviation [Hz]", gr::meta::type_name<EstimatorType>(), tolerance, maxDeviation);
             for (std::size_t i = 0; i < frequencyEstimates.size(); ++i) {
-                fmt::println("{:.4f}, {:.4f}, {:.6f}", frequencyTrue[i], frequencyEstimates[i], std::abs(frequencyEstimates[i] - frequencyTrue[i]));
+                std::println("{:.4f}, {:.4f}, {:.6f}", frequencyTrue[i], frequencyEstimates[i], std::abs(frequencyEstimates[i] - frequencyTrue[i]));
             }
         } else {
-            fmt::println("{:100} - max deviation: {:.6f} Hz vs. tolerance: {:.6f} Hz", gr::meta::type_name<EstimatorType>(), maxDeviation, tolerance);
+            std::println("{:100} - max deviation: {:.6f} Hz vs. tolerance: {:.6f} Hz", gr::meta::type_name<EstimatorType>(), maxDeviation, tolerance);
         }
     } else {
-        fmt::println("No frequency estimates were generated for {}.", gr::meta::type_name<EstimatorType>());
+        std::println("No frequency estimates were generated for {}.", gr::meta::type_name<EstimatorType>());
     }
 }
 

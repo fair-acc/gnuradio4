@@ -22,6 +22,8 @@
 #include "TestBlockRegistryContext.hpp"
 #include "gnuradio-4.0/BlockModel.hpp"
 
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+
 namespace ut = boost::ut;
 
 auto makeTestContext() {
@@ -35,7 +37,7 @@ auto makeTestContext() {
 namespace {
 auto collectBlocks(const gr::Graph& graph) {
     std::set<std::string> result;
-    graph.forEachBlock([&](const auto& node) { result.insert(fmt::format("{}-{}", node.name(), node.typeName())); });
+    graph.forEachBlock([&](const auto& node) { result.insert(std::format("{}-{}", node.name(), node.typeName())); });
     return result;
 }
 
@@ -44,11 +46,11 @@ auto collectEdges(const gr::Graph& graph) {
     graph.forEachEdge([&](const auto& edge) {
         auto portDefinitionToString = [](const gr::PortDefinition& definition) {
             return std::visit(gr::meta::overloaded(                                                                                                                   //
-                                  [](const gr::PortDefinition::IndexBased& _definition) { return fmt::format("{}#{}", _definition.topLevel, _definition.subIndex); }, //
+                                  [](const gr::PortDefinition::IndexBased& _definition) { return std::format("{}#{}", _definition.topLevel, _definition.subIndex); }, //
                                   [](const gr::PortDefinition::StringBased& _definition) { return _definition.name; }),                                               //
                 definition.definition);
         };
-        result.insert(fmt::format("{}#{} - {}#{}",                                          //
+        result.insert(std::format("{}#{} - {}#{}",                                          //
             edge.sourceBlock().name(), portDefinitionToString(edge.sourcePortDefinition()), //
             edge.destinationBlock().name(), portDefinitionToString(edge.destinationPortDefinition())));
     });
@@ -80,20 +82,20 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
     }
 
     for (const auto& block : seenBlocks) {
-        fmt::print("Missing id={} name={}\n", block.first, block.second);
+        std::print("Missing id={} name={}\n", block.first, block.second);
     }
 
     if (seenBlocks.empty() && (std::get<std::vector<pmtv::pmt>>(firstYaml.at("connections")).size() == std::get<std::vector<pmtv::pmt>>(secondYaml.at("connections")).size())) {
         return true;
     }
 
-    fmt::print("Blocks in first:\n");
+    std::print("Blocks in first:\n");
     for (const auto& data : firstBlocks) {
-        fmt::print("    id={} name={}\n", data.first, data.second);
+        std::print("    id={} name={}\n", data.first, data.second);
     }
-    fmt::print("Blocks in second:\n");
+    std::print("Blocks in second:\n");
     for (const auto& data : secondBlocks) {
-        fmt::print("    id={} name={}\n", data.first, data.second);
+        std::print("    id={} name={}\n", data.first, data.second);
     }
 
     return false;
@@ -109,13 +111,15 @@ template<pmtv::yaml::TypeTagMode tagMode = pmtv::yaml::TypeTagMode::Auto>
 std::string ymlDecodeEncode(std::string_view yml, std::source_location location = std::source_location::current()) {
     const auto yaml = pmtv::yaml::deserialize(yml);
     if (!yaml) {
-        throw gr::exception(fmt::format("Could not parse yaml: \n{}", pmtv::yaml::formatAsLines(yml, yaml.error())), location);
+        throw gr::exception(std::format("Could not parse yaml: \n{}", pmtv::yaml::formatAsLines(yml, yaml.error())), location);
     }
 
     return pmtv::yaml::serialize<tagMode>(yaml.value());
 }
 
 const boost::ut::suite BasicGrcTests = [] {
+    using namespace gr::test;
+
     auto context = makeTestContext();
 
     constexpr std::string_view testGrc = R"(
@@ -143,7 +147,7 @@ connections:
         try {
             using namespace gr;
             for (const auto& block : context->loader.availableBlocks()) {
-                fmt::print("Block {} is known\n", block);
+                std::print("Block {} is known\n", block);
             }
 
             const auto graphSrc      = ymlDecodeEncode(testGrc);
@@ -151,7 +155,7 @@ connections:
             auto       graphSavedSrc = gr::saveGrc(context->loader, graph);
             expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };
@@ -168,7 +172,7 @@ connections:
             expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
             expect(eq(collectEdges(graph1), collectEdges(graph2)));
         } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };
@@ -207,7 +211,7 @@ connections:
 
             const auto graphSrc1 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::Auto>(pluginsTestGrc);
             const auto graphSrc2 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::None>(pluginsTestGrc);
-            fmt::println("yml-before:\n {}\nwith type-tags:\n{}\nwithout type tags:\n{}", pluginsTestGrc, graphSrc1, graphSrc2);
+            std::println("yml-before:\n {}\nwith type-tags:\n{}\nwithout type tags:\n{}", pluginsTestGrc, graphSrc1, graphSrc2);
 
             auto graph  = gr::loadGrc(context->loader, graphSrc1);
             auto graph2 = gr::loadGrc(context->loader, pluginsTestGrc);
@@ -221,7 +225,7 @@ connections:
             gr::scheduler::Simple scheduler(std::move(graph));
             expect(scheduler.runAndWait().has_value());
         } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };
@@ -276,7 +280,7 @@ connections:
 
             expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };
@@ -287,6 +291,8 @@ connections:
 const boost::ut::suite PortTests = [] {
     using namespace boost::ut;
     using namespace boost::ext::ut;
+    using namespace gr::test;
+
     auto context = makeTestContext();
 
     "Port buffer sizes"_test = [&] {
@@ -355,7 +361,7 @@ connections:
                 expect(expectedSizes.empty());
             }
         } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };
@@ -417,6 +423,7 @@ connections:
 #endif
 
 const boost::ut::suite SettingsTests = [] {
+    using namespace gr::test;
     auto context = makeTestContext();
 
     "Settings serialization"_test = [&] {
@@ -453,7 +460,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
             expect(eq(collectEdges(graph1), collectEdges(graph2)));
         } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };
@@ -500,7 +507,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
             expect(eq(collectEdges(graph1), collectEdges(graph2)));
         } catch (const std::string& e) {
-            fmt::println(std::cerr, "Unexpected exception: {}", e);
+            std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
         }
     };

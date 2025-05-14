@@ -2,7 +2,7 @@
 
 #include <random>
 
-#include <fmt/format.h>
+#include <format>
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
@@ -68,18 +68,18 @@ const boost::ut::suite<"ImChart"> windowTests = [] {
             auto expectedGap = tickPositions[1UZ] - tickPositions[0UZ];
             for (size_t i = 1; i < tickPositions.size() - 1; ++i) {
                 auto actualGap = tickPositions[i + 1] - tickPositions[i];
-                expect(eq(actualGap, expectedGap)) << fmt::format("uneven spacing {} exp. {} found at axis width {}", actualGap, expectedGap, axisWidth);
-                expect(ge(actualGap, minGapSize)) << fmt::format("gap size {} less than minimum required {} at axis width {}", actualGap, minGapSize, axisWidth);
+                expect(eq(actualGap, expectedGap)) << std::format("uneven spacing {} exp. {} found at axis width {}", actualGap, expectedGap, axisWidth);
+                expect(ge(actualGap, minGapSize)) << std::format("gap size {} less than minimum required {} at axis width {}", actualGap, minGapSize, axisWidth);
             }
         }
     } | std::vector{10UZ, 20UZ, 42UZ, 50UZ, 100UZ};
 
-    constexpr std::size_t sizeX = 120;
-    constexpr std::size_t sizeY = 16;
-    constexpr double      xMin  = 0.0;
-    constexpr double      xMax  = 100.0;
-    constexpr double      yMin  = -5.0;
-    constexpr double      yMax  = +5.0;
+    [[maybe_unused]] constexpr std::size_t sizeX = 120;
+    [[maybe_unused]] constexpr std::size_t sizeY = 16;
+    [[maybe_unused]] constexpr double      xMin  = 0.0;
+    [[maybe_unused]] constexpr double      xMax  = 100.0;
+    [[maybe_unused]] constexpr double      yMin  = -5.0;
+    [[maybe_unused]] constexpr double      yMax  = +5.0;
 
     "basic chart - lines"_test = [&](bool defaultConstructor) {
         using namespace gr::graphs;

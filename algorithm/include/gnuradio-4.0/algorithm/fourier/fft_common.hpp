@@ -6,7 +6,7 @@
 #include <numbers>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 #include <ranges>
 
 namespace gr::algorithm::fft {

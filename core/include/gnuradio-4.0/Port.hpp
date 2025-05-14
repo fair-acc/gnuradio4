@@ -597,7 +597,7 @@ struct Port {
 #ifndef NDEBUG
 
                 if (lastTag.index > index) { // check the order of published Tags.index
-                    fmt::println(stderr, "Tag indices are not in the correct order, tagsPublished:{}, lastTag.index:{}, index:{}", tagsPublished, lastTag.index, index);
+                    std::println(stderr, "Tag indices are not in the correct order, tagsPublished:{}, lastTag.index:{}, index:{}", tagsPublished, lastTag.index, index);
                     // std::abort();
                 }
 #endif

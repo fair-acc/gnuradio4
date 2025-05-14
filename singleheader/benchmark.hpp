@@ -4,10 +4,14 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cmath>
+#include <cstring>
+#include <format>
 #include <iostream>
 #include <map>
 #include <mutex>
 #include <numeric>
+#include <print>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -22,25 +26,22 @@
 // (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 //
-#if defined(__cpp_modules) && !defined(BOOST_UT_DISABLE_MODULE)
-export module boost.ut;
-export import std;
+#if defined(BOOST_UT_CXX_MODULES)
 #define BOOST_UT_EXPORT export
 #else
 
 #define BOOST_UT_EXPORT
 #endif
 
-#if __has_include(<iso646.h>)
-#include <iso646.h>  // and, or, not, ...
+#if !defined(BOOST_UT_CXX_MODULES)
+#include <version>
 #endif
 
-#include <version>
 #if defined(_MSC_VER)
-  #pragma push_macro("min")
-  #pragma push_macro("max")
-  #undef min
-  #undef max
+#pragma push_macro("min")
+#pragma push_macro("max")
+#undef min
+#undef max
 #endif
 // Before libc++ 17 had experimental support for format and it required a
 // special build flag. Currently libc++ has not implemented all C++20 chrono
@@ -74,7 +75,7 @@ export import std;
 #elif not defined(__cpp_static_assert)
 #error "[Boost::ext].UT requires support for static assert";
 #else
-#define BOOST_UT_VERSION 2'0'1
+#define BOOST_UT_VERSION 2'3'1
 
 #if defined(__has_builtin) and defined(__GNUC__) and (__GNUC__ < 10) and \
     not defined(__clang__)
@@ -89,24 +90,26 @@ export import std;
 #define __has_builtin(...) __has_##__VA_ARGS__
 #endif
 
+#if !defined(BOOST_UT_CXX_MODULES)
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <concepts>
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <stack>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
-#include <fstream>
 #if __has_include(<unistd.h>) and __has_include(<sys/wait.h>)
 #include <sys/wait.h>
 #include <unistd.h>
@@ -121,12 +124,13 @@ export import std;
 #if __has_include(<source_location>)
 #include <source_location>
 #endif
+#endif // cxx modules
 
-struct _unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct {
+struct unique_name_for_auto_detect_prefix_and_suffix_length_0123456789_struct_ {
 };
 
 BOOST_UT_EXPORT
-namespace boost::inline ext::ut::inline v2_0_1 {
+namespace boost::inline ext::ut::inline v2_3_1 {
 namespace utility {
 template <class>
 class function;
@@ -254,22 +258,28 @@ template <class T = std::string_view, class TDelim>
   }
   return output;
 }
-constexpr auto regex_match(const char *str, const char *pattern) -> bool {
-  if (*pattern == '\0' && *str == '\0') return true;
-  if (*pattern == '\0' && *str != '\0') return false;
-  if (*str == '\0' && *pattern != '\0') return false;
+constexpr auto regex_match(const char* str, const char* pattern) -> bool {
+  if (*pattern == '\0' && *str == '\0') {
+    return true;
+  }
+  if (*pattern == '\0' && *str != '\0') {
+    return false;
+  }
+  if (*str == '\0' && *pattern != '\0') {
+    return false;
+  }
   if (*pattern == '.') {
-    return regex_match(str+1, pattern+1);
+    return regex_match(str + 1, pattern + 1);
   }
   if (*pattern == *str) {
-    return regex_match(str+1, pattern+1);
+    return regex_match(str + 1, pattern + 1);
   }
   return false;
 }
 }  // namespace utility
 
 namespace reflection {
-#if defined(__cpp_lib_source_location)
+#if defined(__cpp_lib_source_location) && !defined(_LIBCPP_APPLE_CLANG_VER)
 using source_location = std::source_location;
 #else
 class source_location {
@@ -297,7 +307,7 @@ class source_location {
 namespace detail {
 template <typename TargetType>
 [[nodiscard]] constexpr auto get_template_function_name_use_type()
-    -> const std::string_view {
+    -> std::string_view {
 // for over compiler need over macros
 #if defined(_MSC_VER) && !defined(__clang__)
   return {&__FUNCSIG__[0], sizeof(__FUNCSIG__)};
@@ -309,40 +319,40 @@ template <typename TargetType>
 // decay allows you to highlight a cleaner name
 template <typename TargetType>
 [[nodiscard]] constexpr auto get_template_function_name_use_decay_type()
-    -> const std::string_view {
+    -> std::string_view {
   return get_template_function_name_use_type<std::decay_t<TargetType>>();
 }
 
 inline constexpr const std::string_view raw_type_name =
     get_template_function_name_use_decay_type<
-        _unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct>();
+        unique_name_for_auto_detect_prefix_and_suffix_length_0123456789_struct_>();
 
 inline constexpr const std::size_t raw_length = raw_type_name.length();
 inline constexpr const std::string_view need_name =
 #if defined(_MSC_VER) and not defined(__clang__)
     "struct "
-    "_unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct";
+    "unique_name_for_auto_detect_prefix_and_suffix_length_0123456789_struct_";
 #else
-    "_unique_name_for_auto_detect_prefix_and_suffix_lenght_0123456789_struct";
+    "unique_name_for_auto_detect_prefix_and_suffix_length_0123456789_struct_";
 #endif
 inline constexpr const std::size_t need_length = need_name.length();
 static_assert(need_length <= raw_length,
-              "Auto find prefix and suffix lenght broken error 1");
+              "Auto find prefix and suffix length broken error 1");
 inline constexpr const std::size_t prefix_length =
     raw_type_name.find(need_name);
 static_assert(prefix_length != std::string_view::npos,
-              "Auto find prefix and suffix lenght broken error 2");
+              "Auto find prefix and suffix length broken error 2");
 static_assert(prefix_length <= raw_length,
-              "Auto find prefix and suffix lenght broken error 3");
-inline constexpr const std::size_t tail_lenght = raw_length - prefix_length;
-static_assert(need_length <= tail_lenght,
-              "Auto find prefix and suffix lenght broken error 4");
-inline constexpr const std::size_t suffix_length = tail_lenght - need_length;
+              "Auto find prefix and suffix length broken error 3");
+inline constexpr const std::size_t tail_length = raw_length - prefix_length;
+static_assert(need_length <= tail_length,
+              "Auto find prefix and suffix length broken error 4");
+inline constexpr const std::size_t suffix_length = tail_length - need_length;
 
 }  // namespace detail
 
 template <typename TargetType>
-[[nodiscard]] constexpr auto type_name() -> const std::string_view {
+[[nodiscard]] constexpr auto type_name() -> std::string_view {
   const std::string_view raw_type_name =
       detail::get_template_function_name_use_type<TargetType>();
   const std::size_t end = raw_type_name.length() - detail::suffix_length;
@@ -353,7 +363,7 @@ template <typename TargetType>
 
 // decay allows you to highlight a cleaner name
 template <typename TargetType>
-[[nodiscard]] constexpr auto decay_type_name() -> const std::string_view {
+[[nodiscard]] constexpr auto decay_type_name() -> std::string_view {
   const std::string_view raw_type_name =
       detail::get_template_function_name_use_decay_type<TargetType>();
   const std::size_t end = raw_type_name.length() - detail::suffix_length;
@@ -477,32 +487,12 @@ struct function_traits<R (T::*)(TArgs...) const> {
   using args = list<TArgs...>;
 };
 
-template <class T>
-T&& declval();
-template <class... Ts, class TExpr>
-constexpr auto is_valid(TExpr expr)
-    -> decltype(expr(declval<Ts...>()), bool()) {
-  return true;
-}
-template <class...>
-constexpr auto is_valid(...) -> bool {
-  return false;
-}
-
-template <class T>
-inline constexpr auto is_range_v =
-    is_valid<T>([](auto t) -> decltype(t.begin(), t.end(), void()) {});
-
-template <class T>
-inline constexpr auto has_user_print = is_valid<T>(
-    [](auto t) -> decltype(void(declval<std::ostringstream&>() << t)) {});
-
 template <class T, class = void>
 struct has_static_member_object_value : std::false_type {};
 
 template <class T>
-struct has_static_member_object_value<T,
-                                      std::void_t<decltype(declval<T>().value)>>
+struct has_static_member_object_value<
+    T, std::void_t<decltype(std::declval<T>().value)>>
     : std::bool_constant<!std::is_member_pointer_v<decltype(&T::value)> &&
                          !std::is_function_v<decltype(T::value)>> {};
 
@@ -515,7 +505,7 @@ struct has_static_member_object_epsilon : std::false_type {};
 
 template <class T>
 struct has_static_member_object_epsilon<
-    T, std::void_t<decltype(declval<T>().epsilon)>>
+    T, std::void_t<decltype(std::declval<T>().epsilon)>>
     : std::bool_constant<!std::is_member_pointer_v<decltype(&T::epsilon)> &&
                          !std::is_function_v<decltype(T::epsilon)>> {};
 
@@ -523,41 +513,20 @@ template <class T>
 inline constexpr bool has_static_member_object_epsilon_v =
     has_static_member_object_epsilon<T>::value;
 
-template <class T>
-inline constexpr auto is_floating_point_v = false;
-template <>
-inline constexpr auto is_floating_point_v<float> = true;
-template <>
-inline constexpr auto is_floating_point_v<double> = true;
-template <>
-inline constexpr auto is_floating_point_v<long double> = true;
-
-#if defined(__clang__) or defined(_MSC_VER)
-template <class From, class To>
-inline constexpr auto is_convertible_v = __is_convertible_to(From, To);
-#else
-template <class From, class To>
-constexpr auto is_convertible(int) -> decltype(bool(To(declval<From>()))) {
-  return true;
-}
-template <class...>
-constexpr auto is_convertible(...) {
-  return false;
-}
-template <class From, class To>
-constexpr auto is_convertible_v = is_convertible<From, To>(0);
-#endif
-
-template <bool>
-struct requires_ {};
-template <>
-struct requires_<true> {
-  using type = int;
-};
-
-template <bool Cond>
-using requires_t = typename requires_<Cond>::type;
 }  // namespace type_traits
+
+namespace concepts {
+
+// std::convertible_to also requires implicit conversion to work
+// See https://stackoverflow.com/a/76547623
+template <class From, class To>
+concept explicitly_convertible_to =
+    requires { static_cast<To>(std::declval<From>()); };
+
+template <class T>
+concept ostreamable = requires(std::ostringstream& os, T t) { os << t; };
+
+}  // namespace concepts
 
 template <typename CharT, std::size_t SIZE>
 struct fixed_string {
@@ -565,8 +534,11 @@ struct fixed_string {
   CharT _data[N + 1] = {};
 
   constexpr explicit(false) fixed_string(const CharT (&str)[N + 1]) noexcept {
-    if constexpr (N != 0)
-      for (std::size_t i = 0; i < N; ++i) _data[i] = str[i];
+    if constexpr (N != 0) {
+      for (std::size_t i = 0; i < N; ++i) {
+        _data[i] = str[i];
+      }
+    }
   }
 
   [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
@@ -596,6 +568,10 @@ fixed_string(const CharT (&str)[N]) -> fixed_string<CharT, N - 1>;
 struct none {};
 
 namespace events {
+struct run_begin {
+  int argc{};
+  const char** argv{};
+};
 struct test_begin {
   std::string_view type{};
   std::string_view name{};
@@ -614,7 +590,7 @@ struct suite_end {
 template <class Test, class TArg = none>
 struct test {
   std::string_view type{};
-  std::string_view name{};
+  std::string name{};  /// might be dynamic
   std::vector<std::string_view> tag{};
   reflection::source_location location{};
   TArg arg{};
@@ -701,7 +677,7 @@ struct log {
 };
 template <class TMsg = std::string_view>
 log(TMsg) -> log<TMsg>;
-struct fatal_assertion {};
+struct fatal_assertion : std::exception {};
 struct exception {
   const char* msg{};
   [[nodiscard]] auto what() const -> const char* { return msg; }
@@ -717,7 +693,7 @@ struct fatal_;
 
 struct fatal {
   template <class T>
-  [[nodiscard]] inline auto operator()(const T& t) const {
+  [[nodiscard]] auto operator()(const T& t) const {
     return detail::fatal_{t};
   }
 };
@@ -738,22 +714,22 @@ struct cfg {
 #endif
 
   static inline std::string executable_name = "unknown executable";
-  static inline std::string query_pattern = "";        // <- done
-  static inline bool invert_query_pattern = false;     // <- done
-  static inline std::string query_regex_pattern = "";  // <- done
-  static inline bool show_help = false;                // <- done
-  static inline bool show_tests = false;               // <- done
-  static inline bool list_tags = false;                // <- done
-  static inline bool show_successful_tests = false;    // <- done
-  static inline std::string output_filename = "";
+  static inline std::string query_pattern;           // <- done
+  static inline bool invert_query_pattern = false;   // <- done
+  static inline std::string query_regex_pattern;     // <- done
+  static inline bool show_help = false;              // <- done
+  static inline bool show_tests = false;             // <- done
+  static inline bool list_tags = false;              // <- done
+  static inline bool show_successful_tests = false;  // <- done
+  static inline std::string output_filename;
   static inline std::string use_reporter = "console";  // <- done
-  static inline std::string suite_name = "";
+  static inline std::string suite_name;
   static inline bool abort_early = false;  // <- done
   static inline std::size_t abort_after_n_failures =
       std::numeric_limits<std::size_t>::max();  // <- done
   static inline bool show_duration = false;     // <- done
   static inline std::size_t show_min_duration = 0;
-  static inline std::string input_filename = "";
+  static inline std::string input_filename;
   static inline bool show_test_names = false;  // <- done
   static inline bool show_reporters = false;   // <- done
   static inline std::string sort_order = "decl";
@@ -819,29 +795,41 @@ struct cfg {
     std::cout << "version:        " << BOOST_UT_VERSION << std::endl;
   }
 
-  static inline void parse(int argc, const char* argv[]) {
-    const std::size_t n_args = static_cast<std::size_t>(argc);
-    if (n_args > 0 && argv != nullptr) {
+  static void parse_arg_with_fallback(int argc, const char* argv[]) {
+    //int before call main
+    if (argc > 0 && argv != nullptr) {
       cfg::largc = argc;
       cfg::largv = argv;
+    }
+    else
+    {
+      cfg::largc = 0;
+      cfg::largv = nullptr;
+    }
+    parse(cfg::largc, cfg::largv);
+  }
+
+  static void parse(int argc, const char* argv[]) {
+    const std::size_t n_args = argc > 0 ? static_cast<std::size_t>(argc) : 0U;
+    if (n_args > 0 && argv != nullptr) {
       executable_name = argv[0];
     }
     query_pattern = "";
     bool found_first_option = false;
-    for (auto i = 1U; i < n_args; i++) {
+    for (auto i = 1U; i < n_args && argv != nullptr; i++) {
       std::string cmd(argv[i]);
       auto cmd_option = find_arg(cmd);
       if (!cmd_option.has_value()) {
         if (found_first_option) {
-          std::cerr << "unknown option: '" << argv[i] << "' run:" << std::endl;
-          std::cerr << "'" << argv[0] << " --help'" << std::endl;
+          std::cerr << "unknown option: '" << cmd << "' run:" << std::endl;
+          std::cerr << "'" << executable_name << " --help'" << std::endl;
           std::cerr << "for additional help" << std::endl;
           std::exit(-1);
         } else {
           if (i > 1U) {
             query_pattern.append(" ");
           }
-          query_pattern.append(argv[i]);
+          query_pattern.append(cmd);
         }
         continue;
       }
@@ -862,7 +850,7 @@ struct cfg {
         // parse size argument
         std::size_t last;
         std::string argument(argv[i]);
-        std::size_t val = std::stoull(argument, &last);
+        auto val = static_cast<std::size_t>(std::stoull(argument, &last));
         if (last != argument.length()) {
           std::cerr << "cannot parse option of " << argv[i - 1] << " "
                     << argv[i] << std::endl;
@@ -924,6 +912,7 @@ template <class T>
 template <class T>
 struct type_ : op {
   template <class TOther>
+  // NOLINTNEXTLINE(readability-const-return-type)
   [[nodiscard]] constexpr auto operator()(const TOther&) const
       -> const type_<TOther> {
     return {};
@@ -959,9 +948,8 @@ struct value : op {
   T value_{};
 };
 
-template <class T>
-struct value<T, type_traits::requires_t<type_traits::is_floating_point_v<T>>>
-    : op {
+template <std::floating_point T>
+struct value<T> : op {
   using value_type = T;
   static inline auto epsilon = T{};
 
@@ -1031,7 +1019,7 @@ struct eq_ : op {
 
           if constexpr (type_traits::has_static_member_object_value_v<TLhs> and
                         type_traits::has_static_member_object_value_v<TRhs>) {
-            return TLhs::value == TRhs::value;
+            return lhs.value == rhs.value;
           } else if constexpr (type_traits::has_static_member_object_epsilon_v<
                                    TLhs> and
                                type_traits::has_static_member_object_epsilon_v<
@@ -1096,7 +1084,7 @@ struct neq_ : op {
 
           if constexpr (type_traits::has_static_member_object_value_v<TLhs> and
                         type_traits::has_static_member_object_value_v<TRhs>) {
-            return TLhs::value != TRhs::value;
+            return lhs.value != rhs.value;
           } else if constexpr (type_traits::has_static_member_object_epsilon_v<
                                    TLhs> and
                                type_traits::has_static_member_object_epsilon_v<
@@ -1131,7 +1119,7 @@ struct gt_ : op {
 
           if constexpr (type_traits::has_static_member_object_value_v<TLhs> and
                         type_traits::has_static_member_object_value_v<TRhs>) {
-            return TLhs::value > TRhs::value;
+            return lhs.value > rhs.value;
           } else {
             return get(lhs_) > get(rhs_);
           }
@@ -1154,7 +1142,7 @@ struct ge_ : op {
 
           if constexpr (type_traits::has_static_member_object_value_v<TLhs> and
                         type_traits::has_static_member_object_value_v<TRhs>) {
-            return TLhs::value >= TRhs::value;
+            return lhs.value >= rhs.value;
           } else {
             return get(lhs_) >= get(rhs_);
           }
@@ -1177,11 +1165,18 @@ struct lt_ : op {
 
           if constexpr (type_traits::has_static_member_object_value_v<TLhs> and
                         type_traits::has_static_member_object_value_v<TRhs>) {
+#if defined(_MSC_VER) && !defined(__clang__)
+            // for some reason, accessing the static member via :: does not compile on MSVC,
+            // and the next line does not compile on clang, so we have to use the ifdef here
+            return lhs.value < rhs.value;
+#else
             return TLhs::value < TRhs::value;
+#endif
           } else {
             return get(lhs_) < get(rhs_);
           }
-        }()} {}
+        }()} {
+  }
 
   [[nodiscard]] constexpr operator bool() const { return value_; }
   [[nodiscard]] constexpr auto lhs() const { return get(lhs_); }
@@ -1201,7 +1196,7 @@ struct le_ : op {
 
           if constexpr (type_traits::has_static_member_object_value_v<TLhs> and
                         type_traits::has_static_member_object_value_v<TRhs>) {
-            return TLhs::value <= TRhs::value;
+            return lhs.value <= rhs.value;
           } else {
             return get(lhs_) <= get(rhs_);
           }
@@ -1341,7 +1336,18 @@ struct aborts_ : op {
 
 namespace type_traits {
 template <class T>
-inline constexpr auto is_op_v = __is_base_of(detail::op, T);
+concept is_op = std::derived_from<T, detail::op>;
+
+template <typename T, typename = void>
+struct is_stream_insertable : std::false_type {};
+
+template <typename T>
+struct is_stream_insertable<
+    T, std::void_t<decltype(std::declval<std::ostream&>()
+                            << detail::get(std::declval<T>()))>>
+    : std::true_type {};
+template <typename T>
+inline constexpr bool is_stream_insertable_v = is_stream_insertable<T>::value;
 }  // namespace type_traits
 
 struct colors {
@@ -1352,7 +1358,7 @@ struct colors {
 };
 
 class printer {
-  [[nodiscard]] inline auto color(const bool cond) {
+  [[nodiscard]] auto color(const bool cond) {
     return cond ? colors_.pass : colors_.fail;
   }
 
@@ -1366,9 +1372,8 @@ class printer {
     return *this;
   }
 
-  template <class T,
-            type_traits::requires_t<not type_traits::has_user_print<T> and
-                                    type_traits::is_range_v<T>> = 0>
+  template <class T>
+    requires std::ranges::range<T> && (!concepts::ostreamable<T>)
   auto& operator<<(T&& t) {
     *this << '{';
     auto first = true;
@@ -1495,6 +1500,8 @@ class reporter {
     printer_ = static_cast<TPrinter&&>(printer);
   }
 
+  auto on(events::run_begin) -> void {}
+
   auto on(events::test_begin test_begin) -> void {
     printer_ << "Running \"" << test_begin.name << "\"...";
     fails_ = asserts_.fail;
@@ -1553,7 +1560,7 @@ class reporter {
     ++asserts_.fail;
   }
 
-  auto on(events::fatal_assertion) -> void {}
+  auto on(const events::fatal_assertion&) -> void {}
 
   auto on(events::summary) -> void {
     if (tests_.fail or asserts_.fail) {
@@ -1604,7 +1611,7 @@ class reporter_junit {
   using clock_ref = std::chrono::high_resolution_clock;
   using timePoint = std::chrono::time_point<clock_ref>;
   using timeDiff = std::chrono::milliseconds;
-  enum class ReportType { CONSOLE, JUNIT } report_type_;
+  enum class ReportType : std::uint8_t { CONSOLE, JUNIT } report_type_;
   static constexpr ReportType CONSOLE = ReportType::CONSOLE;
   static constexpr ReportType JUNIT = ReportType::JUNIT;
 
@@ -1698,8 +1705,11 @@ class reporter_junit {
   constexpr auto operator=(TPrinter printer) {
     printer_ = static_cast<TPrinter&&>(printer);
   }
-  reporter_junit() : lcout_(std::cout.rdbuf()) {
-    ::boost::ut::detail::cfg::parse(detail::cfg::largc, detail::cfg::largv);
+  reporter_junit() : lcout_(std::cout.rdbuf()) {}
+  ~reporter_junit() { std::cout.rdbuf(cout_save); }
+
+  auto on(events::run_begin run) {
+    ::boost::ut::detail::cfg::parse_arg_with_fallback(run.argc, run.argv);
 
     if (detail::cfg::show_reporters) {
       std::cout << "available reporter:\n";
@@ -1719,7 +1729,6 @@ class reporter_junit {
       std::cout.rdbuf(ss_out_.rdbuf());
     }
   }
-  ~reporter_junit() { std::cout.rdbuf(cout_save); }
 
   auto on(events::suite_begin suite) -> void {
     while (active_test_.size() > 0) {
@@ -1742,8 +1751,9 @@ class reporter_junit {
 
     if (report_type_ == CONSOLE) {
       ss_out_ << "\n";
-      ss_out_ << std::string(2 * active_test_.size() - 2, ' ');
-      ss_out_ << "Running test \"" << test_event.name << "\"... ";
+      ss_out_ << std::string((2 * active_test_.size()) - 2, ' ');
+      ss_out_ << "Running " << test_event.type << " \"" << test_event.name
+              << "\"... ";
     }
   }
 
@@ -1757,7 +1767,7 @@ class reporter_junit {
         if (detail::cfg::show_successful_tests) {
           if (!active_scope_->nested_tests->empty()) {
             ss_out_ << "\n";
-            ss_out_ << std::string(2 * active_test_.size() - 2, ' ');
+            ss_out_ << std::string((2 * active_test_.size()) - 2, ' ');
             ss_out_ << "Running test \"" << test_event.name << "\" - ";
           }
           ss_out_ << color_.pass << "PASSED" << color_.none;
@@ -1786,9 +1796,9 @@ class reporter_junit {
       active_scope_->status = "SKIPPED";
       active_scope_->skipped += 1;
       if (report_type_ == CONSOLE) {
-        lcout_ << '\n' << std::string(2 * active_test_.size() - 2, ' ');
+        lcout_ << '\n' << std::string((2 * active_test_.size()) - 2, ' ');
         lcout_ << "Running \"" << test_event.name << "\"... ";
-        lcout_ << color_.skip << "SKIPPED" << color_.none;
+        lcout_ << color_.skip << "SKIPPED" << color_.none << '\n';
       }
       reset_printer();
       pop_scope(test_event.name);
@@ -1812,7 +1822,7 @@ class reporter_junit {
       active_scope_->report_string += color_.none;
     }
     if (report_type_ == CONSOLE) {
-      lcout_ << std::string(2 * active_test_.size() - 2, ' ');
+      lcout_ << std::string((2 * active_test_.size()) - 2, ' ');
       lcout_ << "Running test \"" << active_test_.top() << "\"... ";
       lcout_ << color_.fail << "FAILED" << color_.none;
       print_duration(lcout_);
@@ -1859,22 +1869,24 @@ class reporter_junit {
     }
   }
 
-  auto on(events::fatal_assertion) -> void { active_scope_->fails++; }
+  auto on(const events::fatal_assertion&) -> void { active_scope_->fails++; }
 
   auto on(events::summary) -> void {
     std::cout.flush();
     std::cout.rdbuf(cout_save);
     std::ofstream maybe_of;
-    if (detail::cfg::output_filename != "") { maybe_of = std::ofstream(detail::cfg::output_filename); }
+    if (detail::cfg::output_filename != "") {
+      maybe_of = std::ofstream(detail::cfg::output_filename);
+    }
 
     if (report_type_ == JUNIT) {
-      print_junit_summary(detail::cfg::output_filename != "" ? maybe_of : std::cout);
+      print_junit_summary(detail::cfg::output_filename != "" ? maybe_of
+                                                             : std::cout);
       return;
     }
     print_console_summary(
-      detail::cfg::output_filename != "" ? maybe_of : std::cout,
-      detail::cfg::output_filename != "" ? maybe_of : std::cerr
-    );
+        detail::cfg::output_filename != "" ? maybe_of : std::cout,
+        detail::cfg::output_filename != "" ? maybe_of : std::cerr);
   }
 
  protected:
@@ -1890,13 +1902,14 @@ class reporter_junit {
     }
   }
 
-  void print_console_summary(std::ostream &out_stream, std::ostream &err_stream) {
+  void print_console_summary(std::ostream& out_stream,
+                             std::ostream& err_stream) {
     for (const auto& [suite_name, suite_result] : results_) {
       if (suite_result.fails) {
         err_stream
             << "\n========================================================"
                "=======================\n"
-            << "Suite " << suite_name  //
+            << "Suite " << suite_name << '\n'  //
             << "tests:   " << (suite_result.n_tests) << " | " << color_.fail
             << suite_result.fails << " failed" << color_.none << '\n'
             << "asserts: " << (suite_result.assertions) << " | "
@@ -1906,9 +1919,9 @@ class reporter_junit {
         std::cerr << std::endl;
       } else {
         out_stream << color_.pass << "Suite '" << suite_name
-                  << "': all tests passed" << color_.none << " ("
-                  << suite_result.assertions << " asserts in "
-                  << suite_result.n_tests << " tests)\n";
+                   << "': all tests passed" << color_.none << " ("
+                   << suite_result.assertions << " asserts in "
+                   << suite_result.n_tests << " tests)\n";
 
         if (suite_result.skipped) {
           std::cout << suite_result.skipped << " tests skipped\n";
@@ -1919,9 +1932,10 @@ class reporter_junit {
     }
   }
 
-  void print_junit_summary(std::ostream &stream) {
+  void print_junit_summary(std::ostream& stream) {
     // aggregate results
-    size_t n_tests=0, n_fails=0;
+    size_t n_tests = 0;
+    size_t n_fails = 0;
     double total_time = 0.0;
     auto suite_time = [](auto const& suite_result) {
       std::int64_t time_ms =
@@ -1939,11 +1953,11 @@ class reporter_junit {
     // mock junit output:
     stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     stream << "<testsuites";
-      stream << " name=\"all\"";
-      stream << " tests=\"" << n_tests << '\"';
-      stream << " failures=\"" << n_fails << '\"';
-      stream << " time=\"" << total_time << '\"';
-      stream << ">\n";
+    stream << " name=\"all\"";
+    stream << " tests=\"" << n_tests << '\"';
+    stream << " failures=\"" << n_fails << '\"';
+    stream << " time=\"" << total_time << '\"';
+    stream << ">\n";
 
     for (const auto& [suite_name, suite_result] : results_) {
       stream << "<testsuite";
@@ -1961,8 +1975,8 @@ class reporter_junit {
     }
     stream << "</testsuites>";
   }
-  void print_result(std::ostream &stream, const std::string& suite_name, std::string indent,
-                    const test_result& parent) {
+  void print_result(std::ostream& stream, const std::string& suite_name,
+                    const std::string& indent, const test_result& parent) {
     for (const auto& [name, result] : *parent.nested_tests) {
       stream << indent;
       stream << "<testcase classname=\"" << result.suite_name << '\"';
@@ -1975,8 +1989,7 @@ class reporter_junit {
           std::chrono::duration_cast<std::chrono::milliseconds>(
               result.run_stop - result.run_start)
               .count();
-      stream << " time=\"" << (static_cast<double>(time_ms) / 1000.0)
-                << "\"";
+      stream << " time=\"" << (static_cast<double>(time_ms) / 1000.0) << "\"";
       stream << " status=\"" << result.status << '\"';
       if (result.report_string.empty() && result.nested_tests->empty()) {
         stream << " />\n";
@@ -2004,6 +2017,8 @@ struct options {
 
 struct run_cfg {
   bool report_errors{false};
+  int argc{0};
+  const char** argv{nullptr};
 };
 
 template <class TReporter = reporter<printer>, auto MaxPathSize = 16>
@@ -2146,7 +2161,7 @@ class runner {
       }
 #endif
 
-      if (not --level_) {
+      if (not--level_) {
         reporter_.on(events::test_end{.type = test.type, .name = test.name});
       } else {  // N.B. prev. only root-level tests were signalled on finish
         if constexpr (requires {
@@ -2207,6 +2222,7 @@ class runner {
 
   [[nodiscard]] auto run(run_cfg rc = {}) -> bool {
     run_ = true;
+    reporter_.on(events::run_begin{.argc = rc.argc, .argv = rc.argv});
     for (const auto& [suite, suite_name] : suites_) {
       // add reporter in/out
       if constexpr (requires { reporter_.on(events::suite_begin{}); }) {
@@ -2282,7 +2298,7 @@ struct test {
   template <class... Ts>
   constexpr auto operator=(test_location<void (*)()> _test) {
     on<Ts...>(events::test<void (*)()>{.type = type,
-                                       .name = name,
+                                       .name = std::string{name},
                                        .tag = tag,
                                        .location = _test.location,
                                        .arg = none{},
@@ -2290,13 +2306,11 @@ struct test {
     return _test.test;
   }
 
-  template <class Test,
-            type_traits::requires_t<
-                not type_traits::is_convertible_v<Test, void (*)()>> = 0>
-  constexpr auto operator=(Test _test) ->
-      typename type_traits::identity<Test, decltype(_test())>::type {
+  template <class Test>
+    requires std::invocable<Test> && (!std::convertible_to<Test, void (*)()>)
+  constexpr auto operator=(Test _test) {
     on<Test>(events::test<Test>{.type = type,
-                                .name = name,
+                                .name = std::string{name},
                                 .tag = tag,
                                 .location = {},
                                 .arg = none{},
@@ -2304,16 +2318,17 @@ struct test {
     return _test;
   }
 
-  constexpr auto operator=(void (*_test)(std::string_view)) const {
-    return _test(name);
+  constexpr void operator=(void (*_test)(std::string_view,
+                                         std::string_view)) const {
+    _test(type, name);
   }
 
-  template <class Test,
-            type_traits::requires_t<not type_traits::is_convertible_v<
-                Test, void (*)(std::string_view)>> = 0>
-  constexpr auto operator=(Test _test)
-      -> decltype(_test(type_traits::declval<std::string_view>())) {
-    return _test(name);
+  template <class Test>
+    requires std::invocable<Test, std::string_view, std::string_view> &&
+             (!std::convertible_to<Test, void (*)(std::string_view,
+                                                  std::string_view)>)
+  constexpr auto operator=(Test _test) {
+    return _test(type, name);
   }
 };
 
@@ -2618,6 +2633,43 @@ constexpr auto operator""_b(const char* name, decltype(sizeof("")) size) {
 }
 }  // namespace literals
 
+[[nodiscard]] constexpr auto get_ordinal_suffix(int number) {
+  // See https://stackoverflow.com/a/13627586
+  const auto last_digit = number % 10;
+  const auto last_two_digits = number % 100;
+  if (last_digit == 1 && last_two_digits != 11) {
+    return "st";
+  }
+  if (last_digit == 2 && last_two_digits != 12) {
+    return "nd";
+  }
+  if (last_digit == 3 && last_two_digits != 13) {
+    return "rd";
+  }
+  return "th";
+};
+
+template <class TArg>
+inline std::string format_test_parameter([[maybe_unused]] const TArg& arg,
+                                         const int counter) {
+  return std::to_string(counter) + get_ordinal_suffix(counter) + " parameter";
+}
+
+template <class F>
+  requires(std::integral<F> || std::floating_point<F>) &&
+          (!std::same_as<F, bool>)
+inline std::string
+    format_test_parameter(const F& arg, [[maybe_unused]] const int counter) {
+  std::ostringstream oss;
+  oss << arg;
+  return oss.str();
+}
+
+inline std::string format_test_parameter(const bool& arg,
+                                         [[maybe_unused]] const int counter) {
+  return arg ? "true" : "false";
+}
+
 namespace operators {
 [[nodiscard]] constexpr auto operator==(std::string_view lhs,
                                         std::string_view rhs) {
@@ -2629,73 +2681,66 @@ namespace operators {
   return detail::neq_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_range_v<T>> = 0>
+template <std::ranges::range T>
 [[nodiscard]] constexpr auto operator==(T&& lhs, T&& rhs) {
   return detail::eq_{static_cast<T&&>(lhs), static_cast<T&&>(rhs)};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_range_v<T>> = 0>
+template <std::ranges::range T>
 [[nodiscard]] constexpr auto operator!=(T&& lhs, T&& rhs) {
   return detail::neq_{static_cast<T&&>(lhs), static_cast<T&&>(rhs)};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator==(const TLhs& lhs, const TRhs& rhs) {
   return detail::eq_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator!=(const TLhs& lhs, const TRhs& rhs) {
   return detail::neq_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator>(const TLhs& lhs, const TRhs& rhs) {
   return detail::gt_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator>=(const TLhs& lhs, const TRhs& rhs) {
   return detail::ge_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator<(const TLhs& lhs, const TRhs& rhs) {
   return detail::lt_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator<=(const TLhs& lhs, const TRhs& rhs) {
   return detail::le_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator and(const TLhs& lhs, const TRhs& rhs) {
   return detail::and_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 [[nodiscard]] constexpr auto operator or(const TLhs& lhs, const TRhs& rhs) {
   return detail::or_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 [[nodiscard]] constexpr auto operator not(const T& t) {
   return detail::not_{t};
 }
@@ -2716,7 +2761,8 @@ template <class Test>
 
 [[nodiscard]] inline auto operator/(const detail::tag& lhs,
                                     const detail::tag& rhs) {
-  std::vector<std::string_view> tag{};
+  std::vector<std::string_view> tag;
+  tag.reserve(lhs.name.size() + rhs.name.size());
   for (const auto& name : lhs.name) {
     tag.push_back(name);
   }
@@ -2726,35 +2772,49 @@ template <class Test>
   return detail::tag{tag};
 }
 
-template <class F, class T,
-          type_traits::requires_t<type_traits::is_range_v<T>> = 0>
+template <class F, class T>
+  requires std::ranges::range<T>
 [[nodiscard]] constexpr auto operator|(const F& f, const T& t) {
-  return [f, t](const auto name) {
-    for (const auto& arg : t) {
+  return [f, t](std::string_view type, std::string_view name) {
+    for (int counter = 1; const auto& arg : t) {
       detail::on<F>(events::test<F, decltype(arg)>{
-              .type = "test",
-              .name = name,
-              .tag = {},
-              .location = {},
-              .arg = arg,
-              .run = f});
+          .type = type,
+          .name = std::string{name} + " (" +
+                  format_test_parameter(arg, counter) + ")",
+          .tag = {},
+          .location = {},
+          .arg = arg,
+          .run = f});
+      ++counter;
     }
   };
 }
 
-template <
-    class F, template <class...> class T, class... Ts,
-    type_traits::requires_t<not type_traits::is_range_v<T<Ts...>>> = 0>
+template <class F, template <class...> class T, class... Ts>
+  requires(!std::ranges::range<T<Ts...>>)
 [[nodiscard]] constexpr auto operator|(const F& f, const T<Ts...>& t) {
-  return [f, t](const auto name) {
+  constexpr auto unique_name = []<class TArg>(std::string_view name,
+                                              const TArg& arg, int& counter) {
+    auto ret = std::string{name} + " (";
+    if (std::invocable<F, TArg>) {
+      ret += format_test_parameter(arg, counter) + ", ";
+    }
+    ret += std::string(reflection::type_name<TArg>()) + ")";
+    ++counter;
+    return ret;
+  };
+
+  return [f, t, unique_name](std::string_view type, std::string_view name) {
+    int counter = 1;
     apply(
-        [f, name](const auto&... args) {
-          (detail::on<F>(events::test<F, Ts>{.type = "test",
-                                             .name = name,
-                                             .tag = {},
-                                             .location = {},
-                                             .arg = args,
-                                             .run = f}),
+        [=, &counter](const auto&... args) {
+          (detail::on<F>(events::test<F, Ts>{
+               .type = type,
+               .name = unique_name.template operator()<Ts>(name, args, counter),
+               .tag = {},
+               .location = {},
+               .arg = args,
+               .run = f}),
            ...);
         },
         t);
@@ -2766,11 +2826,11 @@ namespace terse {
 #pragma clang diagnostic ignored "-Wunused-comparison"
 #endif
 
-[[maybe_unused]] constexpr struct {
+[[maybe_unused]] constexpr struct placeholder_gcc_t {
 } _t;
 
 template <class T>
-constexpr auto operator%(const T& t, const decltype(_t)&) {
+constexpr auto operator%(const T& t, const placeholder_gcc_t&) {
   return detail::value<T>{t};
 }
 
@@ -2786,7 +2846,8 @@ inline auto operator>>(const T& t,
   return fatal_{t};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator==(
     const T& lhs, const detail::value_location<typename T::value_type>& rhs) {
   using eq_t = detail::eq_<T, detail::value_location<typename T::value_type>>;
@@ -2798,7 +2859,8 @@ constexpr auto operator==(
   return eq_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator==(
     const detail::value_location<typename T::value_type>& lhs, const T& rhs) {
   using eq_t = detail::eq_<detail::value_location<typename T::value_type>, T>;
@@ -2810,7 +2872,8 @@ constexpr auto operator==(
   return eq_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator!=(
     const T& lhs, const detail::value_location<typename T::value_type>& rhs) {
   using neq_t = detail::neq_<T, detail::value_location<typename T::value_type>>;
@@ -2822,7 +2885,8 @@ constexpr auto operator!=(
   return neq_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator!=(
     const detail::value_location<typename T::value_type>& lhs, const T& rhs) {
   using neq_t = detail::neq_<detail::value_location<typename T::value_type>, T>;
@@ -2834,7 +2898,8 @@ constexpr auto operator!=(
   return neq_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator>(
     const T& lhs, const detail::value_location<typename T::value_type>& rhs) {
   using gt_t = detail::gt_<T, detail::value_location<typename T::value_type>>;
@@ -2846,7 +2911,8 @@ constexpr auto operator>(
   return gt_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator>(
     const detail::value_location<typename T::value_type>& lhs, const T& rhs) {
   using gt_t = detail::gt_<detail::value_location<typename T::value_type>, T>;
@@ -2858,7 +2924,8 @@ constexpr auto operator>(
   return gt_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator>=(
     const T& lhs, const detail::value_location<typename T::value_type>& rhs) {
   using ge_t = detail::ge_<T, detail::value_location<typename T::value_type>>;
@@ -2870,7 +2937,8 @@ constexpr auto operator>=(
   return ge_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator>=(
     const detail::value_location<typename T::value_type>& lhs, const T& rhs) {
   using ge_t = detail::ge_<detail::value_location<typename T::value_type>, T>;
@@ -2882,7 +2950,8 @@ constexpr auto operator>=(
   return ge_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator<(
     const T& lhs, const detail::value_location<typename T::value_type>& rhs) {
   using lt_t = detail::lt_<T, detail::value_location<typename T::value_type>>;
@@ -2894,7 +2963,8 @@ constexpr auto operator<(
   return lt_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator<(
     const detail::value_location<typename T::value_type>& lhs, const T& rhs) {
   using lt_t = detail::lt_<detail::value_location<typename T::value_type>, T>;
@@ -2906,7 +2976,8 @@ constexpr auto operator<(
   return lt_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator<=(
     const T& lhs, const detail::value_location<typename T::value_type>& rhs) {
   using le_t = detail::le_<T, detail::value_location<typename T::value_type>>;
@@ -2918,7 +2989,8 @@ constexpr auto operator<=(
   return le_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator<=(
     const detail::value_location<typename T::value_type>& lhs, const T& rhs) {
   using le_t = detail::le_<detail::value_location<typename T::value_type>, T>;
@@ -2930,9 +3002,8 @@ constexpr auto operator<=(
   return le_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 constexpr auto operator and(const TLhs& lhs, const TRhs& rhs) {
   using and_t = detail::and_<typename TLhs::type, typename TRhs::type>;
   struct and_ : and_t, detail::log {
@@ -2943,9 +3014,8 @@ constexpr auto operator and(const TLhs& lhs, const TRhs& rhs) {
   return and_{lhs, rhs};
 }
 
-template <class TLhs, class TRhs,
-          type_traits::requires_t<type_traits::is_op_v<TLhs> or
-                                  type_traits::is_op_v<TRhs>> = 0>
+template <class TLhs, class TRhs>
+  requires type_traits::is_op<TLhs> || type_traits::is_op<TRhs>
 constexpr auto operator or(const TLhs& lhs, const TRhs& rhs) {
   using or_t = detail::or_<typename TLhs::type, typename TRhs::type>;
   struct or_ : or_t, detail::log {
@@ -2956,7 +3026,8 @@ constexpr auto operator or(const TLhs& lhs, const TRhs& rhs) {
   return or_{lhs, rhs};
 }
 
-template <class T, type_traits::requires_t<type_traits::is_op_v<T>> = 0>
+template <class T>
+  requires type_traits::is_op<T>
 constexpr auto operator not(const T& t) {
   using not_t = detail::not_<typename T::type>;
   struct not_ : not_t, detail::log {
@@ -2970,9 +3041,9 @@ constexpr auto operator not(const T& t) {
 }  // namespace terse
 }  // namespace operators
 
-template <class TExpr, type_traits::requires_t<
-                           type_traits::is_op_v<TExpr> or
-                           type_traits::is_convertible_v<TExpr, bool>> = 0>
+template <class TExpr>
+  requires type_traits::is_op<TExpr> ||
+           concepts::explicitly_convertible_to<TExpr, bool>
 constexpr auto expect(const TExpr& expr,
                       const reflection::source_location& sl =
                           reflection::source_location::current()) {
@@ -3068,31 +3139,45 @@ template <class T = void>
 [[maybe_unused]] constexpr auto type = detail::type_<T>();
 
 template <class TLhs, class TRhs>
+  requires type_traits::is_stream_insertable_v<TLhs> &&
+           type_traits::is_stream_insertable_v<TRhs>
 [[nodiscard]] constexpr auto eq(const TLhs& lhs, const TRhs& rhs) {
   return detail::eq_{lhs, rhs};
 }
 template <class TLhs, class TRhs, class TEpsilon>
+  requires type_traits::is_stream_insertable_v<TLhs> &&
+           type_traits::is_stream_insertable_v<TRhs>
 [[nodiscard]] constexpr auto approx(const TLhs& lhs, const TRhs& rhs,
                                     const TEpsilon& epsilon) {
   return detail::approx_{lhs, rhs, epsilon};
 }
 template <class TLhs, class TRhs>
+  requires type_traits::is_stream_insertable_v<TLhs> &&
+           type_traits::is_stream_insertable_v<TRhs>
 [[nodiscard]] constexpr auto neq(const TLhs& lhs, const TRhs& rhs) {
   return detail::neq_{lhs, rhs};
 }
 template <class TLhs, class TRhs>
+  requires type_traits::is_stream_insertable_v<TLhs> &&
+           type_traits::is_stream_insertable_v<TRhs>
 [[nodiscard]] constexpr auto gt(const TLhs& lhs, const TRhs& rhs) {
   return detail::gt_{lhs, rhs};
 }
 template <class TLhs, class TRhs>
+  requires type_traits::is_stream_insertable_v<TLhs> &&
+           type_traits::is_stream_insertable_v<TRhs>
 [[nodiscard]] constexpr auto ge(const TLhs& lhs, const TRhs& rhs) {
   return detail::ge_{lhs, rhs};
 }
 template <class TLhs, class TRhs>
+  requires type_traits::is_stream_insertable_v<TLhs> &&
+           type_traits::is_stream_insertable_v<TRhs>
 [[nodiscard]] constexpr auto lt(const TLhs& lhs, const TRhs& rhs) {
   return detail::lt_{lhs, rhs};
 }
 template <class TLhs, class TRhs>
+  requires type_traits::is_stream_insertable_v<TLhs> &&
+           type_traits::is_stream_insertable_v<TRhs>
 [[nodiscard]] constexpr auto le(const TLhs& lhs, const TRhs& rhs) {
   return detail::le_{lhs, rhs};
 }
@@ -3293,12 +3378,12 @@ using operators::operator not;
 using operators::operator|;
 using operators::operator/;
 using operators::operator>>;
-}  // namespace boost::inline ext::ut::inline v2_0_1
+}  // namespace boost::inline ext::ut::inline v2_3_1
 
 #if (defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)) && \
     !defined(__EMSCRIPTEN__)
-__attribute__((constructor)) inline void cmd_line_args(int argc,
-                                                       const char* argv[]) {
+__attribute__((constructor(101))) inline void cmd_line_args(
+    int argc, const char* argv[]) {
   ::boost::ut::detail::cfg::largc = argc;
   ::boost::ut::detail::cfg::largv = argv;
 }
@@ -3307,15 +3392,12 @@ __attribute__((constructor)) inline void cmd_line_args(int argc,
 #endif
 
 #if defined(_MSC_VER)
-  #pragma pop_macro("min")
-  #pragma pop_macro("max")
+#pragma pop_macro("min")
+#pragma pop_macro("max")
 #endif
 
 #endif
 
-
-#include <fmt/color.h>
-#include <fmt/format.h>
 
 #if __has_include(<unistd.h>)  && __has_include(<sys/ioctl.h>)  && __has_include(<sys/syscall.h>) && __has_include(<linux/perf_event.h>) && !defined(BENCHMARK_NO_PERF_COUNTER)
 #define HAS_LINUX_PERFORMANCE_HEADER
@@ -3479,11 +3561,11 @@ for details see: https://www.kernel.org/doc/Documentation/sysctl/kernel.txt)";
     static void printAccessRightMsg(std::string_view method = "") noexcept {
         try {
             if (errno != 0) {
-                fmt::println(stderr, "PerformanceCounter: could not perform {} in method '{}' - error {}: '{}'", eventIdToStringView(), method, errno, strerror(errno));
+                std::println(stderr, "PerformanceCounter: could not perform {} in method '{}' - error {}: '{}'", eventIdToStringView(), method, errno, strerror(errno));
             } else {
-                fmt::println(stderr, "PerformanceCounter: could not perform {} in method '{}'", eventIdToStringView(), method);
+                std::println(stderr, "PerformanceCounter: could not perform {} in method '{}'", eventIdToStringView(), method);
             }
-            fmt::println(stderr, _sysErrorMessage);
+            std::println(stderr, _sysErrorMessage);
         } catch (const std::exception& e) {
             std::cerr << "Error during logging: " << e.what() << '\n';
         } catch (...) {
@@ -3887,7 +3969,7 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
 
     std::size_t exponent = 10U;
     if (value == 0.0L) {
-        return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
+        return std::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
     }
     while (value >= base && exponent < si_prefixes.size()) {
         value /= base;
@@ -3913,7 +3995,7 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
         }
     }
 
-    return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
+    return std::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
 }
 
 } // namespace utils
@@ -4009,7 +4091,7 @@ public:
             if (ec == std::errc()) {
                 _precision = std::clamp(_precision, 1, 6) - 1;
             } else {
-                fmt::print("Invalid value for BM_DIGITS: '{}'\n", env);
+                std::print("Invalid value for BM_DIGITS: '{}'\n", env);
             }
         }
     }
@@ -4094,7 +4176,7 @@ public:
                 auto transposed_map = utils::convert<N_ITERATIONS>(marker_iter);
                 for (auto keyID = 0LU; keyID < transposed_map.size(); keyID++) {
                     if (keyID > 0) {
-                        const auto meas = fmt::format("  {}─Marker{}: '{}'→'{}' ", //
+                        const auto meas = std::format("  {}─Marker{}: '{}'→'{}' ", //
                             keyID < transposed_map.size() - 1 ? "├" : "└", keyID, transposed_map[0].first, transposed_map[keyID].first);
 
                         auto& marker_result_map = ResultType::add_result(meas);
@@ -4143,14 +4225,14 @@ public:
     void on(const ut::events::test_run& test_run) { _printer << "\n \"" << test_run.name << "\"..."; }
 
     constexpr void on(const ut::events::test_skip& bench) const {
-        std::cerr << fmt::format("SKIPPED - {}", bench.name) << std::endl;
+        std::cerr << std::format("SKIPPED - {}", bench.name) << std::endl;
         [[maybe_unused]] const auto& map = benchmark::results::add_result(bench.name);
     }
 
     void on(const ut::events::test_end& test_end) {
         if (_asserts.fail > 0) {
             ++_benchmarks.fail;
-            _printer << _printer.colors().fail << fmt::format("... in benchmark '{}'", test_end.name) << _printer.colors().none << '\n';
+            _printer << _printer.colors().fail << std::format("... in benchmark '{}'", test_end.name) << _printer.colors().none << '\n';
             _asserts.fail--;
         }
     }
@@ -4161,9 +4243,11 @@ public:
     }
 
     void on(ut::events::exception exception) {
-        _printer << fmt::format("\033[31munexpected exception: \"{}\"\n\033[0m", exception.what());
+        _printer << std::format("\033[31munexpected exception: \"{}\"\n\033[0m", exception.what());
         ++_asserts.fail;
     }
+
+    auto on(ut::events::run_begin) -> void {} // no-op (required for Boost.UT >= v2.3.1)
 
     template<class TExpr>
     void on(ut::events::assertion_pass<TExpr>) {
@@ -4182,7 +4266,7 @@ public:
     void on(const ut::events::summary&) {
         if (_benchmarks.fail || _asserts.fail) {
             std::cout << _printer.str() << std::endl;
-            std::cout << fmt::format("\033[31m{} micro-benchmark(s) failed:\n\033[m", _benchmarks.fail);
+            std::cout << std::format("\033[31m{} micro-benchmark(s) failed:\n\033[m", _benchmarks.fail);
         } else {
             std::cout << _printer.colors().pass << "all micro-benchmarks passed:\n" << _printer.colors().none;
         }
@@ -4195,7 +4279,7 @@ public:
     static void print() {
         const auto& data = benchmark::results::data();
         if (data.empty()) {
-            fmt::print("no benchmark tests executed\n");
+            std::print("no benchmark tests executed\n");
         }
         std::vector<std::size_t> v(data.size());
         // N.B. using <algorithm> rather than <ranges> to be compatible with libc/Emscripten
@@ -4211,12 +4295,12 @@ public:
             if (std::holds_alternative<std::monostate>(value)) {
                 return "";
             } else if (std::holds_alternative<long double>(value)) {
-                return fmt::format("{}", to_si_prefix(std::get<long double>(value), unit, digits));
+                return std::format("{}", to_si_prefix(std::get<long double>(value), unit, digits));
             } else if (std::holds_alternative<uint64_t>(value)) {
-                return fmt::format("{}", to_si_prefix(std::get<uint64_t>(value), unit, digits));
+                return std::format("{}", to_si_prefix(std::get<uint64_t>(value), unit, digits));
             } else if (std::holds_alternative<benchmark::perf_sub_metric>(value)) {
                 const auto stat = std::get<benchmark::perf_sub_metric>(value);
-                return fmt::format("{:>4} / {:>4} = {:4.1f}%", //
+                return std::format("{:>4} / {:>4} = {:4.1f}%", //
                     to_si_prefix(stat.misses, unit, 0), to_si_prefix(stat.total, unit, 0), 100.0 * stat.ratio);
             }
             throw std::invalid_argument("benchmark::results: unhandled ResultMap type");
@@ -4239,48 +4323,48 @@ public:
         bool first_row = true;
         for (auto& [test_name, result_map] : data) {
             if (first_row) {
-                fmt::print("┌{1:─^{0}}", name_max_size + 2UL, test_case_label);
-                fmt::print("┬{1:─^{0}}", sizeof("PASS") + 1UL, "");
+                std::print("┌{1:─^{0}}", name_max_size + 2UL, test_case_label);
+                std::print("┬{1:─^{0}}", sizeof("PASS") + 1UL, "");
                 for (auto const& [metric_key, max_width] : metric_keys) {
-                    fmt::print("┬{1:─^{0}}", max_width + 2UL, metric_key);
+                    std::print("┬{1:─^{0}}", max_width + 2UL, metric_key);
                 }
-                fmt::print("┐\n");
+                std::print("┐\n");
                 first_row = false;
             } else if (test_name.empty() and result_map.empty()) {
-                fmt::print("├{1:─^{0}}", name_max_size + 2UL, "");
-                fmt::print("┼{1:─^{0}}", sizeof("PASS") + 1UL, "");
+                std::print("├{1:─^{0}}", name_max_size + 2UL, "");
+                std::print("┼{1:─^{0}}", sizeof("PASS") + 1UL, "");
                 for (auto const& [metric_key, max_width] : metric_keys) {
-                    fmt::print("┼{1:─^{0}}", max_width + 2UL, "");
+                    std::print("┼{1:─^{0}}", max_width + 2UL, "");
                 }
-                fmt::print("┤\n");
+                std::print("┤\n");
                 continue;
             }
-            fmt::print("│ {1:<{0}} ", name_max_size, test_name);
+            std::print("│ {1:<{0}} ", name_max_size, test_name);
             if (result_map.empty()) {
-                fmt::print("│ \033[33mSKIP\033[0m ");
+                std::print("│ \033[33mSKIP\033[0m ");
             } else if (result_map.size() == 1) {
-                fmt::print("│ \033[31mFAIL\033[0m ");
+                std::print("│ \033[31mFAIL\033[0m ");
             } else {
-                fmt::print("│ \033[32mPASS\033[0m ");
+                std::print("│ \033[32mPASS\033[0m ");
             }
 
             for (auto& [metric_key, max_width] : metric_keys) {
                 if (result_map.contains(metric_key)) {
                     const auto& [value, unit, digits] = result_map.at(metric_key);
-                    fmt::print("│ {1:>{0}} ", max_width, format(value, unit, digits));
+                    std::print("│ {1:>{0}} ", max_width, format(value, unit, digits));
                 } else {
-                    fmt::print("│ {1:>{0}} ", max_width, "");
+                    std::print("│ {1:>{0}} ", max_width, "");
                 }
             }
-            fmt::print("│\n");
+            std::print("│\n");
         }
 
-        fmt::print("└{1:─^{0}}", name_max_size + 2UL, "");
-        fmt::print("┴{1:─^{0}}", sizeof("PASS") + 1UL, "");
+        std::print("└{1:─^{0}}", name_max_size + 2UL, "");
+        std::print("┴{1:─^{0}}", sizeof("PASS") + 1UL, "");
         for (auto const& [metric_key, max_width] : metric_keys) {
-            fmt::print("┴{1:─^{0}}", max_width + 2UL, "");
+            std::print("┴{1:─^{0}}", max_width + 2UL, "");
         }
-        fmt::print("┘\n");
+        std::print("┘\n");
     }
 };
 } // namespace cfg

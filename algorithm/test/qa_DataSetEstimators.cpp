@@ -1,11 +1,9 @@
 #include <boost/ut.hpp>
-#include <fmt/format.h>
+#include <format>
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp> // for draw(...)
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
-
-#include <fmt/ranges.h>
 
 #include <gnuradio-4.0/algorithm/dataset/DataSetEstimators.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetMath.hpp>
@@ -38,15 +36,15 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         gr::dataset::draw(ds);
 
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
-        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
 
         gr::DataSet<T> ds1 = generate::triangular<double>("triagonal - odd", 11);
-        fmt::println("\"{:20}\": {}", ds1.signalName(0UZ), ds1.signal_values);
+        std::println("\"{:20}\": {}", ds1.signalName(0UZ), ds1.signal_values);
         expect(eq(ds1.signalValues().front(), ds1.signalValues().back()));
         expect(eq(ds1.signalValues()[5UZ], 1.0));
 
         gr::DataSet<T> ds2 = generate::triangular<double>("triagonal - even", 10);
-        fmt::println("\"{:20}\": {}", ds2.signalName(0UZ), ds2.signal_values);
+        std::println("\"{:20}\": {}", ds2.signalName(0UZ), ds2.signal_values);
         expect(eq(ds2.signalValues().front(), ds2.signalValues().back()));
         expect(eq(ds2.signalValues()[4UZ], ds2.signalValues()[5UZ]));
     };
@@ -54,7 +52,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
     "ramp DataSet"_test = []<typename T = double> {
         gr::DataSet<T>                 ds      = generate::ramp<T>("ramp", nSamples);
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
-        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 
@@ -65,7 +63,7 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
 
         gr::DataSet<T>                 ds      = generate::gaussFunction<T>("gaussFunction", nSamples, mean, sigma, T(0), normalisation);
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
-        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 
@@ -80,14 +78,14 @@ const boost::ut::suite<"DataSet<T> visual test functions"> _DataSetTestFcuntions
         gr::DataSet<T> ds  = addFunction(ds1, ds2);
 
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
-        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 
     "randomStepFunction DataSet"_test = []<typename T = double> {
         gr::DataSet<T>                 ds      = generate::randomStepFunction<T>("randomStepFunction", nSamples);
         std::expected<void, gr::Error> dsCheck = gr::dataset::checkConsistency(ds);
-        expect(dsCheck.has_value()) << [&] { return fmt::format("unexpected: {}", dsCheck.error()); } << fatal;
+        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
         gr::dataset::draw(ds);
     };
 };
@@ -113,8 +111,8 @@ const boost::ut::suite<"DataSet<T> element-wise accessor"> _dataSetAccessors = [
         expect(approx(getIndexValue(ds, dim::Y, 1), value_t(1), value_t(1e-3f)));
         expect(approx(getIndexValue(ds, dim::Y, 0), value_t(0), value_t(1e-3f)));
 
-        expect(!gr::math::isfinite(getIndexValue(ds, dim::X, 3))) << fmt::format("element is not NaN: {}", getIndexValue(ds, dim::X, 3));
-        expect(!gr::math::isfinite(getIndexValue(ds, dim::Y, 3))) << fmt::format("element is not NaN: {}", getIndexValue(ds, dim::Y, 3));
+        expect(!gr::math::isfinite(getIndexValue(ds, dim::X, 3))) << std::format("element is not NaN: {}", getIndexValue(ds, dim::X, 3));
+        expect(!gr::math::isfinite(getIndexValue(ds, dim::Y, 3))) << std::format("element is not NaN: {}", getIndexValue(ds, dim::Y, 3));
 
         expect(throws([&] { std::ignore = getIndexValue(ds, dim::Z, 0); }));
 
@@ -129,12 +127,12 @@ const boost::ut::suite<"DataSet<T> element-wise accessor"> _dataSetAccessors = [
 
         std::vector<T> copyX = getSubArrayCopy(ds, dim::X, 0UZ, 2UZ);
         for (std::size_t i = 0; i < copyX.size(); i++) {
-            expect(eq(copyX[i], getIndexValue(ds, dim::X, i))) << fmt::format("X-index {} mismatch", i);
+            expect(eq(copyX[i], getIndexValue(ds, dim::X, i))) << std::format("X-index {} mismatch", i);
         }
 
         std::vector<T> copyY = getSubArrayCopy(ds, dim::X, 0UZ, 2UZ);
         for (std::size_t i = 0; i < copyY.size(); i++) {
-            expect(eq(copyY[i], getIndexValue(ds, dim::Y, i))) << fmt::format("X-index {} mismatch", i);
+            expect(eq(copyY[i], getIndexValue(ds, dim::Y, i))) << std::format("X-index {} mismatch", i);
         }
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
 };
@@ -154,8 +152,8 @@ const boost::ut::suite<"DSP helper"> _dspHelper = [] {
             expect(approx(tenLog10(value_t(0.1)), value_t(-10), value_t(1e-3f))) << "10 * log10(0.1) should be -10";
 
             // edge cases
-            expect(!gr::math::isfinite(tenLog10(value_t(0)))) << fmt::format("tenLog10<{}>(0) = {} should be -inf", typeName, tenLog10(value_t(0)));
-            expect(!gr::math::isfinite(tenLog10(value_t(-1)))) << fmt::format("tenLog10<{}>(-1) = {} should be -inf", typeName, tenLog10(value_t(-1)));
+            expect(!gr::math::isfinite(tenLog10(value_t(0)))) << std::format("tenLog10<{}>(0) = {} should be -inf", typeName, tenLog10(value_t(0)));
+            expect(!gr::math::isfinite(tenLog10(value_t(-1)))) << std::format("tenLog10<{}>(-1) = {} should be -inf", typeName, tenLog10(value_t(-1)));
         };
 
         "decibel"_test = [] {
@@ -344,7 +342,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         for (std::size_t i = 0UZ; i < 5UZ; i++) {
             T origVal = ds1.signal_values[i];
             T newVal  = dsAdd.signal_values[i];
-            expect(eq(newVal, T(2) * origVal)) << fmt::format("Add op failed at i={}, got {}", i, newVal);
+            expect(eq(newVal, T(2) * origVal)) << std::format("Add op failed at i={}, got {}", i, newVal);
         }
 
         // 2) dataSet + double
@@ -400,7 +398,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
 
             for (std::size_t i = 0; i < expected.size(); ++i) {
                 T val = derivative[i];
-                expect(approx(val, expected[i], T(1e-3))) << fmt::format("Derivative at index {}: expected {}, got {}", i, expected[i], val);
+                expect(approx(val, expected[i], T(1e-3))) << std::format("Derivative at index {}: expected {}, got {}", i, expected[i], val);
             }
         };
 
@@ -411,7 +409,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
             std::vector<T> expected_step = {0.0, 0.0, 1.0, 0.0, 0.0};
             for (std::size_t i = 0; i < expected_step.size(); ++i) {
                 T val = derivative_step[i];
-                expect(approx(val, expected_step[i], T(1e-3))) << fmt::format("Step Derivative at index {}: expected {}, got {}", i, expected_step[i], val);
+                expect(approx(val, expected_step[i], T(1e-3))) << std::format("Step Derivative at index {}: expected {}, got {}", i, expected_step[i], val);
             }
         };
     } | std::tuple<float, double, gr::UncertainValue<float>, gr::UncertainValue<double>>{};
@@ -580,7 +578,7 @@ const boost::ut::suite<"DataSet<T> filter"> _dataSetFilter = [] {
         std::vector<T> expected = {value_t(0.1), value_t(0.2), value_t(0.4), value_t(0.6), value_t(0.7)};
         for (std::size_t i = 0; i < expected.size(); ++i) {
             T val = smoothed.signal_values[i];
-            expect(approx(val, expected[i], T(1e-3))) << fmt::format("smoothed value at index {}: expected {}, got {}", i, expected[i], val);
+            expect(approx(val, expected[i], T(1e-3))) << std::format("smoothed value at index {}: expected {}, got {}", i, expected[i], val);
         }
 
         expect(throws([&]() { filter::applyMovingAverage(ds, 4); }));

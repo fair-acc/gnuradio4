@@ -1,7 +1,8 @@
 #include <array>
 #include <cassert>
 
-#include <fmt/core.h>
+#include <format>
+#include <print>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Port.hpp>
@@ -22,7 +23,7 @@ struct ExpectSink : public gr::Block<ExpectSink<T>> {
 
     GR_MAKE_REFLECTABLE(ExpectSink, sink);
 
-    void processOne(T value) { std::cout << value << std::endl; }
+    void processOne(T value) { std::println("{}", value); }
 };
 
 template<typename T, T Scale, typename R = decltype(std::declval<T>() * std::declval<T>())>
@@ -88,7 +89,7 @@ struct delay : public gr::Block<delay<T, Depth>> {
 
 template<typename TDescr, typename TPort>
 void reflectPort(auto idx, const TPort& obj) {
-    fmt::print("  {}.       name: {} / {}\n"
+    std::print("  {}.       name: {} / {}\n"
                "           type: {} / {}\n"
                "     descriptor: {}\n",
         idx.value, TDescr::Name.view(), obj.name, gr::refl::type_name<typename TDescr::value_type>.view(), gr::refl::type_name<typename TPort::value_type>.view(), gr::refl::type_name<TDescr>.view());
@@ -98,14 +99,14 @@ template<gr::refl::reflectable TBlock>
 void reflectBlock(const TBlock& obj) {
     using inputs  = gr::traits::block::stream_input_ports<TBlock>;
     using outputs = gr::traits::block::stream_output_ports<TBlock>;
-    fmt::print("reflecting on '{}'\n"
+    std::print("reflecting on '{}'\n"
                "# reflectable data members: {}\n"
                "# input streams: {}\n"
                "# output streams: {}\n",
         gr::refl::type_name<TBlock>.view(), gr::refl::data_member_count<TBlock>, inputs::size(), outputs::size());
-    fmt::print("-- input streams:\n");
+    std::print("-- input streams:\n");
     inputs::for_each([&]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
-    fmt::print("-- output streams:\n");
+    std::print("-- output streams:\n");
     outputs::for_each([&]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
 }
 
@@ -113,9 +114,9 @@ int main() {
     using gr::merge;
     using gr::mergeByIndex;
 
-    fmt::print("Project compiler: '{}' - version '{}'\n", CXX_COMPILER_ID, CXX_COMPILER_VERSION);
-    fmt::print("Project compiler path: '{}' - arg1 '{}'\n", CXX_COMPILER_PATH, CXX_COMPILER_ARG1);
-    fmt::print("Project compiler flags: '{}'\n", CXX_COMPILER_FLAGS);
+    std::print("Project compiler: '{}' - version '{}'\n", CXX_COMPILER_ID, CXX_COMPILER_VERSION);
+    std::print("Project compiler path: '{}' - arg1 '{}'\n", CXX_COMPILER_PATH, CXX_COMPILER_ARG1);
+    std::print("Project compiler flags: '{}'\n", CXX_COMPILER_FLAGS);
 
     {
         // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
@@ -138,7 +139,7 @@ int main() {
 
         constexpr int expect = 20;
 
-        fmt::print("Result of graph execution: {}, expected: {}\n", r, expect);
+        std::print("Result of graph execution: {}, expected: {}\n", r, expect);
 
         assert(r == expect);
     }
@@ -156,7 +157,7 @@ int main() {
             auto [r1, r2] = tuple;
             static_assert(std::same_as<std::remove_cvref_t<decltype(r1)>, int>);
             static_assert(std::same_as<std::remove_cvref_t<decltype(r2)>, int>);
-            fmt::print("{} {}, expected: {} {} \n", r1, r2, a[i] * 2, a[i]);
+            std::print("{} {}, expected: {} {} \n", r1, r2, a[i] * 2, a[i]);
         }
     }
 
@@ -173,7 +174,7 @@ int main() {
             r += merged.processOne(a[i], b[i]);
         }
 
-        fmt::print("Result of graph execution: {}\n", r);
+        std::print("Result of graph execution: {}\n", r);
 
         assert(r == 60);
     }
@@ -188,7 +189,7 @@ int main() {
         for (std::size_t i = 0; i < 4; ++i) {
             auto tuple    = merged.processOne(a[i]);
             auto [r1, r2] = tuple;
-            fmt::print("{} {} \n", r1, r2);
+            std::print("{} {} \n", r1, r2);
         }
     }
 
@@ -205,6 +206,6 @@ int main() {
         auto random = CountSource<int>{};
 
         auto merged = merge<"random", "original">(std::move(random), scale<int, 2>());
-        fmt::print("{}\n", merged.processOne());
+        std::print("{}\n", merged.processOne());
     }
 }

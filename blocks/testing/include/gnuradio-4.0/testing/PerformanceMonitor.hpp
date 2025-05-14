@@ -3,8 +3,7 @@
 
 #include <limits>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -27,7 +26,7 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
 
     std::size_t exponent = 10u;
     if (value == 0.0l) {
-        return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
+        return std::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
     }
     while (value >= base && exponent < si_prefixes.size()) {
         value /= base;
@@ -53,7 +52,7 @@ std::string to_si_prefix(T value_base, std::string_view unit = "s", std::size_t 
         }
     }
 
-    return fmt::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
+    return std::format("{:.{}f}{}{}{}", value, significant_digits, unit.empty() ? "" : " ", si_prefixes[exponent], unit);
 }
 } // namespace details
 
@@ -133,7 +132,7 @@ private:
             _file.open(output_csv_file_path, std::ios::out);
             _addCsvHeader = true;
             if (!_file) {
-                throw gr::exception(fmt::format("failed to open file '{}'.", output_csv_file_path));
+                throw gr::exception(std::format("failed to open file '{}'.", output_csv_file_path));
             }
         }
     }
@@ -162,7 +161,7 @@ private:
 
         if (_timeFromLastUpdate >= publish_rate) {
             if (output_csv_file_path == "") {
-                fmt::println("Performance at {}, #{} dT:{} s, rate:{}, memory_resident:{}", //
+                std::println("Performance at {}, #{} dT:{} s, rate:{}, memory_resident:{}", //
                     gr::time::getIsoTime(), n_writes, _timeFromLastUpdate, details::to_si_prefix(rate, "S/s"), details::to_si_prefix(residentSize, "b"));
             } else {
                 if (_file.is_open()) {

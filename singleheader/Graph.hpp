@@ -558,7 +558,33 @@ namespace pmtv {
 }
 
 
-#include <fmt/format.h>
+#include <format>
+
+// #include <gnuradio-4.0/meta/formatter.hpp>
+#ifndef GNURADIO_FORMATTER_HPP
+#define GNURADIO_FORMATTER_HPP
+
+#include <chrono>
+#include <complex>
+#include <concepts>
+#include <expected>
+#include <source_location>
+#include <vector>
+
+// #include <gnuradio-4.0/Tag.hpp>
+#ifndef GNURADIO_TAG_HPP
+#define GNURADIO_TAG_HPP
+
+#include <map>
+
+// #include <pmtv/pmt.hpp>
+
+
+// #include <gnuradio-4.0/meta/formatter.hpp>
+
+// #include <gnuradio-4.0/meta/reflection.hpp>
+#ifndef GNURADIO_REFLECTION_HPP
+#define GNURADIO_REFLECTION_HPP
 
 // #include <gnuradio-4.0/meta/typelist.hpp>
 #ifndef GNURADIO_TYPELIST_HPP
@@ -1099,8 +1125,9 @@ using transform_to_typelist = typename detail::transform_to_typelist_impl<Collec
 #include <complex>
 #include <cstdint>
 #include <cxxabi.h>
-#include <iostream>
 #include <map>
+#include <new>
+#include <print>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -1132,7 +1159,7 @@ using transform_to_typelist = typename detail::transform_to_typelist_impl<Collec
 
 // #include "simd_version.h"
 /* SPDX-License-Identifier: LGPL-3.0-or-later */
-/* Copyright © 2024      GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
+/* Copyright © 2024–2025 GSI Helmholtzzentrum fuer Schwerionenforschung GmbH
  *                       Matthias Kretz <m.kretz@gsi.de>
  */
 
@@ -1146,11 +1173,11 @@ using transform_to_typelist = typename detail::transform_to_typelist_impl<Collec
 #define VIR_HAVE_SPACESHIP 0
 #endif
 
-//     release >= 0x00
-// development >= 0x64
+//     release >= 0x00 and even
+// development >= 0x00 and odd
 //       alpha >= 0xbe
 //        beta >= 0xc8
-#define VIR_SIMD_VERSION 0x0'04'00
+#define VIR_SIMD_VERSION 0x0'04'04
 
 #define VIR_SIMD_VERSION_MAJOR (VIR_SIMD_VERSION / 0x10000)
 
@@ -1297,8 +1324,12 @@ namespace vir::detail
 #endif
 
 #if VIR_CHECK_PRECONDITIONS < 0
-#define vir_simd_precondition(expr, msg, ...)                                             \
+#define vir_simd_precondition(expr, msg)             \
   (void) bool(expr)
+
+#define vir_simd_precondition_vaargs(expr, msg, ...) \
+  (void) bool(expr)
+
 #elif defined __clang__ or __GNUC__ >= 10
 #if (VIR_CHECK_PRECONDITIONS & 1) == 1
 #define VIR_CONSTPROP_PRECONDITION_FAILURE_ACTION __error__
@@ -1310,7 +1341,7 @@ namespace vir::detail
 #else
 #define VIR_ATTR_NOIPA
 #endif
-#define vir_simd_precondition(expr, msg, ...)                                               \
+#define vir_simd_precondition(expr, msg)                                                    \
   do {                                                                                      \
     const bool precondition_result = bool(expr);                                            \
     if (__builtin_constant_p(precondition_result) and not precondition_result)              \
@@ -1321,17 +1352,42 @@ namespace vir::detail
     else if (__builtin_expect(not precondition_result, false))                              \
       vir::detail::invoke_ub(                                                               \
         VIR_SIMD_LOC "precondition failure in '%s': " msg " ('" #expr "' does not hold)\n", \
-        VIR_PRETTY_FUNCTION_ __VA_OPT__(,) __VA_ARGS__);                                    \
+        VIR_PRETTY_FUNCTION_);                                                              \
   } while(false)
+
+#define vir_simd_precondition_vaargs(expr, msg, ...)                                        \
+  do {                                                                                      \
+    const bool precondition_result = bool(expr);                                            \
+    if (__builtin_constant_p(precondition_result) and not precondition_result)              \
+      []() __attribute__((__noinline__, __noreturn__, VIR_ATTR_NOIPA                        \
+        VIR_CONSTPROP_PRECONDITION_FAILURE_ACTION("precondition failure."                   \
+        "\n" VIR_SIMD_LOC "note: " msg " (precondition '" #expr "' does not hold)")))       \
+        { vir::detail::trap(); }();                                                         \
+    else if (__builtin_expect(not precondition_result, false))                              \
+      vir::detail::invoke_ub(                                                               \
+        VIR_SIMD_LOC "precondition failure in '%s': " msg " ('" #expr "' does not hold)\n", \
+        VIR_PRETTY_FUNCTION_, __VA_ARGS__);                                                 \
+  } while(false)
+
 #else
-#define vir_simd_precondition(expr, msg, ...)                                               \
+#define vir_simd_precondition(expr, msg)                                                    \
   do {                                                                                      \
     const bool precondition_result = bool(expr);                                            \
     if (not precondition_result) [[unlikely]]                                               \
       vir::detail::invoke_ub(                                                               \
         VIR_SIMD_LOC "precondition failure in '%s': " msg " ('" #expr "' does not hold)\n", \
-        VIR_PRETTY_FUNCTION_ __VA_OPT__(,) __VA_ARGS__);                                    \
+        VIR_PRETTY_FUNCTION_);                                                              \
   } while(false)
+
+#define vir_simd_precondition_vaargs(expr, msg, ...)                                        \
+  do {                                                                                      \
+    const bool precondition_result = bool(expr);                                            \
+    if (not precondition_result) [[unlikely]]                                               \
+      vir::detail::invoke_ub(                                                               \
+        VIR_SIMD_LOC "precondition failure in '%s': " msg " ('" #expr "' does not hold)\n", \
+        VIR_PRETTY_FUNCTION_, __VA_ARGS__);                                                 \
+  } while(false)
+
 #endif
 
 
@@ -1845,14 +1901,16 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data;
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data;
       }
 
@@ -1996,14 +2054,16 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data[i];
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data[i];
       }
 
@@ -2455,14 +2515,16 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data;
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data;
       }
 
@@ -2782,14 +2844,16 @@ namespace vir::stdx
       constexpr reference
       operator[](size_t i)
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data[i];
       }
 
       constexpr value_type
       operator[](size_t i) const
       {
-        vir_simd_precondition(i < size(), "Subscript %d is out of range [0, %d]", i, size() - 1);
+        vir_simd_precondition_vaargs(i < size(), "Subscript %zu is out of range [0, %zu]",
+                                     i, size() - 1);
         return data[i];
       }
 
@@ -3830,7 +3894,7 @@ struct print_types;
     } else {
         struct handle {
             [[noreturn]] static void failure() {
-                std::clog << "failed precondition\n";
+                std::println(stderr, "failed precondition");
                 __builtin_trap();
             }
         };
@@ -4162,7 +4226,108 @@ template<typename T>
     }
 }
 
-std::string makePortableTypeName(std::string_view name);
+inline std::string makePortableTypeName(std::string_view name) {
+    auto trimmed = [](std::string_view view) {
+        while (view.front() == ' ') {
+            view.remove_prefix(1);
+        }
+        while (view.back() == ' ') {
+            view.remove_suffix(1);
+        }
+        return view;
+    };
+
+    using namespace std::string_literals;
+    using gr::meta::detail::local_type_name;
+    static const auto typeMapping = std::array<std::pair<std::string, std::string>, 13>{{
+        {local_type_name<std::int8_t>(), "int8"s}, {local_type_name<std::int16_t>(), "int16"s}, {local_type_name<std::int32_t>(), "int32"s}, {local_type_name<std::int64_t>(), "int64"s},         //
+        {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
+        {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
+        {local_type_name<std::string>(), "string"s},                                                                                                                                              //
+        {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s},                                                            //
+    }};
+
+    const auto it = std::ranges::find_if(typeMapping, [&](const auto& pair) { return pair.first == name; });
+    if (it != typeMapping.end()) {
+        return it->second;
+    }
+
+    auto stripStdPrivates = [](std::string_view _name) -> std::string {
+        // There's an issue in std::regex in libstdcpp which tries to construct
+        // a vector of larger-than-possible size in some cases. Need to
+        // implement this manually. To simplify, we will remove any namespace
+        // starting with an underscore.
+        // static const std::regex stdPrivate("::_[A-Z_][a-zA-Z0-9_]*");
+        // return std::regex_replace(std::string(_name), stdPrivate, std::string());
+        std::string result(_name);
+        std::size_t oldStart = 0UZ;
+        while (true) {
+            auto delStart = result.find("::_"s, oldStart);
+            if (delStart == std::string::npos) {
+                break;
+            }
+
+            auto delEnd = delStart + 3;
+            while (delEnd < result.size() && (std::isalnum(result[delEnd]) || result[delEnd] == '_')) {
+                delEnd++;
+            }
+
+            result.erase(delStart, delEnd - delStart);
+            oldStart = delStart;
+        }
+        return result;
+    };
+
+    std::string_view view   = name;
+    auto             cursor = view.find("<");
+    if (cursor == std::string_view::npos) {
+        return stripStdPrivates(std::string{name});
+    }
+    auto base = view.substr(0, cursor);
+
+    view.remove_prefix(cursor + 1);
+    if (!view.ends_with(">")) {
+        return stripStdPrivates(std::string{name});
+    }
+    view.remove_suffix(1);
+    while (view.back() == ' ') {
+        view.remove_suffix(1);
+    }
+
+    std::vector<std::string> params;
+
+    std::size_t depth = 0;
+    cursor            = 0;
+
+    while (cursor < view.size()) {
+        if (view[cursor] == '<') {
+            depth++;
+        } else if (view[cursor] == '>') {
+            depth--;
+        } else if (view[cursor] == ',' && depth == 0) {
+            auto param = trimmed(view.substr(0, cursor));
+            params.push_back(makePortableTypeName(param));
+            view.remove_prefix(cursor + 1);
+            cursor = 0;
+            continue;
+        }
+        cursor++;
+    }
+    params.push_back(makePortableTypeName(trimmed(view)));
+    auto join = [](const auto& range, std::string_view sep = ", ") -> std::string {
+        std::string out;
+        auto        it2  = std::ranges::begin(range);
+        const auto  end2 = std::ranges::end(range);
+        if (it2 != end2) {
+            out += std::format("{}", *it2);
+            while (++it2 != end2) {
+                out += std::format("{}{}", sep, *it2);
+            }
+        }
+        return out;
+    };
+    return std::format("{}<{}>", base, join(params, ", "));
+}
 
 } // namespace detail
 
@@ -4440,7 +4605,7 @@ concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detai
 } // namespace meta
 
 #if HAVE_SOURCE_LOCATION
-inline auto this_source_location(std::source_location l = std::source_location::current()) { return fmt::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
+inline auto this_source_location(std::source_location l = std::source_location::current()) { return std::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
 #else
 inline auto this_source_location() { return "not yet implemented"; }
 #endif // HAVE_SOURCE_LOCATION
@@ -4448,20 +4613,6 @@ inline auto this_source_location() { return "not yet implemented"; }
 } // namespace gr
 
 #endif // include guard
-
-
-// #include <gnuradio-4.0/BlockTraits.hpp>
-#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
-#define GNURADIO_NODE_NODE_TRAITS_HPP
-
-#include <array>
-// #include <gnuradio-4.0/meta/reflection.hpp>
-#ifndef GNURADIO_REFLECTION_HPP
-#define GNURADIO_REFLECTION_HPP
-
-// #include <gnuradio-4.0/meta/typelist.hpp>
-
-// #include <gnuradio-4.0/meta/utils.hpp>
 
 
 #include <array>
@@ -6545,6 +6696,1007 @@ template <typename E, detail::enum_subtype S = detail::subtype_v<E>>
 // #include <gnuradio-4.0/meta/utils.hpp>
 
 
+#ifdef __cpp_lib_hardware_interference_size
+using std::hardware_constructive_interference_size;
+using std::hardware_destructive_interference_size;
+#else
+inline constexpr std::size_t hardware_destructive_interference_size  = 64;
+inline constexpr std::size_t hardware_constructive_interference_size = 64;
+#endif
+
+#ifdef __EMSCRIPTEN__
+// constexpr for cases where emscripten does not yet support constexpr and has to fall back to static const or nothing
+#define EM_CONSTEXPR
+#define EM_CONSTEXPR_STATIC static const
+#else
+#define EM_CONSTEXPR        constexpr
+#define EM_CONSTEXPR_STATIC constexpr
+#endif
+
+namespace gr {
+
+using property_map = pmtv::map_t;
+
+template<typename T>
+concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
+
+/**
+ * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
+ * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
+ * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
+ * any point in the signal processing flow, allowing for flexible and customisable data processing.
+ *
+ * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
+ * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
+ * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
+ */
+struct alignas(hardware_constructive_interference_size) Tag {
+    std::size_t  index{0UZ};
+    property_map map{};
+
+    GR_MAKE_REFLECTABLE(Tag, index, map);
+
+    bool operator==(const Tag& other) const = default;
+
+    // TODO: do we need the convenience methods below?
+    void reset() noexcept {
+        index = 0;
+        map.clear();
+    }
+
+    [[nodiscard]] pmtv::pmt& at(const std::string& key) { return map.at(key); }
+
+    [[nodiscard]] const pmtv::pmt& at(const std::string& key) const { return map.at(key); }
+
+    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>> get(const std::string& key) const noexcept {
+        try {
+            return map.at(key);
+        } catch (const std::out_of_range& e) {
+            return std::nullopt;
+        }
+    }
+
+    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>> get(const std::string& key) noexcept {
+        try {
+            return map.at(key);
+        } catch (const std::out_of_range&) {
+            return std::nullopt;
+        }
+    }
+
+    void insert_or_assign(const std::pair<std::string, pmtv::pmt>& value) { map[value.first] = value.second; }
+
+    void insert_or_assign(const std::string& key, const pmtv::pmt& value) { map[key] = value; }
+};
+
+} // namespace gr
+
+namespace gr {
+using meta::fixed_string;
+
+inline void updateMaps(const property_map& src, property_map& dest) {
+    for (const auto& [key, value] : src) {
+        if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
+            // If it's a nested map
+            if (auto it = dest.find(key); it != dest.end()) {
+                // If the key exists in the destination map
+                auto dest_nested_map = std::get_if<pmtv::map_t>(&(it->second));
+                if (dest_nested_map) {
+                    // Merge the nested maps recursively
+                    updateMaps(*nested_map, *dest_nested_map);
+                } else {
+                    // Key exists but not a map, replace it
+                    dest[key] = value;
+                }
+            } else {
+                // If the key doesn't exist, just insert
+                dest.insert({key, value});
+            }
+        } else {
+            // If it's not a nested map, insert/replace the value
+            dest[key] = value;
+        }
+    }
+}
+
+constexpr fixed_string GR_TAG_PREFIX = "gr:";
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit = "", fixed_string Description = "">
+class DefaultTag {
+    constexpr static fixed_string _key = GR_TAG_PREFIX + Key;
+
+public:
+    using value_type = PMT_TYPE;
+
+    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(_key).data(); }
+    [[nodiscard]] constexpr const char* shortKey() const noexcept { return std::string_view(Key).data(); }
+    [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
+    [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
+
+    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
+
+    template<typename T>
+    requires std::is_same_v<value_type, T>
+    [[nodiscard]] std::pair<std::string, pmtv::pmt> operator()(const T& newValue) const noexcept {
+        return {std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue))};
+    }
+};
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
+    if ((dt.shortKey() <=> str) == 0) {
+        return std::strong_ordering::equal; // shortKeys are equal
+    } else {
+        return dt.key() <=> str; // compare key()
+    }
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
+    if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
+        return std::strong_ordering::equal; // shortKeys are equal
+    } else {
+        return str <=> dt.key(); // compare key()
+    }
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr bool operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
+    return (dt <=> std::string_view(str)) == 0;
+}
+
+template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
+inline constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
+    return (std::string_view(str) <=> dt) == 0;
+}
+
+namespace tag { // definition of default tags and names
+inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
+inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_quantity", std::string, "", "signal quantity"> SIGNAL_QUANTITY;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
+inline EM_CONSTEXPR_STATIC DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
+inline EM_CONSTEXPR_STATIC DefaultTag<"n_dropped_samples", gr::Size_t, "", "number of dropped samples"> N_DROPPED_SAMPLES;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_name", std::string> TRIGGER_NAME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
+inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_meta_info", property_map, "", "maps containing additional trigger information"> TRIGGER_META_INFO;
+inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
+inline EM_CONSTEXPR_STATIC DefaultTag<"time", std::uint64_t, "", "multiplexing UTC-time in [ns] when ctx should be applied"> CONTEXT_TIME; // TODO: for backward compatibility -> rename to `ctx_time'
+inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
+inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
+inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
+
+inline constexpr std::array<std::string_view, 16> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "time", "reset_default", "store_default", "end_of_stream"};
+
+} // namespace tag
+
+} // namespace gr
+
+#endif // GNURADIO_TAG_HPP
+
+// #include <gnuradio-4.0/meta/UncertainValue.hpp>
+#ifndef GNURADIO_UNCERTAINVALUE_HPP
+#define GNURADIO_UNCERTAINVALUE_HPP
+
+#include <atomic>
+#include <complex>
+#include <concepts>
+#include <cstdint>
+#include <numbers>
+#include <optional>
+#include <type_traits>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+namespace gr {
+
+/**
+ *
+ * @brief Propagation of Uncertainties
+ *
+ * original idea by: Evan Manning, "Uncertainty Propagation in C++", NASA Jet Propulsion Laboratory,
+ * C/C++ Users Journal Volume 14, Number 3, March, 1996
+ * http://www.pennelynn.com/Documents/CUJ/HTML/14.03/MANNING/MANNING.HTM
+ *
+ * implements +,-,*,/ operators for basic arithmetic and complex types, for details see:
+ * https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
+ * This implements only propagation of uncorrelated symmetric errors (i.e. gaussian-type standard deviations).
+ * A more rigorous treatment would require the calculation and propagation of the
+ * corresponding covariance matrix which is out of scope of this implementation.
+ */
+
+template<typename T>
+concept arithmetic_or_complex_like = std::is_arithmetic_v<T> || meta::complex_like<T>;
+
+template<arithmetic_or_complex_like T>
+struct UncertainValue {
+    using value_type = T;
+
+    T value       = static_cast<T>(0); /// mean value
+    T uncertainty = static_cast<T>(0); /// uncorrelated standard deviation
+
+    // Default constructor
+    constexpr UncertainValue() noexcept = default;
+
+    constexpr UncertainValue(T value_, T uncertainty_) noexcept : value(value_), uncertainty(uncertainty_) {}
+
+    explicit(false) constexpr UncertainValue(T value_) noexcept : value(value_), uncertainty(static_cast<T>(0)) {}
+
+    constexpr UncertainValue(const UncertainValue&) noexcept            = default;
+    constexpr UncertainValue(UncertainValue&&) noexcept                 = default;
+    constexpr UncertainValue& operator=(const UncertainValue&) noexcept = default;
+    ~UncertainValue()                                                   = default;
+
+    constexpr UncertainValue& operator=(const T& other) noexcept {
+        value       = other;
+        uncertainty = static_cast<T>(0);
+        return *this;
+    }
+
+    auto operator<=>(UncertainValue const&) const = default;
+};
+
+template<typename T>
+UncertainValue(T, T) -> UncertainValue<T>;
+
+template<arithmetic_or_complex_like T, arithmetic_or_complex_like U>
+requires std::convertible_to<U, T>
+auto operator<=>(const UncertainValue<T>& lhs, U rhs) {
+    return lhs.value <=> static_cast<T>(rhs);
+}
+
+template<arithmetic_or_complex_like T, arithmetic_or_complex_like U>
+requires std::convertible_to<U, T>
+auto operator<=>(U lhs, const UncertainValue<T>& rhs) {
+    return static_cast<T>(lhs) <=> rhs.value;
+}
+
+template<typename T>
+concept UncertainValueLike = gr::meta::is_instantiation_of<T, UncertainValue>;
+
+template<typename T>
+requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] constexpr auto value(const T& val) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        return val.value;
+    } else {
+        return val;
+    }
+}
+
+template<typename T>
+requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
+[[nodiscard]] constexpr auto uncertainty(const T& val) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        return val.uncertainty;
+    } else {
+        return meta::fundamental_base_value_type_t<T>(0);
+    }
+}
+
+namespace detail {
+template<typename T>
+struct UncertainValueValueType {
+    using type = T;
+};
+
+template<typename T>
+struct UncertainValueValueType<UncertainValue<T>> {
+    using type = T;
+};
+} // namespace detail
+
+template<typename T>
+using UncertainValueType_t = detail::UncertainValueValueType<T>::type;
+
+/********************** some basic math operation definitions *********************************/
+
+// FIXME: make operators of UncertainValue hidden friends or members to reduce compile time (simplifies overload
+// resolution)
+
+template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
+requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
+[[nodiscard]] constexpr auto operator+(const T& lhs, const U& rhs) noexcept {
+    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
+        using ResultType = decltype(lhs.value + rhs.value);
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+            // we are dealing with complex numbers -> use the standard uncorrelated calculation.
+            ResultType newUncertainty = {std::hypot(std::real(lhs.uncertainty), std::real(rhs.uncertainty)), std::hypot(std::imag(lhs.uncertainty), std::imag(rhs.uncertainty))};
+            return UncertainValue<ResultType>{lhs.value + rhs.value, newUncertainty};
+        } else {
+            // both ValueType[T,U] are arithmetic uncertainties
+            return UncertainValue<ResultType>{lhs.value + rhs.value, std::hypot(lhs.uncertainty, rhs.uncertainty)};
+        }
+    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
+        return T{lhs.value + rhs, lhs.uncertainty};
+    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
+        return U{lhs + rhs.value, rhs.uncertainty};
+    } else {
+        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '+' definition");
+        return lhs + rhs; // unlikely to be called due to default '+' definition
+    }
+}
+
+template<UncertainValueLike T, typename U>
+constexpr T& operator+=(T& lhs, const U& rhs) noexcept {
+    lhs = lhs + rhs;
+    return lhs;
+}
+
+template<UncertainValueLike T, typename ValueTypeT = UncertainValueType_t<T>>
+constexpr T operator+(const T& val) {
+    if constexpr (meta::complex_like<ValueTypeT>) {
+        return val;
+    } else {
+        return {std::abs(val.value), std::abs(val.uncertainty)};
+    }
+}
+
+template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
+requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
+[[nodiscard]] constexpr auto operator-(const T& lhs, const U& rhs) noexcept {
+    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
+        using ResultType = decltype(lhs.value - rhs.value);
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+            // we are dealing with complex numbers -> use the standard uncorrelated calculation.
+            ResultType newUncertainty = {std::hypot(std::real(lhs.uncertainty), std::real(rhs.uncertainty)), std::hypot(std::imag(lhs.uncertainty), std::imag(rhs.uncertainty))};
+            return UncertainValue<ResultType>{lhs.value - rhs.value, newUncertainty};
+        } else {
+            // both ValueType[T,U] are arithmetic uncertainties
+            return UncertainValue<ResultType>{lhs.value - rhs.value, std::hypot(lhs.uncertainty, rhs.uncertainty)};
+        }
+    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
+        return T{lhs.value - rhs, lhs.uncertainty};
+    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
+        return U{lhs - rhs.value, rhs.uncertainty};
+    } else {
+        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '-' definition");
+    }
+}
+
+template<UncertainValueLike T, typename U>
+constexpr T& operator-=(T& lhs, const U& rhs) noexcept {
+    lhs = lhs - rhs;
+    return lhs;
+}
+
+template<UncertainValueLike T>
+constexpr T operator-(const T& val) {
+    return {-val.value, val.uncertainty};
+}
+
+template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
+requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
+[[nodiscard]] constexpr auto operator*(const T& lhs, const U& rhs) noexcept {
+    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
+        using ResultType = decltype(lhs.value * rhs.value);
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+            // we are dealing with complex numbers -> use standard uncorrelated calculation
+            ResultType newUncertainty = {std::hypot(std::real(lhs.value) * std::real(rhs.uncertainty), std::real(rhs.value) * std::real(lhs.uncertainty)), std::hypot(std::imag(lhs.value) * std::imag(rhs.uncertainty), std::imag(rhs.value) * std::imag(lhs.uncertainty))};
+            return UncertainValue<ResultType>{lhs.value * rhs.value, newUncertainty};
+        } else {
+            // both ValueType[T,U] are arithmetic uncertainties
+            auto combinedUncertainty = std::hypot(lhs.value * rhs.uncertainty, rhs.value * lhs.uncertainty);
+            return UncertainValue<ResultType>{lhs.value * rhs.value, combinedUncertainty};
+        }
+    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
+        return T{lhs.value * rhs, lhs.uncertainty * rhs};
+    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
+        return U{lhs * rhs.value, lhs * rhs.uncertainty};
+    } else {
+        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '*' definition");
+    }
+}
+
+template<UncertainValueLike T, typename U>
+constexpr T& operator*=(T& lhs, const U& rhs) noexcept {
+    lhs = lhs * rhs;
+    return lhs;
+}
+
+template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
+requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
+[[nodiscard]] constexpr auto operator/(const T& lhs, const U& rhs) noexcept {
+    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
+        using ResultType = decltype(lhs.value * rhs.value);
+        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
+            // we are dealing with complex numbers -> use standard uncorrelated calculation
+            ResultType newUncertainty;
+            if constexpr (std::is_arithmetic_v<ValueTypeT> && meta::complex_like<ValueTypeU>) {
+                // LHS is real, RHS is complex
+                newUncertainty = {std::sqrt(std::pow(lhs.uncertainty / std::real(rhs.value), 2)), std::sqrt(std::pow(std::imag(rhs.uncertainty) * lhs.value / std::norm(rhs.value), 2))};
+            } else if constexpr (meta::complex_like<ValueTypeT> && std::is_arithmetic_v<ValueTypeU>) {
+                // LHS is complex, RHS is real
+                newUncertainty = {std::hypot(std::real(lhs.uncertainty) / rhs.value, rhs.uncertainty * std::real(lhs.value) / std::pow(rhs.value, 2)), std::sqrt(std::pow(std::imag(lhs.uncertainty) / rhs.value, 2))};
+            } else {
+                newUncertainty = {std::hypot(std::real(lhs.uncertainty) / std::real(rhs.value), std::real(rhs.uncertainty) * std::real(lhs.value) / std::norm(rhs.value)), std::hypot(std::imag(lhs.uncertainty) / std::imag(rhs.value), std::imag(rhs.uncertainty) * std::imag(lhs.value) / std::norm(rhs.value))};
+            }
+
+            return UncertainValue<ResultType>{lhs.value / rhs.value, newUncertainty};
+        } else {
+            // both ValueType[T,U] are arithmetic uncertainties
+            ResultType combinedUncertainty = std::hypot(lhs.uncertainty / rhs.value, rhs.uncertainty * lhs.value / (rhs.value * rhs.value));
+            return UncertainValue<ResultType>{lhs.value / rhs.value, combinedUncertainty};
+        }
+    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
+        return T{lhs.value / rhs, lhs.uncertainty / std::abs(rhs)};
+    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
+        auto rhsMagSquared = std::norm(rhs.value);
+        return U{lhs / rhs.value, rhs.uncertainty * std::abs(lhs) / rhsMagSquared};
+    } else {
+        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '/' definition");
+    }
+}
+
+template<UncertainValueLike T, typename U>
+constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
+    lhs = lhs / rhs;
+    return lhs;
+}
+
+} // namespace gr
+
+namespace gr::math {
+
+template<typename T, typename U>
+requires(std::is_arithmetic_v<T> && std::is_arithmetic_v<U>)
+[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
+    return std::pow(base, exponent);
+}
+
+template<gr::UncertainValueLike T, std::floating_point U, typename ValueTypeT = gr::UncertainValueType_t<T>>
+requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> || std::integral<U>
+[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
+    if (base.value == static_cast<meta::fundamental_base_value_type_t<ValueTypeT>>(0)) [[unlikely]] {
+        if (exponent == 0) [[unlikely]] {
+            return T{1, 0};
+        } else {
+            return T{0, 0};
+        }
+    }
+
+    ValueTypeT newValue = std::pow(base.value, exponent);
+    if constexpr (gr::meta::complex_like<ValueTypeT>) {
+        auto val = exponent / base.value * newValue;
+        return T{newValue, std::sqrt(val * std::conj(val)) * base.uncertainty};
+    } else {
+        return T{newValue, std::abs(newValue * exponent * base.uncertainty / base.value)};
+    }
+}
+
+template<gr::UncertainValueLike T, gr::UncertainValueLike U, typename ValueTypeT = gr::UncertainValueType_t<T>, typename ValueTypeU = gr::UncertainValueType_t<T>>
+requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, gr::meta::fundamental_base_value_type_t<ValueTypeU>>
+[[nodiscard]] constexpr T pow(const T& base, const U& exponent) noexcept {
+    if (base.value == ValueTypeT(0)) [[unlikely]] {
+        if (exponent.value == static_cast<ValueTypeU>(0)) [[unlikely]] {
+            return T{1, 0};
+        } else {
+            return T{0, 0};
+        }
+    }
+
+    ValueTypeT newValue = std::pow(base.value, exponent.value);
+    if constexpr (gr::meta::complex_like<ValueTypeT>) {
+        auto hypot = [](auto a, auto b) { return std::sqrt(std::real(a * std::conj(a) + b * std::conj(b))); }; // c*c⃰ == is always real valued
+        return T{newValue, hypot(exponent.value / base.value * newValue * base.uncertainty, std::log(base.value) * newValue * exponent.uncertainty)};
+    } else {
+        return T{newValue, std::abs(newValue) * std::hypot(exponent.value / base.value * base.uncertainty, std::log(base.value) * exponent.uncertainty)};
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T sqrt(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        using ValueType = meta::fundamental_base_value_type_t<T>;
+        return gr::math::pow(value, ValueType(0.5));
+    } else {
+        return std::sqrt(value);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T sin(const T& x) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return T{std::sin(x.value), std::abs(std::cos(x.value) * x.uncertainty)};
+    } else {
+        return std::sin(x);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T cos(const T& x) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return T{std::cos(x.value), std::abs(std::sin(x.value) * x.uncertainty)};
+    } else {
+        return std::cos(x);
+    }
+}
+
+template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_t<T>>
+[[nodiscard]] constexpr T exp(const T& x) noexcept {
+    if constexpr (gr::meta::complex_like<ValueTypeT>) {
+        return gr::math::pow(gr::UncertainValue<ValueTypeT>{std::numbers::e_v<typename ValueTypeT::value_type>, static_cast<ValueTypeT>(0)}, x);
+    } else {
+        return gr::math::pow(gr::UncertainValue<ValueTypeT>{std::numbers::e_v<ValueTypeT>, static_cast<ValueTypeT>(0)}, x);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr bool isfinite(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return std::isfinite(gr::value(value)) && std::isfinite(gr::uncertainty(value));
+    } else {
+        return std::isfinite(value);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T abs(const T& value) noexcept {
+    if constexpr (gr::UncertainValueLike<T>) {
+        return gr::value(value) > T(0) ? value : -value;
+    } else {
+        return std::abs(value);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T log(const T& x) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        using base_t = gr::meta::fundamental_base_value_type_t<T>;
+        auto val     = std::log(gr::value(x));
+        if constexpr (gr::meta::complex_like<base_t>) {
+            constexpr auto derivative = base_t(1) / x.value; // derivative(log(z)) = 1/z
+            return T{val, std::abs(derivative) * gr::uncertainty(x)};
+        } else {
+            return T{val, std::abs(gr::uncertainty(x) / gr::value(x))}; // derivative(log(x)) = 1/x
+        }
+    } else {
+        return std::log(x);
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T log10(const T& x) noexcept {
+    if constexpr (UncertainValueLike<T>) {
+        using base_t        = gr::meta::fundamental_base_value_type_t<T>;
+        auto           val  = std::log10(gr::value(x));
+        constexpr auto ln10 = std::numbers::ln10_v<base_t>;
+        if constexpr (gr::meta::complex_like<base_t>) {
+            constexpr auto derivative = base_t(1) / (x.value * ln10); // derivative(log10(z)) = 1 / (z * ln(10))
+            return T{val, std::abs(derivative) * gr::uncertainty(x)};
+        } else {
+            return T{val, std::abs(gr::uncertainty(x) / (gr::value(x) * ln10))}; // derivative(log10(x)) = 1 / (x * ln(10))
+        }
+    } else {
+        return std::log10(x);
+    }
+}
+
+} // namespace gr::math
+
+#endif // GNURADIO_UNCERTAINVALUE_HPP
+
+
+namespace gr {
+namespace time {
+[[nodiscard]] inline std::string getIsoTime() noexcept {
+    std::chrono::system_clock::time_point now  = std::chrono::system_clock::now();
+    const auto                            secs = std::chrono::time_point_cast<std::chrono::seconds>(now);
+    const auto                            ms   = std::chrono::duration_cast<std::chrono::milliseconds>(now - secs).count();
+    return std::format("{:%Y-%m-%dT%H:%M:%S}.{:06}", secs, ms); // ms-precision ISO time-format
+}
+} // namespace time
+
+template<std::ranges::input_range R>
+requires std::formattable<std::ranges::range_value_t<R>, char>
+std::string join(const R& range, std::string_view sep = ", ") {
+    std::string out;
+    auto        it  = std::ranges::begin(range);
+    const auto  end = std::ranges::end(range);
+    if (it != end) {
+        out += std::format("{}", *it);
+        while (++it != end) {
+            out += std::format("{}{}", sep, *it);
+        }
+    }
+    return out;
+}
+
+template<typename T>
+constexpr auto ptr(const T* p) {
+    return std::format("{:#x}", reinterpret_cast<std::uintptr_t>(p));
+}
+} // namespace gr
+
+template<>
+struct std::formatter<std::source_location, char> {
+    char presentation = 's';
+
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin(), end = ctx.end();
+        if (it != end && (*it == 's' || *it == 'f' || *it == 't')) {
+            presentation = *it++;
+        }
+        if (it != end && *it != '}') {
+            throw std::format_error("invalid format specifier for source_location");
+        }
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto format(const std::source_location& loc, FormatContext& ctx) const {
+        switch (presentation) {
+        case 's': return std::format_to(ctx.out(), "{}", loc.file_name());
+        case 't': return std::format_to(ctx.out(), "{}:{}", loc.file_name(), loc.line());
+        case 'f':
+        default: return std::format_to(ctx.out(), "{}:{} in {}", loc.file_name(), loc.line(), loc.function_name());
+        }
+    }
+};
+
+template<typename T>
+struct std::formatter<std::complex<T>, char> {
+    char presentation = 'g'; // default format
+
+    template<typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        auto it = ctx.begin(), end = ctx.end();
+        if (it != end && (*it == 'f' || *it == 'F' || *it == 'e' || *it == 'E' || *it == 'g' || *it == 'G')) {
+            presentation = *it++;
+        }
+        if (it != end && *it != '}') {
+            throw std::format_error("invalid format");
+        }
+        return it;
+    }
+
+    template<typename FormatContext>
+    constexpr auto format(const std::complex<T>& value, FormatContext& ctx) const {
+        const auto imag = value.imag();
+        switch (presentation) {
+        case 'e':
+            if (imag == 0) {
+                return std::format_to(ctx.out(), "{:e}", value.real());
+            }
+            return std::format_to(ctx.out(), "({:e}{:+e}i)", value.real(), imag);
+        case 'E':
+            if (imag == 0) {
+                return std::format_to(ctx.out(), "{:E}", value.real());
+            }
+            return std::format_to(ctx.out(), "({:E}{:+E}i)", value.real(), imag);
+        case 'f':
+            if (imag == 0) {
+                return std::format_to(ctx.out(), "{:f}", value.real());
+            }
+            return std::format_to(ctx.out(), "({:f}{:+f}i)", value.real(), imag);
+        case 'F':
+            if (imag == 0) {
+                return std::format_to(ctx.out(), "{:F}", value.real());
+            }
+            return std::format_to(ctx.out(), "({:F}{:+F}i)", value.real(), imag);
+        case 'G':
+            if (imag == 0) {
+                return std::format_to(ctx.out(), "{:G}", value.real());
+            }
+            return std::format_to(ctx.out(), "({:G}{:+G}i)", value.real(), imag);
+        case 'g':
+        default:
+            if (imag == 0) {
+                return std::format_to(ctx.out(), "{:g}", value.real());
+            }
+            return std::format_to(ctx.out(), "({:g}{:+g}i)", value.real(), imag);
+        }
+    }
+};
+
+// simplified formatter for UncertainValue
+template<gr::arithmetic_or_complex_like T>
+struct std::formatter<gr::UncertainValue<T>> {
+    formatter<T> value_formatter;
+
+    constexpr auto parse(format_parse_context& ctx) { return value_formatter.parse(ctx); }
+
+    template<typename FormatContext>
+    auto format(const gr::UncertainValue<T>& uv, FormatContext& ctx) const {
+        auto out = ctx.out();
+        out      = std::format_to(out, "(");
+        out      = value_formatter.format(uv.value, ctx);
+        out      = std::format_to(out, " ± ");
+        out      = value_formatter.format(uv.uncertainty, ctx);
+        out      = std::format_to(out, ")");
+        return out;
+    }
+};
+
+namespace gr {
+template<gr::UncertainValueLike T>
+std::ostream& operator<<(std::ostream& os, const T& v) {
+    return os << std::format("{}", v);
+}
+} // namespace gr
+
+// DataSet - Range formatter
+
+namespace gr {
+template<typename T>
+struct Range;
+}
+
+template<typename T>
+struct std::formatter<gr::Range<T>> {
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const gr::Range<T>& range, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "[min: {}, max: {}]", range.min, range.max);
+    }
+};
+
+namespace gr {
+template<typename T>
+std::ostream& operator<<(std::ostream& os, const gr::Range<T>& v) {
+    return os << std::format("{}", v);
+}
+} // namespace gr
+
+// pmt formatter
+
+namespace gr {
+
+template<typename R>
+concept FormattableRange = std::ranges::range<R> && !std::same_as<std::remove_cvref_t<R>, std::string> && !std::is_array_v<std::remove_cvref_t<R>> && std::formattable<std::ranges::range_value_t<R>, char>;
+
+template<typename OutputIt, typename Container>
+constexpr auto format_join(OutputIt out, const Container& container, std::string_view separator = ", ") {
+    auto it = container.begin();
+    if (it != container.end()) {
+        out = std::format_to(out, "{}", *it); // format first element
+        ++it;
+    }
+
+    for (; it != container.end(); ++it) {
+        out = std::format_to(out, "{}", separator); // insert separator
+        out = std::format_to(out, "{}", *it);       // format remaining element
+    }
+
+    return out;
+}
+
+template<typename Container>
+constexpr std::string join(const Container& container, std::string_view separator = ", ") {
+    std::ostringstream ss;
+    auto               out = std::ostream_iterator<char>(ss);
+    format_join(out, container, separator);
+    return ss.str();
+}
+
+} // namespace gr
+
+template<>
+struct std::formatter<pmtv::map_t::value_type> {
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const noexcept {
+        return std::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
+    }
+};
+
+template<pmtv::IsPmt T>
+struct std::formatter<T> { // alternate pmtv formatter optimised for compile-time not runtime
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const T& value, FormatContext& ctx) const noexcept {
+        // if the std::visit dispatch is too expensive then maybe manually loop-unroll this
+        return std::visit([&ctx](const auto& format_arg) { return format_value(format_arg, ctx); }, value);
+    }
+
+private:
+    template<typename FormatContext, typename U>
+    static auto format_value(const U& arg, FormatContext& ctx) -> decltype(std::format_to(ctx.out(), "")) {
+        if constexpr (pmtv::Scalar<U> || pmtv::Complex<U>) {
+            return std::format_to(ctx.out(), "{}", arg);
+        } else if constexpr (std::same_as<U, std::string>) {
+            return std::format_to(ctx.out(), "{}", arg);
+        } else if constexpr (pmtv::UniformVector<U> || pmtv::UniformStringVector<U>) { // format vector
+            std::format_to(ctx.out(), "[");
+            gr::format_join(ctx.out(), arg, ", ");
+            return std::format_to(ctx.out(), "]");
+        } else if constexpr (std::same_as<U, std::vector<pmtv::pmt>>) { // format vector of pmts
+            std::format_to(ctx.out(), "[");
+            gr::format_join(ctx.out(), arg, ", ");
+            return std::format_to(ctx.out(), "]");
+        } else if constexpr (pmtv::PmtMap<U>) { // format map
+            std::format_to(ctx.out(), "{{ ");
+            for (auto it = arg.begin(); it != arg.end(); ++it) {
+                format_value(it->first, ctx); // Format key
+                std::format_to(ctx.out(), ": ");
+                format_value(it->second, ctx); // Format value
+                if (std::next(it) != arg.end()) {
+                    std::format_to(ctx.out(), ", ");
+                }
+            }
+            return std::format_to(ctx.out(), " }}");
+        } else if constexpr (requires { std::visit([](const auto&) {}, arg); }) {
+            return std::visit([&](const auto& value) { return format_value(value, ctx); }, arg);
+        } else if constexpr (std::same_as<std::monostate, U>) {
+            return std::format_to(ctx.out(), "null");
+        } else {
+            return std::format_to(ctx.out(), "unknown type {}", gr::meta::type_name<U>());
+        }
+    }
+};
+
+template<>
+struct std::formatter<pmtv::map_t> {
+    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    constexpr auto format(const pmtv::map_t& value, FormatContext& ctx) const noexcept {
+        std::format_to(ctx.out(), "{{ ");
+        gr::format_join(ctx.out(), value, ", ");
+        return std::format_to(ctx.out(), " }}");
+    }
+};
+
+template<>
+struct std::formatter<std::vector<bool>> {
+    char presentation = 'c';
+
+    constexpr auto parse(std::format_parse_context& ctx) -> decltype(ctx.begin()) {
+        auto it = ctx.begin(), end = ctx.end();
+        if (it != end && (*it == 's' || *it == 'c')) {
+            presentation = *it++;
+        }
+        if (it != end && *it != '}') {
+            throw std::format_error("invalid format");
+        }
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto format(const std::vector<bool>& v, FormatContext& ctx) const noexcept -> decltype(ctx.out()) {
+        auto   sep = (presentation == 'c' ? ", " : " ");
+        size_t len = v.size();
+        std::format_to(ctx.out(), "[");
+        for (size_t i = 0; i < len; ++i) {
+            if (i > 0) {
+                std::format_to(ctx.out(), "{}", sep);
+            }
+            std::format_to(ctx.out(), "{}", v[i] ? "true" : "false");
+        }
+        std::format_to(ctx.out(), "]");
+        return ctx.out();
+    }
+};
+
+template<typename T1, typename T2>
+struct std::formatter<std::pair<T1, T2>, char> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const std::pair<T1, T2>& p, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "({}, {})", p.first, p.second);
+    }
+};
+
+template<gr::FormattableRange R>
+struct std::formatter<R, char> {
+    char separator = ',';
+
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const R& range, FormatContext& ctx) const {
+        auto out = ctx.out();
+        std::format_to(out, "[");
+        bool first = true;
+
+        for (const auto& val : range) {
+            if (!first) {
+                std::format_to(out, "{} ", separator);
+            } else {
+                first = false;
+            }
+            std::format_to(out, "{}", val);
+        }
+
+        return std::format_to(out, "]");
+    }
+};
+
+template<typename T, std::size_t N>
+requires(!std::same_as<T, char>)
+struct std::formatter<T[N], char> {
+    std::formatter<T> elemFmt;
+    std::string       elemSpec;
+    char              separator = ',';
+
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && *it != '}') {
+            if (*it != ':') {
+                separator = *it++;
+            }
+            if (it != ctx.end() && *it == ':') {
+                ++it;
+                auto spec_start = it;
+                while (it != ctx.end() && *it != '}') {
+                    ++it;
+                }
+                elemSpec = std::string(spec_start, it);
+            }
+        }
+
+        if (it == ctx.end() || *it != '}') {
+            throw std::format_error("invalid format specifier for C-style array");
+        }
+
+        return it + 1;
+    }
+
+    template<typename FormatContext>
+    auto format(const T (&arr)[N], FormatContext& ctx) const {
+        auto out = ctx.out();
+        std::format_to(out, "[");
+        for (std::size_t i = 0; i < N; ++i) {
+            if (i > 0) {
+                std::format_to(out, "{} ", separator);
+            }
+            const auto fmt = std::string("{:") + elemSpec + "}";
+            std::vformat_to(out, fmt, std::make_format_args(arr[i]));
+        }
+        return std::format_to(out, "]");
+    }
+};
+
+template<typename Value, typename Error>
+struct std::formatter<std::expected<Value, Error>> {
+    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const std::expected<Value, Error>& ret, FormatContext& ctx) const -> decltype(ctx.out()) {
+        if (ret.has_value()) {
+            return std::format_to(ctx.out(), "<std::expected-value: {}>", ret.value());
+        } else {
+            return std::format_to(ctx.out(), "<std::unexpected: {}>", ret.error());
+        }
+    }
+};
+
+template<typename T>
+requires std::derived_from<T, std::exception>
+struct std::formatter<T, char> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const T& e, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "{}", e.what());
+    }
+};
+
+#endif // GNURADIO_FORMATTER_HPP
+
+// #include <gnuradio-4.0/meta/typelist.hpp>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
+// #include <gnuradio-4.0/BlockTraits.hpp>
+#ifndef GNURADIO_NODE_NODE_TRAITS_HPP
+#define GNURADIO_NODE_NODE_TRAITS_HPP
+
+#include <array>
+// #include <gnuradio-4.0/meta/reflection.hpp>
+
+// #include <gnuradio-4.0/meta/utils.hpp>
+
+
 // #include "Port.hpp"
 #ifndef GNURADIO_PORT_HPP
 #define GNURADIO_PORT_HPP
@@ -6585,7 +7737,7 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <stdexcept>
 #include <system_error>
 
-#include <fmt/format.h>
+#include <format>
 
 // header for creating/opening or POSIX shared memory objects
 #include <cerrno>
@@ -6896,10 +8048,11 @@ private:
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <new>
 #include <ranges>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace gr {
 
@@ -7051,11 +8204,11 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
 } // namespace gr
 
-#include <fmt/core.h>
-#include <fmt/ostream.h>
+// #include <gnuradio-4.0/meta/formatter.hpp>
+
 
 template<>
-struct fmt::formatter<gr::Sequence> {
+struct std::formatter<gr::Sequence> {
     template<typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
         return ctx.begin();
@@ -7063,12 +8216,12 @@ struct fmt::formatter<gr::Sequence> {
 
     template<typename FormatContext>
     auto format(gr::Sequence const& value, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", value.value());
+        return std::format_to(ctx.out(), "{}", value.value());
     }
 };
 
 namespace gr {
-inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << fmt::format("{}", v.value()); }
+inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << std::format("{}", v.value()); }
 } // namespace gr
 
 #endif // GNURADIO_SEQUENCE_HPP
@@ -7719,9 +8872,9 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
             try {
                 return do_allocate_internal(required_size, alignment);
             } catch (const std::system_error& e) { // explicitly caught for retry
-                fmt::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+                std::print("system-error: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
             } catch (const std::invalid_argument& e) { // explicitly caught for retry
-                fmt::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
+                std::print("invalid_argument: allocation failed (VERY RARE) '{}' - will retry, attempt: {}\n", e.what(), retry_attempt);
             }
         }
         return do_allocate_internal(required_size, alignment);
@@ -7731,36 +8884,36 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
 
         const std::size_t size = 2 * required_size;
         if (size % static_cast<std::size_t>(getpagesize()) != 0LU) {
-            throw std::invalid_argument(fmt::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
+            throw std::invalid_argument(std::format("incompatible buffer-byte-size: {} -> {} alignment: {} vs. page size: {}", required_size, size, alignment, getpagesize()));
         }
         const std::size_t size_half = size / 2;
 
         static std::size_t _counter;
-        const auto         buffer_name  = fmt::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        const auto         buffer_name  = std::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
         const auto         memfd_create = [name = buffer_name.c_str()](unsigned int flags) { return syscall(__NR_memfd_create, name, flags); };
         auto               shm_fd       = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
-            throw std::system_error(errno, std::system_category(), fmt::format("{} - memfd_create error {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errno, std::system_category(), std::format("{} - memfd_create error {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         if (ftruncate(shm_fd, static_cast<off_t>(size)) == -1) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - ftruncate {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, std::format("{} - ftruncate {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         void* first_copy = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, static_cast<off_t>(0));
         if (first_copy == MAP_FAILED) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, std::format("{} - failed munmap for first half {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         // unmap the 2nd half
         if (munmap(static_cast<char*>(first_copy) + size_half, size_half) == -1) {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
-            throw std::system_error(errorCode, fmt::format("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno)));
+            throw std::system_error(errorCode, std::format("{} - failed munmap for second half {}: {}", buffer_name, errno, strerror(errno)));
         }
 
         // Map the first half into the now available hole.
@@ -7773,11 +8926,11 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
             std::error_code errorCode(errno, std::system_category());
             close(shm_fd);
             if (result == MAP_FAILED) {
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno)));
+                throw std::system_error(errorCode, std::format("{} - failed mmap for second copy {}: {}", buffer_name, errno, strerror(errno)));
             } else {
                 ptrdiff_t diff2 = static_cast<const char*>(result) - static_cast<char*>(second_copy_addr);
                 ptrdiff_t diff1 = static_cast<const char*>(result) - static_cast<char*>(first_copy);
-                throw std::system_error(errorCode, fmt::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, fmt::ptr(result), fmt::ptr(first_copy), fmt::ptr(second_copy_addr), diff2, diff1, 2 * size_half));
+                throw std::system_error(errorCode, std::format("{} - failed mmap for second copy: mismatching address -- result {} first_copy {} second_copy_addr {} - diff result-2nd {} diff result-1st {} size {}", buffer_name, gr::ptr(result), gr::ptr(first_copy), gr::ptr(second_copy_addr), diff2, diff1, 2 * size_half));
             }
         }
 
@@ -7795,7 +8948,7 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
     void do_deallocate(void* p, std::size_t size, std::size_t alignment) override { // NOSONAR
 
         if (munmap(p, size) == -1) {
-            throw std::system_error(errno, std::system_category(), fmt::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
+            throw std::system_error(errno, std::system_category(), std::format("double_mapped_memory_resource::do_deallocate(void*, {}, {}) - munmap(..) failed", size, alignment));
         }
     }
 #else
@@ -7976,13 +9129,13 @@ class CircularBuffer {
 #ifndef NDEBUG
                 if constexpr (isMultiProducerStrategy()) {
                     if (!isFullyPublished()) {
-                        fmt::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
+                        std::print(stderr, "CircularBuffer::MultiWriter::WriterSpan() - did not publish {} samples\n", _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish);
                         std::abort();
                     }
 
                 } else {
                     if (!_parent->_internalSpan.empty() && !isPublishRequested()) {
-                        fmt::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
+                        std::print(stderr, "CircularBuffer::SingleWriter::WriterSpan() - omitted publish call for {} reserved samples\n", _parent->_internalSpan.size());
                         std::abort();
                     }
                 }
@@ -8116,7 +9269,7 @@ class CircularBuffer {
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {
             if constexpr (std::is_base_of_v<MultiProducerStrategy<SIZE, TWaitStrategy>, ClaimType>) {
                 if (_internalSpan.size() - _nRequestedSamplesToPublish != 0) {
-                    fmt::print(stderr,
+                    std::print(stderr,
                         "An error occurred: The method CircularBuffer::MultiWriter::reserve() was invoked for the second time in succession, "
                         "a previous WriterSpan was not fully published, {} samples remain unpublished.",
                         _internalSpan.size() - _nRequestedSamplesToPublish);
@@ -8125,7 +9278,7 @@ class CircularBuffer {
 
             } else {
                 if (!_internalSpan.empty() && !_isPublishRequested) {
-                    fmt::print(stderr,
+                    std::print(stderr,
                         "An error occurred: The method CircularBuffer::SingleWriter::reserve() was invoked for the second time in succession "
                         "without calling publish() for a previous WriterSpan, {} samples was reserved.",
                         _internalSpan.size());
@@ -8398,891 +9551,6 @@ static_assert(BufferLike<CircularBuffer<int32_t>>);
 // #include <gnuradio-4.0/CircularBuffer.hpp>
 
 // #include <gnuradio-4.0/Tag.hpp>
-#ifndef GNURADIO_TAG_HPP
-#define GNURADIO_TAG_HPP
-
-#include <map>
-
-// #include <pmtv/pmt.hpp>
-
-
-// #include <gnuradio-4.0/meta/formatter.hpp>
-#ifndef GNURADIO_FORMATTER_HPP
-#define GNURADIO_FORMATTER_HPP
-
-#include <chrono>
-#include <complex>
-#include <expected>
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wshorten-64-to-32"
-#endif // error in fmt::chrono for latest clang version/WASM builds
-#include <fmt/chrono.h>
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-#include <fmt/format.h>
-#include <fmt/std.h>
-#include <source_location>
-#include <vector>
-
-// #include <gnuradio-4.0/Tag.hpp>
-
-// #include <gnuradio-4.0/meta/UncertainValue.hpp>
-#ifndef GNURADIO_UNCERTAINVALUE_HPP
-#define GNURADIO_UNCERTAINVALUE_HPP
-
-#include <atomic>
-#include <complex>
-#include <concepts>
-#include <cstdint>
-#include <numbers>
-#include <optional>
-#include <type_traits>
-
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-namespace gr {
-
-/**
- *
- * @brief Propagation of Uncertainties
- *
- * original idea by: Evan Manning, "Uncertainty Propagation in C++", NASA Jet Propulsion Laboratory,
- * C/C++ Users Journal Volume 14, Number 3, March, 1996
- * http://www.pennelynn.com/Documents/CUJ/HTML/14.03/MANNING/MANNING.HTM
- *
- * implements +,-,*,/ operators for basic arithmetic and complex types, for details see:
- * https://en.wikipedia.org/wiki/Propagation_of_uncertainty#Example_formulae
- * This implements only propagation of uncorrelated symmetric errors (i.e. gaussian-type standard deviations).
- * A more rigorous treatment would require the calculation and propagation of the
- * corresponding covariance matrix which is out of scope of this implementation.
- */
-
-template<typename T>
-concept arithmetic_or_complex_like = std::is_arithmetic_v<T> || meta::complex_like<T>;
-
-template<arithmetic_or_complex_like T>
-struct UncertainValue {
-    using value_type = T;
-
-    T value       = static_cast<T>(0); /// mean value
-    T uncertainty = static_cast<T>(0); /// uncorrelated standard deviation
-
-    // Default constructor
-    constexpr UncertainValue() noexcept = default;
-
-    constexpr UncertainValue(T value_, T uncertainty_) noexcept : value(value_), uncertainty(uncertainty_) {}
-
-    explicit(false) constexpr UncertainValue(T value_) noexcept : value(value_), uncertainty(static_cast<T>(0)) {}
-
-    constexpr UncertainValue(const UncertainValue&) noexcept            = default;
-    constexpr UncertainValue(UncertainValue&&) noexcept                 = default;
-    constexpr UncertainValue& operator=(const UncertainValue&) noexcept = default;
-    ~UncertainValue()                                                   = default;
-
-    constexpr UncertainValue& operator=(const T& other) noexcept {
-        value       = other;
-        uncertainty = static_cast<T>(0);
-        return *this;
-    }
-
-    auto operator<=>(UncertainValue const&) const = default;
-};
-
-template<typename T>
-UncertainValue(T, T) -> UncertainValue<T>;
-
-template<arithmetic_or_complex_like T, arithmetic_or_complex_like U>
-requires std::convertible_to<U, T>
-auto operator<=>(const UncertainValue<T>& lhs, U rhs) {
-    return lhs.value <=> static_cast<T>(rhs);
-}
-
-template<arithmetic_or_complex_like T, arithmetic_or_complex_like U>
-requires std::convertible_to<U, T>
-auto operator<=>(U lhs, const UncertainValue<T>& rhs) {
-    return static_cast<T>(lhs) <=> rhs.value;
-}
-
-template<typename T>
-concept UncertainValueLike = gr::meta::is_instantiation_of<T, UncertainValue>;
-
-template<typename T>
-requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr auto value(const T& val) noexcept {
-    if constexpr (UncertainValueLike<T>) {
-        return val.value;
-    } else {
-        return val;
-    }
-}
-
-template<typename T>
-requires arithmetic_or_complex_like<meta::fundamental_base_value_type_t<T>>
-[[nodiscard]] constexpr auto uncertainty(const T& val) noexcept {
-    if constexpr (UncertainValueLike<T>) {
-        return val.uncertainty;
-    } else {
-        return meta::fundamental_base_value_type_t<T>(0);
-    }
-}
-
-namespace detail {
-template<typename T>
-struct UncertainValueValueType {
-    using type = T;
-};
-
-template<typename T>
-struct UncertainValueValueType<UncertainValue<T>> {
-    using type = T;
-};
-} // namespace detail
-
-template<typename T>
-using UncertainValueType_t = detail::UncertainValueValueType<T>::type;
-
-/********************** some basic math operation definitions *********************************/
-
-// FIXME: make operators of UncertainValue hidden friends or members to reduce compile time (simplifies overload
-// resolution)
-
-template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] constexpr auto operator+(const T& lhs, const U& rhs) noexcept {
-    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
-        using ResultType = decltype(lhs.value + rhs.value);
-        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
-            // we are dealing with complex numbers -> use the standard uncorrelated calculation.
-            ResultType newUncertainty = {std::hypot(std::real(lhs.uncertainty), std::real(rhs.uncertainty)), std::hypot(std::imag(lhs.uncertainty), std::imag(rhs.uncertainty))};
-            return UncertainValue<ResultType>{lhs.value + rhs.value, newUncertainty};
-        } else {
-            // both ValueType[T,U] are arithmetic uncertainties
-            return UncertainValue<ResultType>{lhs.value + rhs.value, std::hypot(lhs.uncertainty, rhs.uncertainty)};
-        }
-    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
-        return T{lhs.value + rhs, lhs.uncertainty};
-    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
-        return U{lhs + rhs.value, rhs.uncertainty};
-    } else {
-        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '+' definition");
-        return lhs + rhs; // unlikely to be called due to default '+' definition
-    }
-}
-
-template<UncertainValueLike T, typename U>
-constexpr T& operator+=(T& lhs, const U& rhs) noexcept {
-    lhs = lhs + rhs;
-    return lhs;
-}
-
-template<UncertainValueLike T, typename ValueTypeT = UncertainValueType_t<T>>
-constexpr T operator+(const T& val) {
-    if constexpr (meta::complex_like<ValueTypeT>) {
-        return val;
-    } else {
-        return {std::abs(val.value), std::abs(val.uncertainty)};
-    }
-}
-
-template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] constexpr auto operator-(const T& lhs, const U& rhs) noexcept {
-    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
-        using ResultType = decltype(lhs.value - rhs.value);
-        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
-            // we are dealing with complex numbers -> use the standard uncorrelated calculation.
-            ResultType newUncertainty = {std::hypot(std::real(lhs.uncertainty), std::real(rhs.uncertainty)), std::hypot(std::imag(lhs.uncertainty), std::imag(rhs.uncertainty))};
-            return UncertainValue<ResultType>{lhs.value - rhs.value, newUncertainty};
-        } else {
-            // both ValueType[T,U] are arithmetic uncertainties
-            return UncertainValue<ResultType>{lhs.value - rhs.value, std::hypot(lhs.uncertainty, rhs.uncertainty)};
-        }
-    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
-        return T{lhs.value - rhs, lhs.uncertainty};
-    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
-        return U{lhs - rhs.value, rhs.uncertainty};
-    } else {
-        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '-' definition");
-    }
-}
-
-template<UncertainValueLike T, typename U>
-constexpr T& operator-=(T& lhs, const U& rhs) noexcept {
-    lhs = lhs - rhs;
-    return lhs;
-}
-
-template<UncertainValueLike T>
-constexpr T operator-(const T& val) {
-    return {-val.value, val.uncertainty};
-}
-
-template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] constexpr auto operator*(const T& lhs, const U& rhs) noexcept {
-    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
-        using ResultType = decltype(lhs.value * rhs.value);
-        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
-            // we are dealing with complex numbers -> use standard uncorrelated calculation
-            ResultType newUncertainty = {std::hypot(std::real(lhs.value) * std::real(rhs.uncertainty), std::real(rhs.value) * std::real(lhs.uncertainty)), std::hypot(std::imag(lhs.value) * std::imag(rhs.uncertainty), std::imag(rhs.value) * std::imag(lhs.uncertainty))};
-            return UncertainValue<ResultType>{lhs.value * rhs.value, newUncertainty};
-        } else {
-            // both ValueType[T,U] are arithmetic uncertainties
-            auto combinedUncertainty = std::hypot(lhs.value * rhs.uncertainty, rhs.value * lhs.uncertainty);
-            return UncertainValue<ResultType>{lhs.value * rhs.value, combinedUncertainty};
-        }
-    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
-        return T{lhs.value * rhs, lhs.uncertainty * rhs};
-    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
-        return U{lhs * rhs.value, lhs * rhs.uncertainty};
-    } else {
-        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '*' definition");
-    }
-}
-
-template<UncertainValueLike T, typename U>
-constexpr T& operator*=(T& lhs, const U& rhs) noexcept {
-    lhs = lhs * rhs;
-    return lhs;
-}
-
-template<typename T, typename U, typename ValueTypeT = UncertainValueType_t<T>, typename ValueTypeU = UncertainValueType_t<U>>
-requires(UncertainValueLike<T> || UncertainValueLike<U>) && std::is_same_v<meta::fundamental_base_value_type_t<ValueTypeT>, meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] constexpr auto operator/(const T& lhs, const U& rhs) noexcept {
-    if constexpr (UncertainValueLike<T> && UncertainValueLike<U>) {
-        using ResultType = decltype(lhs.value * rhs.value);
-        if constexpr (meta::complex_like<ValueTypeT> || meta::complex_like<ValueTypeU>) {
-            // we are dealing with complex numbers -> use standard uncorrelated calculation
-            ResultType newUncertainty;
-            if constexpr (std::is_arithmetic_v<ValueTypeT> && meta::complex_like<ValueTypeU>) {
-                // LHS is real, RHS is complex
-                newUncertainty = {std::sqrt(std::pow(lhs.uncertainty / std::real(rhs.value), 2)), std::sqrt(std::pow(std::imag(rhs.uncertainty) * lhs.value / std::norm(rhs.value), 2))};
-            } else if constexpr (meta::complex_like<ValueTypeT> && std::is_arithmetic_v<ValueTypeU>) {
-                // LHS is complex, RHS is real
-                newUncertainty = {std::hypot(std::real(lhs.uncertainty) / rhs.value, rhs.uncertainty * std::real(lhs.value) / std::pow(rhs.value, 2)), std::sqrt(std::pow(std::imag(lhs.uncertainty) / rhs.value, 2))};
-            } else {
-                newUncertainty = {std::hypot(std::real(lhs.uncertainty) / std::real(rhs.value), std::real(rhs.uncertainty) * std::real(lhs.value) / std::norm(rhs.value)), std::hypot(std::imag(lhs.uncertainty) / std::imag(rhs.value), std::imag(rhs.uncertainty) * std::imag(lhs.value) / std::norm(rhs.value))};
-            }
-
-            return UncertainValue<ResultType>{lhs.value / rhs.value, newUncertainty};
-        } else {
-            // both ValueType[T,U] are arithmetic uncertainties
-            ResultType combinedUncertainty = std::hypot(lhs.uncertainty / rhs.value, rhs.uncertainty * lhs.value / (rhs.value * rhs.value));
-            return UncertainValue<ResultType>{lhs.value / rhs.value, combinedUncertainty};
-        }
-    } else if constexpr (UncertainValueLike<T> && arithmetic_or_complex_like<ValueTypeU>) {
-        return T{lhs.value / rhs, lhs.uncertainty / std::abs(rhs)};
-    } else if constexpr (arithmetic_or_complex_like<ValueTypeT> && UncertainValueLike<U>) {
-        auto rhsMagSquared = std::norm(rhs.value);
-        return U{lhs / rhs.value, rhs.uncertainty * std::abs(lhs) / rhsMagSquared};
-    } else {
-        static_assert(gr::meta::always_false<T>, "branch should never reach here due to default '/' definition");
-    }
-}
-
-template<UncertainValueLike T, typename U>
-constexpr T& operator/=(T& lhs, const U& rhs) noexcept {
-    lhs = lhs / rhs;
-    return lhs;
-}
-
-} // namespace gr
-
-namespace gr::math {
-
-template<typename T, typename U>
-requires(std::is_arithmetic_v<T> && std::is_arithmetic_v<U>)
-[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
-    return std::pow(base, exponent);
-}
-
-template<gr::UncertainValueLike T, std::floating_point U, typename ValueTypeT = gr::UncertainValueType_t<T>>
-requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, U> || std::integral<U>
-[[nodiscard]] constexpr T pow(const T& base, U exponent) noexcept {
-    if (base.value == static_cast<meta::fundamental_base_value_type_t<ValueTypeT>>(0)) [[unlikely]] {
-        if (exponent == 0) [[unlikely]] {
-            return T{1, 0};
-        } else {
-            return T{0, 0};
-        }
-    }
-
-    ValueTypeT newValue = std::pow(base.value, exponent);
-    if constexpr (gr::meta::complex_like<ValueTypeT>) {
-        auto val = exponent / base.value * newValue;
-        return T{newValue, std::sqrt(val * std::conj(val)) * base.uncertainty};
-    } else {
-        return T{newValue, std::abs(newValue * exponent * base.uncertainty / base.value)};
-    }
-}
-
-template<gr::UncertainValueLike T, gr::UncertainValueLike U, typename ValueTypeT = gr::UncertainValueType_t<T>, typename ValueTypeU = gr::UncertainValueType_t<T>>
-requires std::is_same_v<gr::meta::fundamental_base_value_type_t<ValueTypeT>, gr::meta::fundamental_base_value_type_t<ValueTypeU>>
-[[nodiscard]] constexpr T pow(const T& base, const U& exponent) noexcept {
-    if (base.value == ValueTypeT(0)) [[unlikely]] {
-        if (exponent.value == static_cast<ValueTypeU>(0)) [[unlikely]] {
-            return T{1, 0};
-        } else {
-            return T{0, 0};
-        }
-    }
-
-    ValueTypeT newValue = std::pow(base.value, exponent.value);
-    if constexpr (gr::meta::complex_like<ValueTypeT>) {
-        auto hypot = [](auto a, auto b) { return std::sqrt(std::real(a * std::conj(a) + b * std::conj(b))); }; // c*c⃰ == is always real valued
-        return T{newValue, hypot(exponent.value / base.value * newValue * base.uncertainty, std::log(base.value) * newValue * exponent.uncertainty)};
-    } else {
-        return T{newValue, std::abs(newValue) * std::hypot(exponent.value / base.value * base.uncertainty, std::log(base.value) * exponent.uncertainty)};
-    }
-}
-
-template<typename T>
-[[nodiscard]] constexpr T sqrt(const T& value) noexcept {
-    if constexpr (gr::UncertainValueLike<T>) {
-        using ValueType = meta::fundamental_base_value_type_t<T>;
-        return gr::math::pow(value, ValueType(0.5));
-    } else {
-        return std::sqrt(value);
-    }
-}
-
-template<typename T>
-[[nodiscard]] constexpr T sin(const T& x) noexcept {
-    if constexpr (gr::UncertainValueLike<T>) {
-        return T{std::sin(x.value), std::abs(std::cos(x.value) * x.uncertainty)};
-    } else {
-        return std::sin(x);
-    }
-}
-
-template<typename T>
-[[nodiscard]] constexpr T cos(const T& x) noexcept {
-    if constexpr (gr::UncertainValueLike<T>) {
-        return T{std::cos(x.value), std::abs(std::sin(x.value) * x.uncertainty)};
-    } else {
-        return std::cos(x);
-    }
-}
-
-template<gr::UncertainValueLike T, typename ValueTypeT = gr::UncertainValueType_t<T>>
-[[nodiscard]] constexpr T exp(const T& x) noexcept {
-    if constexpr (gr::meta::complex_like<ValueTypeT>) {
-        return gr::math::pow(gr::UncertainValue<ValueTypeT>{std::numbers::e_v<typename ValueTypeT::value_type>, static_cast<ValueTypeT>(0)}, x);
-    } else {
-        return gr::math::pow(gr::UncertainValue<ValueTypeT>{std::numbers::e_v<ValueTypeT>, static_cast<ValueTypeT>(0)}, x);
-    }
-}
-
-template<typename T>
-[[nodiscard]] constexpr bool isfinite(const T& value) noexcept {
-    if constexpr (gr::UncertainValueLike<T>) {
-        return std::isfinite(gr::value(value)) && std::isfinite(gr::uncertainty(value));
-    } else {
-        return std::isfinite(value);
-    }
-}
-
-template<typename T>
-[[nodiscard]] constexpr T abs(const T& value) noexcept {
-    if constexpr (gr::UncertainValueLike<T>) {
-        return gr::value(value) > T(0) ? value : -value;
-    } else {
-        return std::abs(value);
-    }
-}
-
-template<typename T>
-[[nodiscard]] constexpr T log(const T& x) noexcept {
-    if constexpr (UncertainValueLike<T>) {
-        using base_t = gr::meta::fundamental_base_value_type_t<T>;
-        auto val     = std::log(gr::value(x));
-        if constexpr (gr::meta::complex_like<base_t>) {
-            constexpr auto derivative = base_t(1) / x.value; // derivative(log(z)) = 1/z
-            return T{val, std::abs(derivative) * gr::uncertainty(x)};
-        } else {
-            return T{val, std::abs(gr::uncertainty(x) / gr::value(x))}; // derivative(log(x)) = 1/x
-        }
-    } else {
-        return std::log(x);
-    }
-}
-
-template<typename T>
-[[nodiscard]] constexpr T log10(const T& x) noexcept {
-    if constexpr (UncertainValueLike<T>) {
-        using base_t        = gr::meta::fundamental_base_value_type_t<T>;
-        auto           val  = std::log10(gr::value(x));
-        constexpr auto ln10 = std::numbers::ln10_v<base_t>;
-        if constexpr (gr::meta::complex_like<base_t>) {
-            constexpr auto derivative = base_t(1) / (x.value * ln10); // derivative(log10(z)) = 1 / (z * ln(10))
-            return T{val, std::abs(derivative) * gr::uncertainty(x)};
-        } else {
-            return T{val, std::abs(gr::uncertainty(x) / (gr::value(x) * ln10))}; // derivative(log10(x)) = 1 / (x * ln(10))
-        }
-    } else {
-        return std::log10(x);
-    }
-}
-
-} // namespace gr::math
-
-#endif // GNURADIO_UNCERTAINVALUE_HPP
-
-
-namespace gr {
-namespace time {
-[[nodiscard]] inline std::string getIsoTime() noexcept {
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-    return fmt::format(fmt::runtime("{:%Y-%m-%dT%H:%M:%S}.{:06}"), // ms-precision ISO time-format
-        fmt::localtime(std::chrono::system_clock::to_time_t(now)), //
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1'000);
-}
-} // namespace time
-} // namespace gr
-
-template<typename T>
-struct fmt::formatter<std::complex<T>> {
-    char presentation = 'g'; // default format
-
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        auto it = ctx.begin(), end = ctx.end();
-        if (it != end && (*it == 'f' || *it == 'F' || *it == 'e' || *it == 'E' || *it == 'g' || *it == 'G')) {
-            presentation = *it++;
-        }
-        if (it != end && *it != '}') {
-            throw fmt::format_error("invalid format");
-        }
-        return it;
-    }
-
-    template<typename FormatContext>
-    constexpr auto format(const std::complex<T>& value, FormatContext& ctx) const {
-        // format according to: https://fmt.dev/papers/p2197r0.html#examples
-        const auto imag = value.imag();
-        switch (presentation) {
-        case 'e':
-            if (imag == 0) {
-                return fmt::format_to(ctx.out(), "{:e}", value.real());
-            }
-            return fmt::format_to(ctx.out(), "({:e}{:+e}i)", value.real(), imag);
-        case 'E':
-            if (imag == 0) {
-                return fmt::format_to(ctx.out(), "{:E}", value.real());
-            }
-            return fmt::format_to(ctx.out(), "({:E}{:+E}i)", value.real(), imag);
-        case 'f':
-            if (imag == 0) {
-                return fmt::format_to(ctx.out(), "{:f}", value.real());
-            }
-            return fmt::format_to(ctx.out(), "({:f}{:+f}i)", value.real(), imag);
-        case 'F':
-            if (imag == 0) {
-                return fmt::format_to(ctx.out(), "{:F}", value.real());
-            }
-            return fmt::format_to(ctx.out(), "({:F}{:+F}i)", value.real(), imag);
-        case 'G':
-            if (imag == 0) {
-                return fmt::format_to(ctx.out(), "{:G}", value.real());
-            }
-            return fmt::format_to(ctx.out(), "({:G}{:+G}i)", value.real(), imag);
-        case 'g':
-        default:
-            if (imag == 0) {
-                return fmt::format_to(ctx.out(), "{:g}", value.real());
-            }
-            return fmt::format_to(ctx.out(), "({:g}{:+g}i)", value.real(), imag);
-        }
-    }
-};
-
-// simplified formatter for UncertainValue
-template<gr::arithmetic_or_complex_like T>
-struct fmt::formatter<gr::UncertainValue<T>> {
-    formatter<T> value_formatter;
-
-    constexpr auto parse(format_parse_context& ctx) { return value_formatter.parse(ctx); }
-
-    template<typename FormatContext>
-    auto format(const gr::UncertainValue<T>& uv, FormatContext& ctx) const {
-        auto out = ctx.out();
-        out      = fmt::format_to(out, "(");
-        out      = value_formatter.format(uv.value, ctx);
-        out      = fmt::format_to(out, " ± ");
-        out      = value_formatter.format(uv.uncertainty, ctx);
-        out      = fmt::format_to(out, ")");
-        return out;
-    }
-};
-
-namespace gr {
-template<gr::UncertainValueLike T>
-std::ostream& operator<<(std::ostream& os, const T& v) {
-    return os << fmt::format("{}", v);
-}
-} // namespace gr
-
-// DataSet - Range formatter
-
-namespace gr {
-template<typename T>
-struct Range;
-}
-
-namespace fmt {
-template<typename T>
-struct formatter<gr::Range<T>> {
-    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const gr::Range<T>& range, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "[min: {}, max: {}]", range.min, range.max);
-    }
-};
-} // namespace fmt
-
-namespace gr {
-template<typename T>
-std::ostream& operator<<(std::ostream& os, const gr::Range<T>& v) {
-    return os << fmt::format("{}", v);
-}
-} // namespace gr
-
-// pmt formatter
-
-namespace gr {
-
-template<typename OutputIt, typename Container, typename Separator>
-constexpr auto format_join(OutputIt out, const Container& container, const Separator& separator) {
-    auto it = container.begin();
-    if (it != container.end()) {
-        out = fmt::format_to(out, "{}", *it); // format first element
-        ++it;
-    }
-
-    for (; it != container.end(); ++it) {
-        out = fmt::format_to(out, "{}", separator); // insert separator
-        out = fmt::format_to(out, "{}", *it);       // format remaining element
-    }
-
-    return out;
-}
-
-template<typename Container, typename Separator>
-constexpr std::string join(const Container& container, const Separator& separator) {
-    std::ostringstream ss;
-    auto               out = std::ostream_iterator<char>(ss);
-    format_join(out, container, separator);
-    return ss.str();
-}
-
-} // namespace gr
-
-template<>
-struct fmt::formatter<pmtv::map_t::value_type> {
-    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const noexcept {
-        return fmt::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
-    }
-};
-
-template<pmtv::IsPmt T>
-struct fmt::formatter<T> { // alternate pmtv formatter optimised for compile-time not runtime
-    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const T& value, FormatContext& ctx) const noexcept {
-        // if the std::visit dispatch is too expensive then maybe manually loop-unroll this
-        return std::visit([&ctx](const auto& format_arg) { return format_value(format_arg, ctx); }, value);
-    }
-
-private:
-    template<typename FormatContext, typename U>
-    static auto format_value(const U& arg, FormatContext& ctx) -> decltype(fmt::format_to(ctx.out(), "")) {
-        if constexpr (pmtv::Scalar<U> || pmtv::Complex<U>) {
-            return fmt::format_to(ctx.out(), "{}", arg);
-        } else if constexpr (std::same_as<U, std::string>) {
-            return fmt::format_to(ctx.out(), "{}", arg);
-        } else if constexpr (pmtv::UniformVector<U> || pmtv::UniformStringVector<U>) { // format vector
-            fmt::format_to(ctx.out(), "[");
-            gr::format_join(ctx.out(), arg, ", ");
-            return fmt::format_to(ctx.out(), "]");
-        } else if constexpr (std::same_as<U, std::vector<pmtv::pmt>>) { // format vector of pmts
-            fmt::format_to(ctx.out(), "[");
-            gr::format_join(ctx.out(), arg, ", ");
-            return fmt::format_to(ctx.out(), "]");
-        } else if constexpr (pmtv::PmtMap<U>) { // format map
-            fmt::format_to(ctx.out(), "{{ ");
-            for (auto it = arg.begin(); it != arg.end(); ++it) {
-                format_value(it->first, ctx); // Format key
-                fmt::format_to(ctx.out(), ": ");
-                format_value(it->second, ctx); // Format value
-                if (std::next(it) != arg.end()) {
-                    fmt::format_to(ctx.out(), ", ");
-                }
-            }
-            return fmt::format_to(ctx.out(), " }}");
-        } else if constexpr (requires { std::visit([](const auto&) {}, arg); }) {
-            return std::visit([&](const auto& value) { return format_value(value, ctx); }, arg);
-        } else if constexpr (std::same_as<std::monostate, U>) {
-            return fmt::format_to(ctx.out(), "null");
-        } else {
-            return fmt::format_to(ctx.out(), "unknown type {}", gr::meta::type_name<U>());
-        }
-    }
-};
-
-template<>
-struct fmt::formatter<pmtv::map_t> {
-    constexpr auto parse(fmt::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    constexpr auto format(const pmtv::map_t& value, FormatContext& ctx) const noexcept {
-        fmt::format_to(ctx.out(), "{{ ");
-        gr::format_join(ctx.out(), value, ", ");
-        return fmt::format_to(ctx.out(), " }}");
-    }
-};
-
-template<>
-struct fmt::formatter<std::vector<bool>> {
-    char presentation = 'c';
-
-    constexpr auto parse(fmt::format_parse_context& ctx) -> decltype(ctx.begin()) {
-        auto it = ctx.begin(), end = ctx.end();
-        if (it != end && (*it == 's' || *it == 'c')) {
-            presentation = *it++;
-        }
-        if (it != end && *it != '}') {
-            throw fmt::format_error("invalid format");
-        }
-        return it;
-    }
-
-    template<typename FormatContext>
-    auto format(const std::vector<bool>& v, FormatContext& ctx) const noexcept -> decltype(ctx.out()) {
-        auto   sep = (presentation == 'c' ? ", " : " ");
-        size_t len = v.size();
-        fmt::format_to(ctx.out(), "[");
-        for (size_t i = 0; i < len; ++i) {
-            if (i > 0) {
-                fmt::format_to(ctx.out(), "{}", sep);
-            }
-            fmt::format_to(ctx.out(), "{}", v[i] ? "true" : "false");
-        }
-        fmt::format_to(ctx.out(), "]");
-        return ctx.out();
-    }
-};
-
-#if FMT_VERSION < 110000
-/* fmt introduces a std::expected formatter with version 11.0.0 */
-template<typename Value, typename Error>
-struct fmt::formatter<std::expected<Value, Error>> {
-    constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const std::expected<Value, Error>& ret, FormatContext& ctx) const -> decltype(ctx.out()) {
-        if (ret.has_value()) {
-            return fmt::format_to(ctx.out(), "<std::expected-value: {}>", ret.value());
-        } else {
-            return fmt::format_to(ctx.out(), "<std::unexpected: {}>", ret.error());
-        }
-    }
-};
-#endif
-#endif // GNURADIO_FORMATTER_HPP
-
-// #include <gnuradio-4.0/meta/reflection.hpp>
-
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-#ifdef __cpp_lib_hardware_interference_size
-using std::hardware_constructive_interference_size;
-using std::hardware_destructive_interference_size;
-#else
-inline constexpr std::size_t hardware_destructive_interference_size  = 64;
-inline constexpr std::size_t hardware_constructive_interference_size = 64;
-#endif
-
-#ifdef __EMSCRIPTEN__
-// constexpr for cases where emscripten does not yet support constexpr and has to fall back to static const or nothing
-#define EM_CONSTEXPR
-#define EM_CONSTEXPR_STATIC static const
-#else
-#define EM_CONSTEXPR        constexpr
-#define EM_CONSTEXPR_STATIC constexpr
-#endif
-
-namespace gr {
-
-using property_map = pmtv::map_t;
-
-template<typename T>
-concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
-
-/**
- * @brief 'Tag' is a metadata structure that can be attached to a stream of data to carry extra information about that data.
- * A tag can describe a specific time, parameter or meta-information (e.g. sampling frequency, gains, ...), provide annotations,
- * or indicate events that blocks may trigger actions in downstream blocks. Tags can be inserted or consumed by blocks at
- * any point in the signal processing flow, allowing for flexible and customisable data processing.
- *
- * Tags contain the index ID of the sending/receiving stream sample <T> they are attached to. Block implementations
- * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
- * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
- */
-struct alignas(hardware_constructive_interference_size) Tag {
-    std::size_t  index{0UZ};
-    property_map map{};
-
-    GR_MAKE_REFLECTABLE(Tag, index, map);
-
-    bool operator==(const Tag& other) const = default;
-
-    // TODO: do we need the convenience methods below?
-    void reset() noexcept {
-        index = 0;
-        map.clear();
-    }
-
-    [[nodiscard]] pmtv::pmt& at(const std::string& key) { return map.at(key); }
-
-    [[nodiscard]] const pmtv::pmt& at(const std::string& key) const { return map.at(key); }
-
-    [[nodiscard]] std::optional<std::reference_wrapper<const pmtv::pmt>> get(const std::string& key) const noexcept {
-        try {
-            return map.at(key);
-        } catch (const std::out_of_range& e) {
-            return std::nullopt;
-        }
-    }
-
-    [[nodiscard]] std::optional<std::reference_wrapper<pmtv::pmt>> get(const std::string& key) noexcept {
-        try {
-            return map.at(key);
-        } catch (const std::out_of_range&) {
-            return std::nullopt;
-        }
-    }
-
-    void insert_or_assign(const std::pair<std::string, pmtv::pmt>& value) { map[value.first] = value.second; }
-
-    void insert_or_assign(const std::string& key, const pmtv::pmt& value) { map[key] = value; }
-};
-
-} // namespace gr
-
-namespace gr {
-using meta::fixed_string;
-
-inline void updateMaps(const property_map& src, property_map& dest) {
-    for (const auto& [key, value] : src) {
-        if (auto nested_map = std::get_if<pmtv::map_t>(&value)) {
-            // If it's a nested map
-            if (auto it = dest.find(key); it != dest.end()) {
-                // If the key exists in the destination map
-                auto dest_nested_map = std::get_if<pmtv::map_t>(&(it->second));
-                if (dest_nested_map) {
-                    // Merge the nested maps recursively
-                    updateMaps(*nested_map, *dest_nested_map);
-                } else {
-                    // Key exists but not a map, replace it
-                    dest[key] = value;
-                }
-            } else {
-                // If the key doesn't exist, just insert
-                dest.insert({key, value});
-            }
-        } else {
-            // If it's not a nested map, insert/replace the value
-            dest[key] = value;
-        }
-    }
-}
-
-constexpr fixed_string GR_TAG_PREFIX = "gr:";
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit = "", fixed_string Description = "">
-class DefaultTag {
-    constexpr static fixed_string _key = GR_TAG_PREFIX + Key;
-
-public:
-    using value_type = PMT_TYPE;
-
-    [[nodiscard]] constexpr const char* key() const noexcept { return std::string_view(_key).data(); }
-    [[nodiscard]] constexpr const char* shortKey() const noexcept { return std::string_view(Key).data(); }
-    [[nodiscard]] constexpr const char* unit() const noexcept { return std::string_view(Unit).data(); }
-    [[nodiscard]] constexpr const char* description() const noexcept { return std::string_view(Description).data(); }
-
-    [[nodiscard]] EM_CONSTEXPR explicit(false) operator std::string() const noexcept { return std::string(_key); }
-
-    template<typename T>
-    requires std::is_same_v<value_type, T>
-    [[nodiscard]] std::pair<std::string, pmtv::pmt> operator()(const T& newValue) const noexcept {
-        return {std::string(_key), static_cast<pmtv::pmt>(PMT_TYPE(newValue))};
-    }
-};
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering operator<=>(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
-    if ((dt.shortKey() <=> str) == 0) {
-        return std::strong_ordering::equal; // shortKeys are equal
-    } else {
-        return dt.key() <=> str; // compare key()
-    }
-}
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr std::strong_ordering operator<=>(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
-    if ((str <=> dt.shortKey()) == std::strong_ordering::equal) {
-        return std::strong_ordering::equal; // shortKeys are equal
-    } else {
-        return str <=> dt.key(); // compare key()
-    }
-}
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool operator==(const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt, const TOtherString& str) noexcept {
-    return (dt <=> std::string_view(str)) == 0;
-}
-
-template<fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description, gr::meta::string_like TOtherString>
-inline constexpr bool operator==(const TOtherString& str, const DefaultTag<Key, PMT_TYPE, Unit, Description>& dt) noexcept {
-    return (std::string_view(str) <=> dt) == 0;
-}
-
-namespace tag { // definition of default tags and names
-inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SAMPLE_RATE;
-inline EM_CONSTEXPR_STATIC DefaultTag<"sample_rate", float, "Hz", "signal sample rate"> SIGNAL_RATE;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_name", std::string, "", "signal name"> SIGNAL_NAME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_quantity", std::string, "", "signal quantity"> SIGNAL_QUANTITY;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_unit", std::string, "", "signal's physical SI unit"> SIGNAL_UNIT;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_min", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MIN;
-inline EM_CONSTEXPR_STATIC DefaultTag<"signal_max", float, "a.u.", "signal physical max. (e.g. DAQ) limit"> SIGNAL_MAX;
-inline EM_CONSTEXPR_STATIC DefaultTag<"n_dropped_samples", gr::Size_t, "", "number of dropped samples"> N_DROPPED_SAMPLES;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_name", std::string> TRIGGER_NAME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_time", uint64_t, "ns", "UTC-based time-stamp"> TRIGGER_TIME;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_offset", float, "s", "sample delay w.r.t. the trigger (e.g.compensating analog group delays)"> TRIGGER_OFFSET;
-inline EM_CONSTEXPR_STATIC DefaultTag<"trigger_meta_info", property_map, "", "maps containing additional trigger information"> TRIGGER_META_INFO;
-inline EM_CONSTEXPR_STATIC DefaultTag<"context", std::string, "", "multiplexing key to orchestrate node settings/behavioural changes"> CONTEXT;
-inline EM_CONSTEXPR_STATIC DefaultTag<"time", std::uint64_t, "", "multiplexing UTC-time in [ns] when ctx should be applied"> CONTEXT_TIME; // TODO: for backward compatibility -> rename to `ctx_time'
-inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block state to stored default"> RESET_DEFAULTS;
-inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
-inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
-
-inline constexpr std::array<std::string_view, 16> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "time", "reset_default", "store_default", "end_of_stream"};
-
-} // namespace tag
-
-} // namespace gr
-
-#endif // GNURADIO_TAG_HPP
 
 // #include <gnuradio-4.0/meta/formatter.hpp>
 
@@ -9298,9 +9566,6 @@ inline constexpr std::array<std::string_view, 16> kDefaultTags = {"sample_rate",
 #include <source_location>
 #include <string_view>
 
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-
 namespace gr {
 
 struct exception : public std::exception {
@@ -9312,7 +9577,7 @@ struct exception : public std::exception {
 
     [[nodiscard]] const char* what() const noexcept override {
         if (formattedMessage.empty()) {
-            formattedMessage = fmt::format("{} at {}:{}", message, sourceLocation.file_name(), sourceLocation.line());
+            formattedMessage = std::format("{} at {}:{}", message, sourceLocation.file_name(), sourceLocation.line());
         }
         return formattedMessage.c_str();
     }
@@ -9334,13 +9599,9 @@ struct Error {
 
     explicit Error(const gr::exception& ex) noexcept : Error(ex.message, ex.sourceLocation, ex.errorTime) {}
 
-    [[nodiscard]] std::string srcLoc() const noexcept { return fmt::format("{}", sourceLocation); }
+    [[nodiscard]] std::string srcLoc() const noexcept { return std::format("{}", sourceLocation); }
     [[nodiscard]] std::string methodName() const noexcept { return {sourceLocation.function_name()}; }
-    [[nodiscard]] std::string isoTime() const noexcept {
-        return fmt::format("{:%Y-%m-%dT%H:%M:%S}.{:03}",                     // ms-precision ISO time-format
-            fmt::localtime(std::chrono::system_clock::to_time_t(errorTime)), //
-            std::chrono::duration_cast<std::chrono::milliseconds>(errorTime.time_since_epoch()).count() % 1000);
-    }
+    [[nodiscard]] std::string isoTime() const noexcept { return std::format("{}", errorTime); } // ms-precision ISO time-format
 };
 
 static_assert(std::is_default_constructible_v<Error>);
@@ -9441,7 +9702,7 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
 } // namespace gr
 
 template<>
-struct fmt::formatter<gr::Error> {
+struct std::formatter<gr::Error> {
     char presentation = 's';
 
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
@@ -9450,50 +9711,51 @@ struct fmt::formatter<gr::Error> {
             presentation = *it++;
         }
         if (it != end && *it != '}') {
-            throw fmt::format_error("invalid format");
+            throw std::format_error("invalid format");
         }
         return it;
     }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
-    auto format(const gr::Error& err, FormatContext& ctx) const -> decltype(ctx.out()) {
+    auto format(const gr::Error& err, FormatContext& ctx) const {
+        const auto& loc = err.sourceLocation;
         switch (presentation) {
-        case 't': return fmt::format_to(ctx.out(), "{}: {}: {} in method: {}", err.isoTime(), err.sourceLocation, err.message, err.sourceLocation.function_name());
-        case 'f': return fmt::format_to(ctx.out(), "{}: {} in method: {}", err.sourceLocation, err.message, err.sourceLocation.function_name());
+        case 'f': return std::format_to(ctx.out(), "{}:{} in {}: {}", loc.file_name(), loc.line(), loc.function_name(), err.message);
+        case 't': return std::format_to(ctx.out(), "{}: {}:{}: {} in {}", err.isoTime(), loc.file_name(), loc.line(), err.message, loc.function_name());
         case 's':
-        default: return fmt::format_to(ctx.out(), "{}: {}", err.sourceLocation, err.message);
+        default: return std::format_to(ctx.out(), "{}:{}: {}", loc.file_name(), loc.line(), err.message);
         }
     }
 };
 
 template<>
-struct fmt::formatter<gr::message::Command> {
+struct std::formatter<gr::message::Command> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const gr::message::Command& command, FormatContext& ctx) const -> decltype(ctx.out()) {
-        return fmt::format_to(ctx.out(), "{}", magic_enum::enum_name(command));
+        return std::format_to(ctx.out(), "{}", magic_enum::enum_name(command));
     }
 };
 
 inline std::ostream& operator<<(std::ostream& os, const gr::message::Command& command) { return os << magic_enum::enum_name(command); }
 
 template<>
-struct fmt::formatter<gr::Message> {
+struct std::formatter<gr::Message> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const gr::Message& msg, FormatContext& ctx) const -> decltype(ctx.out()) {
-        return fmt::format_to(ctx.out(), "{{ protocol: '{}', cmd: {}, serviceName: '{}', clientRequestID: '{}', endpoint: '{}', {}, RBAC: '{}' }}", //
+        return std::format_to(ctx.out(), "{{ protocol: '{}', cmd: {}, serviceName: '{}', clientRequestID: '{}', endpoint: '{}', {}, RBAC: '{}' }}", //
             msg.protocol, msg.cmd, msg.serviceName, msg.clientRequestID, msg.endpoint,                                                              //
-            msg.data.has_value() ? fmt::format("data: {}", msg.data.value()) : fmt::format("error: {}", msg.data.error()), msg.rbac);
+            msg.data.has_value() ? std::format("data: {}", msg.data.value()) : std::format("error: {}", msg.data.error()), msg.rbac);
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const gr::Message& msg) { return os << fmt::format("{}", msg); }
+inline std::ostream& operator<<(std::ostream& os, const gr::Message& msg) { return os << std::format("{}", msg); }
 
 #endif // include guard
 
@@ -9634,24 +9896,24 @@ struct DataSet {
 private:
     [[nodiscard]] std::size_t _axCheck(std::size_t i, std::source_location loc = std::source_location::current()) const {
         if (i >= axis_names.size()) {
-            throw gr::exception(fmt::format("{} axis out of range: i={} >= axis_name [0, {}]", loc.function_name(), i, axis_names.size()), loc);
+            throw gr::exception(std::format("{} axis out of range: i={} >= axis_name [0, {}]", loc.function_name(), i, axis_names.size()), loc);
         }
         if (i >= axis_values.size()) {
-            throw gr::exception(fmt::format("{} axis out of range: i={} >= axis_values [0, {}]", loc.function_name(), i, axis_values.size()), loc);
+            throw gr::exception(std::format("{} axis out of range: i={} >= axis_values [0, {}]", loc.function_name(), i, axis_values.size()), loc);
         }
         return i;
     }
 
     [[nodiscard]] std::size_t _idxCheck(std::size_t i, std::source_location location = std::source_location::current()) const {
         if (i >= size()) {
-            throw gr::exception(fmt::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
+            throw gr::exception(std::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
         }
         return i;
     }
 
     [[nodiscard]] std::ptrdiff_t _idxCheckS(std::size_t i, std::source_location location = std::source_location::current()) const {
         if (i >= size()) {
-            throw gr::exception(fmt::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
+            throw gr::exception(std::format("{} out of range: i={} >= [0, {}]", location.function_name(), i, size()), location);
         }
         return static_cast<std::ptrdiff_t>(i);
     }
@@ -9716,11 +9978,13 @@ static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity"
 #ifndef GNURADIO_ANNOTATED_HPP
 #define GNURADIO_ANNOTATED_HPP
 
+#include <format>
+#include <sstream>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 
-#include <fmt/format.h>
+// #include <gnuradio-4.0/meta/formatter.hpp>
 
 // #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -10155,9 +10419,9 @@ template<typename... Ts>
 struct gr::meta::typelist<gr::SupportedTypes<Ts...>> : gr::meta::typelist<Ts...> {};
 
 template<typename T, gr::meta::fixed_string description, typename... Arguments>
-struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
+struct std::formatter<gr::Annotated<T, description, Arguments...>> {
     using Type = std::remove_const_t<T>;
-    fmt::formatter<Type> value_formatter;
+    std::formatter<Type> value_formatter;
 
     template<typename FormatContext>
     constexpr auto parse(FormatContext& ctx) {
@@ -10166,7 +10430,6 @@ struct fmt::formatter<gr::Annotated<T, description, Arguments...>> {
 
     template<typename FormatContext>
     constexpr auto format(const gr::Annotated<T, description, Arguments...>& annotated, FormatContext& ctx) const {
-        // TODO: add switch for printing only brief and/or meta-information
         return value_formatter.format(annotated.value, ctx);
     }
 };
@@ -10175,7 +10438,7 @@ namespace gr {
 template<typename T, gr::meta::fixed_string description, typename... Arguments>
 inline std::ostream& operator<<(std::ostream& os, const gr::Annotated<T, description, Arguments...>& v) {
     // TODO: add switch for printing only brief and/or meta-information
-    return os << fmt::format("{}", v.value);
+    return os << std::format("{}", v.value);
 }
 } // namespace gr
 
@@ -10763,7 +11026,7 @@ struct Port {
 #ifndef NDEBUG
 
                 if (lastTag.index > index) { // check the order of published Tags.index
-                    fmt::println(stderr, "Tag indices are not in the correct order, tagsPublished:{}, lastTag.index:{}, index:{}", tagsPublished, lastTag.index, index);
+                    std::println(stderr, "Tag indices are not in the correct order, tagsPublished:{}, lastTag.index:{}, index:{}", tagsPublished, lastTag.index, index);
                     // std::abort();
                 }
 #endif
@@ -12491,7 +12754,7 @@ namespace vir
   namespace literals
   {
     template <char... Chars>
-      constexpr auto operator"" _cw()
+      constexpr auto operator""_cw()
       { return vir::cw<vir::detail::cw_parse<Chars...>()>; }
   }
 
@@ -12502,7 +12765,8 @@ namespace vir
 // vim: et tw=100 ts=8 sw=2 cc=101
 
 
-#if VIR_HAVE_STRUCT_REFLECT and VIR_HAVE_CONSTEXPR_WRAPPER
+#if VIR_HAVE_STRUCT_REFLECT and VIR_HAVE_CONSTEXPR_WRAPPER \
+  and (not defined __clang_major__ or __clang_major__ > 14)
 #define VIR_HAVE_SIMDIZE 1
 
 #include <tuple>
@@ -12875,11 +13139,17 @@ namespace vir
 
   constexpr int simd_permute_uninit = simd_permute_zero - 1;
 
+#if defined __clang__ and __clang__ <= 13
+#define VIR_CONSTEVAL constexpr
+#else
+#define VIR_CONSTEVAL consteval
+#endif
+
   namespace simd_permutations
   {
     struct DuplicateEven
     {
-      consteval unsigned
+      VIR_CONSTEVAL unsigned
       operator()(unsigned i) const
       { return i & ~1u; }
     };
@@ -12888,7 +13158,7 @@ namespace vir
 
     struct DuplicateOdd
     {
-      consteval unsigned
+      VIR_CONSTEVAL unsigned
       operator()(unsigned i) const
       { return i | 1u; }
     };
@@ -12898,7 +13168,7 @@ namespace vir
     template <unsigned N>
       struct SwapNeighbors
       {
-	consteval unsigned
+	VIR_CONSTEVAL unsigned
 	operator()(unsigned i, auto size) const
 	{
 	  static_assert(size % (2 * N) == 0,
@@ -12918,7 +13188,7 @@ namespace vir
     template <int Position>
       struct Broadcast
       {
-	consteval int
+	VIR_CONSTEVAL int
 	operator()(int) const
 	{ return Position; }
       };
@@ -12932,7 +13202,7 @@ namespace vir
 
     struct Reverse
     {
-      consteval int
+      VIR_CONSTEVAL int
       operator()(int i) const
       { return -1 - i; }
     };
@@ -12945,7 +13215,7 @@ namespace vir
 	static constexpr int Offset = O;
 	static constexpr bool is_even_rotation = Offset % 2 == 0;
 
-	consteval int
+	VIR_CONSTEVAL int
 	operator()(int i, auto size) const
 	{ return (i + Offset) % size.value; }
       };
@@ -12956,7 +13226,7 @@ namespace vir
     template <int Offset>
       struct Shift
       {
-	consteval int
+	VIR_CONSTEVAL int
 	operator()(int i, int size) const
 	{
 	  const int j = i + Offset;
@@ -12970,6 +13240,8 @@ namespace vir
     template <int Offset>
       inline constexpr Shift<Offset> shift {};
   }
+
+#undef VIR_CONSTEVAL
 
   template <std::size_t N = 0, vir::any_simd_or_mask V,
 	    detail::index_permutation_function<V::size()> F>
@@ -13003,35 +13275,43 @@ namespace vir
 	      }
 #endif
 #if VIR_HAVE_WORKING_SHUFFLEVECTOR
-	    using VecType [[gnu::vector_size(sizeof(V))]] = T;
-	    if constexpr (std::is_trivially_copyable_v<V> and std::is_constructible_v<R, VecType>)
+	    if constexpr (std::has_single_bit(sizeof(V)) and std::has_single_bit(sizeof(R)))
 	      {
-		const VecType vec = detail::bit_cast<VecType>(v);
-		const auto idx_perm2 = [&](constexpr_value auto i) -> int {
-		  constexpr int j = [&]() {
-		    if constexpr (detail::index_permutation_function_nosize<F>)
-		      return idx_perm(i);
-		    else
-		      return idx_perm(i, vir::cw<V::size()>);
-		  }();
-		  if constexpr (j == simd_permute_zero)
-		    return V::size();
-		  else if constexpr (j == simd_permute_uninit)
-		    return -1;
-		  else if constexpr (j < 0)
-		    {
-		      static_assert (-j <= int(V::size()));
-		      return int(V::size()) + j;
-		    }
-		  else
-		    {
-		      static_assert (j < int(V::size()));
-		      return j;
-		    }
-		};
-		return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-		  return R(__builtin_shufflevector(vec, VecType{}, (idx_perm2(vir::cw<Is>))...));
-		}(std::make_index_sequence<V::size()>());
+		using VBuiltin [[gnu::vector_size(sizeof(V))]] = T;
+		using RBuiltin [[gnu::vector_size(sizeof(R))]] = T;
+		if constexpr (std::is_trivially_copyable_v<V> and std::is_trivially_copyable_v<R>
+				and sizeof(VBuiltin) == sizeof(V) and sizeof(RBuiltin) == sizeof(R))
+		  {
+		    const VBuiltin vec = detail::bit_cast<VBuiltin>(v);
+		    constexpr auto idx_perm2 = [=](constexpr_value auto i) {
+		      if constexpr (detail::index_permutation_function_nosize<F>)
+			return vir::cw<idx_perm(i)>;
+		      else
+			return vir::cw<idx_perm(i, vir::cw<V::size()>)>;
+		    };
+		    constexpr auto adj_idx = [](constexpr_value auto i) {
+		      constexpr int j = i;
+		      if constexpr (j == simd_permute_zero)
+			return vir::cw<V::size()>;
+		      else if constexpr (j == simd_permute_uninit)
+			return vir::cw<-1>;
+		      else if constexpr (j < 0)
+			{
+			  static_assert (-j <= int(V::size()));
+			  return vir::cw<int(V::size()) + j>;
+			}
+		      else
+			{
+			  static_assert (j < int(V::size()));
+			  return vir::cw<j>;
+			}
+		    };
+		    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+		      return detail::bit_cast<R>(
+			       __builtin_shufflevector(vec, VBuiltin{},
+						       adj_idx(idx_perm2(vir::cw<Is>)).value...));
+		    }(std::make_index_sequence<R::size()>());
+		  }
 	      }
 #endif
 	  }
@@ -13152,10 +13432,20 @@ namespace vir
     inline constexpr int simdize_size_v = simdize_size<T>::value;
 
   template <typename T, int N>
-    class simd_tuple;
+    class simd_tuple
+    {
+      simd_tuple() = delete;
+      simd_tuple(const simd_tuple&) = delete;
+      ~simd_tuple() = delete;
+    };
 
   template <typename T, int N>
-    class vectorized_struct;
+    class vectorized_struct
+    {
+      vectorized_struct() = delete;
+      vectorized_struct(const vectorized_struct&) = delete;
+      ~vectorized_struct() = delete;
+    };
 
   namespace detail
   {
@@ -13189,6 +13479,9 @@ namespace vir
       { using type = T; };
 
     template <vectorizable T, int N>
+      requires requires {
+	typename stdx::simd_abi::deduce_t<T, N == 0 ? stdx::native_simd<T>::size() : N>;
+      }
       struct simdize_impl<T, N>
       { using type = deduced_simd<T, N == 0 ? stdx::native_simd<T>::size() : N>; };
 
@@ -13245,49 +13538,62 @@ namespace vir
     template <typename Tup>
       inline constexpr int default_simdize_size_v = default_simdize_size<Tup>::value;
 
-    template <reflectable_struct Tup, int N>
+    template <reflectable_struct Tup, int N,
+	      typename = std::make_index_sequence<vir::struct_size_v<Tup>>>
+      struct make_simd_tuple;
+
+    template <reflectable_struct Tup, int N, std::size_t... Is>
       requires (vir::struct_size_v<Tup> > 0 and N > 0)
-      struct make_simd_tuple
+	and ((simdize_impl<vir::struct_element_t<Is, Tup>, N>::type::size() == N) and ...)
+      struct make_simd_tuple<Tup, N, std::index_sequence<Is...>>
       {
-	using type = decltype([]<std::size_t... Is>(std::index_sequence<Is...>)
-				-> std::tuple<typename simdize_impl<
-						vir::struct_element_t<Is, Tup>, N>::type...> {
-		       return {};
-		     }(std::make_index_sequence<vir::struct_size_v<Tup>>()));
+	using type = std::tuple<typename simdize_impl<vir::struct_element_t<Is, Tup>, N>::type...>;
       };
 
     /**
      * Recursively simdize all type template arguments.
      */
     template <std::size_t N, template <typename...> class Tpl, typename... Ts>
+      requires ((simdize_impl<Ts, N>::type::size() == N) and ...)
       Tpl<typename simdize_impl<Ts, N>::type...>
       simdize_template_arguments_impl(const Tpl<Ts...>&);
 
     template <std::size_t N, template <typename, auto...> class Tpl, typename T, auto... X>
       requires(sizeof...(X) > 0)
+	and (simdize_impl<T, N>::type::size() == N)
       Tpl<typename simdize_impl<T, N>::type, X...>
       simdize_template_arguments_impl(const Tpl<T, X...>&);
 
     template <std::size_t N, template <typename, typename, auto...> class Tpl,
 	      typename... Ts, auto... X>
       requires(sizeof...(X) > 0)
+	and ((simdize_impl<Ts, N>::type::size() == N) and ...)
       Tpl<typename simdize_impl<Ts, N>::type..., X...>
       simdize_template_arguments_impl(const Tpl<Ts..., X...>&);
 
     template <std::size_t N, template <typename, typename, typename, auto...> class Tpl,
 	      typename... Ts, auto... X>
       requires(sizeof...(X) > 0)
+	and ((simdize_impl<Ts, N>::type::size() == N) and ...)
       Tpl<typename simdize_impl<Ts, N>::type..., X...>
       simdize_template_arguments_impl(const Tpl<Ts..., X...>&);
 
-    template <typename T, int N = 0>
+    template <typename T, int N>
+      struct simdize_template_arguments;
+
+    template <typename T, int N>
+      requires requires(const T& tt) { simdize_template_arguments_impl<N>(tt); }
+      struct simdize_template_arguments<T, N>
+      { using type = decltype(simdize_template_arguments_impl<N>(std::declval<const T&>())); };
+
+    template <typename T>
       requires requires(const T& tt) {
 	simdize_template_arguments_impl<default_simdize_size<T>::value>(tt);
       }
-      struct simdize_template_arguments
+      struct simdize_template_arguments<T, 0>
       {
-	using type = decltype(simdize_template_arguments_impl<
-				N == 0 ? default_simdize_size_v<T> : N>(std::declval<const T&>()));
+	using type = decltype(simdize_template_arguments_impl<default_simdize_size_v<T>>(
+				std::declval<const T&>()));
       };
 
     template <typename T, int N = 0>
@@ -13415,6 +13721,7 @@ namespace vir
     template <reflectable_struct Tup, int N>
       requires (vir::struct_size_v<Tup> > 0 and not vectorizable_struct_template<Tup>)
 	and requires { default_simdize_size<Tup>::value; }
+	and std::is_destructible_v<simd_tuple<Tup, N == 0 ? default_simdize_size_v<Tup> : N>>
       struct simdize_impl<Tup, N>
       {
 	static_assert(requires { typename simdize_impl<vir::struct_element_t<0, Tup>, N>::type; });
@@ -13424,6 +13731,7 @@ namespace vir
 
     template <vectorizable_struct_template T, int N>
       requires requires { default_simdize_size<T>::value; }
+	and std::is_destructible_v<vectorized_struct<T, N == 0 ? default_simdize_size_v<T> : N>>
       struct simdize_impl<T, N>
       { using type = vectorized_struct<T, N == 0 ? default_simdize_size_v<T> : N>; };
   } // namespace detail
@@ -13432,6 +13740,7 @@ namespace vir
    * stdx::simd-like interface for tuples of vectorized data members of T.
    */
   template <reflectable_struct T, int N>
+    requires requires { typename detail::make_simd_tuple<T, N>::type; }
     class simd_tuple<T, N>
     {
       using tuple_type = typename detail::make_simd_tuple<T, N>::type;
@@ -13576,6 +13885,7 @@ namespace vir
    * stdx::simd-like interface on top of vectorized types (template argument substitution).
    */
   template <vectorizable_struct_template T, int N>
+    requires requires { typename detail::simdize_template_arguments_t<T, N>; }
     class vectorized_struct<T, N> : public detail::simdize_template_arguments_t<T, N>
     {
       using tuple_type = typename detail::make_simd_tuple<T, N>::type;
@@ -14470,9 +14780,9 @@ concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <format>
 #include <functional>
 #include <future>
-#include <iostream>
 #include <list>
 #include <mutex>
 #include <span>
@@ -14480,9 +14790,6 @@ concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (
 #include <thread>
 #include <type_traits>
 #include <utility>
-
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 
 // #include "../WaitStrategy.hpp"
 #ifndef GNURADIO_WAITSTRATEGY_HPP
@@ -14507,10 +14814,11 @@ concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <new>
 #include <ranges>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 
 namespace gr {
 
@@ -14662,11 +14970,11 @@ inline bool removeSequence(std::shared_ptr<std::vector<std::shared_ptr<Sequence>
 
 } // namespace gr
 
-#include <fmt/core.h>
-#include <fmt/ostream.h>
+// #include <gnuradio-4.0/meta/formatter.hpp>
+
 
 template<>
-struct fmt::formatter<gr::Sequence> {
+struct std::formatter<gr::Sequence> {
     template<typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
         return ctx.begin();
@@ -14674,12 +14982,12 @@ struct fmt::formatter<gr::Sequence> {
 
     template<typename FormatContext>
     auto format(gr::Sequence const& value, FormatContext& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", value.value());
+        return std::format_to(ctx.out(), "{}", value.value());
     }
 };
 
 namespace gr {
-inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << fmt::format("{}", v.value()); }
+inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << std::format("{}", v.value()); }
 } // namespace gr
 
 #endif // GNURADIO_SEQUENCE_HPP
@@ -15050,17 +15358,17 @@ public:
 #define THREADAFFINITY_HPP
 
 #include <algorithm>
-#include <fmt/core.h>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
 #include <fstream>
-#include <iostream>
 #include <mutex>
 #include <optional>
 #include <sstream>
 #include <system_error>
 #include <thread>
 #include <vector>
+
+// #include <gnuradio-4.0/meta/formatter.hpp>
+
 
 #if !defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__))) // UNIX-style OS
 #include <unistd.h>
@@ -15092,9 +15400,9 @@ public:
         case THREAD_UNINITIALISED: return "thread uninitialised or user does not have the appropriate rights (ie. CAP_SYS_NICE capability)";
         case THREAD_ERROR_UNKNOWN: return "thread error code 2";
         case THREAD_INVALID_ARGUMENT: return "invalid argument";
-        case THREAD_ERANGE: return fmt::format("length of the string specified pointed to by name exceeds the allowed limit THREAD_MAX_NAME_LENGTH = '{}'", THREAD_MAX_NAME_LENGTH);
-        case THREAD_VALUE_RANGE: return fmt::format("priority out of valid range for scheduling policy", THREAD_MAX_NAME_LENGTH);
-        default: return fmt::format("unknown threading error code {}", errorCode);
+        case THREAD_ERANGE: return std::format("length of the string specified pointed to by name exceeds the allowed limit THREAD_MAX_NAME_LENGTH = '{}'", THREAD_MAX_NAME_LENGTH);
+        case THREAD_VALUE_RANGE: return std::format("priority out of valid range for scheduling policy", THREAD_MAX_NAME_LENGTH);
+        default: return std::format("unknown threading error code {}", errorCode);
         }
     };
 };
@@ -15140,7 +15448,7 @@ inline int getPid() { return 0; }
 
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline std::string getProcessName(const int pid = detail::getPid()) {
-    if (std::ifstream in(fmt::format("/proc/{}/comm", pid), std::ios::in); in.is_open()) {
+    if (std::ifstream in(std::format("/proc/{}/comm", pid), std::ios::in); in.is_open()) {
         std::string fileContent;
         std::getline(in, fileContent, '\n');
         return fileContent;
@@ -15165,9 +15473,9 @@ inline std::string getThreadName(thread_type auto&... /*thread*/) { return "unkn
 
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline void setProcessName(const std::string_view& processName, int pid = detail::getPid()) {
-    std::ofstream out(fmt::format("/proc/{}/comm", pid), std::ios::out);
+    std::ofstream out(std::format("/proc/{}/comm", pid), std::ios::out);
     if (!out.is_open()) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessName({},{})", processName, pid));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("setProcessName({},{})", processName, pid));
     }
     out << std::string{processName.cbegin(), std::min(15LU, processName.size())};
     out.close();
@@ -15180,10 +15488,10 @@ inline void setProcessName(const std::string_view& /*processName*/, int /*pid*/ 
 inline void setThreadName(const std::string_view& threadName, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadName({}, thread_type)", threadName, detail::getThreadName(handle)));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("setThreadName({}, thread_type)", threadName, detail::getThreadName(handle)));
     }
     if (int rc = pthread_setname_np(handle, threadName.data()); rc < 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setThreadName({},{}) - error code '{}'", threadName, detail::getThreadName(handle), rc));
+        throw std::system_error(rc, thread_exception(), std::format("setThreadName({},{}) - error code '{}'", threadName, detail::getThreadName(handle), rc));
     }
 }
 #else
@@ -15222,11 +15530,11 @@ inline constexpr cpu_set_t getAffinityMask(const T& threadMap) {
 inline std::vector<bool> getThreadAffinity(thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getThreadAffinity(thread_type)"));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("getThreadAffinity(thread_type)"));
     }
     cpu_set_t cpuSet;
     if (int rc = pthread_getaffinity_np(handle, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("getThreadAffinity({})", detail::getThreadName(handle)));
+        throw std::system_error(rc, thread_exception(), std::format("getThreadAffinity({})", detail::getThreadName(handle)));
     }
     return detail::getAffinityMask(cpuSet);
 }
@@ -15242,11 +15550,11 @@ requires requires(T value) { value[0]; }
 inline constexpr void setThreadAffinity(const T& threadMap, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, thread_type)", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", ")));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, thread_type)", threadMap.size(), gr::join(threadMap, ", ")));
     }
     cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
     if (int rc = pthread_setaffinity_np(handle, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), detail::getThreadName(handle)));
+        throw std::system_error(rc, thread_exception(), std::format("setThreadAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), detail::getThreadName(handle)));
     }
 }
 #else
@@ -15258,11 +15566,11 @@ constexpr bool setThreadAffinity(const T& /*threadMap*/, thread_type auto&...) {
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline std::vector<bool> getProcessAffinity(const int pid = detail::getPid()) {
     if (pid <= 0) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getProcessAffinity({}) -- invalid pid", pid));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("getProcessAffinity({}) -- invalid pid", pid));
     }
     cpu_set_t cpuSet;
     if (int rc = sched_getaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("getProcessAffinity(std::bitset<{{}}> = {{}}, thread_type)")); // todo: fix format string
+        throw std::system_error(rc, thread_exception(), std::format("getProcessAffinity(std::bitset<{{}}> = {{}}, thread_type)")); // todo: fix format string
     }
     return detail::getAffinityMask(cpuSet);
 }
@@ -15277,11 +15585,11 @@ template<class T>
 requires requires(T value) { std::get<0>(value); }
 inline constexpr bool setProcessAffinity(const T& threadMap, const int pid = detail::getPid()) {
     if (pid <= 0) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), pid));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), pid));
     }
     cpu_set_t cpuSet = detail::getAffinityMask(threadMap);
     if (int rc = sched_setaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), fmt::join(threadMap.begin(), threadMap.end(), ", "), pid));
+        throw std::system_error(rc, thread_exception(), std::format("setProcessAffinity(std::vector<bool, {}> = {{{}}}, {})", threadMap.size(), gr::join(threadMap, ", "), pid));
     }
 
     return true;
@@ -15297,7 +15605,7 @@ enum Policy { UNKNOWN = -1, OTHER = 0, FIFO = 1, ROUND_ROBIN = 2 };
 } // namespace gr::thread_pool::thread
 
 template<>
-struct fmt::formatter<gr::thread_pool::thread::Policy> {
+struct std::formatter<gr::thread_pool::thread::Policy> {
     using Policy = gr::thread_pool::thread::Policy;
 
     template<typename ParseContext>
@@ -15315,7 +15623,7 @@ struct fmt::formatter<gr::thread_pool::thread::Policy> {
         case Policy::ROUND_ROBIN: policy_name = "ROUND_ROBIN"; break;
         default: policy_name = "INVALID_POLICY"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", policy_name);
+        return std::format_to(ctx.out(), "{}", policy_name);
     }
 };
 
@@ -15342,12 +15650,12 @@ inline Policy getEnumPolicy(const int policy) {
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline struct SchedulingParameter getProcessSchedulingParameter(const int pid = detail::getPid()) {
     if (pid <= 0) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getProcessSchedulingParameter({}) -- invalid pid", pid));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("getProcessSchedulingParameter({}) -- invalid pid", pid));
     }
     struct sched_param param;
     const int          policy = sched_getscheduler(pid);
     if (int rc = sched_getparam(pid, &param); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("getProcessSchedulingParameter({}) - sched_getparam error", pid));
+        throw std::system_error(rc, thread_exception(), std::format("getProcessSchedulingParameter({}) - sched_getparam error", pid));
     }
     return SchedulingParameter{.policy = detail::getEnumPolicy(policy), .priority = param.sched_priority};
 }
@@ -15358,12 +15666,12 @@ inline struct SchedulingParameter getProcessSchedulingParameter(const int /*pid*
 #if defined(_POSIX_VERSION) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline void setProcessSchedulingParameter(Policy scheduler, int priority, const int pid = detail::getPid()) {
     if (pid <= 0) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setProcessSchedulingParameter({}, {}, {}) -- invalid pid", scheduler, priority, pid));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("setProcessSchedulingParameter({}, {}, {}) -- invalid pid", scheduler, priority, pid));
     }
     const int minPriority = sched_get_priority_min(scheduler);
     const int maxPriority = sched_get_priority_max(scheduler);
     if (priority < minPriority || priority > maxPriority) {
-        throw std::system_error(THREAD_VALUE_RANGE, thread_exception(), fmt::format("setProcessSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, pid, minPriority, maxPriority));
+        throw std::system_error(THREAD_VALUE_RANGE, thread_exception(), std::format("setProcessSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, pid, minPriority, maxPriority));
     }
 
     struct sched_param param {
@@ -15371,7 +15679,7 @@ inline void setProcessSchedulingParameter(Policy scheduler, int priority, const 
     };
 
     if (int rc = sched_setscheduler(pid, scheduler, &param); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setProcessSchedulingParameter({}, {}, {}) - sched_setscheduler return code: {}", scheduler, priority, pid, rc));
+        throw std::system_error(rc, thread_exception(), std::format("setProcessSchedulingParameter({}, {}, {}) - sched_setscheduler return code: {}", scheduler, priority, pid, rc));
     }
 }
 #else
@@ -15382,12 +15690,12 @@ inline void setProcessSchedulingParameter(Policy /*scheduler*/, int /*priority*/
 inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("getThreadSchedulingParameter(thread_type) -- invalid thread"));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("getThreadSchedulingParameter(thread_type) -- invalid thread"));
     }
     struct sched_param param;
     int                policy;
     if (int rc = pthread_getschedparam(handle, &policy, &param); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("getThreadSchedulingParameter({}) - sched_getparam error", detail::getThreadName(handle)));
+        throw std::system_error(rc, thread_exception(), std::format("getThreadSchedulingParameter({}) - sched_getparam error", detail::getThreadName(handle)));
     }
     return {.policy = detail::getEnumPolicy(policy), .priority = param.sched_priority};
 }
@@ -15399,12 +15707,12 @@ inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto&
 inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
-        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), fmt::format("setThreadSchedulingParameter({}, {}, thread_type) -- invalid thread", scheduler, priority));
+        throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("setThreadSchedulingParameter({}, {}, thread_type) -- invalid thread", scheduler, priority));
     }
     const int minPriority = sched_get_priority_min(scheduler);
     const int maxPriority = sched_get_priority_max(scheduler);
     if (priority < minPriority || priority > maxPriority) {
-        throw std::system_error(THREAD_VALUE_RANGE, thread_exception(), fmt::format("setThreadSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, detail::getThreadName(handle), minPriority, maxPriority));
+        throw std::system_error(THREAD_VALUE_RANGE, thread_exception(), std::format("setThreadSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, detail::getThreadName(handle), minPriority, maxPriority));
     }
 
     struct sched_param param {
@@ -15412,7 +15720,7 @@ inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_
     };
 
     if (int rc = pthread_setschedparam(handle, scheduler, &param); rc != 0) {
-        throw std::system_error(rc, thread_exception(), fmt::format("setThreadSchedulingParameter({}, {}, {}) - pthread_setschedparam return code: {}", scheduler, priority, detail::getThreadName(handle), rc));
+        throw std::system_error(rc, thread_exception(), std::format("setThreadSchedulingParameter({}, {}, {}) - pthread_setschedparam return code: {}", scheduler, priority, detail::getThreadName(handle), rc));
     }
 }
 #else
@@ -15422,6 +15730,9 @@ inline void setThreadSchedulingParameter(Policy /*scheduler*/, int /*priority*/,
 } // namespace gr::thread_pool::thread
 
 #endif // THREADAFFINITY_HPP
+
+
+// #include <gnuradio-4.0/meta/formatter.hpp>
 
 
 namespace gr::thread_pool {
@@ -15701,8 +16012,8 @@ concept ThreadPool = requires(T t, std::function<void()>&& func) {
  * // pool for CPU-bound tasks with exactly 1 thread
  * opencmw::BasicThreadPool&lt;opencmw::CPU_BOUND&gt; poolWork("CustomCpuPool", 1, 1);
  * // enqueue and add task to list -- w/o return type
- * poolWork.execute([] { fmt::print("Hello World from thread '{}'!\n", getThreadName()); }); // here: caller thread-name
- * poolWork.execute([](const auto &...args) { fmt::print(fmt::runtime("Hello World from thread '{}'!\n"), args...); }, getThreadName()); // here: executor thread-name
+ * poolWork.execute([] { std::print("Hello World from thread '{}'!\n", getThreadName()); }); // here: caller thread-name
+ * poolWork.execute([](const auto &...args) { std::print("Hello World from thread '{}'!\n", args...); }, getThreadName()); // here: executor thread-name
  * // [..]
  *
  * // pool for IO-bound (potentially blocking) tasks with at least 1 and a max of 1000 threads
@@ -15711,16 +16022,16 @@ concept ThreadPool = requires(T t, std::function<void()>&& func) {
  * poolIO.waitUntilInitialised();                       // wait until the pool is initialised (optional)
  * poolIO.setAffinityMask({ true, true, true, false }); // allows executor threads to run on the first four CPU cores
  *
- * constexpr auto           func1  = [](const auto &...args) { return fmt::format(fmt::runtime("thread '{1}' scheduled task '{0}'!\n"), getThreadName(), args...); };
+ * constexpr auto           func1  = [](const auto &...args) { return std::format("thread '{1}' scheduled task '{0}'!\n", getThreadName(), args...); };
  * std::future&lt;std::string&gt; result = poolIO.execute&lt;"customTaskName"&gt;(func1, getThreadName()); // N.B. the calling thread is owner of the std::future
  *
  * // execute a task with a name, a priority and single-core affinity (here: 2)
- * poolIO.execute&lt;"task name", 20U, 2&gt;([]() { fmt::print("Hello World from custom thread '{}'!\n", getThreadName()); });
+ * poolIO.execute&lt;"task name", 20U, 2&gt;([]() { std::print("Hello World from custom thread '{}'!\n", getThreadName()); });
  *
  * try {
  *     poolIO.execute&lt;"customName", 20U, 3&gt;([]() {  [..] this potentially long-running task is trackable via it's 'customName' thread name [..] });
  * } catch (const std::invalid_argument &e) {
- *     fmt::print("caught exception: {}\n", e.what());
+ *     std::print("caught exception: {}\n", e.what());
  * }
  * @endcode
  */
@@ -15730,7 +16041,7 @@ class BasicThreadPool {
     static std::atomic<uint64_t> _globalPoolId;
     static std::atomic<uint64_t> _taskID;
 
-    static std::string generateName() { return fmt::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1)); }
+    static std::string generateName() { return std::format("BasicThreadPool#{}", _globalPoolId.fetch_add(1)); }
 
     std::atomic_bool _initialised = ATOMIC_FLAG_INIT;
     std::atomic_bool _shutdown    = false;
@@ -15835,7 +16146,7 @@ public:
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
-                throw std::invalid_argument(fmt::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), fmt::join(_affinityMask.begin(), _affinityMask.end(), ", ")));
+                throw std::invalid_argument(std::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
             }
         }
         _numTaskedQueued.fetch_add(1U);
@@ -15863,9 +16174,9 @@ public:
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
-                throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
+                throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
 #else
-                throw std::invalid_argument(fmt::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", cpuID, _affinityMask.size(), _affinityMask));
+                throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", cpuID, _affinityMask.size(), _affinityMask));
 #endif
             }
         }
@@ -15900,7 +16211,7 @@ private:
     }
 
     void updateThreadConstraints(const std::size_t threadID, std::thread& thread) const {
-        thread::setThreadName(fmt::format("{}#{}", _poolName, threadID), thread);
+        thread::setThreadName(std::format("{}#{}", _poolName, threadID), thread);
         thread::setThreadSchedulingParameter(_schedulingPolicy, _schedulingPriority, thread);
         if (!_affinityMask.empty()) {
             if (_taskType == TaskType::IO_BOUND) {
@@ -15908,7 +16219,7 @@ private:
                 return;
             }
             const std::vector<bool> affinityMask = distributeThreadAffinityAcrossCores(_affinityMask, threadID);
-            std::cout << fmt::format("{}#{} affinity mask: {}", _poolName, threadID, fmt::join(affinityMask.begin(), affinityMask.end(), ",")) << std::endl;
+            std::println("{}#{} affinity mask: {}", _poolName, threadID, gr::join(affinityMask, ","));
             thread::setThreadAffinity(affinityMask);
         }
     }
@@ -16007,7 +16318,7 @@ private:
                 _recycledTasks.push(std::move(currentTaskContainer));
                 _numTasksRunning.fetch_sub(1);
                 if (nameSet) {
-                    thread::setThreadName(fmt::format("{}#{}", _poolName, threadID));
+                    thread::setThreadName(std::format("{}#{}", _poolName, threadID));
                 }
                 lastUsed     = std::chrono::steady_clock::now();
                 noop_counter = 0;
@@ -16272,8 +16583,7 @@ static inline int Base64encode(char* encoded, const char* string, int len)
 // #include <pmtv/pmt.hpp>
 
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+#include <format>
 
 // #include <gnuradio-4.0/BlockTraits.hpp>
 
@@ -16288,6 +16598,7 @@ static inline int Base64encode(char* encoded, const char* string, int len)
 #include <complex>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
@@ -16295,8 +16606,8 @@ static inline int Base64encode(char* encoded, const char* string, int len)
 #include <string_view>
 #include <variant>
 
-#include <fmt/format.h>
-#include <fmt/ranges.h>
+// #include <gnuradio-4.0/meta/formatter.hpp>
+
 
 // #include <pmtv/pmt.hpp>
 
@@ -16433,7 +16744,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
             }
 
             if constexpr (strictCheck) {
-                return std::unexpected(fmt::format("strict-check enabled: source {} and target {} type do not match", typeid(S).name(), typeid(T).name()));
+                return std::unexpected(std::format("strict-check enabled: source {} and target {} type do not match", typeid(S).name(), typeid(T).name()));
             }
 
             // 2) source is bool (special case, needed to be treated first because of overlapping with integral)
@@ -16453,7 +16764,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 if constexpr (std::is_integral_v<T>) {
                     if constexpr (std::is_unsigned_v<T> && std::is_signed_v<S>) {
                         if (srcValue < 0) {
-                            return std::unexpected(fmt::format("negative integer {} cannot be converted to unsigned type", srcValue));
+                            return std::unexpected(std::format("negative integer {} cannot be converted to unsigned type", srcValue));
                         }
                     }
                     constexpr auto digitsS = std::numeric_limits<S>::digits;
@@ -16464,7 +16775,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                         if (static_cast<std::int64_t>(srcValue) >= std::numeric_limits<T>::lowest() && static_cast<std::int64_t>(srcValue) <= std::numeric_limits<T>::max()) {
                             return static_cast<T>(srcValue);
                         }
-                        return std::unexpected(fmt::format("out-of-range integer conversion: {} not in [{}..{}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+                        return std::unexpected(std::format("out-of-range integer conversion: {} not in [{}..{}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
                     }
                 }
                 // 3b) target is floating‐point
@@ -16478,14 +16789,14 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                         using WideType         = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
                         const WideType wideVal = static_cast<WideType>(srcValue);
                         if (wideVal == std::numeric_limits<WideType>::min()) {
-                            return std::unexpected(fmt::format("cannot handle integer min()={} when checking bit width", wideVal));
+                            return std::unexpected(std::format("cannot handle integer min()={} when checking bit width", wideVal));
                         }
                         const auto magnitude = (wideVal < 0) ? -wideVal : wideVal;
                         const auto bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
                         if (bitWidth <= digitsT) {
                             return static_cast<T>(srcValue);
                         }
-                        return std::unexpected(fmt::format("integer bit_width({})={} > floating-point mantissa={}", srcValue, bitWidth, digitsT));
+                        return std::unexpected(std::format("integer bit_width({})={} > floating-point mantissa={}", srcValue, bitWidth, digitsT));
                     }
                 }
                 // 3c) target is std::complex<T>
@@ -16494,11 +16805,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if (conv.has_value()) {
                         return T{conv.value()};
                     }
-                    return std::unexpected(fmt::format("unsupported complex conversion {}", conv.error()));
+                    return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
                 }
                 // 3d) no match
                 else {
-                    return std::unexpected(fmt::format("no valid safe conversion for <integral {}> -> <{}>", typeid(S).name(), typeid(T).name()));
+                    return std::unexpected(std::format("no valid safe conversion for <integral {}> -> <{}>", typeid(S).name(), typeid(T).name()));
                 }
             }
 
@@ -16507,13 +16818,13 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 // 4a) target is integral
                 if constexpr (std::is_integral_v<T>) {
                     if (!std::isfinite(srcValue)) {
-                        return std::unexpected(fmt::format("floating-point value {} is not finite (NaN/inf)", srcValue));
+                        return std::unexpected(std::format("floating-point value {} is not finite (NaN/inf)", srcValue));
                     }
                     if (srcValue < static_cast<S>(std::numeric_limits<T>::lowest()) || srcValue > static_cast<S>(std::numeric_limits<T>::max())) {
-                        return std::unexpected(fmt::format("floating-point value {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+                        return std::unexpected(std::format("floating-point value {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
                     }
                     if (srcValue != std::nearbyint(srcValue)) {
-                        return std::unexpected(fmt::format("floating-point value {} is not an integer", srcValue));
+                        return std::unexpected(std::format("floating-point value {} is not an integer", srcValue));
                     }
                     return static_cast<T>(srcValue);
                 }
@@ -16522,7 +16833,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if (static_cast<long double>(srcValue) >= static_cast<long double>(std::numeric_limits<T>::lowest()) && static_cast<long double>(srcValue) <= static_cast<long double>(std::numeric_limits<T>::max())) {
                         return static_cast<T>(srcValue);
                     }
-                    return std::unexpected(fmt::format("floating-point conversion from {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+                    return std::unexpected(std::format("floating-point conversion from {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
                 }
                 // 4c) target is std::complex<T>
                 else if constexpr (detail::is_complex_v<T>) { // value becomes real-part
@@ -16530,11 +16841,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     if (conv.has_value()) {
                         return T{conv.value()};
                     }
-                    return std::unexpected(fmt::format("unsupported complex conversion {}", conv.error()));
+                    return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
                 }
                 // 4d) no match
                 else {
-                    return std::unexpected(fmt::format("no valid safe conversion for <float {}> src = {} -> <{}>", typeid(S).name(), srcValue, typeid(T).name()));
+                    return std::unexpected(std::format("no valid safe conversion for <float {}> src = {} -> <{}>", typeid(S).name(), srcValue, typeid(T).name()));
                 }
             }
 
@@ -16562,18 +16873,18 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 // 5b) complex->integral or float (only for real-valued complex)
                 else if constexpr (std::is_arithmetic_v<T>) {
                     if (std::imag(srcValue) != 0) {
-                        return std::unexpected(fmt::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
+                        return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
                             typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
                     }
                     auto conv = convert_safely<T>(std::variant<typename S::value_type>{srcValue.real()});
                     if (conv.has_value()) {
                         return conv.value();
                     }
-                    return std::unexpected(fmt::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}> reason: {}", //
+                    return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}> reason: {}", //
                         typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name(), conv.error()));
                 }
 
-                return std::unexpected(fmt::format("no valid safe conversion for std:complex<{}> src= {} +{}i -> <{}>", //
+                return std::unexpected(std::format("no valid safe conversion for std:complex<{}> src= {} +{}i -> <{}>", //
                     typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
             }
 
@@ -16587,9 +16898,9 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     auto possibleEnumValues = []<typename U>(const U&) -> std::string {
                         constexpr auto vals  = magic_enum::enum_values<U>();
                         auto           names = vals | std::views::transform(magic_enum::enum_name<U>);
-                        return fmt::format("{}", fmt::join(names, ", "));
+                        return std::format("{}", gr::join(names, ", "));
                     };
-                    return std::unexpected(fmt::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, magic_enum::enum_type_name<T>(), possibleEnumValues(T{})));
+                    return std::unexpected(std::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, magic_enum::enum_type_name<T>(), possibleEnumValues(T{})));
                 }
                 // 6b) string->integral (excluding bool)
                 else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
@@ -16597,10 +16908,10 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     T          parsedVal{};
                     auto [p, errorCode] = std::from_chars(trimmed.data(), trimmed.data() + trimmed.size(), parsedVal, 10);
                     if (errorCode == std::errc::invalid_argument || p != trimmed.data() + trimmed.size()) {
-                        return std::unexpected(fmt::format("cannot parse '{}' as an integer", srcValue));
+                        return std::unexpected(std::format("cannot parse '{}' as an integer", srcValue));
                     }
                     if (errorCode == std::errc::result_out_of_range) {
-                        return std::unexpected(fmt::format("integer out-of-range: '{}'", srcValue));
+                        return std::unexpected(std::format("integer out-of-range: '{}'", srcValue));
                     }
                     return parsedVal;
                 }
@@ -16609,7 +16920,7 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     const auto trimmed = detail::trimAndCutComment(srcValue);
                     auto       result  = detail::parseStringToFloat<T>(trimmed);
                     if (!result) {
-                        return std::unexpected(fmt::format("cannot parse '{}' as floating-point: {}", srcValue, result.error()));
+                        return std::unexpected(std::format("cannot parse '{}' as floating-point: {}", srcValue, result.error()));
                     }
                     return *result;
                 }
@@ -16622,11 +16933,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                     } else if (s == "false" || s == "0") {
                         return false;
                     }
-                    return std::unexpected(fmt::format("cannot parse '{}' as bool", srcValue));
+                    return std::unexpected(std::format("cannot parse '{}' as bool", srcValue));
                 }
                 // fallback
                 else {
-                    return std::unexpected(fmt::format("no safe conversion for std::string src = {} -> <{}>", srcValue, typeid(T).name()));
+                    return std::unexpected(std::format("no safe conversion for std::string src = {} -> <{}>", srcValue, typeid(T).name()));
                 }
             }
 
@@ -16635,11 +16946,11 @@ template<class T, bool strictCheck = false, detail::VariantLike TVariant>
                 if constexpr (std::is_same_v<T, std::string>) {
                     return std::string(magic_enum::enum_name(srcValue));
                 }
-                return std::unexpected(fmt::format("no safe conversion for {} src = {} -> <{}>", magic_enum::enum_type_name<S>(), magic_enum::enum_name(srcValue), typeid(T).name()));
+                return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", magic_enum::enum_type_name<S>(), magic_enum::enum_name(srcValue), typeid(T).name()));
             }
 
             // fallback
-            return std::unexpected(fmt::format("no safe conversion for <{}> -> <{}>", typeid(S).name(), typeid(T).name()));
+            return std::unexpected(std::format("no safe conversion for <{}> -> <{}>", typeid(S).name(), typeid(T).name()));
         },
         v);
 }
@@ -16648,7 +16959,7 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
 [[nodiscard]] constexpr R parseToMinimalNumeric(std::string_view numericString) {
     const std::string_view str = detail::trimAndCutComment(numericString);
     if (str.empty()) {
-        return std::unexpected(fmt::format("empty or comment-only string: '{}'", numericString));
+        return std::unexpected(std::format("empty or comment-only string: '{}'", numericString));
     }
 
     const bool mightBeFloat = (str.find('.') != std::string_view::npos) || (str.find('e') != std::string_view::npos) || (str.find('E') != std::string_view::npos);
@@ -16661,9 +16972,9 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
 
             const auto [p, errorCode] = std::from_chars(str.data(), str.data() + str.size(), val, 10);
             if (errorCode == std::errc::invalid_argument || p != str.data() + str.size()) {
-                return std::unexpected(fmt::format("invalid integer - cannot parse '{}'", str));
+                return std::unexpected(std::format("invalid integer - cannot parse '{}'", str));
             } else if (errorCode == std::errc::result_out_of_range) {
-                return std::unexpected(fmt::format("out-of-range for signed 64-bit - cannot parse '{}'", str));
+                return std::unexpected(std::format("out-of-range for signed 64-bit - cannot parse '{}'", str));
             }
 
             // check smallest signed-integer type that can hold `val`
@@ -16686,14 +16997,14 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
                 return TMinimalNumericVariant(val);
             }
 
-            return std::unexpected(fmt::format("no suitable integral type available (negative) for: {}", val));
+            return std::unexpected(std::format("no suitable integral type available (negative) for: {}", val));
         } else { // needs to be 64-bit unsigned integer
             std::uint64_t valU{};
             auto [p, errorCode] = std::from_chars(str.data(), str.data() + str.size(), valU, 10);
             if (errorCode == std::errc::invalid_argument || p != str.data() + str.size()) {
-                return std::unexpected(fmt::format("invalid integer - cannot parse '{}'", str));
+                return std::unexpected(std::format("invalid integer - cannot parse '{}'", str));
             } else if (errorCode == std::errc::result_out_of_range) {
-                return std::unexpected(fmt::format("out-of-range for unsigned 64-bit - cannot parse '{}'", str));
+                return std::unexpected(std::format("out-of-range for unsigned 64-bit - cannot parse '{}'", str));
             }
 
             // check smallest integer type that can hold `val` with preference to signed-types
@@ -16738,7 +17049,7 @@ template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNum
                 }
             }
 
-            return std::unexpected(fmt::format("no suitable integral type available (non-negative) for: {}", valU));
+            return std::unexpected(std::format("no suitable integral type available (non-negative) for: {}", valU));
         }
     } else { // mightBeFloat - prefer float if in the variant, fallback to double
         if constexpr (detail::variant_contains_v<TMinimalNumericVariant, float>) {
@@ -16816,11 +17127,6 @@ extern template std::expected<map_t, std::string>                             co
 
 // #include <gnuradio-4.0/meta/reflection.hpp>
 
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-nonliteral"
-#include <fmt/chrono.h>
-#pragma GCC diagnostic pop
 
 #if defined(__clang__)
 #define NO_INLINE [[gnu::noinline]]
@@ -17277,7 +17583,7 @@ public:
         storeDefaults();
 
         if (const property_map failed = set(_initBlockParameters); !failed.empty()) {
-            throw gr::exception(fmt::format("settings could not be applied: {}", failed));
+            throw gr::exception(std::format("settings could not be applied: {}", failed));
         }
 
         if (const auto failed = activateContext(); failed == std::nullopt) {
@@ -17624,16 +17930,17 @@ public:
                                         std::ignore = staged; // help clang to see why staged is not unused
                                     }
                                 } else {
-                                    // TODO: replace with pmt error message on msgOut port (to note: clang compiler bug/issue)
-                                    fmt::print(stderr, " cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                    const auto  fieldName     = refl::data_member_name<TBlock, kIdx>.view();
+                                    const char* validatorInfo = RawType::LimitType::ValidatorFunc == nullptr ? "not" : "";
+                                    std::string msg           = std::vformat(" cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
+                                                  std::make_format_args(
 #if !defined(__EMSCRIPTEN__) && !defined(__clang__)
-                                        _block->unique_name, _block->name,
+                                            _block->unique_name, _block->name,
 #else
-                                        "_block->uniqueName", "_block->name",
+                                            "_block->uniqueName", "_block->name",
 #endif
-                                        member, std::get<Type>(stagedValue), refl::data_member_name<TBlock, kIdx>.view(), RawType::LimitType::MinRange,
-                                        RawType::LimitType::MaxRange, //
-                                        RawType::LimitType::ValidatorFunc == nullptr ? "not" : "");
+                                            fieldName, member, std::get<Type>(stagedValue), RawType::LimitType::MinRange, RawType::LimitType::MaxRange, validatorInfo));
+                                    std::fputs(msg.c_str(), stderr);
                                 }
                             } else {
                                 member = std::get<Type>(stagedValue);
@@ -17723,7 +18030,7 @@ public:
         }
 
         if (const property_map failed = set(newProperties, ctx); !failed.empty()) {
-            throw gr::exception(fmt::format("settings from property_map could not be loaded: {}", failed));
+            throw gr::exception(std::format("settings from property_map could not be loaded: {}", failed));
         }
     }
 
@@ -18023,7 +18330,7 @@ extern template std::expected<property_map, std::string> convertParameter<proper
 #endif // GNURADIO_SETTINGS_HPP
 
 // #include <gnuradio-4.0/annotated.hpp>
- // This needs to be included after fmt/format.h, as it defines formatters only if FMT_FORMAT_H_ is defined
+
 // #include <gnuradio-4.0/meta/reflection.hpp>
 
 
@@ -18180,13 +18487,13 @@ protected:
             return {};
         } catch (const gr::exception& e) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), e.sourceLocation, e.errorTime});
+            return std::unexpected(Error{std::format("Block '{}' throws: {}", getBlockName(), e.what()), e.sourceLocation, e.errorTime});
         } catch (const std::exception& e) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), e.what()), location});
+            return std::unexpected(Error{std::format("Block '{}' throws: {}", getBlockName(), e.what()), location});
         } catch (...) {
             setAndNotifyState(State::ERROR);
-            return std::unexpected(Error{fmt::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location});
+            return std::unexpected(Error{std::format("Block '{}' throws: {}", getBlockName(), "unknown unnamed error"), location});
         }
     }
 
@@ -18217,7 +18524,7 @@ public:
         }
 
         if (!isValidTransition(oldState, newState)) {
-            return std::unexpected(Error{fmt::format("Block '{}' invalid state transition in {} from {} -> to {}", //
+            return std::unexpected(Error{std::format("Block '{}' invalid state transition in {} from {} -> to {}", //
                                              getBlockName(), gr::meta::type_name<TDerived>(),                      //
                                              magic_enum::enum_name(state()), magic_enum::enum_name(newState)),
                 location});
@@ -18581,7 +18888,7 @@ enum class Category {
  *             break;
  *           case Unsubscribe: // handle unsubscription
  *             break;
- *           default: throw gr::exception(fmt::format("unsupported command {} for property {}", message.cmd, propertyName));
+ *           default: throw gr::exception(std::format("unsupported command {} for property {}", message.cmd, propertyName));
  *         }
  *       return std::nullopt; // no reply needed for Set, Subscribe, Unsubscribe
  *     }
@@ -18649,7 +18956,7 @@ public:
 
     // TODO: These are not involved in move operations, might be a problem later
     const std::size_t unique_id   = _uniqueIdCounter++;
-    const std::string unique_name = fmt::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    const std::string unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
@@ -18843,7 +19150,7 @@ public:
             static_assert(HasProcessBulkFunction<Derived>, "Blocks which allow input_chunk_size and output_chunk_size must implement processBulk(...) method. Remove 'Resampling<>' from the block definition.");
         } else {
             if (input_chunk_size != 1ULL || output_chunk_size != 1ULL) {
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `Resampling<>`, but input_chunk_size = {}, output_chunk_size = {}, they both must equal to 1.", input_chunk_size, output_chunk_size));
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Block is not defined as `Resampling<>`, but input_chunk_size = {}, output_chunk_size = {}, they both must equal to 1.", input_chunk_size, output_chunk_size));
                 requestStop();
                 return;
             }
@@ -18852,7 +19159,7 @@ public:
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         } else {
             if (stride != 0ULL) {
-                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
+                emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Block is not defined as `Stride<>`, but stride = {}, it must equal to 0.", stride));
                 requestStop();
                 return;
             }
@@ -18860,22 +19167,22 @@ public:
         const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         if (minSyncIn > maxSyncIn) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
             requestStop();
             return;
         }
         if (minSyncOut > maxSyncOut) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Min samples for output ports ({}) is larger then max samples for output ports ({})", minSyncOut, maxSyncOut));
             requestStop();
             return;
         }
         if (input_chunk_size > maxSyncIn) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling input_chunk_size ({}) is larger then max samples for input ports ({})", input_chunk_size, maxSyncIn));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("resampling input_chunk_size ({}) is larger then max samples for input ports ({})", input_chunk_size, maxSyncIn));
             requestStop();
             return;
         }
         if (output_chunk_size > maxSyncOut) {
-            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", fmt::format("resampling output_chunk_size ({}) is larger then max samples for output ports ({})", output_chunk_size, maxSyncOut));
+            emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("resampling output_chunk_size ({}) is larger then max samples for output ports ({})", output_chunk_size, maxSyncOut));
             requestStop();
             return;
         }
@@ -19065,7 +19372,7 @@ public:
             auto& lastTag = _outputTags.back();
 #ifndef NDEBUG
             if (lastTag.index > tagOffset) { // check the order of published Tags.index
-                fmt::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
+                std::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
                 // std::abort();
             }
 #endif
@@ -19109,7 +19416,7 @@ public:
             } else if constexpr (traits::block::can_processMessagesForPortStdSpan<Derived, TPort>) {
                 self().processMessages(inPort, static_cast<std::span<const Message>>(inSpan));
                 if (auto consumed = inSpan.tryConsume(inSpan.size()); !consumed) {
-                    throw gr::exception(fmt::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
+                    throw gr::exception(std::format("Block {}::processScheduledMessages() could not consume the messages from the message port", unique_name));
                 }
             } else {
                 return;
@@ -19141,7 +19448,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackEcho(std::string_view propertyName, Message message) {
@@ -19152,7 +19459,7 @@ protected:
             return message; // mirror message as is
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackLifecycleState(std::string_view propertyName, Message message) {
@@ -19161,27 +19468,27 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value() || !message.data.value().contains("state")) { // Changed '&&' to '||'
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
             }
 
             const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
             auto        it      = dataMap.find("state");
             if (it == dataMap.end()) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
             }
 
             const std::string* stateStr = std::get_if<std::string>(&it->second); // Used std::get_if instead of std::get and try-catch block
             if (!stateStr) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
             }
 
             auto state = magic_enum::enum_cast<lifecycle::State>(*stateStr); // Changed to dereference stateStr
             if (!state.has_value()) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", *stateStr, message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", *stateStr, message));
             }
 
             if (auto e = this->changeStateTo(state.value()); !e) {
-                throw gr::exception(fmt::format("propertyCallbackLifecycleState - error in state transition - what: {}", e.error().message, e.error().sourceLocation, e.error().errorTime));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - error in state transition - what: {}", e.error().message, e.error().sourceLocation, e.error().errorTime));
             }
 
             return std::nullopt;
@@ -19204,7 +19511,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
+        throw gr::exception(std::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackSettings(std::string_view propertyName, Message message) {
@@ -19213,7 +19520,7 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
             // delegate to 'propertyCallbackStagedSettings' since we cannot set but only stage new settings due to mandatory real-time/non-real-time decoupling
             // settings are applied during the next work(...) invocation.
@@ -19232,7 +19539,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
@@ -19251,7 +19558,7 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
 
             property_map notSet          = self().settings().setStaged(*message.data);
@@ -19266,7 +19573,7 @@ protected:
                 return std::nullopt;
             }
 
-            throw gr::exception(fmt::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(std::move(notSet)), keys(settings().get())));
+            throw gr::exception(std::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(std::move(notSet)), keys(settings().get())));
         } else if (message.cmd == Get) {
             message.data = self().settings().stagedParameters();
             return message;
@@ -19280,7 +19587,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackStoreDefaults(std::string_view propertyName, Message message) {
@@ -19292,7 +19599,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackResetDefaults(std::string_view propertyName, Message message) {
@@ -19304,7 +19611,7 @@ protected:
             return std::nullopt;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackActiveContext(std::string_view propertyName, Message message) {
@@ -19313,7 +19620,7 @@ protected:
 
         if (message.cmd == Set) {
             if (!message.data.has_value()) {
-                throw gr::exception(fmt::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
             }
 
             const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
@@ -19323,10 +19630,10 @@ protected:
                 if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                     contextStr = *stringPtr;
                 } else {
-                    throw gr::exception(fmt::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
+                    throw gr::exception(std::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
                 }
             } else {
-                throw gr::exception(fmt::format("propertyCallbackActiveContext - context name not found, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackActiveContext - context name not found, msg: {}", message));
             }
 
             std::uint64_t time = 0;
@@ -19342,7 +19649,7 @@ protected:
             });
 
             if (!ctx.has_value()) {
-                throw gr::exception(fmt::format("propertyCallbackActiveContext - failed to activate context {}, msg: {}", contextStr, message));
+                throw gr::exception(std::format("propertyCallbackActiveContext - failed to activate context {}, msg: {}", contextStr, message));
             }
         }
 
@@ -19352,7 +19659,7 @@ protected:
             return message;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackSettingsCtx(std::string_view propertyName, Message message) {
@@ -19360,7 +19667,7 @@ protected:
         assert(propertyName == block::property::kSettingsCtx);
 
         if (!message.data.has_value()) {
-            throw gr::exception(fmt::format("block {} (aka. {}) cannot get/set {} w/o data msg: {}", unique_name, name, propertyName, message));
+            throw gr::exception(std::format("block {} (aka. {}) cannot get/set {} w/o data msg: {}", unique_name, name, propertyName, message));
         }
 
         const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
@@ -19370,10 +19677,10 @@ protected:
             if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
                 contextStr = *stringPtr;
             } else {
-                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
             }
         } else {
-            throw gr::exception(fmt::format("propertyCallbackSettingsCtx - context name not found, msg: {}", message));
+            throw gr::exception(std::format("propertyCallbackSettingsCtx - context name not found, msg: {}", message));
         }
 
         std::uint64_t time = 0;
@@ -19421,16 +19728,16 @@ protected:
         // Removed a Context
         if (message.cmd == Disconnect) {
             if (ctx.context == "") {
-                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
+                throw gr::exception(std::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
             }
 
             if (!settings().removeContext(ctx)) {
-                throw gr::exception(fmt::format("propertyCallbackSettingsCtx - could not delete context {}, msg: {}", ctx.context, message));
+                throw gr::exception(std::format("propertyCallbackSettingsCtx - could not delete context {}, msg: {}", ctx.context, message));
             }
             return message;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
     std::optional<Message> propertyCallbackSettingsContexts(std::string_view propertyName, Message message) {
@@ -19458,7 +19765,7 @@ protected:
             return message;
         }
 
-        throw gr::exception(fmt::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
 protected:
@@ -19909,7 +20216,7 @@ protected:
 
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
-                emitErrorMessage("Block::workInternal:", fmt::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
+                emitErrorMessage("Block::workInternal:", std::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
                 requestStop();
                 processedIn  = 0;
                 processedOut = 0;
@@ -20139,7 +20446,7 @@ public:
                 retMessage->data = std::unexpected(Error(e));
             } catch (...) {
                 retMessage       = Message{message};
-                retMessage->data = std::unexpected(Error(fmt::format("unknown exception in Block {} property '{}'\n request message: {} ", unique_name, message.endpoint, message)));
+                retMessage->data = std::unexpected(Error(std::format("unknown exception in Block {} property '{}'\n request message: {} ", unique_name, message.endpoint, message)));
             }
 
             if (!retMessage.has_value()) {
@@ -20150,7 +20457,7 @@ public:
             retMessage->serviceName     = unique_name;
             WriterSpanLike auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
-                throw gr::exception(fmt::format("{}::processMessages() can not reserve span for message\n", name));
+                throw gr::exception(std::format("{}::processMessages() can not reserve span for message\n", name));
             } else {
                 msgSpan[0] = *retMessage;
             }
@@ -20196,7 +20503,7 @@ void checkBlockContracts() {
                     // N.B. this function is compile-time ready but static_assert does not allow for configurable error
                     // messages
                     if constexpr (!gr::settings::isReadableMember<Type>() && !traits::port::AnyPort<Type>) {
-                        throw std::invalid_argument(fmt::format("block {} {}member '{}' has unsupported setting type '{}'", //
+                        throw std::invalid_argument(std::format("block {} {}member '{}' has unsupported setting type '{}'", //
                             gr::meta::type_name<TDecayedBlock>(), isAnnotated ? "" : "annotated ", refl::data_member_name<TDecayedBlock, Idxs>.view(), detail::shortTypeName<Type>()));
                     }
                 }(),
@@ -20218,50 +20525,50 @@ void checkBlockContracts() {
         const auto b1 = (TOutputTypes::size.value == 1UZ) ? "" : "{ "; // optional opening brackets
         const auto b2 = (TOutputTypes::size.value == 1UZ) ? "" : " }"; // optional closing brackets
                                                                        // clang-format off
-        std::string signatureProcessOne = fmt::format("* Option Ia (pure function):\n\n{}\n\n* Option Ib (allows modifications: settings, Tags, state, errors,...):\n\n{}\n\n* Option Ic (explicit return types):\n\n{}\n\n", //
-fmt::format(R"(auto processOne({}) const noexcept {{
+        std::string signatureProcessOne = std::format("* Option Ia (pure function):\n\n{}\n\n* Option Ib (allows modifications: settings, Tags, state, errors,...):\n\n{}\n\n* Option Ic (explicit return types):\n\n{}\n\n", //
+std::format(R"(auto processOne({}) const noexcept {{
     /* add code here */
     return {}{}{};
 }})",
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }),
-    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2),
-fmt::format(R"(auto processOne({}) {{
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("{} in{}", detail::shortTypeName<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}()", detail::shortTypeName<T>()); }), b2),
+std::format(R"(auto processOne({}) {{
     /* add code here */
     return {}{}{};
 }})",
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }),
-    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2),
-fmt::format(R"(std::tuple<{}> processOne({}) {{
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("{} in{}", detail::shortTypeName<T>(), index); }),
+    b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}()", detail::shortTypeName<T>()); }), b2),
+std::format(R"(std::tuple<{}> processOne({}) {{
     /* add code here */
     return {}{}{};
 }})",
-   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}", detail::shortTypeName<T>()); }), //
-   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("{} in{}", detail::shortTypeName<T>(), index); }), //
-   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return fmt::format("{}()", detail::shortTypeName<T>()); }), b2)
+   detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}", detail::shortTypeName<T>()); }), //
+   detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("{} in{}", detail::shortTypeName<T>(), index); }), //
+   b1, detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto, T) { return std::format("{}()", detail::shortTypeName<T>()); }), b2)
 );
 
-std::string signaturesProcessBulk = fmt::format("* Option II:\n\n{}\n\nadvanced:* Option III:\n\n{}\n\n\n",
-fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+std::string signaturesProcessBulk = std::format("* Option II:\n\n{}\n\nadvanced:* Option III:\n\n{}\n\n\n",
+std::format(R"(gr::work::Status processBulk({}{}{}) {{
     /* add code here */
     return gr::work::Status::OK;
 }})", //
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<{}> out{}", detail::shortTypeName<T>(), index); })),
-fmt::format(R"(gr::work::Status processBulk({}{}{}) {{
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return std::format("std::span<{}> out{}", detail::shortTypeName<T>(), index); })),
+std::format(R"(gr::work::Status processBulk({}{}{}) {{
     /* add code here */
     return gr::work::Status::OK;
 }})", //
-    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return fmt::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
+    detail::for_each_type_to_string<TInputTypes>([]<typename T>(auto index, T) { return std::format("std::span<const {}> in{}", detail::shortTypeName<T>(), index); }), //
     (TInputTypes::size == 0UZ || TOutputTypes::size == 0UZ ? "" : ", "),                                                                             //
-    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return fmt::format("OutputSpanLike auto out{}", detail::shortTypeName<T>(), index); })));
+    detail::for_each_type_to_string<TOutputTypes>([]<typename T>(auto index, T) { return std::format("OutputSpanLike auto out{}", detail::shortTypeName<T>(), index); })));
         // clang-format on
 
         bool has_port_collection = false;
         TInputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         TOutputTypes::for_each([&has_port_collection]<typename T>(auto, T) { has_port_collection |= requires { typename T::value_type; }; });
         const std::string signatures = (has_port_collection ? "" : signatureProcessOne) + signaturesProcessBulk;
-        throw std::invalid_argument(fmt::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
+        throw std::invalid_argument(std::format("block {} has neither a valid processOne(...) nor valid processBulk(...) method\nPossible valid signatures (copy-paste):\n\n{}", detail::shortTypeName<TDecayedBlock>(), signatures));
     }
 
     // test for optional Drawable interface
@@ -20289,32 +20596,32 @@ template<BlockLike TBlock>
     constexpr bool kIsBlocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
 
     // re-enable once string and constexpr static is supported by all compilers
-    /*constexpr*/ std::string ret = fmt::format("# {}\n{}\n{}\n**supported data types:**", //
+    /*constexpr*/ std::string ret = std::format("# {}\n{}\n{}\n**supported data types:**", //
         gr::meta::type_name<DerivedBlock>(), TBlock::description, kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
     gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto&& t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
-        ret += fmt::format("{}:{} ", index, type_name);
+        ret += std::format("{}:{} ", index, type_name);
     });
-    ret += fmt::format("\n**Parameters:**\n");
+    ret += std::format("\n**Parameters:**\n");
     if constexpr (refl::reflectable<DerivedBlock>) {
         refl::for_each_data_member_index<DerivedBlock>([&](auto kIdx) {
             using RawType = std::remove_cvref_t<refl::data_member_type<DerivedBlock, kIdx>>;
             using Type    = unwrap_if_wrapped_t<RawType>;
             if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
                 if constexpr (is_annotated<RawType>()) {
-                    ret += fmt::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
+                    ret += std::format("{}{:10} {:<20} - annotated info: {} unit: [{}] documentation: {}{}\n",
                         RawType::visible() ? "" : "_",                                                   //
                         refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view(), //
                         RawType::description(), RawType::unit(),
                         RawType::documentation(), //
                         RawType::visible() ? "" : "_");
                 } else {
-                    ret += fmt::format("_{:10} {}_\n", refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view());
+                    ret += std::format("_{:10} {}_\n", refl::type_name<Type>.view(), refl::data_member_name<DerivedBlock, kIdx>.view());
                 }
             }
         });
     }
-    ret += fmt::format("\n~~Ports:~~\ntbd.");
+    ret += std::format("\n~~Ports:~~\ntbd.");
     return ret;
 }
 
@@ -20535,18 +20842,18 @@ inline constexpr auto for_each_writer_span(Function&& function, Tuple&& tuple, T
 } // namespace gr
 
 template<>
-struct fmt::formatter<gr::work::Result> {
-    static constexpr auto parse(const format_parse_context& ctx) {
-        const auto it = ctx.begin();
+struct std::formatter<gr::work::Result, char> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
         if (it != ctx.end() && *it != '}') {
-            throw format_error("invalid format");
+            throw std::format_error("invalid format");
         }
         return it;
     }
 
     template<typename FormatContext>
-    auto format(const gr::work::Result& work_return, FormatContext& ctx) {
-        return fmt::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", work_return.requested_work, work_return.performed_work, magic_enum::enum_name(work_return.status));
+    auto format(const gr::work::Result& result, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", result.requested_work, result.performed_work, magic_enum::enum_name(result.status));
     }
 };
 
@@ -20718,7 +21025,7 @@ protected:
             });
 
             if (it == what.end()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
             }
 
             return std::get<gr::DynamicPort>(*it);
@@ -20728,7 +21035,7 @@ protected:
             std::size_t            index = -1UZ;
             auto [_, ec]                 = std::from_chars(indexString.data(), indexString.data() + indexString.size(), index);
             if (ec != std::errc()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, needs to be an integer", what.size(), indexString), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Invalid index {} specified, needs to be an integer", what.size(), indexString), location);
             }
 
             auto collectionIt = std::ranges::find_if(what, [&base](const DynamicPortOrCollection& portOrCollection) {
@@ -20737,13 +21044,13 @@ protected:
             });
 
             if (collectionIt == what.cend()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid name specified name={}, base={}\n", what.size(), name, base), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Invalid name specified name={}, base={}\n", what.size(), name, base), location);
             }
 
             auto& collection = std::get<NamedPortCollection>(*collectionIt);
 
             if (index >= collection.ports.size()) {
-                throw gr::exception(fmt::format("dynamicPortFromName([{}]) - Invalid index {} specified, out of range. Number of ports is {}", what.size(), index, collection.ports.size()), location);
+                throw gr::exception(std::format("dynamicPortFromName([{}]) - Invalid index {} specified, out of range. Number of ports is {}", what.size(), index, collection.ports.size()), location);
             }
 
             return collection.ports[index];
@@ -20792,7 +21099,7 @@ public:
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -20801,7 +21108,7 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw gr::exception(fmt::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
@@ -20812,7 +21119,7 @@ public:
         initDynamicPorts();
         if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
             if (subIndex == meta::invalid_index) {
-                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
             } else {
                 return portCollection->ports[subIndex];
             }
@@ -20821,7 +21128,7 @@ public:
             if (subIndex == meta::invalid_index) {
                 return *port;
             } else {
-                throw gr::exception(fmt::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
+                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
             }
         }
 
@@ -20882,7 +21189,7 @@ public:
             }
         }
 
-        throw gr::exception(fmt::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name));
     }
 
     std::size_t dynamicOutputPortIndex(const std::string& name) const {
@@ -20899,7 +21206,7 @@ public:
             }
         }
 
-        throw gr::exception(fmt::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name));
     }
 
     virtual ~BlockModel() = default;
@@ -21113,15 +21420,15 @@ public:
 } // namespace gr
 
 template<>
-struct fmt::formatter<gr::Edge> {
+struct std::formatter<gr::Edge> {
     char formatSpecifier = 's';
 
-    constexpr auto parse(fmt::format_parse_context& ctx) {
+    constexpr auto parse(std::format_parse_context& ctx) {
         auto it = ctx.begin();
         if (it != ctx.end() && (*it == 's' || *it == 'l')) {
             formatSpecifier = *it++;
         } else if (it != ctx.end() && *it != '}') {
-            throw fmt::format_error("invalid format specifier");
+            throw std::format_error("invalid format specifier");
         }
         return it;
     }
@@ -21134,16 +21441,16 @@ struct fmt::formatter<gr::Edge> {
             return std::visit(gr::meta::overloaded(
                                   [](const gr::PortDefinition::IndexBased& index) {
                                       if (index.subIndex == gr::meta::invalid_index) {
-                                          return fmt::format("{}", index.topLevel);
+                                          return std::format("{}", index.topLevel);
                                       } else {
-                                          return fmt::format("{}#{}", index.topLevel, index.subIndex);
+                                          return std::format("{}#{}", index.topLevel, index.subIndex);
                                       }
                                   },
                                   [](const gr::PortDefinition::StringBased& index) { return index.name; }),
                 port.definition);
         };
 
-        return fmt::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
+        return std::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
             name(e._sourceBlock), portIndex(e._sourcePortDefinition),                                         //
             e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            //
             name(e._destinationBlock), portIndex(e._destinationPortDefinition));
@@ -21157,12 +21464,11 @@ struct fmt::formatter<gr::Edge> {
 // #include <gnuradio-4.0/CircularBuffer.hpp>
 
 // #include <gnuradio-4.0/PluginLoader.hpp>
-#ifndef GNURADIO_PLUGIN_LOADER_H
-#define GNURADIO_PLUGIN_LOADER_H
+#ifndef GNURADIO_PLUGIN_LOADER_HPP
+#define GNURADIO_PLUGIN_LOADER_HPP
 
 #include <algorithm>
 #include <filesystem>
-#include <iostream>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -21569,8 +21875,6 @@ private:
 public:
     PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
         for (const auto& directory : plugin_directories) {
-            std::cerr << std::filesystem::current_path() << std::endl;
-
             if (!std::filesystem::is_directory(directory)) {
                 continue;
             }
@@ -21627,19 +21931,19 @@ public:
         auto* plugin = pluginForBlockName(name);
         if (plugin == nullptr) {
 #ifndef NDEBUG
-            fmt::print("Available blocks in the registry\n");
+            std::print("Available blocks in the registry\n");
             for (const auto& block : _registry->keys()) {
-                fmt::print("    {}\n", block);
+                std::print("    {}\n", block);
             }
-            fmt::print("]\n");
+            std::print("]\n");
 
-            fmt::print("Available blocks from plugins [\n", name);
+            std::print("Available blocks from plugins [\n", name);
             for (const auto& [blockName, _] : _pluginForBlockName) {
-                fmt::print("    {}\n", blockName);
+                std::print("    {}\n", blockName);
             }
-            fmt::print("]\n");
+            std::print("]\n");
 #endif
-            fmt::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
+            std::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
             return {};
         }
 
@@ -21706,7 +22010,7 @@ inline auto& globalPluginLoader() {
 
 } // namespace gr
 
-#endif // include guard
+#endif // GNURADIO_PLUGIN_LOADER_HPP
 
 // #include <gnuradio-4.0/Port.hpp>
 
@@ -21720,7 +22024,6 @@ inline auto& globalPluginLoader() {
 
 
 #include <algorithm>
-#include <iostream>
 #include <map>
 #include <tuple>
 #include <variant>
@@ -21801,7 +22104,7 @@ public:
     void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
         if (infoFound == exportFlag) {
-            throw Error(fmt::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
+            throw Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
         }
 
         auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName);
@@ -21843,7 +22146,7 @@ public:
                 return *block;
             }
         }
-        throw Error(fmt::format("Block {} not found in {}", uniqueBlockName, this->uniqueName()));
+        throw Error(std::format("Block {} not found in {}", uniqueBlockName, this->uniqueName()));
     }
 
     BlockModel& findFirstBlockWithName(std::string blockName) {
@@ -21852,7 +22155,7 @@ public:
                 return *block;
             }
         }
-        throw Error(fmt::format("Block {} not found in {}", blockName, this->uniqueName()));
+        throw Error(std::format("Block {} not found in {}", blockName, this->uniqueName()));
     }
 
 private:
@@ -21928,7 +22231,7 @@ private:
         }();
 
         if (it == _blocks.end()) {
-            throw std::runtime_error(fmt::format("No such block in this graph"));
+            throw std::runtime_error(std::format("No such block in this graph"));
         }
         return *it;
     }
@@ -21963,7 +22266,7 @@ private:
             auto* destinationBlock = self.findBlock(destinationBlockRaw).get();
 
             if (sourceBlock == nullptr || destinationBlock == nullptr) {
-                fmt::print("Source {} and/or destination {} do not belong to this graph\n", sourceBlockRaw.name, destinationBlockRaw.name);
+                std::print("Source {} and/or destination {} do not belong to this graph\n", sourceBlockRaw.name, destinationBlockRaw.name);
                 return ConnectionResult::FAILED;
             }
 
@@ -22115,7 +22418,7 @@ public:
 
             return newBlock;
         }
-        throw gr::exception(fmt::format("Can not create block {}", type));
+        throw gr::exception(std::format("Can not create block {}", type));
     }
 
     static property_map serializeEdge(const auto& edge) {
@@ -22239,7 +22542,7 @@ public:
 
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
         gr::Message reply;
@@ -22256,7 +22559,7 @@ public:
         auto               it         = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
 
         if (it == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
         std::erase_if(_edges, [&it](const Edge& edge) { //
@@ -22284,13 +22587,13 @@ public:
 
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", uniqueName, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
         auto newBlock    = gr::globalPluginLoader().instantiate(type, properties);
         auto newBlockRaw = newBlock.get();
         if (!newBlock) {
-            throw gr::exception(fmt::format("Can not create block {}", type));
+            throw gr::exception(std::format("Can not create block {}", type));
         }
 
         addBlock(std::move(newBlock), false); // false == do not emit message
@@ -22330,25 +22633,25 @@ public:
 
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
         }
 
         auto destinationBlockIt = std::ranges::find_if(_blocks, [&destinationBlock](const auto& block) { return block->uniqueName() == destinationBlock; });
         if (destinationBlockIt == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", destinationBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", destinationBlock, this->unique_name));
         }
 
         auto& sourcePortRef      = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
         auto& destinationPortRef = (*destinationBlockIt)->dynamicInputPort(destinationPort);
 
         if (sourcePortRef.typeName() != destinationPortRef.typeName()) {
-            throw gr::exception(fmt::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
+            throw gr::exception(std::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
         auto connectionResult = sourcePortRef.connect(destinationPortRef);
 
         if (connectionResult != ConnectionResult::SUCCESS) {
-            throw gr::exception(fmt::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
+            throw gr::exception(std::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
         const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
@@ -22368,13 +22671,13 @@ public:
 
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
-            throw gr::exception(fmt::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
         }
 
         auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
 
         if (sourcePortRef.disconnect() == ConnectionResult::FAILED) {
-            throw gr::exception(fmt::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
+            throw gr::exception(std::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
         }
         message.endpoint = graph::property::kEdgeRemoved;
         return message;
@@ -22508,10 +22811,10 @@ public:
                 edge._destinationPort       = std::addressof(destinationPort);
             }
         } catch (gr::exception& e) {
-            fmt::println("applyEdgeConnection({}): {}", edge, e.what());
+            std::println("applyEdgeConnection({}): {}", edge, e.what());
             edge._state = Edge::EdgeState::PortNotFound;
         } catch (...) {
-            fmt::println("applyEdgeConnection({}): unknown exception", edge);
+            std::println("applyEdgeConnection({}): unknown exception", edge);
             edge._state = Edge::EdgeState::PortNotFound;
         }
 
@@ -22571,7 +22874,7 @@ public:
                 applyEdgeConnection(edge);
                 const bool wasConnected = edge.state() == Edge::EdgeState::Connected;
                 if (!wasConnected) {
-                    fmt::print("Edge could not be connected {}\n", edge);
+                    std::print("Edge could not be connected {}\n", edge);
                 }
                 allConnected = allConnected && wasConnected;
             }
@@ -22698,7 +23001,7 @@ public:
     // already is a member of the Block base class, this is shadowing that member with a different value. No other block
     // does this.)
     const std::size_t unique_id   = _unique_id_counter++;
-    const std::string unique_name = fmt::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
+    const std::string unique_name = std::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
 
 private:
     // copy-paste from above, keep in sync

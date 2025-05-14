@@ -3,7 +3,7 @@
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include <fmt/format.h>
+#include <format>
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;

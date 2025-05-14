@@ -93,7 +93,7 @@ myBlock.processBulk(ins, outs);
 
     PyModuleDef*        _moduleDefinitions = myBlockPythonDefinitions<T>();
     python::Interpreter _interpreter{this, _moduleDefinitions};
-    std::string         _prePythonDefinition = fmt::format(R"p(import {0}
+    std::string         _prePythonDefinition = std::format(R"p(import {0}
 import warnings
 
 class WarningException(Exception):
@@ -130,7 +130,7 @@ this_block = PythonBlockWrapper(capsule))p",
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
 
-            fmt::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
+            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
             if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 throw gr::exception("Number of input ports cannot be changed after Graph initialization.");
             }
@@ -145,33 +145,33 @@ this_block = PythonBlockWrapper(capsule))p",
             _interpreter.invoke(
                 [this] {
                     if (python::PyObjectGuard testImport(PyRun_StringFlags(_prePythonDefinition.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !testImport) {
-                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - testImport", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - testImport", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
                     // Retrieve the PythonBlockWrapper class object
                     PyObject* pPythonBlockWrapperClass = PyDict_GetItemString(_interpreter.getDictionary(), "PythonBlockWrapper"); // borrowed reference
                     if (!pPythonBlockWrapperClass) {
-                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - failed to retrieve PythonBlockWrapper class", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - failed to retrieve PythonBlockWrapper class", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
                     // Retrieve the this_block
                     PyObject* pInstance = PyDict_GetItemString(_interpreter.getDictionary(), "this_block"); // borrowed reference
                     if (!pInstance) {
-                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - failed to retrieve 'this_block'", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - failed to retrieve 'this_block'", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
                     // Check if pInstance is an instance of PythonBlockWrapper
                     if (PyObject_IsInstance(pInstance, pPythonBlockWrapperClass) != 1) {
-                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) - 'this_block' is not an instance of PythonBlockWrapper", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - 'this_block' is not an instance of PythonBlockWrapper", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
                     if (const python::PyObjectGuard result(PyRun_StringFlags(pythonScript.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !result) {
-                        python::throwCurrentPythonError(fmt::format("{}(aka. '{}')::settingsChanged(...) - script parsing error", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                        python::throwCurrentPythonError(std::format("{}(aka. '{}')::settingsChanged(...) - script parsing error", this->unique_name, this->name), std::source_location::current(), pythonScript);
                     }
 
                     python::PyObjectGuard pyFunc(PyObject_GetAttrString(_interpreter.getModule(), "process_bulk"));
                     if (!pyFunc.get() || !PyCallable_Check(pyFunc.get())) {
-                        python::throwCurrentPythonError(fmt::format("{}(aka. {})::settingsChanged(...) Python function process_bulk not found or is not callable", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) Python function process_bulk not found or is not callable", this->unique_name, this->name), std::source_location::current(), pythonScript);
                     }
                 },
                 pythonScript);
@@ -234,7 +234,7 @@ private:
         PyTuple_SetItem(pyArgs, 1, pOuts);
 
         if (python::PyObjectGuard pyValue = _interpreter.invokeFunction("process_bulk", pyArgs); !pyValue) {
-            python::throwCurrentPythonError(fmt::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), pythonScript);
+            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), pythonScript);
         }
     }
 };
@@ -279,7 +279,7 @@ PyObject* PythonBlock_GetSettings_Template(PyObject* /*self*/, PyObject* args) {
     }
     const gr::basic::PythonBlock<T>* myBlock = getPythonBlockFromCapsule<T>(capsule);
     if (myBlock == nullptr) {
-        gr::python::throwCurrentPythonError(fmt::format("could not retrieve myBLock<{}> {}", gr::meta::type_name<T>(), gr::python::toString(capsule)));
+        gr::python::throwCurrentPythonError(std::format("could not retrieve myBLock<{}> {}", gr::meta::type_name<T>(), gr::python::toString(capsule)));
         return nullptr;
     }
     const auto& settings = myBlock->getSettings();

@@ -31,7 +31,7 @@ std::size_t checkIndexRange(const DataSet<T>& ds, std::size_t minIndex = 0UZ, st
         maxIndex = maxDataSetIndex;
     }
     if (minIndex > maxIndex || minIndex >= maxDataSetIndex || maxIndex > maxDataSetIndex || signalIndex >= ds.size()) {
-        throw gr::exception(fmt::format("DataSet<{}> ({}/{}: \"{}\") indices [{}, {}] out of range [0, {}]",                                    //
+        throw gr::exception(std::format("DataSet<{}> ({}/{}: \"{}\") indices [{}, {}] out of range [0, {}]",                                    //
                                 gr::meta::type_name<T>(), signalIndex, ds.size(), signalIndex < ds.size() ? ds.signalName(signalIndex) : "???", //
                                 minIndex, maxIndex, maxDataSetIndex),
             location);
@@ -74,7 +74,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
         return static_cast<T>(vals[sampleIndex]);
     }
 
-    throw gr::exception(fmt::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
+    throw gr::exception(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
 }
 
 template<typename T>
@@ -88,7 +88,7 @@ T getDistance(const DataSet<T>& dataSet, std::size_t dimIndex, std::size_t index
         return getIndexValue(dataSet, dimIndex, indexMax, signalIndex) - getIndexValue(dataSet, dimIndex, indexMin, signalIndex);
     }
 
-    throw gr::exception(fmt::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
+    throw gr::exception(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
 }
 
 /*!
@@ -145,7 +145,7 @@ template<typename T, typename TValue = gr::meta::fundamental_base_value_type_t<T
         return yLow + t * (yHigh - yLow);
     }
 
-    throw gr::exception(fmt::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
+    throw gr::exception(std::format("axis dimIndex {} is out of range [0, {}] and", dimIndex, dataSet.axisCount()));
 }
 
 template<typename T>
@@ -181,14 +181,16 @@ template<typename T>
 
 template<typename T>
 [[nodiscard]] std::expected<void, gr::Error> checkConsistency(const DataSet<T>& ds, std::string_view dsName = "unnamed", std::source_location location = std::source_location::current()) {
-    auto handleFailure = [&]<typename... Args>(std::string_view fmtStr, Args&&... args) -> std::expected<void, gr::Error> {
-        std::string combinedFmt = "Mismatch in DataSet<{}>-\"{}\": " + std::string(fmtStr) + "\n";
-        return std::unexpected(gr::Error(fmt::format(fmt::runtime_format_string<>(combinedFmt), gr::meta::type_name<T>(), dsName, std::forward<Args>(args)...), location));
+    auto handleFailure = [&](std::string_view fmtStr, auto&&... args) -> std::expected<void, gr::Error> {
+        auto formatted = std::vformat(fmtStr, std::make_format_args(args...));
+        auto fullMsg   = std::format("Mismatch in DataSet<{}>-\"{}\": {}\n", gr::meta::type_name<T>(), dsName, formatted);
+        return std::unexpected(gr::Error(std::move(fullMsg), location));
     };
 
     // check all extents are non-negative
-    if (std::ranges::any_of(ds.extents, [](std::int32_t e) { return e <= 0; })) {
-        return handleFailure("found 0 or negative extend values [{}]", fmt::join(ds.extents, ", "));
+    if (std::ranges::any_of(ds.extents, [](std::int32_t e) { return e <= 0; })) { // clang-20 bug workaround "immediate function 'operator()<const std::string &>' used before it is defined"
+        // return std::unexpected(gr::Error(std::format("Mismatch in DataSet<{}>-\"{}\": found bad extents [{}]\n", gr::meta::type_name<T>(), dsName, gr::join(ds.extents, ", ")), location));
+        return handleFailure("found 0 or negative extent values [{}]", gr::join(ds.extents));
     }
 
     // check axis-related sizes: axisCount() == extents.size() == axis_units.size() == axis_values.size()

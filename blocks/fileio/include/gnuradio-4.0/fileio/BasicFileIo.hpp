@@ -22,7 +22,7 @@ inline void ensureDirectoryExists(const std::filesystem::path& filePath) { std::
 inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::string& fileName) {
     std::filesystem::path filePath(fileName);
     if (!std::filesystem::exists(filePath.parent_path())) {
-        throw gr::exception(fmt::format("path/file '{}' does not exist.", fileName));
+        throw gr::exception(std::format("path/file '{}' does not exist.", fileName));
     }
 
     std::vector<std::filesystem::path> matchingFiles;
@@ -35,7 +35,7 @@ inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::st
 
 [[nodiscard]] inline std::uintmax_t getFileSize(const std::filesystem::path& filePath) {
     if (!std::filesystem::exists(filePath)) {
-        throw std::runtime_error(fmt::format("file '{}' does not exist.", filePath.string()));
+        throw std::runtime_error(std::format("file '{}' does not exist.", filePath.string()));
     }
     return std::filesystem::file_size(filePath);
 }
@@ -118,7 +118,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         }
 
         if (!_file) {
-            throw gr::exception(fmt::format("failed to write to file '{}'.", _actualFileName));
+            throw gr::exception(std::format("failed to write to file '{}'.", _actualFileName));
         }
 
         _totalBytesWritten += nBytesMax;
@@ -141,7 +141,7 @@ private:
 
         std::filesystem::path filePath(file_name.value);
         if (!std::filesystem::exists(filePath.parent_path())) {
-            throw gr::exception(fmt::format("path/file '{}' does not exist.", file_name.value));
+            throw gr::exception(std::format("path/file '{}' does not exist.", file_name.value));
         }
 
         // Open file handle based on mode
@@ -164,7 +164,7 @@ private:
         }
 
         if (!_file) {
-            throw gr::exception(fmt::format("failed to open file '{}'.", _actualFileName));
+            throw gr::exception(std::format("failed to open file '{}'.", _actualFileName));
         }
     }
 };
@@ -212,7 +212,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
         std::filesystem::path filePath(file_name.value);
         if (!std::filesystem::exists(filePath.parent_path())) {
-            throw gr::exception(fmt::format("path/file '{}' does not exist.", file_name.value));
+            throw gr::exception(std::format("path/file '{}' does not exist.", file_name.value));
         }
 
         switch (_mode) {
@@ -289,7 +289,7 @@ private:
         _currentFileName = _filesToRead[_currentFileIndex].string();
         _file.open(_currentFileName, std::ios::binary);
         if (!_file) {
-            throw gr::exception(fmt::format("failed to open file '{}'.", _currentFileName));
+            throw gr::exception(std::format("failed to open file '{}'.", _currentFileName));
         }
         if (offset.value != 0U) {
             _file.seekg(offset.value * sizeof(T), std::ios::beg);
