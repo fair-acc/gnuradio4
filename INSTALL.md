@@ -31,6 +31,13 @@ target_link_libraries(your_target PRIVATE gnuradio4::core)
 
 **Note**: Installation is typically not required unless you need runtime polymorphism (i.e., a pre-built block library).
 
+## Cloning the Repository
+If you want to use or contribute to GR4 directly, clone the repository with:
+```bash
+git clone https://github.com/fair-acc/gnuradio4.git
+cd gnuradio4
+```
+
 ## System Requirements
 
 ### Prerequisites
@@ -66,12 +73,10 @@ brew update
 brew install cmake llvm git python3
 ```
 
-## Building Tests (Optional)
-Since GR4 is header-only, building is only required for running tests:
+## Building GNU Radio 4 (Optional)
+GR4 is header-only and does not require building for normal use. However, if you want to run tests or examples, you can build the project as follows:
 
 ```bash
-git clone https://github.com/fair-acc/gnuradio4.git
-cd gnuradio4
 mkdir build && cd build
 cmake ..
 cmake --build . --config Release
@@ -96,6 +101,15 @@ If you encounter issues not covered here:
 1. Check the repository's `DEVELOPMENT.md` file
 2. Raise an issue on GitHub with detailed information
 
+## Contributing
+We welcome contributions to GNU Radio 4! To contribute:
+- Fork the repository
+- Create a feature branch for your changes
+- Commit and push your changes
+- Open a pull request with a clear description
+
+Please follow the project's coding standards and check the `CONTRIBUTING.md` file for more details.
+
 ## Learning Resources
 
 - **GR4 Workshop**: A GNU Radio Days workshop at FAIR (end of August) provides in-person and online (via YouTube) tutorials on GR4 and differences from GR3
@@ -104,6 +118,9 @@ If you encounter issues not covered here:
 ## Additional Resources
 - [GNU Radio Wiki](https://wiki.gnuradio.org)
 - [GNU Radio Discourse Forum](https://discuss.gnuradio.org/)
+
+## For More Details
+For more details, refer to the [GNU Radio Wiki](https://wiki.gnuradio.org) or join community discussions. You can also find more advanced topics in the `DEVELOPMENT.md` file in this repository.
 
 ---
 
