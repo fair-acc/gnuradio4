@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <expected>
 #include <iomanip>
+#include <list>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -51,7 +52,7 @@ constexpr bool is_complex_v = is_complex<T>::value;
 
 inline std::string escapeString(std::string_view str, bool escapeForQuotedString) {
     std::string result;
-    result.reserve(str.size());
+    result.reserve(2 * str.size());
     for (char c : str) {
         if (c == '"' && escapeForQuotedString) {
             result.append("\\\"");
@@ -277,7 +278,11 @@ struct ParseContext {
         return false;
     }
 
-    char front() const { return lines[lineIdx][columnIdx]; }
+    char front() const {
+        assert(lineIdx < lines.size());
+        assert(columnIdx < lines[lineIdx].size());
+        return lines[lineIdx][columnIdx];
+    }
 
     void skipToNextLine() {
         if (lineIdx < lines.size()) {
@@ -337,8 +342,9 @@ inline std::vector<std::string_view> split(std::string_view str, std::string_vie
         if (end == std::string_view::npos) {
             end = str.size();
         }
-        lines.emplace_back(str.data() + start, end - start);
-        start = end + 1;
+        std::string_view line = str.substr(start, end - start);
+        lines.emplace_back(line);
+        start = end + separator.size();
     }
     return lines;
 }
@@ -380,12 +386,15 @@ R applyTag(std::string_view tag, Args&&... args) {
 
 inline std::optional<std::string> parseBytesFromHex(std::string_view sv) {
     std::string result;
+    if (sv.size() % 2 != 0) {
+        return std::nullopt;
+    }
     result.reserve(sv.size() / 2);
     for (std::size_t i = 0; i < sv.size(); i += 2) {
         std::string_view byte = sv.substr(i, 2);
-        char             c;
-        if (auto [_, ec] = std::from_chars(byte.begin(), byte.end(), c, 16); ec == std::errc{}) {
-            result.push_back(c);
+        unsigned         u8;
+        if (auto [_, ec] = std::from_chars(byte.data(), byte.data() + byte.size(), u8, 16); ec == std::errc{}) {
+            result.push_back(static_cast<char>(u8));
         } else {
             return std::nullopt;
         }
@@ -526,8 +535,8 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         sv                 = trim(sv); // trim leading and trailing whitespace
         auto parseWithBase = [](std::string_view s, int base) -> std::expected<T, ValueParseError> {
             T value;
-            const auto [ptr, ec] = std::from_chars(s.begin(), s.end(), value, base);
-            if (ec != std::errc{} || ptr != s.end()) {
+            const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value, base);
+            if (ec != std::errc{} || ptr != s.data() + s.size()) {
                 return std::unexpected(ValueParseError{0UZ, std::format("Invalid integral-type value '{}' (error: {})", s, std::make_error_code(ec).message())});
             }
             return value;
@@ -846,7 +855,7 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
     if (colonPos == std::string_view::npos || (commentPos != std::string_view::npos && commentPos < colonPos)) {
         return std::unexpected(ctx.makeError("Could not find key/value separator ':'"));
     }
-    std::string key = std::string(ctx.remainingLine().substr(0, colonPos));
+    std::string key(ctx.remainingLine().substr(0, colonPos));
     ctx.consume(colonPos + 1);
 
     return key;
@@ -1079,7 +1088,10 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
         return l;
     }
 
-    std::vector<pmtv::pmt> list;
+    // Use std::list instead of std::vector as a workaround to the ASAN problem with emscripten 4.0.8 due to vector reallocation.
+    // A list never relocates its nodes, so references and iterators remain valid for the lifetime of the container.
+    // Once parsing ends, we copy to std::vector.
+    std::list<pmtv::pmt> list;
 
     while (!ctx.atEndOfDocument()) {
         ctx.consumeWhitespaceAndComments();
@@ -1146,11 +1158,11 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
         }
         }
     }
-
+    std::vector<pmtv::pmt> vec(list.begin(), list.end());
     if (typeTag.empty()) {
-        return list;
+        return vec;
     }
-    return applyTag<pmtv::pmt, ConvertList>(typeTag, list);
+    return applyTag<pmtv::pmt, ConvertList>(typeTag, vec);
 }
 
 } // namespace detail

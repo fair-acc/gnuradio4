@@ -8,20 +8,18 @@
 #include <limits>
 #include <variant>
 
-auto fuzzy_eq(std::string_view str1, std::string_view str2) { return std::equal(str1.begin(), str1.begin() + std::min(str1.size(), str2.size()), str2.begin()); }
-
-template<typename T>
-std::string_view typeName() {
-    return typeid(T).name();
+auto fuzzy_eq(std::string_view str1, std::string_view str2) {
+    const auto len = std::min(str1.size(), str2.size());
+    return std::equal(str1.data(), str1.data() + len, str2.data());
 }
 
 template<typename... Ts>
-std::string_view variantTypeName(const std::variant<Ts...>& v) {
+std::string variantTypeName(const std::variant<Ts...>& v) {
     return std::visit(
         [](auto&& arg) {
             // Get the type name of the current alternative
             using T = std::decay_t<decltype(arg)>;
-            return typeName<T>();
+            return gr::meta::type_name<T>();
         },
         v);
 }

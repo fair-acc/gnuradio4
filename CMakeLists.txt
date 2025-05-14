@@ -94,11 +94,7 @@ endif()
 option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
 option(USE_CCACHE "Use ccache if available" ON)
 option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ${REGISTRY_DEFAULT})
-if(EMSCRIPTEN)
-  option(WARNINGS_AS_ERRORS "Enable -Werror flags" OFF) # some ubiquitous warnings in UT need to be fixed first.
-else()
-  option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
-endif()
+option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 option(TIMETRACE "Enable clang's -ftime-trace" OFF)
 option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
@@ -224,26 +220,23 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
         -fsanitize-address-use-after-scope
         -fsanitize=leak
         -fno-omit-frame-pointer
-        -fstack-protector-strong
-        -fstack-clash-protection)
+        -fstack-protector-strong)
   elseif(UB_SANITIZER)
     set(SANITIZER_FLAGS
         -fsanitize=undefined
         -fsanitize-address-use-after-scope
         -fsanitize=leak
         -fno-omit-frame-pointer
-        -fstack-protector-strong
-        -fstack-clash-protection)
+        -fstack-protector-strong)
   elseif(THREAD_SANITIZER)
     set(SANITIZER_FLAGS -fsanitize=thread -fsanitize=thread)
   endif()
 
   if(DEFINED SANITIZER_FLAGS)
-    add_compile_options(
-      ${SANITIZER_FLAGS}
-      -fno-omit-frame-pointer
-      -fstack-protector-strong
-      -fstack-clash-protection)
+    add_compile_options(${SANITIZER_FLAGS} -fno-omit-frame-pointer -fstack-protector-strong)
+    if(NOT EMSCRIPTEN)
+      add_compile_options(${SANITIZER_FLAGS} -fstack-clash-protection)
+    endif()
     add_link_options(${SANITIZER_FLAGS})
     message(STATUS "Enabled sanitizer flags: ${SANITIZER_FLAGS}")
   endif()
