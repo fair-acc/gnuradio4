@@ -12,7 +12,7 @@
 
 namespace gr::blocks::math {
 
-GR_REGISTER_BLOCK(gr::blocks::math::Rotator, [ std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK(gr::blocks::math::Rotator, [T], [ std::complex<float>, std::complex<double> ])
 
 template<pmtv::Complex T>
 struct Rotator : gr::Block<Rotator<T>> {
