@@ -188,7 +188,6 @@ class Graph : public gr::Block<Graph> {
 private:
     std::shared_ptr<gr::Sequence>                     _progress     = std::make_shared<gr::Sequence>();
     std::shared_ptr<gr::thread_pool::BasicThreadPool> _ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
-    std::atomic_bool                                  _topologyChanged{false};
     std::vector<Edge>                                 _edges;
     std::vector<std::unique_ptr<BlockModel>>          _blocks;
 
@@ -338,16 +337,11 @@ public:
         }
         _progress     = std::move(other._progress);
         _ioThreadPool = std::move(other._ioThreadPool);
-        _topologyChanged.store(other._topologyChanged.load(std::memory_order_acquire), std::memory_order_release);
-        _edges  = std::move(other._edges);
-        _blocks = std::move(other._blocks);
+        _edges        = std::move(other._edges);
+        _blocks       = std::move(other._blocks);
 
         return *this;
     }
-
-    void               setTopologyChanged() noexcept { _topologyChanged.store(true, std::memory_order_release); }
-    [[nodiscard]] bool hasTopologyChanged() const noexcept { return _topologyChanged; }
-    void               ackTopologyChange() noexcept { _topologyChanged.store(false, std::memory_order_release); }
 
     [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {_blocks}; }
     [[nodiscard]] std::span<Edge>                        edges() noexcept { return {_edges}; }
