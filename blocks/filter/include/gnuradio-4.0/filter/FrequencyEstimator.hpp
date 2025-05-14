@@ -137,7 +137,7 @@ private:
         T accC = 0;
 
         auto         bufferStart = _outputHistory.begin();
-        std::span<T> data(bufferStart, std::next(bufferStart, _n_period_estimate));
+        std::span<T> data(bufferStart, std::next(bufferStart, static_cast<std::ptrdiff_t>(_n_period_estimate)));
         for (std::size_t n = 1UZ; n < _n_period_estimate - 1UZ; ++n) {
             T sumNeighbours = data[n - 1] + data[n + 1];
             T denominator   = T(4) * data[n];
