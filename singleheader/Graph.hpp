@@ -7283,10 +7283,9 @@ template<typename T>
 
 namespace gr {
 namespace time {
-[[nodiscard]] inline std::string getIsoTime() noexcept {
-    std::chrono::system_clock::time_point now  = std::chrono::system_clock::now();
-    const auto                            secs = std::chrono::time_point_cast<std::chrono::seconds>(now);
-    const auto                            ms   = std::chrono::duration_cast<std::chrono::milliseconds>(now - secs).count();
+[[nodiscard]] inline std::string getIsoTime(std::chrono::system_clock::time_point timePoint = std::chrono::system_clock::now()) noexcept {
+    const auto secs = std::chrono::time_point_cast<std::chrono::seconds>(timePoint);
+    const auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(timePoint - secs).count();
     return std::format("{:%Y-%m-%dT%H:%M:%S}.{:06}", secs, ms); // ms-precision ISO time-format
 }
 } // namespace time

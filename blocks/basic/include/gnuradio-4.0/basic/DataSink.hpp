@@ -163,13 +163,6 @@ class DataSinkRegistry {
     std::map<std::string, std::any> _sink_by_signal_name;
 
 public:
-    // TODO this shouldn't be a singleton but associated with the flow graph (?)
-    // TODO reconsider mutex usage when moving to the graph
-    static DataSinkRegistry& instance() {
-        static DataSinkRegistry s_instance;
-        return s_instance;
-    }
-
     template<DataSinkOrDataSetSinkLike TSink>
     void registerSink(TSink* sink, std::source_location location = std::source_location::current()) {
         std::lock_guard lg{_mutex};
@@ -364,6 +357,11 @@ private:
     }
 };
 
+__attribute__((visibility("default"))) inline DataSinkRegistry& globalDataSinkRegistry() {
+    static DataSinkRegistry instance;
+    return instance;
+}
+
 namespace detail {
 
 struct Metadata {
@@ -523,9 +521,9 @@ public:
         if (oldSettings.contains("signal_name")) {
             const std::string oldSignalName = std::get<std::string>(oldSettings.at("signal_name"));
             if (oldSignalName.empty()) {
-                DataSinkRegistry::instance().registerSink(this);
+                globalDataSinkRegistry().registerSink(this);
             } else if (oldSignalName != signal_name && _registered) {
-                DataSinkRegistry::instance().updateSignalName(this, oldSignalName, signal_name);
+                globalDataSinkRegistry().updateSignalName(this, oldSignalName, signal_name);
             }
         }
         std::lock_guard lg{_listener_mutex};
@@ -598,7 +596,7 @@ public:
     }
 
     void stop() noexcept {
-        DataSinkRegistry::instance().unregisterSink(this);
+        globalDataSinkRegistry().unregisterSink(this);
         std::lock_guard lg(_listener_mutex);
         for (auto& listener : _listeners) {
             listener->stop();
@@ -1057,9 +1055,9 @@ public:
         if (oldSettings.contains("signal_name")) {
             const std::string oldSignalName = std::get<std::string>(oldSettings.at("signal_name"));
             if (oldSignalName.empty()) {
-                DataSinkRegistry::instance().registerSink(this);
+                globalDataSinkRegistry().registerSink(this);
             } else if (oldSignalName != signal_name && _registered) {
-                DataSinkRegistry::instance().updateSignalName(this, oldSignalName, signal_name);
+                globalDataSinkRegistry().updateSignalName(this, oldSignalName, signal_name);
             }
         }
     }
@@ -1090,7 +1088,7 @@ public:
     }
 
     void stop() noexcept {
-        DataSinkRegistry::instance().unregisterSink(this);
+        globalDataSinkRegistry().unregisterSink(this);
         std::lock_guard lg(_listener_mutex);
         for (auto& listener : _listeners) {
             listener->stop();

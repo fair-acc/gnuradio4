@@ -4,6 +4,7 @@
 #include <gnuradio-4.0/basic/PythonBlock.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite<"python::<C-API abstraction interfaces>"> pythonInterfaceTests = [] {
