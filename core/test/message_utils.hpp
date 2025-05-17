@@ -10,6 +10,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 
 namespace gr::testing {
 
@@ -102,7 +103,7 @@ inline bool waitForReply(gr::MsgPortIn& fromGraph, std::size_t nReplies = 1UZ, s
 
 inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, property_map properties, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
-    sendMessage<Set>(toGraph, serviceName, graph::property::kEmplaceBlock /* endpoint */, //
+    sendMessage<Set>(toGraph, serviceName, gr::scheduler::property::kEmplaceBlock /* endpoint */, //
         {{"type", std::move(type)}, {"properties", std::move(properties)}} /* data */);
 
     expect(waitForReply(fromGraph)) << std::format("Reply message not received. Requested at: {}\n", sourceLocation);
@@ -118,7 +119,7 @@ inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
     gr::property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort}, {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort}, //
         {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
-    sendMessage<Set>(toGraph, serviceName, graph::property::kEmplaceEdge /* endpoint */, data /* data */);
+    sendMessage<Set>(toGraph, serviceName, gr::scheduler::property::kEmplaceEdge /* endpoint */, data /* data */);
 
     expect(waitForReply(fromGraph)) << std::format("Reply message not received. Requested at: {}\n", sourceLocation);
     expect(eq(getNReplyMessages(fromGraph), 1UZ)) << std::format("No messages available. Requested at: {}\n", sourceLocation);
