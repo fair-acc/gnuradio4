@@ -156,36 +156,38 @@ This example demonstrates how to implement a modular, packet-based QPSK modem us
 #### Block Diagram (Transmitter & Receiver)
 
 Transmitter:
-
-    [Packet Ingress]
-          |
-    [Header Formatter]
-          |
-      [Scrambler]
-          |
-      [Modulator]
-          |
- [Burst/Stream Mode Switch]
-          |
- [Root Raised Cosine Filter]
-          |
-      [SDR Output]
+```
+[Packet Ingress]
+      |
+[Header Formatter]
+      |
+[Scrambler]
+      |
+[Modulator]
+      |
+[Burst/Stream Mode Switch]
+      |
+[Root Raised Cosine Filter]
+      |
+[SDR Output]
+```
 
 Receiver:
-
-      [SDR Input]
-          |
-   [FFT Correlation]
-          |
- [Matched Filtering]
-          |
-     [Costas Loop]
-          |
-   [Header Parsing]
-          |
- [Payload Processing]
-          |
-   [Packet Output]
+```
+[SDR Input]
+      |
+[FFT Correlation]
+      |
+[Matched Filtering]
+      |
+[Costas Loop]
+      |
+[Header Parsing]
+      |
+[Payload Processing]
+      |
+[Packet Output]
+```
 
 #### Key Design Principles
 
