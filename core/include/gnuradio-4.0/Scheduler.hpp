@@ -11,6 +11,7 @@
 #include <utility>
 
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
@@ -35,6 +36,8 @@ inline static const char* kBlockRemoved  = "BlockRemoved";
 inline static const char* kBlockReplaced = "BlockReplaced";
 inline static const char* kEdgeEmplaced  = "EdgeEmplaced";
 inline static const char* kEdgeRemoved   = "EdgeRemoved";
+
+inline static const char* kGraphGRC = "GraphGRC";
 } // namespace property
 
 enum class ExecutionPolicy {
@@ -110,6 +113,7 @@ public:
         this->propertyCallbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
         this->propertyCallbacks[scheduler::property::kEmplaceEdge]  = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
         this->propertyCallbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
+        this->propertyCallbacks[scheduler::property::kGraphGRC]     = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
     }
 
     ~SchedulerBase() {
@@ -601,6 +605,25 @@ protected:
 
         std::lock_guard guard(_zombieBlocksMutex);
         _zombieBlocks.push_back(std::move(block));
+    }
+
+    std::optional<Message> propertyCallbackGraphGRC([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kGraphGRC);
+
+        auto& pluginLoader = gr::globalPluginLoader();
+        if (message.cmd == message::Command::Get) {
+            message.data = property_map{{"value", gr::saveGrc(pluginLoader, _graph)}};
+        } else if (message.cmd == message::Command::Set) {
+            // const auto& data        = message.data.value();
+            // auto        yamlContent = std::get<std::string>(data.at("value"s));
+            // Graph                   = gr::loadGrc(pluginLoader, yamlContent);
+            // We need to stop the scheduler first
+            throw gr::exception(std::format("Not implemented {}", message.cmd));
+        } else {
+            throw gr::exception(std::format("Unexpected command type {}", message.cmd));
+        }
+
+        return message;
     }
 
     std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {

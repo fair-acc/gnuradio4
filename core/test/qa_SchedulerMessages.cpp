@@ -272,6 +272,39 @@ const boost::ut::suite TopologyGraphTests = [] {
             expect(!reply.data.has_value());
         };
     };
+
+    "Get GRC Yaml tests"_test = [] {
+        gr::Graph testGraph(context->loader);
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+
+        TestScheduler scheduler(std::move(testGraph));
+
+        sendMessage<Get>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {});
+        waitForReply(scheduler.fromScheduler);
+
+        expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
+        const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+
+        expect(reply.data.has_value()) << "Reply should contain data";
+        if (reply.data.has_value()) {
+            const auto& data = reply.data.value();
+            expect(data.contains("value")) << "Reply should contain 'value' field";
+            const auto& yaml = std::get<std::string>(data.at("value"));
+            expect(!yaml.empty()) << "YAML string should not be empty";
+            std::println("YAML content:\n{}", yaml);
+
+            // verify well formed by loading from yaml
+            auto graphFromYaml = gr::loadGrc(context->loader, yaml);
+            expect(eq(graphFromYaml.blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks", graphFromYaml.blocks().size());
+
+            // "Set GRC YAML"_test = [&] {
+            //     sendMessage<Set>(toGraph, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {{"value", yaml}});
+            //     expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
+            //     expect(eq(testGraph.blocks().size(), 2UZ)) << "Expected 2 blocks after reloading GRC";
+            // };
+        }
+    };
 };
 
 /// old tests, from the time graph handled messages. They're still good
