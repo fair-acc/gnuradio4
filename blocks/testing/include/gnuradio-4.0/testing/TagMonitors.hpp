@@ -16,13 +16,15 @@ enum class ProcessFunction {
     USE_PROCESS_ONE  = 1  ///
 };
 
-inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) noexcept {
-    if (tag.map.empty()) {
-        std::print("{} @index= {}: map: {{ <empty map> }}\n", prefix, tag.index);
+inline constexpr void print_tag(const auto index, const gr::property_map& tagMap, std::string_view prefix = {}) noexcept {
+    if (tagMap.empty()) {
+        std::println("{} @index= {}: map: {{ <empty map> }}", prefix, index);
         return;
     }
-    std::print("{} @index= {}: map: {{ {} }}\n", prefix, tag.index, gr::join(tag.map, ", "));
+    std::println("{} @index= {}: map: {{ {} }}", prefix, index, gr::join(tagMap, ", "));
 }
+
+inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) noexcept { print_tag(tag.index, tag.map, prefix); }
 
 template<typename MapType>
 inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, const std::string& name1, const std::string& name2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
@@ -291,16 +293,15 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
         return input;
     }
 
-    constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept
+    constexpr work::Status processBulk(InputSpanLike auto& input, std::span<T> output) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        if (this->inputTagsPresent()) {
-            const Tag& tag = this->mergedInputTag();
+        for (auto [idx, tagmap] : input.tags()) {
             if (verbose_console) {
-                print_tag(tag, std::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
+                print_tag(_nSamplesProduced + idx, tagmap, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced + idx));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                _tags.emplace_back(_nSamplesProduced + idx, tagmap);
             }
         }
 
@@ -375,16 +376,15 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     }
 
     // template<gr::meta::t_or_simd<T> V>
-    constexpr work::Status processBulk(std::span<const T> input)
+    constexpr work::Status processBulk(InputSpanLike auto& input)
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        if (this->inputTagsPresent()) {
-            const Tag& tag = this->mergedInputTag();
+        for (auto [idx, tagmap] : input.tags()) {
             if (verbose_console) {
-                print_tag(tag, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));
+                print_tag(_nSamplesProduced + idx, tagmap, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced + idx));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                _tags.emplace_back(_nSamplesProduced + idx, tagmap);
             }
         }
         if (log_samples) {
