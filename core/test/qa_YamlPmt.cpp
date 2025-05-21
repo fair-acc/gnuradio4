@@ -113,9 +113,9 @@ void testYAML(std::string_view src, const pmtv::map_t expected, std::source_loca
     // First test that the deserialized map matches the expected map
     const auto deserializedMap = pmtv::yaml::deserialize(src);
     if (deserializedMap) {
-        expect(eq(diff(expected, *deserializedMap), false)) << std::format("testYAML unexpected error at: {}\n\n", location);
+        expect(eq(diff(expected, *deserializedMap), false), location) << std::format("testYAML unexpected error at: {}\n\n", location);
     } else {
-        expect(false) << std::format("testYAML unexpected error at: {}:\n{}\n\n", location, pmtv::yaml::formatAsLines(src, deserializedMap.error()));
+        expect(false, location) << std::format("testYAML unexpected error at: {}:\n{}\n\n", location, pmtv::yaml::formatAsLines(src, deserializedMap.error()));
         return;
     }
 
@@ -123,10 +123,9 @@ void testYAML(std::string_view src, const pmtv::map_t expected, std::source_loca
     const auto serializedStr    = pmtv::yaml::serialize(expected);
     const auto deserializedMap2 = pmtv::yaml::deserialize(serializedStr);
     if (deserializedMap2) {
-        expect(eq(diff(expected, *deserializedMap2), false)) << std::format("testYAML unexpected error at: {} - string:\n{}\n\n", location, serializedStr);
+        expect(eq(diff(expected, *deserializedMap2), false), location) << std::format("testYAML unexpected error at: {} - string:\n{}\n\n", location, serializedStr);
     } else {
-        expect(false) << std::format("testYAML unexpected error at: {}:\n {}\nYAML:\n{}", location, formatResult(deserializedMap2), serializedStr);
-        ;
+        expect(false, location) << std::format("testYAML unexpected error at: {}:\n {}\nYAML:\n{}", location, formatResult(deserializedMap2), serializedStr);
     }
 }
 
@@ -710,6 +709,190 @@ complex5: !!complex32 (  1.0  ,   -1.0)
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.0, -1.0, 2.0)")), "Error in 1:22: Invalid value for complex<>-type"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (foo, bar)")), "Error in 1:22: std::invalid_argument exception for expected floating-point value of 'foo' - error: stod"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.0, bar)")), "Error in 1:22: std::invalid_argument exception for expected floating-point value of 'bar' - error: stod"sv));
+    };
+
+    "empty lines"_test = [] {
+        "at the end of map"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+
+)";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+
+        "at the end of map - comment"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+ # comment only
+)";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+
+        "in between map"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+
+key1: !!float32 42.0
+)";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5f;
+            expected["key1"] = 42.f;
+            testYAML(src, expected);
+        };
+
+        "in between map - comment"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+ # comment only
+key1: !!float32 42.0
+)";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5f;
+            expected["key1"] = 42.f;
+            testYAML(src, expected);
+        };
+
+        "at the end list"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+  - 42
+
+list2: !!float32
+  - 43
+
+)";
+
+            pmtv::map_t expected;
+            expected["list1"] = std::vector{0.5f, 42.f};
+            expected["list2"] = std::vector{43.f};
+            testYAML(src, expected);
+        };
+
+        "at the end list - comment"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+  - 42
+ # just a comment
+list2: !!float32
+  - 43
+ # another comment
+)";
+
+            pmtv::map_t expected;
+            expected["list1"] = std::vector{0.5f, 42.f};
+            expected["list2"] = std::vector{43.f};
+            testYAML(src, expected);
+        };
+
+        "in between list"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+
+  - 42
+
+list2: !!float32
+  - 43
+
+)";
+
+            pmtv::map_t expected;
+            expected["list1"] = std::vector{0.5f, 42.f};
+            expected["list2"] = std::vector{43.f};
+            testYAML(src, expected);
+        };
+
+        "in between list - comment"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+ # comment
+  - 42
+# comment 2
+list2: !!float32
+  - 43
+  # com...ment
+)";
+
+            pmtv::map_t expected;
+            expected["list1"] = std::vector{0.5f, 42.f};
+            expected["list2"] = std::vector{43.f};
+            testYAML(src, expected);
+        };
+    };
+
+    "trim values"_test = [] {
+        "trim float"_test = [] {
+            constexpr std::string_view src = R"(key0: !!float32 0.5 )";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+        "trim float - comment"_test = [] {
+            constexpr std::string_view src = R"(key0: !!float32 0.5 # comment)";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+
+        "trim float2"_test = [] {
+            constexpr std::string_view src = R"(key0: 0.5 )";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5;
+            testYAML(src, expected);
+        };
+        "trim float - comment2"_test = [] {
+            constexpr std::string_view src = R"(key0: 0.5 # comment)";
+
+            pmtv::map_t expected;
+            expected["key0"] = 0.5;
+            testYAML(src, expected);
+        };
+
+        "trim String w/ space"_test = [] {
+            constexpr std::string_view src = R"(key0: TestString )"; // note: space at the end
+
+            pmtv::map_t expected;
+            expected["key0"] = "TestString"s;
+            testYAML(src, expected);
+        };
+
+        "trim String  w/ space in the middle"_test = [] {
+            constexpr std::string_view src = R"(key0: Test String)";
+
+            pmtv::map_t expected;
+            expected["key0"] = "Test String"s;
+            testYAML(src, expected);
+        };
+
+        "trim String  w/ space in the middle and comment"_test = [] {
+            constexpr std::string_view src = R"(key0: Test String # comment)"; // note: space and comment at the end
+
+            pmtv::map_t expected;
+            expected["key0"] = "Test String"s;
+            testYAML(src, expected);
+        };
+
+        "trim String  w/ space in the middle and comment"_test = [] {
+            constexpr std::string_view src = R"(key0: "Test String" # comment)"; // note: space and comment at the end, quoted string
+
+            pmtv::map_t expected;
+            expected["key0"] = "Test String"s;
+            testYAML(src, expected);
+        };
     };
 
     "Odd Keys"_test = [] {

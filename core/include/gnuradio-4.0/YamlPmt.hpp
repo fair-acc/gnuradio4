@@ -75,6 +75,31 @@ inline std::string escapeString(std::string_view str, bool escapeForQuotedString
     return result;
 }
 
+inline constexpr bool isIgnorableLine(std::string_view line) {
+    if (line.empty()) {
+        return true; // empty line
+    }
+    auto it = std::ranges::find_if_not(line, [](char c) { // skip leading whitespace
+        return std::isspace(static_cast<unsigned char>(c)) || std::iscntrl(static_cast<unsigned char>(c));
+    });
+    return it == line.end() || *it == '#'; // nothing remains or the first non-space char is '#'
+}
+
+inline constexpr std::string_view trim(std::string_view sv) {
+    auto first = std::ranges::find_if_not(sv, isspace);
+    auto last  = std::ranges::find_if_not(sv | std::views::reverse, isspace).base();
+    return sv.substr(static_cast<std::size_t>(first - sv.begin()), static_cast<std::size_t>(last - first));
+}
+
+inline constexpr std::string_view stripComment(std::string_view sv) {
+    if (std::size_t hash = sv.find('#'); hash != std::string_view::npos) {
+        return sv.substr(0, hash);
+    }
+    return sv;
+}
+
+inline constexpr std::string_view trimAndStripComment(std::string_view sv) { return trim(stripComment(sv)); }
+
 inline void indent(std::ostream& os, int level) { os << std::setw(level * 2) << std::setfill(' ') << ""; }
 
 template<TypeTagMode tagMode = TypeTagMode::Auto>
@@ -491,16 +516,10 @@ inline std::expected<std::string, ValueParseError> resolveYamlEscapes_quoted(std
 
 template<typename T>
 std::expected<T, ValueParseError> parseAs(std::string_view sv) {
-    auto trim = [](std::string_view s) {
-        auto first = std::ranges::find_if_not(s, isspace);
-        auto last  = std::ranges::find_if_not(s | std::views::reverse, isspace).base();
-        return s.substr(static_cast<std::size_t>(first - s.begin()), static_cast<std::size_t>(last - first));
-    };
-
     if constexpr (std::is_same_v<T, std::monostate>) {
         return std::monostate{};
     } else if constexpr (std::is_same_v<T, bool>) {
-        sv = trim(sv); // trim leading and trailing whitespace
+        sv = trimAndStripComment(sv); // trim leading and trailing whitespace
         if (sv == "true" || sv == "True" || sv == "TRUE") {
             return true;
         }
@@ -509,7 +528,7 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         }
         return std::unexpected(ValueParseError{0UZ, "Invalid value for bool-type"});
     } else if constexpr (std::is_floating_point_v<T>) {
-        sv = trim(sv); // trim leading and trailing whitespace
+        sv = trimAndStripComment(sv); // trim leading and trailing whitespace
         if (sv == ".inf" || sv == ".Inf" || sv == ".INF") {
             return std::numeric_limits<T>::infinity();
         } else if (sv == "-.inf" || sv == "-.Inf" || sv == "-.INF") {
@@ -550,7 +569,7 @@ std::expected<T, ValueParseError> parseAs(std::string_view sv) {
         }
         return parseWithBase(sv, 10);
     } else if constexpr (is_complex_v<T>) {
-        sv = trim(sv);
+        sv = trimAndStripComment(sv);
         if (!sv.starts_with('(') || !sv.ends_with(')')) {
             return std::unexpected(ValueParseError{0UZ, "Invalid value for complex<>-type"});
         }
@@ -680,10 +699,10 @@ inline std::expected<pmtv::pmt, ParseError> parsePlainScalar(ParseContext& ctx, 
 
     // fallback for parsing without a YAML tag
     return parseNextString(ctx, extraDelimiters, [&](std::size_t quoteOffset, std::string_view sv) -> std::expected<pmtv::pmt, ValueParseError> {
-        // If it's quoted, treat as string
-        if (quoteOffset > 0) {
+        if (quoteOffset > 0) { // quoted, treat as string
             return resolveYamlEscapes_quoted(sv);
         }
+        sv = trimAndStripComment(sv); // unquoted string -> trim & strip comments
 
         // null
         if (sv.empty() || sv == "null" || sv == "Null" || sv == "NULL" || sv == "~") {
@@ -857,6 +876,7 @@ inline std::expected<std::string, ParseError> parseKey(ParseContext& ctx, std::s
     }
     std::string key(ctx.remainingLine().substr(0, colonPos));
     ctx.consume(colonPos + 1);
+    key = std::string(trim(key));
 
     return key;
 }
@@ -1019,8 +1039,19 @@ inline std::expected<pmtv::map_t, ParseError> parseMap(ParseContext& ctx, int pa
             return std::unexpected(ctx.makeError("Parser limitation: Multiple documents not supported"));
         }
         ctx.consumeWhitespaceAndComments();
+        if (ctx.atEndOfDocument()) {
+            break;
+        }
+        if (isIgnorableLine(ctx.currentLine())) {
+            ctx.skipToNextLine();
+            continue;
+        }
 
         const std::size_t line_indent = firstLine ? ctx.currentIndent(" -") : ctx.currentIndent(); // Ignore "-" if map is in a list
+        if (line_indent == std::string_view::npos) {
+            ctx.skipToNextLine(); // skip blank/whitespace-only lines
+            continue;
+        }
 
         if (parentIndentLevel >= 0 && line_indent <= static_cast<std::size_t>(parentIndentLevel)) {
             // indentation decreased; end of current map
@@ -1096,7 +1127,23 @@ inline std::expected<pmtv::pmt, ParseError> parseList(ParseContext& ctx, std::st
     while (!ctx.atEndOfDocument()) {
         ctx.consumeWhitespaceAndComments();
 
+        if (ctx.atEndOfDocument()) {
+            break;
+        }
+
+        // skip completely blank/whitespace-only lines
+        if (isIgnorableLine(ctx.currentLine())) {
+            ctx.skipToNextLine();
+            continue;
+        }
+
         const std::size_t line_indent = ctx.currentIndent();
+        if (line_indent == std::string_view::npos) {
+            // whitespace-only or blank line
+            ctx.skipToNextLine();
+            continue;
+        }
+
         if (parentIndentLevel >= 0 && line_indent <= static_cast<size_t>(parentIndentLevel)) {
             // indentation decreased; end of current list
             break;
