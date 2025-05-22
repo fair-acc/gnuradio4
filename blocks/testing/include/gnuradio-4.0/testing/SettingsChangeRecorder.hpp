@@ -54,6 +54,8 @@ void printChanges(const property_map& oldMap, const property_map& newMap) noexce
 
 GR_REGISTER_BLOCK(gr::testing::SettingsChangeRecorder, [T], [ int32_t, float, double ])
 
+enum class TestEnum { TEST_STATE1, TEST_STATE2, TEST_STATE3 };
+
 template<typename T>
 // struct SettingsChangeRecorder : public Block<SettingsChangeRecorder<T>, BlockingIO<true>, SupportedTypes<float, double>> { // TODO: reenable BlockingIO
 struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
@@ -67,9 +69,11 @@ struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
     gr::Size_t                                                                               n_samples_max = 0;
     Annotated<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1.0f;
     std::vector<T>                                                                           vector_setting{T(3), T(2), T(1)};
-    Annotated<std::vector<std::string>, "string vector">                                     string_vector_setting = {};
+    Annotated<std::vector<std::string>, "string vector">                                     string_vector_setting       = {};
+    TestEnum                                                                                 test_enum_setting           = TestEnum::TEST_STATE1;
+    Annotated<TestEnum, "annotated enum">                                                    annotated_test_enum_setting = TestEnum::TEST_STATE1;
 
-    GR_MAKE_REFLECTABLE(SettingsChangeRecorder, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting);
+    GR_MAKE_REFLECTABLE(SettingsChangeRecorder, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting, test_enum_setting, annotated_test_enum_setting);
 
     bool       _debug            = true;
     int        _updateCount      = 0;

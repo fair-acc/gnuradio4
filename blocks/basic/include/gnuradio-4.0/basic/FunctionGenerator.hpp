@@ -139,8 +139,8 @@ The parameters will automatically update when a Tag containing the 'context' fie
     using SampleRate       = Annotated<float, "sample_rate", Visible, Doc<"stream sampling rate in [Hz]">>;
     SampleRate sample_rate = 1000.f;
 
-    Annotated<std::string, "signal_trigger", Visible, Doc<"required trigger name (empty -> being ignored): ">> signal_trigger;
-    Annotated<std::string, "signal_type", Visible, Doc<"see function_generator::SignalType">>                  signal_type = function_generator::toString(function_generator::Const);
+    Annotated<std::string, "signal_trigger", Visible, Doc<"required trigger name (empty -> being ignored): ">>   signal_trigger;
+    Annotated<function_generator::SignalType, "signal_type", Visible, Doc<"see function_generator::SignalType">> signal_type = function_generator::Const;
 
     // Parameters for different functions, not all parameters are used for all functions
     Annotated<T, "start_value">                                               start_value    = T(0.);
@@ -162,22 +162,18 @@ The parameters will automatically update when a Tag containing the 'context' fie
     T   _currentTime   = T(0.);
     int _sampleCounter = 0;
 
-    function_generator::SignalType _signalType = function_generator::parse<function_generator::SignalType>(signal_type);
-    T                              _timeTick   = T(1.) / static_cast<T>(sample_rate);
+    T _timeTick = T(1.) / static_cast<T>(sample_rate);
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
         if (newSettings.contains(function_generator::toString(function_generator::signal_type))) {
             if (signal_trigger.value.empty()) {
                 _currentTime = T(0.);
-                _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
             } else if (newSettings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
                 std::string newTrigger = std::get<std::string>(newSettings.at(gr::tag::TRIGGER_NAME.shortKey()));
                 if (newTrigger == signal_trigger.value) {
                     _currentTime = T(0.);
-                    _signalType  = function_generator::parse<function_generator::SignalType>(signal_type);
                 } else {
                     // trigger does not match required signal_trigger -- revert signal_type and others to previous ones
-                    signal_type    = function_generator::toString(_signalType);
                     start_value    = std::get<T>(oldSettings.at("start_value"));
                     final_value    = std::get<T>(oldSettings.at("final_value"));
                     duration       = std::get<T>(oldSettings.at("duration"));
@@ -195,7 +191,7 @@ The parameters will automatically update when a Tag containing the 'context' fie
         using enum function_generator::SignalType;
         T value{};
 
-        switch (_signalType) {
+        switch (signal_type) {
         case Const: value = start_value; break;
         case LinearRamp: value = _currentTime > duration.value ? final_value.value : start_value + (final_value - start_value) * (_currentTime / duration); break;
         case ParabolicRamp: value = calculateParabolicRamp(); break;
