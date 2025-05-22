@@ -177,7 +177,7 @@ std::ostream& operator<<(std::ostream& os, const gr::Range<T>& v) {
 namespace gr {
 
 template<typename R>
-concept FormattableRange = std::ranges::range<R> && !std::same_as<std::remove_cvref_t<R>, std::string> && !std::is_array_v<std::remove_cvref_t<R>> && std::formattable<std::ranges::range_value_t<R>, char>;
+concept FormattableRange = std::ranges::range<R> && !std::same_as<std::remove_cvref_t<R>, std::string> && !std::same_as<std::remove_cvref_t<R>, std::string_view> && !std::is_array_v<std::remove_cvref_t<R>> && std::formattable<std::ranges::range_value_t<R>, char>;
 
 template<typename OutputIt, typename Container>
 constexpr auto format_join(OutputIt out, const Container& container, std::string_view separator = ", ") {
