@@ -9,6 +9,8 @@
 #include <source_location>
 #include <vector>
 
+#include <magic_enum.hpp>
+
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
