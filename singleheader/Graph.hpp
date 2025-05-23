@@ -7679,6 +7679,21 @@ struct std::formatter<T, char> {
     }
 };
 
+template<typename E>
+requires std::is_enum_v<E>
+struct std::formatter<E, char> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(E e, FormatContext& ctx) const {
+        if (auto name = magic_enum::enum_name(e); !name.empty()) {
+            return std::format_to(ctx.out(), "{}", name);
+        } else {
+            return std::format_to(ctx.out(), "{}", static_cast<std::underlying_type_t<E>>(e));
+        }
+    }
+};
+
 #endif // GNURADIO_FORMATTER_HPP
 
 // #include <gnuradio-4.0/meta/typelist.hpp>
@@ -17144,7 +17159,7 @@ template<typename T>
 constexpr bool isSupportedVectorType() {
     if constexpr (gr::meta::vector_type<T>) {
         using ValueType = typename T::value_type;
-        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>>;
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType>;
     } else {
         return false;
     }
@@ -17153,7 +17168,7 @@ constexpr bool isSupportedVectorType() {
 template<typename T>
 constexpr bool isReadableMember() {
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
-           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>>;
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T>;
 }
 
 template<typename T, typename TMember>
@@ -17252,6 +17267,34 @@ struct PmtHashVisitor {
 
 inline std::size_t computeHash(const pmtv::pmt& value) { return std::visit(PmtHashVisitor{}, value); }
 
+template<typename T, typename U = unwrap_if_wrapped_t<std::remove_cvref_t<T>>>
+constexpr bool isEnumOrAnnotatedEnum = std::is_enum_v<U>;
+
+template<typename T>
+requires isEnumOrAnnotatedEnum<T>
+std::expected<T, std::string> tryExtractEnumValue(const pmtv::pmt& pmt, std::string_view key) {
+    if (!std::holds_alternative<std::string>(pmt)) {
+        return std::unexpected(std::format("Field '{}' expects enum string, got different type", key));
+    }
+
+    const std::string& str = std::get<std::string>(pmt);
+    if (auto opt = magic_enum::enum_cast<T>(str); opt.has_value()) {
+        return *opt;
+    }
+
+    return std::unexpected(std::format("Invalid enum value '{}' for key '{}'", str, key));
+}
+
+template<typename T, typename U = std::remove_cvref_t<T>>
+requires isEnumOrAnnotatedEnum<U>
+std::string enumToString(T&& enum_value) {
+    if constexpr (is_annotated<U>()) {
+        return std::string(magic_enum::enum_name(enum_value.value));
+    } else {
+        return std::string(magic_enum::enum_name(enum_value));
+    }
+}
+
 } // namespace detail
 
 struct SettingsCtx {
@@ -17302,7 +17345,19 @@ namespace settings {
  * @brief Convert the given `value` to type `T`. If conversion fails or return diagnostic text.
  */
 template<typename T>
-[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value); // foward declaration, implementation defined in corresponding .cpp file
+[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value) {
+    if constexpr (std::is_enum_v<T>) {
+        return detail::tryExtractEnumValue<T>(value, key);
+    } else {
+        constexpr bool strictChecks = false;
+        auto           converted    = pmtv::convert_safely<T, strictChecks>(value);
+        if (!converted) {
+            return std::unexpected(std::vformat("value for key '{}' has wrong type or can't be converted: {}", std::make_format_args(key, converted.error())));
+        }
+        return converted;
+    }
+}
+
 } // namespace settings
 
 struct SettingsBase {
@@ -17622,7 +17677,11 @@ public:
                             if (currentAutoUpdateParameters.contains(key)) {
                                 currentAutoUpdateParameters.erase(key);
                             }
-                            newParameters.insert_or_assign(key, convertedValue.value());
+                            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                                newParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
+                            } else {
+                                newParameters.insert_or_assign(key, convertedValue.value());
+                            }
                             isSet = true;
                         } else {
                             throw gr::exception(convertedValue.error());
@@ -17788,9 +17847,16 @@ public:
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<Type>(value)) {
-                            _stagedParameters.insert_or_assign(key, value);
-                            wasChanged = true;
+                        if constexpr (std::is_enum_v<Type>) {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<std::string>(value)) {
+                                _stagedParameters.insert_or_assign(key, value);
+                                wasChanged = true;
+                            }
+                        } else {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<Type>(value)) {
+                                _stagedParameters.insert_or_assign(key, value);
+                                wasChanged = true;
+                            }
                         }
                     }
                 });
@@ -17915,43 +17981,44 @@ public:
             // update staged and forward parameters based on member properties
             property_map staged;
             for (const auto& [key, stagedValue] : _stagedParameters) {
-                refl::for_each_data_member_index<TBlock>([&key, &staged, &result, &stagedValue, this](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    using Type       = unwrap_if_wrapped_t<RawType>;
+
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        if (refl::data_member_name<TBlock, kIdx>.view() == key && std::holds_alternative<Type>(stagedValue)) {
-                            auto& member = refl::data_member<kIdx>(*_block);
-                            if constexpr (is_annotated<RawType>()) {
-                                if (member.validate_and_set(std::get<Type>(stagedValue))) {
-                                    if constexpr (HasSettingsChangedCallback<TBlock>) {
-                                        staged.insert_or_assign(key, stagedValue);
-                                    } else {
-                                        std::ignore = staged; // help clang to see why staged is not unused
-                                    }
-                                } else {
-                                    const auto  fieldName     = refl::data_member_name<TBlock, kIdx>.view();
-                                    const char* validatorInfo = RawType::LimitType::ValidatorFunc == nullptr ? "not" : "";
-                                    std::string msg           = std::vformat(" cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                                  std::make_format_args(
-#if !defined(__EMSCRIPTEN__) && !defined(__clang__)
-                                            _block->unique_name, _block->name,
-#else
-                                            "_block->uniqueName", "_block->name",
-#endif
-                                            fieldName, member, std::get<Type>(stagedValue), RawType::LimitType::MinRange, RawType::LimitType::MaxRange, validatorInfo));
-                                    std::fputs(msg.c_str(), stderr);
-                                }
-                            } else {
-                                member = std::get<Type>(stagedValue);
-                                result.appliedParameters.insert_or_assign(key, stagedValue);
+                        if (refl::data_member_name<TBlock, kIdx>.view() != key) {
+                            return;
+                        }
+                        auto& member = refl::data_member<kIdx>(*_block);
+
+                        std::expected<Type, std::string> maybe_value;
+                        if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
+                            maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
+                        } else {
+                            maybe_value = std::get<Type>(stagedValue);
+                        }
+
+                        if constexpr (is_annotated<RawType>()) {
+                            if (maybe_value && member.validate_and_set(*maybe_value)) {
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, stagedValue);
-                                } else {
-                                    std::ignore = staged; // help clang to see why staged is not unused
                                 }
+                            } else {
+                                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", key, stagedValue).c_str(), stderr);
+                            }
+                        } else {
+                            if (!maybe_value) {
+                                std::fputs(std::format("Failed to convert key '{}': {}\n", key, maybe_value.error()).c_str(), stderr);
+                                return;
+                            }
+                            member = *maybe_value;
+                            result.appliedParameters.insert_or_assign(key, stagedValue);
+                            if constexpr (HasSettingsChangedCallback<TBlock>) {
+                                staged.insert_or_assign(key, stagedValue);
                             }
                         }
+
                         if (_autoForwardParameters.contains(key)) {
                             result.forwardParameters.insert_or_assign(key, stagedValue);
                         }
@@ -18037,10 +18104,18 @@ public:
 private:
     NO_INLINE void updateActiveParametersImpl() noexcept {
         refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
-            using MemberType = refl::data_member_type<TBlock, kIdx>;
-            using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+            using MemberType   = refl::data_member_type<TBlock, kIdx>;
+            using RawType      = std::remove_cvref_t<MemberType>;
+            using Type         = unwrap_if_wrapped_t<RawType>;
+            const auto& member = refl::data_member<kIdx>(*_block);
+            const auto& key    = std::string(refl::data_member_name<TBlock, kIdx>.view());
+
             if constexpr (settings::isReadableMember<Type>()) {
-                _activeParameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), static_cast<Type>(refl::data_member<kIdx>(*_block)));
+                if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
+                    _activeParameters.insert_or_assign(key, pmtv::pmt(detail::enumToString(member)));
+                } else {
+                    _activeParameters.insert_or_assign(key, pmtv::pmt(member));
+                }
             }
         });
     }
@@ -18146,7 +18221,11 @@ private:
                         }
 
                         if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-                            _stagedParameters.insert_or_assign(key, convertedValue.value());
+                            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                                _stagedParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
+                            } else {
+                                _stagedParameters.insert_or_assign(key, convertedValue.value());
+                            }
                             isSet = true;
                         } else {
                             throw gr::exception(convertedValue.error());
@@ -18261,7 +18340,11 @@ private:
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                 if constexpr (settings::isReadableMember<Type>()) {
-                    parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*_block)));
+                    if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                        parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(detail::enumToString(refl::data_member<kIdx>(*_block))));
+                    } else {
+                        parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*_block)));
+                    }
                 }
             });
         }
@@ -18277,53 +18360,6 @@ struct hash<gr::SettingsCtx> {
     [[nodiscard]] size_t operator()(const gr::SettingsCtx& ctx) const noexcept { return ctx.hash(); }
 };
 } // namespace std
-
-namespace gr {
-
-namespace detail {
-extern template std::size_t hash_combine<std::size_t>(std::size_t seed, std::size_t const& v) noexcept;
-
-}
-
-namespace settings {
-
-// specialisation for fundamental base-types
-extern template std::expected<bool, std::string>                 convertParameter<bool>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int8_t, std::string>          convertParameter<std::int8_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint8_t, std::string>         convertParameter<std::uint8_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int16_t, std::string>         convertParameter<std::int16_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint16_t, std::string>        convertParameter<std::uint16_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int32_t, std::string>         convertParameter<std::int32_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint32_t, std::string>        convertParameter<std::uint32_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int64_t, std::string>         convertParameter<std::int64_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint64_t, std::string>        convertParameter<std::uint64_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<float, std::string>                convertParameter<float>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<double, std::string>               convertParameter<double>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::complex<float>, std::string>  convertParameter<std::complex<float>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::complex<double>, std::string> convertParameter<std::complex<double>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::string, std::string>          convertParameter<std::string>(std::string_view key, const pmtv::pmt& value);
-
-// specialisation declarations for std::string and vectors
-extern template std::expected<std::string, std::string>                       convertParameter<std::string>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<bool>, std::string>                 convertParameter<std::vector<bool>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int8_t>, std::string>          convertParameter<std::vector<std::int8_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint8_t>, std::string>         convertParameter<std::vector<std::uint8_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int16_t>, std::string>         convertParameter<std::vector<std::int16_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint16_t>, std::string>        convertParameter<std::vector<std::uint16_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int32_t>, std::string>         convertParameter<std::vector<std::int32_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint32_t>, std::string>        convertParameter<std::vector<std::uint32_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int64_t>, std::string>         convertParameter<std::vector<std::int64_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint64_t>, std::string>        convertParameter<std::vector<std::uint64_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<float>, std::string>                convertParameter<std::vector<float>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<double>, std::string>               convertParameter<std::vector<double>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::complex<float>>, std::string>  convertParameter<std::vector<std::complex<float>>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::complex<double>>, std::string> convertParameter<std::vector<std::complex<double>>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::string>, std::string>          convertParameter<std::vector<std::string>>(std::string_view key, const pmtv::pmt& value);
-
-extern template std::expected<property_map, std::string> convertParameter<property_map>(std::string_view key, const pmtv::pmt& value);
-
-} // namespace settings
-} // namespace gr
 
 #undef NO_INLINE
 

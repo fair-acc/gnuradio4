@@ -409,4 +409,19 @@ struct std::formatter<T, char> {
     }
 };
 
+template<typename E>
+requires std::is_enum_v<E>
+struct std::formatter<E, char> {
+    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(E e, FormatContext& ctx) const {
+        if (auto name = magic_enum::enum_name(e); !name.empty()) {
+            return std::format_to(ctx.out(), "{}", name);
+        } else {
+            return std::format_to(ctx.out(), "{}", static_cast<std::underlying_type_t<E>>(e));
+        }
+    }
+};
+
 #endif // GNURADIO_FORMATTER_HPP

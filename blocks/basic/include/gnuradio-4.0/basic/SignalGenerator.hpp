@@ -16,14 +16,6 @@ using enum Type;
 constexpr auto                                 TypeList  = magic_enum::enum_values<Type>();
 inline static constexpr gr::meta::fixed_string TypeNames = "[Const, Sin, Cos, Square, Saw, Triangle]";
 
-constexpr Type parse(std::string_view name) {
-    auto signalType = magic_enum::enum_cast<Type>(name, magic_enum::case_insensitive);
-    if (!signalType.has_value()) {
-        throw std::invalid_argument(std::format("unknown signal generator type '{}'", name));
-    }
-    return signalType.value();
-}
-
 } // namespace signal_generator
 
 GR_REGISTER_BLOCK(gr::basic::SignalGenerator, [T], [ float, double ])
@@ -65,24 +57,19 @@ s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
     PortIn<std::uint8_t> in; // ClockSource input
     PortOut<T>           out;
 
-    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                      sample_rate = 1000.f;
-    Annotated<std::string, "signal_type", Visible, Doc<"see signal_generator::Type">> signal_type = "Sin";
-    Annotated<T, "frequency", Visible>                                                frequency   = T(1.);
-    Annotated<T, "amplitude", Visible>                                                amplitude   = T(1.);
-    Annotated<T, "offset", Visible>                                                   offset      = T(0.);
-    Annotated<T, "phase", Visible, Doc<"in rad">>                                     phase       = T(0.);
+    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                                 sample_rate = 1000.f;
+    Annotated<signal_generator::Type, "signal_type", Visible, Doc<"see signal_generator::Type">> signal_type = signal_generator::Type::Sin;
+    Annotated<T, "frequency", Visible>                                                           frequency   = T(1.);
+    Annotated<T, "amplitude", Visible>                                                           amplitude   = T(1.);
+    Annotated<T, "offset", Visible>                                                              offset      = T(0.);
+    Annotated<T, "phase", Visible, Doc<"in rad">>                                                phase       = T(0.);
 
     GR_MAKE_REFLECTABLE(SignalGenerator, in, out, sample_rate, signal_type, frequency, amplitude, offset, phase);
 
     T _currentTime = T(0.);
+    T _timeTick    = T(1.) / T(sample_rate);
 
-    signal_generator::Type _signalType = signal_generator::parse(signal_type);
-    T                      _timeTick   = T(1.) / T(sample_rate);
-
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& /*new_settings*/) {
-        _signalType = signal_generator::parse(signal_type);
-        _timeTick   = T(1.) / T(sample_rate);
-    }
+    void settingsChanged(const property_map& /*old_settings*/, const property_map& /*new_settings*/) { _timeTick = T(1.) / T(sample_rate); }
 
     [[nodiscard]] constexpr T processOne(T /*input*/) noexcept {
         using enum signal_generator::Type;
@@ -91,7 +78,7 @@ s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
         T           value{};
         T           phaseAdjustedTime = _currentTime + phase / (pi2 * frequency);
 
-        switch (_signalType) {
+        switch (signal_type) {
         case Sin: value = amplitude * std::sin(pi2 * frequency * phaseAdjustedTime) + offset; break;
         case Cos: value = amplitude * std::cos(pi2 * frequency * phaseAdjustedTime) + offset; break;
         case Const: value = amplitude + offset; break;
