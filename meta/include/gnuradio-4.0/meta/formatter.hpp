@@ -5,6 +5,7 @@
 #include <complex>
 #include <concepts>
 #include <expected>
+#include <format>
 #include <source_location>
 #include <vector>
 
@@ -20,6 +21,8 @@ namespace time {
 }
 } // namespace time
 
+#ifndef STD_FORMATTER_RANGES
+#define STD_FORMATTER_RANGES
 template<std::ranges::input_range R>
 requires std::formattable<std::ranges::range_value_t<R>, char>
 std::string join(const R& range, std::string_view sep = ", ") {
@@ -34,6 +37,7 @@ std::string join(const R& range, std::string_view sep = ", ") {
     }
     return out;
 }
+#endif
 
 template<typename T>
 constexpr auto ptr(const T* p) {
@@ -41,6 +45,8 @@ constexpr auto ptr(const T* p) {
 }
 } // namespace gr
 
+#ifndef STD_FORMATTER_SOURCE_LOCATION
+#define STD_FORMATTER_SOURCE_LOCATION
 template<>
 struct std::formatter<std::source_location, char> {
     char presentation = 's';
@@ -66,7 +72,10 @@ struct std::formatter<std::source_location, char> {
         }
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_COMPLEX
+#define STD_FORMATTER_COMPLEX
 template<typename T>
 struct std::formatter<std::complex<T>, char> {
     char presentation = 'g'; // default format
@@ -121,6 +130,7 @@ struct std::formatter<std::complex<T>, char> {
         }
     }
 };
+#endif
 
 // simplified formatter for UncertainValue
 template<gr::arithmetic_or_complex_like T>
@@ -273,6 +283,8 @@ struct std::formatter<pmtv::map_t> {
     }
 };
 
+#ifndef STD_FORMATTER_VECTOR_BOOL
+#define STD_FORMATTER_VECTOR_BOOL
 template<>
 struct std::formatter<std::vector<bool>> {
     char presentation = 'c';
@@ -303,7 +315,10 @@ struct std::formatter<std::vector<bool>> {
         return ctx.out();
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_PAIR
+#define STD_FORMATTER_PAIR
 template<typename T1, typename T2>
 struct std::formatter<std::pair<T1, T2>, char> {
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
@@ -313,7 +328,10 @@ struct std::formatter<std::pair<T1, T2>, char> {
         return std::format_to(ctx.out(), "({}, {})", p.first, p.second);
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_RANGE
+#define STD_FORMATTER_RANGE
 template<gr::FormattableRange R>
 struct std::formatter<R, char> {
     char separator = ',';
@@ -383,8 +401,12 @@ struct std::formatter<T[N], char> {
         return std::format_to(out, "]");
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_EXPECTED
+#define STD_FORMATTER_EXPECTED
 template<typename Value, typename Error>
+
 struct std::formatter<std::expected<Value, Error>> {
     constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
@@ -397,7 +419,10 @@ struct std::formatter<std::expected<Value, Error>> {
         }
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_EXCEPTION
+#define STD_FORMATTER_EXCEPTION
 template<typename T>
 requires std::derived_from<T, std::exception>
 struct std::formatter<T, char> {
@@ -408,7 +433,10 @@ struct std::formatter<T, char> {
         return std::format_to(ctx.out(), "{}", e.what());
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_ENUM
+#define STD_FORMATTER_ENUM
 template<typename E>
 requires std::is_enum_v<E>
 struct std::formatter<E, char> {
@@ -423,5 +451,6 @@ struct std::formatter<E, char> {
         }
     }
 };
+#endif
 
 #endif // GNURADIO_FORMATTER_HPP
