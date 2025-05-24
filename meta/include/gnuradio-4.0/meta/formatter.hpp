@@ -9,10 +9,17 @@
 #include <source_location>
 #include <vector>
 
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
 #include <magic_enum.hpp>
 
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace gr {
 namespace time {
@@ -442,14 +449,16 @@ struct std::formatter<T, char> {
 template<typename E>
 requires std::is_enum_v<E>
 struct std::formatter<E, char> {
-    constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
+    std::formatter<std::string_view, char> _strFormatter;
+
+    constexpr auto parse(std::format_parse_context& ctx) { return _strFormatter.parse(ctx); }
 
     template<typename FormatContext>
     auto format(E e, FormatContext& ctx) const {
         if (auto name = magic_enum::enum_name(e); !name.empty()) {
-            return std::format_to(ctx.out(), "{}", name);
+            return _strFormatter.format(name, ctx); // delegate string formatting
         } else {
-            return std::format_to(ctx.out(), "{}", static_cast<std::underlying_type_t<E>>(e));
+            return std::format_to(ctx.out(), "{}", std::to_underlying(e)); // fallback to underlying type
         }
     }
 };
