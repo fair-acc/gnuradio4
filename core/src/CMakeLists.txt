@@ -34,5 +34,8 @@ if(ENABLE_EXAMPLES)
   target_link_libraries(main_sycl_fft PUBLIC gnuradio-core gnuradio-algorithm cuda)
   target_compile_options(main_sycl_fft PRIVATE -Wno-unknown-cuda-version)
 
+  add_executable(fft_test fft_test.cpp)
+  target_link_libraries(fft_test PUBLIC cuda)
+  target_compile_options(fft_test PRIVATE -Wno-unknown-cuda-version)
   endif()
 endif()
