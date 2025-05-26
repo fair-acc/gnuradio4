@@ -23,11 +23,14 @@
 
 namespace gr {
 namespace time {
-[[nodiscard]] inline std::string getIsoTime(std::chrono::system_clock::time_point timePoint = std::chrono::system_clock::now()) noexcept {
+template<typename Clock, typename Duration>
+[[nodiscard]] inline std::string getIsoTime(std::chrono::time_point<Clock, Duration> timePoint) noexcept {
     const auto secs = std::chrono::time_point_cast<std::chrono::seconds>(timePoint);
     const auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(timePoint - secs).count();
     return std::format("{:%Y-%m-%dT%H:%M:%S}.{:06}", secs, ms); // ms-precision ISO time-format
 }
+
+[[nodiscard]] inline std::string getIsoTime() noexcept { return getIsoTime(std::chrono::system_clock::now()); }
 } // namespace time
 
 #ifndef STD_FORMATTER_RANGES
