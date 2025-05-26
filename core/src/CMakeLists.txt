@@ -21,21 +21,32 @@ if(ENABLE_EXAMPLES)
   add_executable(main main.cpp)
   target_link_libraries(main PUBLIC gnuradio-options gnuradio-core magic_enum)
 
-
   if(GR_USE_ADAPTIVE_CPP)
-  find_package(AdaptiveCpp CONFIG REQUIRED)
+    find_package(AdaptiveCpp CONFIG REQUIRED)
 
-  add_executable(main_sycl main_sycl.cpp)
-  target_link_libraries(main_sycl PUBLIC gnuradio-options gnuradio-core magic_enum cuda)
-  target_compile_options(main_sycl PRIVATE -Wno-unknown-cuda-version)
-  #  add_sycl_to_target(TARGET main_sycl)
+    add_executable(main_sycl main_sycl.cpp)
+    target_link_libraries(
+      main_sycl
+      PUBLIC gnuradio-options
+             gnuradio-core
+             magic_enum
+             cuda)
+    target_compile_options(main_sycl PRIVATE -Wno-unknown-cuda-version)
+    # add_sycl_to_target(TARGET main_sycl)
 
-  add_executable(main_sycl_fft main_sycl_fft.cpp)
-  target_link_libraries(main_sycl_fft PUBLIC gnuradio-core gnuradio-algorithm cuda)
-  target_compile_options(main_sycl_fft PRIVATE -Wno-unknown-cuda-version)
 
-  add_executable(fft_test fft_test.cpp)
-  target_link_libraries(fft_test PUBLIC cuda)
-  target_compile_options(fft_test PRIVATE -Wno-unknown-cuda-version)
+    add_executable(main_sycl_fft main_sycl_fft.cpp)
+    target_link_libraries(main_sycl_fft PUBLIC gnuradio-core gnuradio-algorithm cuda)
+    target_compile_options(main_sycl_fft PRIVATE -Wno-unknown-cuda-version)
+
+    add_executable(fft_test fft_test.cpp)
+    target_link_libraries(fft_test PUBLIC cuda)
+    target_compile_options(fft_test PRIVATE -Wno-unknown-cuda-version)
   endif()
 endif()
+
+add_executable(main_simd main_simd.cpp)
+target_compile_definitions(main_simd PRIVATE PFFFT_ENABLE_FLOAT PFFFT_ENABLE_DOUBLE)
+target_include_directories(main_simd PRIVATE ${pffft_SOURCE_DIR})
+target_link_libraries(main_simd PRIVATE gnuradio-core PFFFT)
+target_compile_options(main_simd PRIVATE -march=native)
