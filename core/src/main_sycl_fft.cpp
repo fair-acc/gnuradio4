@@ -498,14 +498,14 @@ void run_fft_benchmark(std::size_t N, std::optional<sycl::queue> queue = std::nu
 
 int main() {
     constexpr std::size_t N = 512;
-    for (const auto& dev : sycl::device::get_devices()) {
-        if (dev.is_cpu()) {
-            run_fft_benchmark<BenchmarkTarget::SYCL>(N, sycl::queue{dev});
-        }
-        if (dev.is_gpu()) {
-            run_fft_benchmark<BenchmarkTarget::SYCL>(N, sycl::queue{dev});
-        }
-    }
+    // for (const auto& dev : sycl::device::get_devices()) {
+    //     if (dev.is_cpu()) {
+    //         run_fft_benchmark<BenchmarkTarget::SYCL>(N, sycl::queue{dev});
+    //     }
+    //     if (dev.is_gpu()) {
+    //         run_fft_benchmark<BenchmarkTarget::SYCL>(N, sycl::queue{dev});
+    //     }
+    // }
 
     run_fft_benchmark<BenchmarkTarget::GR_FFT>(N);
     run_fft_benchmark<BenchmarkTarget::GR_FFTW>(N);
