@@ -433,7 +433,6 @@ protected:
         });
 
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-        this->emitErrorMessageIfAny("stop() -> LifecycleState ->IDLE", this->changeStateTo(lifecycle::State::IDLE));
     }
 
     void pause() {
