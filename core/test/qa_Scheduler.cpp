@@ -1,5 +1,7 @@
+#include "message_utils.hpp"
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
@@ -729,6 +731,65 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         schedulerThread.join();
         std::string errorMsg = schedulerResult.has_value() ? "" : std::format("nested scheduler execution failed:\n{:f}\n", schedulerResult.error());
         expect(schedulerResult.has_value()) << errorMsg;
+    };
+
+    "add block while scheduler is running"_test = [] {
+        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
+        using namespace gr;
+        using namespace gr::testing;
+        using TScheduler = scheduler::Simple<>;
+
+        Graph flow;
+        auto& source = flow.emplaceBlock<NullSource<float>>();
+        auto& sink   = flow.emplaceBlock<NullSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
+
+        auto scheduler = TScheduler{std::move(flow), threadPool};
+
+        MsgPortOut toScheduler;
+        MsgPortIn  fromScheduler;
+        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+
+        std::expected<void, Error> schedulerResult;
+        auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] { schedulerResult = scheduler.runAndWait(); });
+
+        expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+
+        expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler is running";
+
+        auto initialBlockCount = scheduler.graph().blocks().size();
+        std::println("Initial block count: {}", initialBlockCount);
+
+        sendMessage<message::Command::Set>(toScheduler, scheduler.unique_name, scheduler::property::kEmplaceBlock, property_map{{"type", std::string("good::cout_sink<float32>")}, {"properties", property_map{{"disconnect_on_done", false}}}});
+        gr::testing::waitForReply(fromScheduler);
+
+        auto messages = fromScheduler.streamReader().get();
+        expect(gt(messages.size(), 0UZ)) << "received block emplaced message";
+        auto message = messages[0];
+        expect(eq(message.endpoint, scheduler::property::kBlockEmplaced)) << "correct message endpoint";
+        expect(message.data.has_value()) << "message has data";
+        auto consumed = messages.consume(1UZ);
+        expect(consumed) << "failed to consume message";
+
+        expect(awaitCondition(2s, [&scheduler, initialBlockCount] { return scheduler.graph().blocks().size() > initialBlockCount; })) << "waiting for block to be added to graph";
+
+        auto finalBlockCount = scheduler.graph().blocks().size();
+        std::println("Final block count: {}", finalBlockCount);
+        expect(eq(finalBlockCount, initialBlockCount + 1)) << "block was added";
+
+        expect(awaitCondition(2s, [&scheduler] {
+            for (const auto& block : scheduler.graph().blocks()) {
+                if (block->name() == "good::cout_sink<float32>" && block->state() == lifecycle::State::RUNNING) {
+                    return true;
+                }
+            }
+            return false;
+        })) << "waiting for new block to reach running state";
+
+        scheduler.requestStop();
+        schedulerThread.join();
+        expect(schedulerResult.has_value()) << "scheduler executed successfully";
     };
 
     std::println("N.B. test-suite finished");

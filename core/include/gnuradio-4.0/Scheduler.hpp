@@ -63,6 +63,11 @@ protected:
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::unique_ptr<BlockModel>> _zombieBlocks;
 
+    // for blocks that were added while scheduler was running. They need to be adopted by a thread
+    std::mutex _adoptionBlocksMutex;
+    // fixed-sized vector indexed by runnerId. Cheaper than a map.
+    std::vector<std::vector<BlockModel*>> _adoptionBlocks;
+
     MsgPortOutForChildren    _toChildMessagePort;
     MsgPortInFromChildren    _fromChildMessagePort;
     std::vector<gr::Message> _pendingMessagesToChildren;
@@ -368,6 +373,8 @@ protected:
                 // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
                 cleanupZombieBlocks(localBlockList);
 
+                adoptBlocks(runnerID, localBlockList);
+
                 std::ranges::for_each(localBlockList, [](auto& block) { block->processScheduledMessages(); });
                 activeState = this->state();
                 msgToCount++;
@@ -461,6 +468,36 @@ protected:
         }();
 
         auto& newBlock = _graph.emplaceBlock(type, properties);
+
+        if (lifecycle::isActive(this->state())) {
+            // Block is being added while scheduler is running. Will be adopted by a thread.
+            const auto nBatches = _adoptionBlocks.size();
+            if (nBatches > 0) {
+                std::lock_guard guard(_adoptionBlocksMutex);
+                // pseudo-randomize which thread gets it
+                auto blockAddress = reinterpret_cast<std::uintptr_t>(&newBlock);
+                auto runnerIndex  = (blockAddress / sizeof(void*)) % nBatches;
+                _adoptionBlocks[runnerIndex].push_back(&newBlock);
+
+                switch (newBlock.state()) {
+                case lifecycle::State::STOPPED:
+                case lifecycle::State::IDLE: //
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::INITIALISED));
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::RUNNING));
+                    break;
+                case lifecycle::State::INITIALISED: //
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::RUNNING));
+                    break;
+                case lifecycle::State::RUNNING:
+                case lifecycle::State::REQUESTED_PAUSE:
+                case lifecycle::State::PAUSED:
+                case lifecycle::State::REQUESTED_STOP:
+                case lifecycle::State::ERROR: //
+                    this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", magic_enum::enum_name(newBlock.state())));
+                    break;
+                }
+            }
+        }
 
         this->emitMessage(scheduler::property::kBlockEmplaced, Graph::serializeBlock(std::addressof(newBlock)));
 
@@ -598,9 +635,33 @@ protected:
         }
     }
 
+    void adoptBlocks(std::size_t runnerID, std::vector<BlockModel*>& localBlockList) {
+        std::lock_guard guard(_adoptionBlocksMutex);
+
+        assert(_adoptionBlocks.size() > runnerID);
+        auto& newBlocks = _adoptionBlocks[runnerID];
+
+        localBlockList.reserve(localBlockList.size() + newBlocks.size());
+        localBlockList.insert(localBlockList.end(), newBlocks.begin(), newBlocks.end());
+        newBlocks.clear();
+    }
+
     void makeZombie(std::unique_ptr<BlockModel> block) {
         if (block->state() == lifecycle::State::PAUSED || block->state() == lifecycle::State::RUNNING) {
             this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+        }
+
+        {
+            // Handle edge case: If we receive two consecutive "Add Block X" "Remove Block X" messages
+            // it would be zombie before being adopted, so we need to remove it from adoption list
+            std::lock_guard guard(_adoptionBlocksMutex);
+            for (auto& adoptionList : _adoptionBlocks) {
+                auto it = std::find(adoptionList.begin(), adoptionList.end(), block.get());
+                if (it != adoptionList.end()) {
+                    adoptionList.erase(it);
+                    break;
+                }
+            }
         }
 
         std::lock_guard guard(_zombieBlocksMutex);
@@ -686,6 +747,8 @@ private:
         allBlocks.reserve(blockCount);
         this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
 
+        this->_adoptionBlocks.clear();
+        this->_adoptionBlocks.resize(n_batches);
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
@@ -763,6 +826,8 @@ private:
         case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _blocklist.size()); break;
         }
 
+        this->_adoptionBlocks.clear();
+        this->_adoptionBlocks.resize(n_batches);
         std::lock_guard lock(base_t::_jobListsMutex);
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
