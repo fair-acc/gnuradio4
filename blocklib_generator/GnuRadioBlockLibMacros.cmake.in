@@ -12,9 +12,9 @@ function(gr_detail_merge_files_into MERGE_OUTPUT_FILE MERGE_INPUT_FILES)
   endforeach()
 endfunction()
 
-function(gr_generate_block_instantiations LIB_NAME)
+function(gr_generate_block_instantiations HDR_LIB_NAME OBJ_LIB_NAME)
     if(DEFINED GR_ENABLE_BLOCK_REGISTRY AND NOT ${GR_ENABLE_BLOCK_REGISTRY})
-        message(WARNING "GR_ENABLE_BLOCK_REGISTRY is set to Off, not generating block instantiations for ${LIB_NAME}")
+        message(WARNING "GR_ENABLE_BLOCK_REGISTRY is set to Off, not generating block instantiations for ${HDR_LIB_NAME}")
         return()
     endif()
 
@@ -29,8 +29,12 @@ function(gr_generate_block_instantiations LIB_NAME)
         set (MODULE_NAME_BASE ${CBL_MODULE_NAME_BASE})
     endif()
 
-    if (NOT TARGET ${LIB_NAME})
-        message(FATAL_ERROR "${LIB_NAME} is not a target")
+    if (NOT TARGET ${HDR_LIB_NAME})
+        message(FATAL_ERROR "${HDR_LIB_NAME} is not a target")
+    endif()
+
+    if (NOT TARGET ${OBJ_LIB_NAME})
+        message(FATAL_ERROR "${OBJ_LIB_NAME} is not a target")
     endif()
 
     if (NOT CBL_HEADERS)
@@ -62,7 +66,7 @@ function(gr_generate_block_instantiations LIB_NAME)
     # directory where gnuradio_4_0_parse_registrations will output .cpp files.
     set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${MODULE_NAME_BASE}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
-    target_include_directories(${LIB_NAME} PUBLIC ${GEN_DIR})
+    target_include_directories(${HDR_LIB_NAME} INTERFACE ${GEN_DIR})
 
     set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
 
@@ -154,7 +158,7 @@ function(gr_generate_block_instantiations LIB_NAME)
             gr_detail_merge_files_into(${GEN_DIR}/raw_calls.hpp "${RAW_CALLS_FILES}")
         endif()
 
-    target_sources(${LIB_NAME} PRIVATE ${GEN_CPP_LIST})
+    target_sources(${OBJ_LIB_NAME} PRIVATE ${GEN_CPP_LIST})
 endfunction()
 
 function(gr_add_block_library LIB_NAME)
@@ -174,13 +178,18 @@ function(gr_add_block_library LIB_NAME)
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
     endif()
 
+    set(HEADERS_LIB_NAME "${LIB_NAME}Headers")
+    add_library(${HEADERS_LIB_NAME} INTERFACE)
+    target_link_libraries(${HEADERS_LIB_NAME} INTERFACE gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+
     set(OBJECT_LIB_NAME "${LIB_NAME}Object")
     add_library(${OBJECT_LIB_NAME} OBJECT ${CBL_SOURCES})
-    gr_generate_block_instantiations(${OBJECT_LIB_NAME}
+    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${HEADERS_LIB_NAME})
+
+    gr_generate_block_instantiations(${HEADERS_LIB_NAME} ${OBJECT_LIB_NAME}
         HEADERS ${CBL_HEADERS}
         MODULE_NAME_BASE ${LIB_NAME}
         ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
-    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
 
     if(CBL_MAKE_SHARED_LIBRARY)
         set(SHARED_LIB_NAME "${LIB_NAME}Shared")
@@ -224,11 +233,14 @@ function(gr_add_block_plugin LIB_NAME)
       set(SPLIT_BLOCK_INSTANTIATIONS_ARG "")
     endif()
 
+    set(HEADERS_LIB_NAME "${LIB_NAME}Headers")
+    add_library(${HEADERS_LIB_NAME} INTERFACE)
+
     set(OBJECT_LIB_NAME "${LIB_NAME}")
     add_library(${OBJECT_LIB_NAME} OBJECT
         ${CBL_SOURCES}
     )
-    gr_generate_block_instantiations(${OBJECT_LIB_NAME}
+    gr_generate_block_instantiations(${OBJECT_LIB_NAME} ${HEADERS_LIB_NAME}
         HEADERS ${CBL_HEADERS}
         SOURCES ${CBL_SOURCES}
         LINK_LIBRARIES ${CBL_LINK_LIBRARIES}
@@ -238,7 +250,7 @@ function(gr_add_block_plugin LIB_NAME)
         gnuradio-4.0/Plugin.hpp
         REGISTRY_INSTANCE
         grPluginInstance)
-    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core gnuradio-plugin ${CBL_LINK_LIBRARIES})
+    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core gnuradio-plugin ${CBL_LINK_LIBRARIES} ${HEADERS_LIB_NAME})
 
     set(PLUGIN_LIB_NAME "${LIB_NAME}Plugin")
     message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")

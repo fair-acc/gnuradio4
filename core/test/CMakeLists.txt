@@ -74,9 +74,14 @@ add_ut_test(qa_PortableTypeName)
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_Settings)
 
+  add_library(qa_grc_headers INTERFACE)
   add_app_test(qa_grc)
-  gr_generate_block_instantiations(qa_grc HEADERS CollectionTestBlocks.hpp)
-  target_link_libraries(qa_grc PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+  gr_generate_block_instantiations(
+    qa_grc
+    qa_grc_headers
+    HEADERS
+    CollectionTestBlocks.hpp)
+  target_link_libraries(qa_grc PUBLIC GrBasicBlocksShared GrTestingBlocksShared qa_grc_headers)
 
   add_ut_test(qa_GraphMessages)
   target_link_libraries(qa_GraphMessages PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
