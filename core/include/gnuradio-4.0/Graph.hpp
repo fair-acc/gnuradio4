@@ -346,6 +346,11 @@ public:
     [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {_blocks}; }
     [[nodiscard]] std::span<Edge>                        edges() noexcept { return {_edges}; }
 
+    void clear() {
+        _blocks.clear();
+        _edges.clear();
+    }
+
     /**
      * @return atomic sequence counter that indicates if any block could process some data or messages
      */

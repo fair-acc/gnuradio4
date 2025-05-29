@@ -667,6 +667,36 @@ protected:
         _zombieBlocks.push_back(std::move(block));
     }
 
+    // Moves all blocks into the zombie list
+    // Useful for bulk operations such as "set grc yaml" message
+    void makeAllZombies() {
+        std::lock_guard guard(_zombieBlocksMutex);
+
+        for (auto& block : this->_graph.blocks()) {
+            switch (block->state()) {
+            case lifecycle::State::RUNNING:
+            case lifecycle::State::REQUESTED_PAUSE:
+            case lifecycle::State::PAUSED: //
+                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                break;
+
+            case lifecycle::State::INITIALISED: //
+                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(lifecycle::State::STOPPED));
+                break;
+            case lifecycle::State::IDLE:
+            case lifecycle::State::STOPPED:
+            case lifecycle::State::ERROR:
+            case lifecycle::State::REQUESTED_STOP:
+                // Can go into the zombie list and deleted
+                break;
+            }
+
+            _zombieBlocks.push_back(std::move(block));
+        }
+
+        this->_graph.clear();
+    }
+
     std::optional<Message> propertyCallbackGraphGRC([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kGraphGRC);
 
@@ -674,11 +704,47 @@ protected:
         if (message.cmd == message::Command::Get) {
             message.data = property_map{{"value", gr::saveGrc(pluginLoader, _graph)}};
         } else if (message.cmd == message::Command::Set) {
-            // const auto& data        = message.data.value();
-            // auto        yamlContent = std::get<std::string>(data.at("value"s));
-            // Graph                   = gr::loadGrc(pluginLoader, yamlContent);
-            // We need to stop the scheduler first
-            throw gr::exception(std::format("Not implemented {}", message.cmd));
+            const auto& data        = message.data.value();
+            auto        yamlContent = std::get<std::string>(data.at("value"s));
+
+            try {
+                Graph newGraph = gr::loadGrc(pluginLoader, yamlContent);
+
+                makeAllZombies();
+
+                const auto originalState = this->state();
+
+                switch (originalState) {
+                case lifecycle::State::RUNNING:
+                case lifecycle::State::REQUESTED_PAUSE:
+                case lifecycle::State::PAUSED: //
+                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
+                    break;
+                case lifecycle::State::REQUESTED_STOP:
+                case lifecycle::State::INITIALISED: //
+                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::STOPPED));
+                    break;
+                case lifecycle::State::IDLE:
+                    assert(false); // doesn't happen
+                    break;
+                case lifecycle::State::STOPPED:
+                case lifecycle::State::ERROR: break;
+                }
+
+                _graph = std::move(newGraph);
+
+                // Now ideally we'd just restart the Scheduler, but we can't since we're processing a message inside a working thread.
+                // When the scheduler starts running it asserts that _nRunningJobs is 0, so we can't start it now, we're in the job.
+                // We need to let poolWorker() unwind, decrement _nRunningJobs and then move scheduler to its original value.
+                // Alternatively, we could forbid kGraphGRC unless Scheduler was in STOPPED state. That would simplify logic, but
+                // put more burden on the client.
+
+                message.data = property_map{{"originalSchedulerState", int(originalState)}};
+            } catch (const std::exception& e) {
+                message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", e.what())});
+            }
+
         } else {
             throw gr::exception(std::format("Unexpected command type {}", message.cmd));
         }
@@ -748,6 +814,7 @@ private:
 
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
+        this->_jobLists->clear();
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
@@ -757,6 +824,11 @@ private:
                 job.push_back(allBlocks[j]);
             }
         }
+    }
+
+    void reset() {
+        base_t::reset();
+        init();
     }
 };
 
@@ -828,6 +900,7 @@ private:
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         std::lock_guard lock(base_t::_jobListsMutex);
+        this->_jobLists->clear();
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
@@ -837,6 +910,11 @@ private:
                 job.push_back(_blocklist[j]);
             }
         }
+    }
+
+    void reset() {
+        base_t::reset();
+        init();
     }
 };
 } // namespace gr::scheduler
