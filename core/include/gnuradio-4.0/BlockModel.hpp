@@ -347,7 +347,7 @@ public:
     /**
      * @brief to be called by scheduler->graph to initialise block
      */
-    virtual void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) = 0;
+    virtual void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool) = 0;
 
     /**
      * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
@@ -500,7 +500,7 @@ public:
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
     ~BlockWrapper() override                           = default;
 
-    void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
+    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override { return blockRef().init(progress, ioThreadPool); }
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 

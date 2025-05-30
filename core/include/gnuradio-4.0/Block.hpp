@@ -373,7 +373,6 @@ public:
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{work::Status::OK};
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
     alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{false};
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
@@ -385,6 +384,7 @@ public:
     using StrideValue                                                                                                                            = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>       stride             = StrideControl::kStride;
     A<bool, "disconnect on done", Doc<"If no downstream blocks, declare itself 'DONE' and disconnect from upstream blocks.">> disconnect_on_done = true;
+    A<std::string, "compute domain", Doc<"compute domain/IO thread pool name">>                                               compute_domain     = gr::thread_pool::kDefaultIoPoolId;
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
@@ -422,7 +422,7 @@ public:
 
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
 
-    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, unique_name, name, meta_information);
+    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, meta_information);
 
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
@@ -513,9 +513,9 @@ public:
         emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::STOPPED));
     }
 
-    void init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
-        progress     = std::move(progress_);
-        ioThreadPool = std::move(ioThreadPool_);
+    void init(std::shared_ptr<gr::Sequence> progress_, std::string_view computeDomain = gr::thread_pool::kDefaultIoPoolId) {
+        progress       = std::move(progress_);
+        compute_domain = computeDomain;
 
         // Set names of port member variables
         // TODO: Refactor the library not to assign names to ports. The
@@ -1803,11 +1803,13 @@ public:
         bool expectedThreadState = false;
         if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
             if constexpr (useIoThread) { // use graph-provided ioThreadPool
-                if (!ioThreadPool) {
-                    emitErrorMessage("work(..)", "blockingIO with useIoThread - no ioThreadPool being set");
+                std::shared_ptr<thread_pool::TaskExecutor> executor = gr::thread_pool::Manager::instance().get(compute_domain);
+                if (!executor) {
+                    emitErrorMessage("work(..)", std::format("blockingIO with useIoThread - no ioThreadPool being set or '{}' is unknown", compute_domain));
                     return {requested_work, 0UZ, work::Status::ERROR};
                 }
-                ioThreadPool->execute([this]() {
+
+                executor->execute([this]() {
                     assert(lifecycle::isActive(this->state()));
 
                     lifecycle::State actualThreadState = this->state();

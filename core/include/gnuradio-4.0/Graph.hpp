@@ -185,11 +185,9 @@ private:
 };
 
 class Graph : public gr::Block<Graph> {
-private:
-    std::shared_ptr<gr::Sequence>                     _progress     = std::make_shared<gr::Sequence>();
-    std::shared_ptr<gr::thread_pool::BasicThreadPool> _ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
-    std::vector<Edge>                                 _edges;
-    std::vector<std::unique_ptr<BlockModel>>          _blocks;
+    std::shared_ptr<gr::Sequence>            _progress = std::make_shared<gr::Sequence>();
+    std::vector<Edge>                        _edges;
+    std::vector<std::unique_ptr<BlockModel>> _blocks;
 
     gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
 
@@ -335,10 +333,10 @@ public:
         if (this == &other) {
             return *this;
         }
-        _progress     = std::move(other._progress);
-        _ioThreadPool = std::move(other._ioThreadPool);
-        _edges        = std::move(other._edges);
-        _blocks       = std::move(other._blocks);
+        compute_domain = std::move(other.compute_domain);
+        _progress      = std::move(other._progress);
+        _edges         = std::move(other._edges);
+        _blocks        = std::move(other._blocks);
 
         return *this;
     }
@@ -358,7 +356,7 @@ public:
 
     BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
         auto& newBlock = _blocks.emplace_back(std::move(block));
-        newBlock->init(_progress, _ioThreadPool);
+        newBlock->init(_progress, this->compute_domain);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
         return *newBlock.get();
     }
@@ -369,7 +367,7 @@ public:
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         auto& newBlock    = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
         auto* rawBlockRef = static_cast<TBlock*>(newBlock->raw());
-        rawBlockRef->init(_progress, _ioThreadPool);
+        rawBlockRef->init(_progress);
         return *rawBlockRef;
     }
 

@@ -124,7 +124,6 @@ const boost::ut::suite TopologyGraphTests = [] {
     };
 
     "add block while scheduler is running"_test = [] {
-        auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
         using namespace gr;
         using namespace gr::testing;
         using TScheduler = scheduler::Simple<>;
@@ -134,7 +133,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         auto& sink   = flow.emplaceBlock<NullSink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
 
-        auto scheduler = TScheduler{std::move(flow), threadPool};
+        auto scheduler = TScheduler{std::move(flow)};
 
         MsgPortOut toScheduler;
         MsgPortIn  fromScheduler;
