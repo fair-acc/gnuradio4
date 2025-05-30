@@ -66,8 +66,8 @@ const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
         }
 
         if (devices.empty()) {
-            std::println(stderr, "no devices found");
-            return;
+            std::println(stderr, "no devices found - aborting tests");
+            exit(0);
         }
     };
     std::println("Detected available devices: [{}]", gr::join(availableDeviceDriver, ", "));
@@ -284,8 +284,7 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
     };
 
-    auto threadPool                                             = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 10UZ);
-    tag("rtlsdr") / "basic RTL soapy data generation test"_test = [&threadPool, &createWatchdog] {
+    tag("rtlsdr") / "basic RTL soapy data generation test"_test = [&createWatchdog] {
         using namespace gr;
         using namespace gr::blocks::soapy;
         using namespace gr::testing;
@@ -307,7 +306,7 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto sched                                        = scheduler{std::move(flow), threadPool};
+        auto sched                                        = scheduler{std::move(flow)};
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
         auto retVal = sched.runAndWait();
@@ -323,7 +322,7 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         std::println("N.B. 'basic RTL soapy data generation test' test finished");
     };
 
-    tag("lime") / "basic Lime soapy data generation test"_test = [&threadPool, &createWatchdog] {
+    tag("lime") / "basic Lime soapy data generation test"_test = [&createWatchdog] {
         using namespace gr;
         using namespace gr::blocks::soapy;
         using namespace gr::testing;
@@ -348,7 +347,7 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(sink1)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 1>(source).to<"in">(sink2)));
 
-        auto sched = scheduler{std::move(flow), threadPool};
+        auto sched = scheduler{std::move(flow)};
 
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
