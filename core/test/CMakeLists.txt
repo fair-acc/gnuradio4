@@ -35,6 +35,10 @@ function(add_ut_test TEST_NAME)
   setup_test(${TEST_NAME})
   set_property(TEST ${TEST_NAME} PROPERTY ENVIRONMENT_MODIFICATION
                                           "GNURADIO4_PLUGIN_DIRECTORIES=set:${CMAKE_CURRENT_BINARY_DIR}/plugins")
+  get_property(_env GLOBAL PROPERTY _GR_TEST_ENV)
+  if(_env)
+    set_tests_properties(${TEST_NAME} PROPERTIES ENVIRONMENT "${_env}")
+  endif()
 endfunction()
 
 function(add_app_test TEST_NAME)

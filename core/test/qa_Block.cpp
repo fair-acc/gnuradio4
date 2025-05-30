@@ -544,7 +544,7 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
     };
 };
 
-void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
+void interpolation_decimation_test(const IntDecTestData& data) {
     using namespace boost::ut;
     using namespace gr::testing;
     using scheduler = gr::scheduler::Simple<>;
@@ -562,7 +562,7 @@ void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<g
         int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
     }
 
-    auto sched = scheduler(std::move(flow), std::move(thread_pool));
+    auto sched = scheduler(std::move(flow));
     expect(sched.runAndWait().has_value());
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
@@ -570,7 +570,7 @@ void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<g
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
 }
 
-void stride_test(const StrideTestData& data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
+void stride_test(const StrideTestData& data) {
     using namespace boost::ut;
     using namespace gr::testing;
     using namespace gr::test;
@@ -592,7 +592,7 @@ void stride_test(const StrideTestData& data, std::shared_ptr<gr::thread_pool::Ba
         int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
     }
 
-    auto sched = scheduler(std::move(flow), std::move(thread_pool));
+    auto sched = scheduler(std::move(flow));
     expect(sched.runAndWait().has_value());
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
@@ -634,8 +634,6 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
     using namespace gr;
-
-    auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     "Resampling"_test = [] {
         static_assert(Resampling<>::kInputChunkSize == 1LU);
@@ -720,44 +718,44 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(testBlock.stride, 2LU));
     };
 
-    "Interpolation/Decimation"_test = [&thread_pool] {
-        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 2, .exp_in = 1024, .exp_out = 512, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 2, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 5, .input_chunk_size = 6, .exp_in = 996, .exp_out = 830, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 549, .output_chunk_size = 1, .input_chunk_size = 50, .exp_in = 500, .exp_out = 10, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 3, .input_chunk_size = 7, .exp_in = 98, .exp_out = 42, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 100, .input_chunk_size = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 10, .input_chunk_size = 1100, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 1, .input_chunk_size = 1001, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 101, .input_chunk_size = 101, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 5, .input_chunk_size = 11, .out_port_min = 10, .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 80, .output_chunk_size = 2, .input_chunk_size = 4, .out_port_min = 20, .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter = 2}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 7, .input_chunk_size = 3, .out_port_min = 10, .out_port_max = 20, .exp_in = 6, .exp_out = 14, .exp_counter = 16}, thread_pool);
+    "Interpolation/Decimation"_test = [] {
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 2, .exp_in = 1024, .exp_out = 512, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 2, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 5, .input_chunk_size = 6, .exp_in = 996, .exp_out = 830, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 549, .output_chunk_size = 1, .input_chunk_size = 50, .exp_in = 500, .exp_out = 10, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 3, .input_chunk_size = 7, .exp_in = 98, .exp_out = 42, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 100, .input_chunk_size = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 10, .input_chunk_size = 1100, .exp_in = 0, .exp_out = 0, .exp_counter = 0});
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 1, .input_chunk_size = 1001, .exp_in = 0, .exp_out = 0, .exp_counter = 0});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 101, .input_chunk_size = 101, .exp_in = 0, .exp_out = 0, .exp_counter = 0});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 5, .input_chunk_size = 11, .out_port_min = 10, .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 80, .output_chunk_size = 2, .input_chunk_size = 4, .out_port_min = 20, .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter = 2});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 7, .input_chunk_size = 3, .out_port_min = 10, .out_port_max = 20, .exp_in = 6, .exp_out = 14, .exp_counter = 16});
     };
 
-    "Stride tests"_test = [&thread_pool] {
-        stride_test({.n_samples = 1024, .stride = 0, .in_port_max = 1024, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1, .exp_total_in = 1024, .exp_total_out = 1024}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 100, .exp_in = 50, .exp_out = 50, .exp_counter = 10, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
+    "Stride tests"_test = [] {
+        stride_test({.n_samples = 1024, .stride = 0, .in_port_max = 1024, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1, .exp_total_in = 1024, .exp_total_out = 1024});
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 100, .exp_in = 50, .exp_out = 50, .exp_counter = 10, .exp_total_in = 500, .exp_total_out = 500});
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400});
         // the original test assumes that the incomplete chunk is also processed, currently we drop that. todo: switch to last sample update type incomplete
-        // stride_test( {.n_samples = 1000, .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 }, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900}, thread_pool);
+        // stride_test( {.n_samples = 1000, .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 });
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900});
         // this one is tricky, it assumes that there are multiple incomplete last chunks :/ not sure what to do here...
-        // stride_test( {.n_samples = 1000, .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 }, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 25, .input_chunk_size = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 24, .input_chunk_size = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480}, thread_pool);
+        // stride_test( {.n_samples = 1000, .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 });
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800});
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950});
+        stride_test({.n_samples = 1000, .output_chunk_size = 25, .input_chunk_size = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500});
+        stride_test({.n_samples = 1000, .output_chunk_size = 24, .input_chunk_size = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480});
         // std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14};
-        // stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 }, thread_pool);
+        // stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 });
         std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13};
-        stride_test({.n_samples = 15, .output_chunk_size = 5, .input_chunk_size = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1}, thread_pool);
+        stride_test({.n_samples = 15, .output_chunk_size = 5, .input_chunk_size = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1});
         std::vector<int> exp_v2 = {0, 1, 2, 5, 6, 7, 10, 11, 12};
-        stride_test({.n_samples = 15, .output_chunk_size = 3, .input_chunk_size = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2}, thread_pool);
+        stride_test({.n_samples = 15, .output_chunk_size = 3, .input_chunk_size = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2});
         // assuming buffer size is approx 65k
-        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
-        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
+        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400});
+        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500});
     };
 
     "Interpolation/Decimation with many tags, tags forward policy"_test = [] {

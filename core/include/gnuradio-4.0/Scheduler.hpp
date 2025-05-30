@@ -20,7 +20,6 @@
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 namespace gr::scheduler {
-using gr::thread_pool::BasicThreadPool;
 using namespace gr::message;
 
 namespace property {
@@ -49,13 +48,14 @@ enum class ExecutionPolicy {
 template<typename Derived, ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class SchedulerBase : public Block<Derived> {
     friend class lifecycle::StateMachine<Derived>;
-    using JobLists = std::shared_ptr<std::vector<std::vector<BlockModel*>>>;
+    using JobLists     = std::shared_ptr<std::vector<std::vector<BlockModel*>>>;
+    using TaskExecutor = gr::thread_pool::TaskExecutor;
 
 protected:
     gr::Graph                           _graph;
     TProfiler                           _profiler;
     decltype(_profiler.forThisThread()) _profilerHandler;
-    std::shared_ptr<BasicThreadPool>    _pool;
+    std::shared_ptr<TaskExecutor>       _pool;
     std::atomic_size_t                  _nRunningJobs{0UZ};
     std::recursive_mutex                _jobListsMutex; // only used when modifying and copying the graph->local job list
     JobLists                            _jobLists = std::make_shared<std::vector<std::vector<BlockModel*>>>();
@@ -102,6 +102,7 @@ public:
     Annotated<gr::Size_t, "timeout", Doc<"sleep timeout to wait if graph has made no progress ">>                              timeout_ms                      = 10U;
     Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 20U;
     Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
+    Annotated<std::string, "pool name", Doc<"default pool name">>                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
 
     GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio);
 
@@ -109,10 +110,8 @@ public:
 
     [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
 
-    explicit SchedulerBase(gr::Graph&&   graph,                                                                                                  //
-        std::shared_ptr<BasicThreadPool> thread_pool       = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND), //
-        const profiling::Options&        profiling_options = {})                                                                                        //
-        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(std::move(thread_pool)) {
+    explicit SchedulerBase(gr::Graph&& graph, std::string_view defaultPoolName, const profiling::Options& profiling_options = {}) //
+        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
         this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
         this->propertyCallbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
         this->propertyCallbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
@@ -129,6 +128,7 @@ public:
             }
         }
         waitDone();
+        _jobLists.reset(); // force earlier crashes is accessed after destruction
     }
 
     [[nodiscard]] bool isProcessing() const
@@ -327,8 +327,9 @@ protected:
         } else { // run on processing thread pool
             [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.runOnPool");
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
+            auto jobListsCopy = _jobLists;
             for (std::size_t runnerID = 0UZ; runnerID < _jobLists->size(); runnerID++) {
-                _pool->execute([this, runnerID]() { static_cast<Derived*>(this)->poolWorker(runnerID, _jobLists); });
+                _pool->execute([this, runnerID, jobListsCopy]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy); });
             }
             if (!_jobLists->empty()) {
                 _nRunningJobs.wait(0UZ, std::memory_order_acquire); // waits until at least one pool worker started
@@ -421,7 +422,6 @@ protected:
         } while (lifecycle::isActive(activeState));
         _nRunningJobs.fetch_sub(1UZ, std::memory_order_acq_rel);
         _nRunningJobs.notify_all();
-        waitDone(); // wait for the other workers to finish.
     }
 
     void stop() {
@@ -789,7 +789,7 @@ class Simple : public SchedulerBase<Simple<execution, TProfiler>, execution, TPr
 public:
     using base_t = SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
 
-    explicit Simple(gr::Graph&& graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND), const profiling::Options& profiling_options = {}) : base_t(std::move(graph), thread_pool, profiling_options) {}
+    explicit Simple(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
 
 private:
     void init() {
@@ -845,7 +845,7 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
 public:
     using base_t = SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
 
-    explicit BreadthFirst(gr::Graph&& graph, std::shared_ptr<BasicThreadPool> thread_pool = std::make_shared<BasicThreadPool>("breadth-first-pool", thread_pool::CPU_BOUND), const profiling::Options& profiling_options = {}) : base_t(std::move(graph), thread_pool, profiling_options) {}
+    explicit BreadthFirst(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
 
 private:
     void init() {

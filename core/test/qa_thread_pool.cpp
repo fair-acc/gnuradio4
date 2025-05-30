@@ -212,12 +212,12 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
     "Manager: custom pool registration and execution"_test = [] {
         auto& manager = Manager::instance();
 
-        auto custom = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("MyPool", TaskType::IO_BOUND, 1, 2), TaskType::IO_BOUND, "my_pool", "VirtualDevice");
+        auto custom = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("MyPool", TaskType::IO_BOUND, 1, 2), "VirtualDevice");
 
         expect(nothrow([&] { manager.registerPool("my_pool", std::move(custom)); }));
 
         auto pool = manager.get("my_pool");
-        expect(pool->name() == "my_pool");
+        expect(pool->name() == "MyPool");
         expect(pool->device() == "VirtualDevice");
         expect(pool->type() == TaskType::IO_BOUND);
 
@@ -231,7 +231,7 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
     };
 
     "Manager: duplicate registration fails"_test = [] {
-        auto dup = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("DupPool", TaskType::CPU_BOUND, 1U, 2U), TaskType::CPU_BOUND, "default_cpu", "CPU");
+        auto dup = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("DupPool", TaskType::CPU_BOUND, 1U, 2U), "CPU");
         expect(throws<std::invalid_argument>([&] { Manager::instance().registerPool("default_cpu", std::move(dup)); }));
     };
 
@@ -240,7 +240,7 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
     "Manager: replacePool allows update of registered pool"_test = [] {
         auto& manager = Manager::instance();
 
-        auto updated = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("updated_pool", TaskType::CPU_BOUND, 1U, 1U), TaskType::CPU_BOUND, "default_cpu", "CPU-Updated");
+        auto updated = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>("updated_pool", TaskType::CPU_BOUND, 1U, 1U), "CPU-Updated");
         updated->setThreadBounds(1U, 4U);
 
         manager.replacePool("default_cpu", std::move(updated));

@@ -376,15 +376,16 @@ public:
     BasicThreadPool& operator=(const BasicThreadPool&) = delete;
     BasicThreadPool& operator=(BasicThreadPool&&)      = delete;
 
-    [[nodiscard]] std::string poolName() const noexcept { return _poolName; }
-    [[nodiscard]] uint32_t    minThreads() const noexcept { return _minThreads.load(std::memory_order_acquire); }
-    [[nodiscard]] uint32_t    maxThreads() const noexcept { return _maxThreads.load(std::memory_order_acquire); }
-    [[nodiscard]] std::size_t numThreads() const noexcept { return std::atomic_load_explicit(&_numThreads, std::memory_order_acquire); }
-    [[nodiscard]] std::size_t numTasksRunning() const noexcept { return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire); }
-    [[nodiscard]] std::size_t numTasksQueued() const { return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire); }
-    [[nodiscard]] std::size_t numTasksRecycled() const { return _recycledTasks.size(); }
-    [[nodiscard]] bool        isInitialised() const { return _initialised.load(std::memory_order::acquire); }
-    void                      waitUntilInitialised() const { _initialised.wait(false); }
+    [[nodiscard]] std::string_view poolName() const noexcept { return _poolName; }
+    [[nodiscard]] TaskType         poolType() const noexcept { return _taskType; }
+    [[nodiscard]] uint32_t         minThreads() const noexcept { return _minThreads.load(std::memory_order_acquire); }
+    [[nodiscard]] uint32_t         maxThreads() const noexcept { return _maxThreads.load(std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numThreads() const noexcept { return std::atomic_load_explicit(&_numThreads, std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numTasksRunning() const noexcept { return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numTasksQueued() const { return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numTasksRecycled() const { return _recycledTasks.size(); }
+    [[nodiscard]] bool             isInitialised() const { return _initialised.load(std::memory_order::acquire); }
+    void                           waitUntilInitialised() const { _initialised.wait(false); }
 
     void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
         if (minThreads == 0 || maxThreads == 0) {
@@ -435,7 +436,7 @@ public:
     void execute(Callable&& func, Args&&... args) {
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
-            if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
+            if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
                 throw std::invalid_argument(std::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
             }
         }
@@ -462,7 +463,7 @@ public:
     requires(!std::is_same_v<R, void>)
     [[nodiscard]] std::future<R> execute(Callable&& func, Args&&... funcArgs) {
         if constexpr (cpuID >= 0) {
-            if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
+            if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
                 throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
 #else
@@ -679,13 +680,16 @@ struct TaskExecutor {
 };
 
 class ThreadPoolWrapper : public TaskExecutor {
+    std::unique_ptr<BasicThreadPool> _pool;
+    std::string                      _device;
+
 public:
-    ThreadPoolWrapper(std::unique_ptr<BasicThreadPool> pool, TaskType type, std::string name, std::string device) : _pool(std::move(pool)), _type(type), _name(std::move(name)), _device(std::move(device)) {}
+    ThreadPoolWrapper(std::unique_ptr<BasicThreadPool> pool, std::string device) : _pool(std::move(pool)), _device(std::move(device)) {}
 
     void execute(detail::move_only_function&& task) override { _pool->execute(std::move(task)); }
 
-    [[nodiscard]] TaskType         type() const noexcept override { return _type; }
-    [[nodiscard]] std::string_view name() const noexcept override { return _name; }
+    [[nodiscard]] std::string_view name() const noexcept override { return _pool->poolName(); }
+    [[nodiscard]] TaskType         type() const noexcept override { return _pool->poolType(); }
     [[nodiscard]] std::string_view device() const noexcept override { return _device; }
 
     [[nodiscard]] std::size_t numThreads() const override { return _pool->numThreads(); }
@@ -702,12 +706,6 @@ public:
     [[nodiscard]] bool isShutdown() const override { return _pool->isShutdown(); }
 
     [[nodiscard]] BasicThreadPool& impl() noexcept { return *_pool; }
-
-private:
-    std::unique_ptr<BasicThreadPool> _pool;
-    TaskType                         _type;
-    std::string                      _name;
-    std::string                      _device;
 };
 
 /**
@@ -760,8 +758,8 @@ private:
  *
  * <h3>Helper methods</h3>
  * <ul>
- *  <li> <code>cpuPool()</code> &mdash; returns the default CPU-bound pool
- *  <li> <code>ioPool()</code> &mdash; returns the default IO-bound pool
+ *  <li> <code>defaultCpuPool()</code> &mdash; returns the default CPU-bound pool
+ *  <li> <code>defaultIoPool()</code> &mdash; returns the default IO-bound pool
  *  <li> <code>list()</code> &mdash; returns all currently registered pool names
  * </ul>
  *
@@ -779,8 +777,8 @@ class Manager {
         const std::size_t maxConcurrency = std::thread::hardware_concurrency();
 #endif
         const std::size_t maxThread = maxConcurrency <= 2UZ ? 2UZ : maxConcurrency - 2UZ;
-        auto              cpu       = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultCpuPoolId), TaskType::CPU_BOUND, maxThread, maxThread), TaskType::CPU_BOUND, std::string(kDefaultCpuPoolId), "CPU");
-        auto              io        = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultIoPoolId), TaskType::IO_BOUND, 2U, std::numeric_limits<uint32_t>::max()), TaskType::IO_BOUND, std::string(kDefaultIoPoolId), "CPU");
+        auto              cpu       = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultCpuPoolId), TaskType::CPU_BOUND, maxThread, maxThread), "CPU");
+        auto              io        = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultIoPoolId), TaskType::IO_BOUND, 2U, std::numeric_limits<uint32_t>::max()), "CPU");
         registerPool(std::string(kDefaultCpuPoolId), std::move(cpu));
         registerPool(std::string(kDefaultIoPoolId), std::move(io));
     }
