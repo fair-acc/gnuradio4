@@ -1,5 +1,7 @@
+#include "message_utils.hpp"
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>

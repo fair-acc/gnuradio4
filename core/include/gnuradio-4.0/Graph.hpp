@@ -33,22 +33,8 @@
 namespace gr {
 
 namespace graph::property {
-inline static const char* kEmplaceBlock = "EmplaceBlock";
-inline static const char* kRemoveBlock  = "RemoveBlock";
-inline static const char* kReplaceBlock = "ReplaceBlock";
-inline static const char* kInspectBlock = "InspectBlock";
-
-inline static const char* kBlockEmplaced  = "BlockEmplaced";
-inline static const char* kBlockRemoved   = "BlockRemoved";
-inline static const char* kBlockReplaced  = "BlockReplaced";
+inline static const char* kInspectBlock   = "InspectBlock";
 inline static const char* kBlockInspected = "BlockInspected";
-
-inline static const char* kEmplaceEdge = "EmplaceEdge";
-inline static const char* kRemoveEdge  = "RemoveEdge";
-
-inline static const char* kEdgeEmplaced = "EdgeEmplaced";
-inline static const char* kEdgeRemoved  = "EdgeRemoved";
-
 inline static const char* kGraphInspect   = "GraphInspect";
 inline static const char* kGraphInspected = "GraphInspected";
 
@@ -202,7 +188,6 @@ class Graph : public gr::Block<Graph> {
 private:
     std::shared_ptr<gr::Sequence>                     _progress     = std::make_shared<gr::Sequence>();
     std::shared_ptr<gr::thread_pool::BasicThreadPool> _ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
-    std::atomic_bool                                  _topologyChanged{false};
     std::vector<Edge>                                 _edges;
     std::vector<std::unique_ptr<BlockModel>>          _blocks;
 
@@ -335,12 +320,8 @@ public:
 
     Graph(property_map settings = {}) : gr::Block<Graph>(std::move(settings)) {
         _blocks.reserve(100); // TODO: remove
-        propertyCallbacks[graph::property::kEmplaceBlock]       = std::mem_fn(&Graph::propertyCallbackEmplaceBlock);
-        propertyCallbacks[graph::property::kRemoveBlock]        = std::mem_fn(&Graph::propertyCallbackRemoveBlock);
+
         propertyCallbacks[graph::property::kInspectBlock]       = std::mem_fn(&Graph::propertyCallbackInspectBlock);
-        propertyCallbacks[graph::property::kReplaceBlock]       = std::mem_fn(&Graph::propertyCallbackReplaceBlock);
-        propertyCallbacks[graph::property::kEmplaceEdge]        = std::mem_fn(&Graph::propertyCallbackEmplaceEdge);
-        propertyCallbacks[graph::property::kRemoveEdge]         = std::mem_fn(&Graph::propertyCallbackRemoveEdge);
         propertyCallbacks[graph::property::kGraphInspect]       = std::mem_fn(&Graph::propertyCallbackGraphInspect);
         propertyCallbacks[graph::property::kRegistryBlockTypes] = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
     }
@@ -356,33 +337,29 @@ public:
         }
         _progress     = std::move(other._progress);
         _ioThreadPool = std::move(other._ioThreadPool);
-        _topologyChanged.store(other._topologyChanged.load(std::memory_order_acquire), std::memory_order_release);
-        _edges  = std::move(other._edges);
-        _blocks = std::move(other._blocks);
+        _edges        = std::move(other._edges);
+        _blocks       = std::move(other._blocks);
 
         return *this;
     }
 
-    void               setTopologyChanged() noexcept { _topologyChanged.store(true, std::memory_order_release); }
-    [[nodiscard]] bool hasTopologyChanged() const noexcept { return _topologyChanged; }
-    void               ackTopologyChange() noexcept { _topologyChanged.store(false, std::memory_order_release); }
-
     [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {_blocks}; }
     [[nodiscard]] std::span<Edge>                        edges() noexcept { return {_edges}; }
+
+    void clear() {
+        _blocks.clear();
+        _edges.clear();
+    }
 
     /**
      * @return atomic sequence counter that indicates if any block could process some data or messages
      */
     [[nodiscard]] const Sequence& progress() noexcept { return *_progress.get(); }
 
-    BlockModel& addBlock(std::unique_ptr<BlockModel> block, bool doEmitMessage = true) {
+    BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
         auto& newBlock = _blocks.emplace_back(std::move(block));
         newBlock->init(_progress, _ioThreadPool);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
-        setTopologyChanged();
-        if (doEmitMessage) {
-            this->emitMessage(graph::property::kBlockEmplaced, serializeBlock(newBlock.get()));
-        }
         return *newBlock.get();
     }
 
@@ -393,18 +370,12 @@ public:
         auto& newBlock    = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
         auto* rawBlockRef = static_cast<TBlock*>(newBlock->raw());
         rawBlockRef->init(_progress, _ioThreadPool);
-        setTopologyChanged();
-        this->emitMessage(graph::property::kBlockEmplaced, serializeBlock(newBlock.get()));
         return *rawBlockRef;
     }
 
     [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings) {
         if (auto block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
-            setTopologyChanged();
-            auto& newBlock = addBlock(std::move(block_load), false); // false == do not emit message
-
-            this->emitMessage(graph::property::kBlockEmplaced, serializeBlock(std::addressof(newBlock)));
-
+            auto& newBlock = addBlock(std::move(block_load));
             return newBlock;
         }
         throw gr::exception(std::format("Can not create block {}", type));
@@ -503,25 +474,6 @@ public:
         return result;
     }
 
-    std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kEmplaceBlock);
-        using namespace std::string_literals;
-        const auto&         data       = message.data.value();
-        const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const property_map& properties = [&] {
-            if (auto it = data.find("properties"s); it != data.end()) {
-                return std::get<property_map>(it->second);
-            } else {
-                return property_map{};
-            }
-        }();
-
-        emplaceBlock(type, properties);
-
-        // Message is sent as a reaction to emplaceBlock, no need for a separate one
-        return {};
-    }
-
     std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kInspectBlock);
         using namespace std::string_literals;
@@ -540,12 +492,8 @@ public:
         return {reply};
     }
 
-    std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kRemoveBlock);
-        using namespace std::string_literals;
-        const auto&        data       = message.data.value();
-        const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
-        auto               it         = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
+    std::unique_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
+        auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
 
         if (it == _blocks.end()) {
             throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
@@ -554,26 +502,14 @@ public:
         std::erase_if(_edges, [&it](const Edge& edge) { //
             return std::addressof(edge.sourceBlock()) == it->get() || std::addressof(edge.destinationBlock()) == it->get();
         });
-        _blocks.erase(it);
-        message.endpoint = graph::property::kBlockRemoved;
 
-        return {message};
+        std::unique_ptr<BlockModel> removedBlock = std::move(*it);
+        _blocks.erase(it);
+
+        return removedBlock;
     }
 
-    std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kReplaceBlock);
-        using namespace std::string_literals;
-        const auto&         data       = message.data.value();
-        const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
-        const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const property_map& properties = [&] {
-            if (auto it = data.find("properties"s); it != data.end()) {
-                return std::get<property_map>(it->second);
-            } else {
-                return property_map{};
-            }
-        }();
-
+    std::pair<std::unique_ptr<BlockModel>, BlockModel*> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
             throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
@@ -585,41 +521,26 @@ public:
             throw gr::exception(std::format("Can not create block {}", type));
         }
 
-        addBlock(std::move(newBlock), false); // false == do not emit message
+        addBlock(std::move(newBlock));
 
-        BlockModel* oldBlock = it->get();
         for (auto& edge : _edges) {
-            if (edge._sourceBlock == oldBlock) {
+            if (edge._sourceBlock == it->get()) {
                 edge._sourceBlock = newBlockRaw;
             }
 
-            if (edge._destinationBlock == oldBlock) {
+            if (edge._destinationBlock == it->get()) {
                 edge._destinationBlock = newBlockRaw;
             }
         }
+
+        std::unique_ptr<BlockModel> oldBlock = std::move(*it);
         _blocks.erase(it);
 
-        std::optional<Message> result = gr::Message{};
-        result->endpoint              = graph::property::kBlockReplaced;
-        result->data                  = serializeBlock(newBlockRaw);
-
-        (*result->data)["replacedBlockUniqueName"s] = uniqueName;
-
-        return result;
+        return {std::move(oldBlock), newBlockRaw};
     }
 
-    std::optional<Message> propertyCallbackEmplaceEdge([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kEmplaceEdge);
-        using namespace std::string_literals;
-        const auto&                         data             = message.data.value();
-        const std::string&                  sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
-        const std::string&                  sourcePort       = std::get<std::string>(data.at("sourcePort"s));
-        const std::string&                  destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
-        const std::string&                  destinationPort  = std::get<std::string>(data.at("destinationPort"s));
-        [[maybe_unused]] const std::size_t  minBufferSize    = std::get<gr::Size_t>(data.at("minBufferSize"s));
-        [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
-        const std::string                   edgeName         = std::get<std::string>(data.at("edgeName"s));
-
+    void emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
+        std::string destinationPort, [[maybe_unused]] const std::size_t minBufferSize, [[maybe_unused]] const std::int32_t weight, std::string_view edgeName) {
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
             throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
@@ -645,31 +566,20 @@ public:
 
         const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, sanitizedMinBufferSize, weight, edgeName);
-
-        message.endpoint = graph::property::kEdgeEmplaced;
-        return message;
+        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
     }
 
-    std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kRemoveEdge);
-        using namespace std::string_literals;
-        const auto&        data        = message.data.value();
-        const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
-        const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
-
+    void removeEdgeBySourcePort(std::string_view sourceBlock, std::string_view sourcePort) {
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
             throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
         }
 
-        auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
+        auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(std::string(sourcePort));
 
         if (sourcePortRef.disconnect() == ConnectionResult::FAILED) {
             throw gr::exception(std::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
         }
-        message.endpoint = graph::property::kEdgeRemoved;
-        return message;
     }
 
     std::optional<Message> propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
