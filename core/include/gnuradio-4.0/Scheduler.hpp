@@ -6,11 +6,12 @@
 #include <mutex>
 #include <queue>
 #include <set>
-#include <source_location>
+
 #include <thread>
 #include <utility>
 
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/LifeCycle.hpp>
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Port.hpp>
@@ -21,6 +22,23 @@
 namespace gr::scheduler {
 using gr::thread_pool::BasicThreadPool;
 using namespace gr::message;
+
+namespace property {
+
+inline static const char* kEmplaceBlock = "EmplaceBlock";
+inline static const char* kRemoveBlock  = "RemoveBlock";
+inline static const char* kReplaceBlock = "ReplaceBlock";
+inline static const char* kEmplaceEdge  = "EmplaceEdge";
+inline static const char* kRemoveEdge   = "RemoveEdge";
+
+inline static const char* kBlockEmplaced = "BlockEmplaced";
+inline static const char* kBlockRemoved  = "BlockRemoved";
+inline static const char* kBlockReplaced = "BlockReplaced";
+inline static const char* kEdgeEmplaced  = "EdgeEmplaced";
+inline static const char* kEdgeRemoved   = "EdgeRemoved";
+
+inline static const char* kGraphGRC = "GraphGRC";
+} // namespace property
 
 enum class ExecutionPolicy {
     singleThreaded,        ///
@@ -41,6 +59,14 @@ protected:
     std::atomic_size_t                  _nRunningJobs{0UZ};
     std::recursive_mutex                _jobListsMutex; // only used when modifying and copying the graph->local job list
     JobLists                            _jobLists = std::make_shared<std::vector<std::vector<BlockModel*>>>();
+
+    std::mutex                               _zombieBlocksMutex;
+    std::vector<std::unique_ptr<BlockModel>> _zombieBlocks;
+
+    // for blocks that were added while scheduler was running. They need to be adopted by a thread
+    std::mutex _adoptionBlocksMutex;
+    // fixed-sized vector indexed by runnerId. Cheaper than a map.
+    std::vector<std::vector<BlockModel*>> _adoptionBlocks;
 
     MsgPortOutForChildren    _toChildMessagePort;
     MsgPortInFromChildren    _fromChildMessagePort;
@@ -86,7 +112,14 @@ public:
     explicit SchedulerBase(gr::Graph&&   graph,                                                                                                  //
         std::shared_ptr<BasicThreadPool> thread_pool       = std::make_shared<BasicThreadPool>("simple-scheduler-pool", thread_pool::CPU_BOUND), //
         const profiling::Options&        profiling_options = {})                                                                                        //
-        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(std::move(thread_pool)) {}
+        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(std::move(thread_pool)) {
+        this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
+        this->propertyCallbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
+        this->propertyCallbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
+        this->propertyCallbacks[scheduler::property::kEmplaceEdge]  = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
+        this->propertyCallbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
+        this->propertyCallbacks[scheduler::property::kGraphGRC]     = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
+    }
 
     ~SchedulerBase() {
         if (this->state() == lifecycle::RUNNING) {
@@ -335,6 +368,13 @@ protected:
                 if (runnerID == 0UZ || _nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
                 }
+
+                // Zombies are cleaned per-thread, as we remove from the localBlockList as well.
+                // Cleaning zombies has low priority, so uses process_stream_to_message_ratio (a different ratio could be introduced)
+                cleanupZombieBlocks(localBlockList);
+
+                adoptBlocks(runnerID, localBlockList);
+
                 std::ranges::for_each(localBlockList, [](auto& block) { block->processScheduledMessages(); });
                 activeState = this->state();
                 msgToCount++;
@@ -355,10 +395,6 @@ protected:
                     break;
                 }
             } else if (activeState == lifecycle::State::PAUSED) {
-                if (_graph.hasTopologyChanged()) {
-                    // TODO: update localBlockList topology if needed
-                    _graph.ackTopologyChange();
-                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
                 msgToCount = 0UZ;
             } else { // other states
@@ -395,8 +431,8 @@ protected:
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::STOPPED));
             }
         });
+
         this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-        this->emitErrorMessageIfAny("stop() -> LifecycleState ->IDLE", this->changeStateTo(lifecycle::State::IDLE));
     }
 
     void pause() {
@@ -415,6 +451,331 @@ protected:
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
         forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
+    }
+
+    std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kEmplaceBlock);
+        using namespace std::string_literals;
+        const auto&         data       = message.data.value();
+        const std::string&  type       = std::get<std::string>(data.at("type"s));
+        const property_map& properties = [&] {
+            if (auto it = data.find("properties"s); it != data.end()) {
+                return std::get<property_map>(it->second);
+            } else {
+                return property_map{};
+            }
+        }();
+
+        auto& newBlock = _graph.emplaceBlock(type, properties);
+
+        if (lifecycle::isActive(this->state())) {
+            // Block is being added while scheduler is running. Will be adopted by a thread.
+            const auto nBatches = _adoptionBlocks.size();
+            if (nBatches > 0) {
+                std::lock_guard guard(_adoptionBlocksMutex);
+                // pseudo-randomize which thread gets it
+                auto blockAddress = reinterpret_cast<std::uintptr_t>(&newBlock);
+                auto runnerIndex  = (blockAddress / sizeof(void*)) % nBatches;
+                _adoptionBlocks[runnerIndex].push_back(&newBlock);
+
+                switch (newBlock.state()) {
+                case lifecycle::State::STOPPED:
+                case lifecycle::State::IDLE: //
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::INITIALISED));
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::RUNNING));
+                    break;
+                case lifecycle::State::INITIALISED: //
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::RUNNING));
+                    break;
+                case lifecycle::State::RUNNING:
+                case lifecycle::State::REQUESTED_PAUSE:
+                case lifecycle::State::PAUSED:
+                case lifecycle::State::REQUESTED_STOP:
+                case lifecycle::State::ERROR: //
+                    this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", magic_enum::enum_name(newBlock.state())));
+                    break;
+                }
+            }
+        }
+
+        this->emitMessage(scheduler::property::kBlockEmplaced, Graph::serializeBlock(std::addressof(newBlock)));
+
+        // Message is sent as a reaction to emplaceBlock, no need for a separate one
+        return {};
+    }
+
+    std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kRemoveBlock);
+        using namespace std::string_literals;
+        const auto&        data       = message.data.value();
+        const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
+
+        auto removedBlock = _graph.removeBlockByName(uniqueName);
+        makeZombie(std::move(removedBlock));
+
+        message.endpoint = scheduler::property::kBlockRemoved;
+        return {message};
+    }
+
+    std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kRemoveEdge);
+        using namespace std::string_literals;
+        const auto&        data        = message.data.value();
+        const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
+        const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
+
+        _graph.removeEdgeBySourcePort(sourceBlock, sourcePort);
+
+        message.endpoint = scheduler::property::kEdgeRemoved;
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackEmplaceEdge([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kEmplaceEdge);
+        using namespace std::string_literals;
+        const auto&                         data             = message.data.value();
+        const std::string&                  sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
+        const std::string&                  sourcePort       = std::get<std::string>(data.at("sourcePort"s));
+        const std::string&                  destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
+        const std::string&                  destinationPort  = std::get<std::string>(data.at("destinationPort"s));
+        [[maybe_unused]] const std::size_t  minBufferSize    = std::get<gr::Size_t>(data.at("minBufferSize"s));
+        [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
+        const std::string                   edgeName         = std::get<std::string>(data.at("edgeName"s));
+
+        _graph.emplaceEdge(sourceBlock, sourcePort, destinationBlock, destinationPort, minBufferSize, weight, edgeName);
+
+        message.endpoint = scheduler::property::kEdgeEmplaced;
+        return message;
+    }
+
+    /*
+      Zombie Tutorial:
+
+      Blocks can't be deleted unless stopped, but since stopping can take time (async) we move such blocks
+      to the "zombie list" and disconnect them immediately from the graph. This allows them to stop and be deleted
+      safely.
+
+      Periodically, we call cleanupZombieBlocks(), which iterates the zombie list and deletes the blocks that are now stopped.
+
+      cleanupZombieBlocks() is called *per-thread*, since we also need to update the localBlockList, i.e.: removing dangling block pointers
+      from the localBlockList.
+
+      We also update the _jobLists member variable, but probably that member can be removed, seems unneeded and only used so unit-tests can
+      query it.
+     */
+    void cleanupZombieBlocks(std::vector<BlockModel*>& localBlockList) {
+        if (localBlockList.empty()) {
+            return;
+        }
+
+        std::lock_guard guard(_zombieBlocksMutex);
+
+        auto it = _zombieBlocks.begin();
+
+        while (it != _zombieBlocks.end()) {
+            auto localBlockIt = std::find(localBlockList.begin(), localBlockList.end(), it->get());
+            if (localBlockIt == localBlockList.end()) {
+                // we only care about the blocks local to our thread.
+                ++it;
+                continue;
+            }
+
+            bool shouldDelete = false;
+
+            switch ((*it)->state()) {
+            case lifecycle::State::IDLE:
+            case lifecycle::State::STOPPED:
+            case lifecycle::State::INITIALISED:
+                // This block can be deleted immediately
+                shouldDelete = true;
+                break;
+            case lifecycle::State::ERROR:
+                // Delete as well. (Separate case block, as better ideas welcome)
+                shouldDelete = true;
+                break;
+            case lifecycle::State::REQUESTED_STOP:
+                // This block will be deleted later
+                break;
+            case lifecycle::State::REQUESTED_PAUSE:
+                // This block will be deleted later
+                // There's no transition from REQUESTED_PAUSE to REQUESTED_STOP
+                // Will be moved to REQUESTED_STOP as soon as it's possible
+                break;
+            case lifecycle::State::PAUSED:
+                // This zombie was in REQUESTED_PAUSE and now finally in PAUSED. Can be stopped now.
+                // Will be deleted in a next zombie maintenance period
+                this->emitErrorMessageIfAny("cleanupZombieBlocks", (*it)->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                break;
+            case lifecycle::State::RUNNING: assert(false && "Doesn't happen: zombie blocks are never running"); break;
+            }
+
+            if (shouldDelete) {
+                localBlockList.erase(localBlockIt);
+
+                BlockModel* zombieRaw = it->get();
+                it                    = _zombieBlocks.erase(it); // ~Block() runs here
+
+                // We need to remove zombieRaw from jobLists as well, in case Scheduler ever goes to INITIALIZED
+                // again.
+                // TODO: I'd argue we should remove _jobLists to minimize having to maintain state. Instead, a job list can be
+                // calculated in start().
+                std::lock_guard lock(_jobListsMutex);
+                for (auto& jobList : *this->_jobLists) {
+                    auto job_it = std::remove(jobList.begin(), jobList.end(), zombieRaw);
+                    if (job_it != jobList.end()) {
+                        jobList.erase(job_it, jobList.end());
+                        break;
+                    }
+                }
+
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    void adoptBlocks(std::size_t runnerID, std::vector<BlockModel*>& localBlockList) {
+        std::lock_guard guard(_adoptionBlocksMutex);
+
+        assert(_adoptionBlocks.size() > runnerID);
+        auto& newBlocks = _adoptionBlocks[runnerID];
+
+        localBlockList.reserve(localBlockList.size() + newBlocks.size());
+        localBlockList.insert(localBlockList.end(), newBlocks.begin(), newBlocks.end());
+        newBlocks.clear();
+    }
+
+    void makeZombie(std::unique_ptr<BlockModel> block) {
+        if (block->state() == lifecycle::State::PAUSED || block->state() == lifecycle::State::RUNNING) {
+            this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+        }
+
+        {
+            // Handle edge case: If we receive two consecutive "Add Block X" "Remove Block X" messages
+            // it would be zombie before being adopted, so we need to remove it from adoption list
+            std::lock_guard guard(_adoptionBlocksMutex);
+            for (auto& adoptionList : _adoptionBlocks) {
+                auto it = std::find(adoptionList.begin(), adoptionList.end(), block.get());
+                if (it != adoptionList.end()) {
+                    adoptionList.erase(it);
+                    break;
+                }
+            }
+        }
+
+        std::lock_guard guard(_zombieBlocksMutex);
+        _zombieBlocks.push_back(std::move(block));
+    }
+
+    // Moves all blocks into the zombie list
+    // Useful for bulk operations such as "set grc yaml" message
+    void makeAllZombies() {
+        std::lock_guard guard(_zombieBlocksMutex);
+
+        for (auto& block : this->_graph.blocks()) {
+            switch (block->state()) {
+            case lifecycle::State::RUNNING:
+            case lifecycle::State::REQUESTED_PAUSE:
+            case lifecycle::State::PAUSED: //
+                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                break;
+
+            case lifecycle::State::INITIALISED: //
+                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(lifecycle::State::STOPPED));
+                break;
+            case lifecycle::State::IDLE:
+            case lifecycle::State::STOPPED:
+            case lifecycle::State::ERROR:
+            case lifecycle::State::REQUESTED_STOP:
+                // Can go into the zombie list and deleted
+                break;
+            }
+
+            _zombieBlocks.push_back(std::move(block));
+        }
+
+        this->_graph.clear();
+    }
+
+    std::optional<Message> propertyCallbackGraphGRC([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kGraphGRC);
+
+        auto& pluginLoader = gr::globalPluginLoader();
+        if (message.cmd == message::Command::Get) {
+            message.data = property_map{{"value", gr::saveGrc(pluginLoader, _graph)}};
+        } else if (message.cmd == message::Command::Set) {
+            const auto& data        = message.data.value();
+            auto        yamlContent = std::get<std::string>(data.at("value"s));
+
+            try {
+                Graph newGraph = gr::loadGrc(pluginLoader, yamlContent);
+
+                makeAllZombies();
+
+                const auto originalState = this->state();
+
+                switch (originalState) {
+                case lifecycle::State::RUNNING:
+                case lifecycle::State::REQUESTED_PAUSE:
+                case lifecycle::State::PAUSED: //
+                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
+                    break;
+                case lifecycle::State::REQUESTED_STOP:
+                case lifecycle::State::INITIALISED: //
+                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::STOPPED));
+                    break;
+                case lifecycle::State::IDLE:
+                    assert(false); // doesn't happen
+                    break;
+                case lifecycle::State::STOPPED:
+                case lifecycle::State::ERROR: break;
+                }
+
+                _graph = std::move(newGraph);
+
+                // Now ideally we'd just restart the Scheduler, but we can't since we're processing a message inside a working thread.
+                // When the scheduler starts running it asserts that _nRunningJobs is 0, so we can't start it now, we're in the job.
+                // We need to let poolWorker() unwind, decrement _nRunningJobs and then move scheduler to its original value.
+                // Alternatively, we could forbid kGraphGRC unless Scheduler was in STOPPED state. That would simplify logic, but
+                // put more burden on the client.
+
+                message.data = property_map{{"originalSchedulerState", int(originalState)}};
+            } catch (const std::exception& e) {
+                message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", e.what())});
+            }
+
+        } else {
+            throw gr::exception(std::format("Unexpected command type {}", message.cmd));
+        }
+
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kReplaceBlock);
+        using namespace std::string_literals;
+        const auto&         data       = message.data.value();
+        const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
+        const std::string&  type       = std::get<std::string>(data.at("type"s));
+        const property_map& properties = [&] {
+            if (auto it = data.find("properties"s); it != data.end()) {
+                return std::get<property_map>(it->second);
+            } else {
+                return property_map{};
+            }
+        }();
+
+        auto [oldBlock, newBlockRaw] = _graph.replaceBlock(uniqueName, type, properties);
+        makeZombie(std::move(oldBlock));
+
+        std::optional<Message> result = gr::Message{};
+        result->endpoint              = scheduler::property::kBlockReplaced;
+        result->data                  = Graph::serializeBlock(newBlockRaw);
+
+        (*result->data)["replacedBlockUniqueName"s] = uniqueName;
+
+        return result;
     }
 };
 
@@ -451,6 +812,9 @@ private:
         allBlocks.reserve(blockCount);
         this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
 
+        this->_adoptionBlocks.clear();
+        this->_adoptionBlocks.resize(n_batches);
+        this->_jobLists->clear();
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
@@ -460,6 +824,11 @@ private:
                 job.push_back(allBlocks[j]);
             }
         }
+    }
+
+    void reset() {
+        base_t::reset();
+        init();
     }
 };
 
@@ -528,7 +897,10 @@ private:
         case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _blocklist.size()); break;
         }
 
+        this->_adoptionBlocks.clear();
+        this->_adoptionBlocks.resize(n_batches);
         std::lock_guard lock(base_t::_jobListsMutex);
+        this->_jobLists->clear();
         this->_jobLists->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
@@ -538,6 +910,11 @@ private:
                 job.push_back(_blocklist[j]);
             }
         }
+    }
+
+    void reset() {
+        base_t::reset();
+        init();
     }
 };
 } // namespace gr::scheduler
