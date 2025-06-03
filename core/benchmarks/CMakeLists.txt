@@ -4,6 +4,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(
       ${BM_NAME}
       PRIVATE gnuradio-core
+              gnuradio-blocklib-core
               gr-basic
               gr-fileio
               gr-math
