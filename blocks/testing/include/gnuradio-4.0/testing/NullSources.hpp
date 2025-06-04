@@ -158,7 +158,7 @@ Commonly used to control data flow in systems where precise sample counts are cr
     }
 };
 
-GR_REGISTER_BLOCK(gr::testing::NullSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
+GR_REGISTER_BLOCK(gr::testing::NullSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double>, gr::DataSet<uint16_t> ])
 
 template<typename T>
 struct NullSink : Block<NullSink<T>> {
