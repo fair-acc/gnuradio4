@@ -141,7 +141,10 @@ const boost::ut::suite<"YamlPmtTests"> _yamlPmtTests = [] {
     "Comments and Whitespace"_test = [] {
         constexpr std::string_view src1 = R"(# Comment
 double: !!float64 42 # Comment
-string: "#Hello" # Comment
+stringQ1: "#Hello1" # Comment
+stringQ2: "   #Hello2   "       # Comment
+string1: Hello1 # Comment
+string2:        Hello2        # Comment
 null:  # Comment
 #Comment: 43
 # string: | # Comment
@@ -157,13 +160,16 @@ map:
 )";
 
         pmtv::map_t expected;
-        expected["double"] = 42.0;
-        expected["string"] = "#Hello";
-        expected["null"]   = std::monostate{};
-        expected["number"] = static_cast<int64_t>(42);
-        expected["list"]   = std::vector<pmtv::pmt>{};
-        expected["list2"]  = std::vector<pmtv::pmt>{static_cast<int64_t>(42)};
-        expected["map"]    = pmtv::map_t{};
+        expected["double"]   = 42.0;
+        expected["stringQ1"] = "#Hello1";
+        expected["stringQ2"] = "   #Hello2   ";
+        expected["string1"]  = "Hello1";
+        expected["string2"]  = "Hello2";
+        expected["null"]     = std::monostate{};
+        expected["number"]   = static_cast<int64_t>(42);
+        expected["list"]     = std::vector<pmtv::pmt>{};
+        expected["list2"]    = std::vector<pmtv::pmt>{static_cast<int64_t>(42)};
+        expected["map"]      = pmtv::map_t{};
 
         testYAML(src1, expected);
     };
@@ -472,7 +478,9 @@ emptyPmtVector: []
 emptyAfterNewline:
   []
 flowDouble: !!float64 [1, 2, 3]
-flowString: !!str ["Hello, ", "World", "Multiple\nlines"]
+flowString1: !!str ["Hello1, ", "World1", "Multiple1\nlines1"]
+flowString2: !!str [Hello2, World2, Single2]
+flowString3: !!str [   Hello3   ,   World3  ,     Single3  ]
 flowMultiline: !!str [ "Hello, "    , #]
   "][", # Comment ,
   "World"  ,
@@ -515,7 +523,9 @@ vectorWithColons:
         expected["emptyPmtVector"]             = std::vector<pmtv::pmt>{};
         expected["emptyAfterNewline"]          = std::vector<pmtv::pmt>{};
         expected["flowDouble"]                 = std::vector<double>{1.0, 2.0, 3.0};
-        expected["flowString"]                 = std::vector<std::string>{"Hello, ", "World", "Multiple\nlines"};
+        expected["flowString1"]                = std::vector<std::string>{"Hello1, ", "World1", "Multiple1\nlines1"};
+        expected["flowString2"]                = std::vector<std::string>{"Hello2", "World2", "Single2"};
+        expected["flowString3"]                = std::vector<std::string>{"Hello3", "World3", "Single3"};
         expected["flowMultiline"]              = std::vector<std::string>{"Hello, ", "][", "World", "Multiple\nlines"};
         expected["nestedVector"]               = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
         expected["nestedFlow"]                 = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
@@ -586,6 +596,9 @@ nested:
         key5: !!int8 44
         key6: !!int8 45
 flow: {key1: !!int8 42, key2: !!int8 43}
+flow2: {key1: value1, key2: value2}
+flow3: {key1: " value1  ", key2: "value2   "} # Add extra spaces inside quotes
+flow4: {  key1  :  value1  ,  key2  : value2   } # Add extra spaces without quotes
 flow_multiline: {key1: !!int8 42,
                  key2: !!int8 43}
 flow_nested: {key1: {key2: !!int8 42, key3: !!int8 43}, key4: {key5: !!int8 44, key6: !!int8 45}}
@@ -598,6 +611,9 @@ last: # End of document, null value
         expected["empty"]          = pmtv::map_t{};
         expected["nested"]         = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"unknown_property", static_cast<int64_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
         expected["flow"]           = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["flow2"]          = pmtv::map_t{{"key1", "value1"}, {"key2", "value2"}};
+        expected["flow3"]          = pmtv::map_t{{"key1", " value1  "}, {"key2", "value2   "}};
+        expected["flow4"]          = pmtv::map_t{{"key1", "value1"}, {"key2", "value2"}};
         expected["flow_multiline"] = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
         expected["flow_nested"]    = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
         expected["flow_braces"]    = pmtv::map_t{{"}{", static_cast<int8_t>(42)}};
