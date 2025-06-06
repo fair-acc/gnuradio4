@@ -5,6 +5,8 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
+#include <algorithm>   // std::max_element, std::distance
+
 
 namespace gr::blocks::math {
 
@@ -68,6 +70,11 @@ GR_REGISTER_BLOCK("gr::blocks::math::Add", gr::blocks::math::MathOpImpl, ([T], s
 GR_REGISTER_BLOCK("gr::blocks::math::Subtract", gr::blocks::math::MathOpImpl, ([T], std::minus<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::Multiply", gr::blocks::math::MathOpImpl, ([T], std::multiplies<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::Divide", gr::blocks::math::MathOpImpl, ([T], std::divides<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Max", gr::blocks::math::MathOpImpl, ([T], std::max<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Min", gr::blocks::math::MathOpImpl, ([T], std::min<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::And", gr::blocks::math::MathOpImpl, ([T], std::bit_and<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Or", gr::blocks::math::MathOpImpl, ([T], std::bit_or<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Xor", gr::blocks::math::MathOpImpl, ([T], std::bit_xor<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
 
 template<typename T, typename op>
 requires(std::is_arithmetic_v<T>)
@@ -79,6 +86,11 @@ struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
     - Divide: out = in_1 / in_2 / in_3 / ...
     - Add: out = in_1 + in_2 + in_3 + ...
     - Subtract: out = in_1 - in_2 - in_3 - ...
+    - Max: out = max(in_1, in_2, in_3, ...)
+    - Min: out = min(in_1, in_2, in_3, ...)
+    - And: out = in_1 & in_2 & in_3 & ...
+    - Or: out = in_1 | in_2 | in_3 | ...
+    - Xor: out = in_1 ^ in_2 ^ in_3 ^ ...
     )"">;
 
     // ports
@@ -114,6 +126,210 @@ template<typename T>
 using Multiply = MathOpMultiPortImpl<T, std::multiplies<T>>;
 template<typename T>
 using Divide = MathOpMultiPortImpl<T, std::divides<T>>;
+
+template<typename T>
+using And = MathOpMultiPortImpl<T, std::bit_and<T>>;
+template<typename T>
+using Or = MathOpMultiPortImpl<T, std::bit_or<T>>;
+template<typename T>
+using Xor = MathOpMultiPortImpl<T, std::bit_xor<T>>;
+
+template<class T = void>
+struct max {
+    constexpr T operator()(const T& lhs, const T& rhs) const { return std::max(lhs, rhs); }
+};
+
+template<class T = void>
+struct min {
+    constexpr T operator()(const T& lhs, const T& rhs) const { return std::min(lhs, rhs); }
+};
+
+template<typename T>
+using Max = MathOpMultiPortImpl<T, max<T>>;
+
+template<typename T>
+using Min = MathOpMultiPortImpl<T, min<T>>;
+
+GR_REGISTER_BLOCK("gr::blocks::math::Negate", gr::blocks::math::MathOpImpl, ([T], std::negate<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Not", gr::blocks::math::MathOpImpl, ([T], std::bit_not<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Abs", gr::blocks::math::MathOpImpl, ([T], std::abs_op<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T, typename op>
+requires(std::is_arithmetic_v<T>)
+struct MathOpSinglePortImpl : public gr::Block<MathOpSinglePortImpl<T, op>> {
+    using Description = Doc<R""(
+    @brief Math block transforming a single input to a single output with a given operation
+
+    Depending on the operator op this block computes:
+    - Negate: out = - in
+    - Not: out = ~ in
+    - Abs: out = abs(in)
+    )"">;
+
+    // ports
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(MathOpSinglePortImpl, in, out);
+
+    [[nodiscard]] constexpr T processOne(const auto& a) const noexcept { return op{}(a); }
+};
+
+template<typename T>
+using Negate = MathOpSinglePortImpl<T, std::negate<T>>;
+template<typename T>
+using Not = MathOpSinglePortImpl<T, std::bit_not<T>>;
+
+template<class T = void>
+struct abs_op {
+    constexpr T operator()(const T& v) const {
+        if constexpr (std::is_unsigned_v<T>) {
+            // |v| == v  ➜ avoid ambiguous std::abs and silence -Wabsolute-value
+            return v;
+        } else if constexpr (std::is_integral_v<T>) {
+            // std::abs promotes to int/long long; cast back to T
+            using Promoted = std::conditional_t<(sizeof(long long) > sizeof(int) &&
+                                                 sizeof(T) > sizeof(int)),
+                                                long long,
+                                                int>;
+            return static_cast<T>(std::abs(static_cast<Promoted>(v)));
+        } else {
+            // float, double, long double: return type is already correct
+            return std::abs(v);
+        }
+    }
+};
+
+template<typename T>
+using Abs = MathOpSinglePortImpl<T, abs_op<T>>;
+
+/* ------------------------------------------------------------------ *
+ *  Integrate : running sum over N samples, output 1 value, decimate   *
+ * ------------------------------------------------------------------ */
+
+ GR_REGISTER_BLOCK("gr::blocks::math::Integrate",
+                  gr::blocks::math::Integrate,
+                  ([T]),
+                  [ uint8_t, uint16_t, uint32_t, uint64_t,
+                    int8_t,  int16_t,  int32_t,  int64_t,
+                    float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
+requires std::is_arithmetic_v<T>
+struct Integrate : gr::Block<Integrate<T>>
+{
+    /* ---------- Doc string ---------------------------------------- */
+    using Description = Doc<R""(
+@brief Integrate successive samples and decimate.
+
+For every *decim* input items the block outputs the sum of those
+*decim* items and then resets the accumulator.
+
+Example, decim = 4  
+in : 1 2 3 4 5 6 7 8   →  out : 10 26
+)"">;
+
+    /* ---------- Ports & settings ---------------------------------- */
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    Annotated<gr::Size_t,
+              "decim",
+              Visible,
+              Doc<"decimation / integration length">,
+              Limits<1UZ, (1UZ << 20)> >    // ← space before last '>'
+        decim = 1UZ;
+
+    GR_MAKE_REFLECTABLE(Integrate, in, out, decim);
+
+    /* ---------- State --------------------------------------------- */
+    T           _acc  = T(0);
+    std::size_t _seen = 0;
+
+    /* ---------- Reset on start / stop ----------------------------- */
+    void start()        { _acc = T(0); _seen = 0; }
+    /* no explicit stop() needed – Block takes care of it */
+
+    /* ---------- Work (scalar & SIMD transparent) ------------------ */
+    template<gr::InputSpanLike TSpanIn, gr::OutputSpanLike TSpanOut>
+    gr::work::Status processBulk(const TSpanIn& ins, TSpanOut& outs)
+    {
+        auto       outIt   = outs.begin();
+        const auto dec     = decim.value;
+
+        for (auto v : ins) {
+            _acc += v;
+            if (++_seen == dec) {
+                *outIt++ = _acc;
+                _acc  = T(0);
+                _seen = 0;
+            }
+        }
+        outs.publish(static_cast<std::size_t>(outIt - outs.begin()));   // how many we produced
+        return gr::work::Status::OK;
+    }
+};
+
+/* helper alias so tests can just write Integrate<T> */
+template<typename T>
+using integrate = Integrate<T>;
+
+/* ------------------------------------------------------------------ *
+ *  Argmax  : find index of the largest value in every vlen-element    *
+ *            vector and output that index (0 … vlen-1)                *
+ * ------------------------------------------------------------------ */
+
+GR_REGISTER_BLOCK("gr::blocks::math::Argmax",
+                  gr::blocks::math::Argmax,
+                  ([T]),
+                  [ uint8_t,  uint16_t,  uint32_t,  uint64_t,
+                    int8_t,   int16_t,   int32_t,   int64_t,
+                    float,    double ])
+
+template<typename T>
+requires std::is_arithmetic_v<T>
+struct Argmax : gr::Block<Argmax<T>>
+{
+    /* ---------- one-liner shown in GUI / docs --------------------- */
+    using Description = Doc<"Argmax – returns the index of the maximum element in every vlen-sample input vector">;
+
+    /* ---------- ports -------------------------------------------- */
+    PortIn< T >         in;                 // stream of scalars
+    PortOut<gr::Size_t> out;                // one index per vector
+
+    /* ---------- settings ----------------------------------------- */
+    Annotated<gr::Size_t,
+              "vlen",
+              Visible,
+              Doc<"Vector length analysed per result">,
+              Limits<1UZ, (1UZ << 16)>>
+        vlen = 1UZ;
+
+    GR_MAKE_REFLECTABLE(Argmax, in, out, vlen);
+
+    /* ---------- work --------------------------------------------- */
+    template<gr::InputSpanLike  TSpanIn,
+             gr::OutputSpanLike TSpanOut>
+    gr::work::Status processBulk(const TSpanIn& ins, TSpanOut& outs)
+    {
+        const auto L = static_cast<std::size_t>(vlen.value);
+
+        auto  in_it  = ins.begin();
+        auto  out_it = outs.begin();
+
+        while (std::distance(in_it, ins.end()) >= static_cast<std::ptrdiff_t>(L)) {
+    auto max_it = std::max_element(in_it, in_it + static_cast<std::ptrdiff_t>(L));
+    *out_it++   = static_cast<gr::Size_t>(std::distance(in_it, max_it));
+    in_it      += static_cast<std::ptrdiff_t>(L);
+}
+        outs.publish(static_cast<std::size_t>(out_it - outs.begin()));
+        return gr::work::Status::OK;
+    }
+};
+
+/* helper alias for tests – mirrors the 3.x name */
+template<typename T>
+using argmax = Argmax<T>;
 
 } // namespace gr::blocks::math
 
