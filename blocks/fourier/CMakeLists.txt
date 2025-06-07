@@ -15,3 +15,7 @@ gr_add_block_library(
 if(TARGET GrFourierBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()
+
+if(ENABLE_EXAMPLES)
+  add_subdirectory(benchmarks)
+endif()
