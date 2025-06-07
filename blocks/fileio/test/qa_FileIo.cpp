@@ -31,7 +31,7 @@ auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::ch
 }
 
 template<typename DataType>
-void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thread_pool::BasicThreadPool>& threadPool) {
+void runTest(const gr::blocks::fileio::Mode mode) {
     using namespace boost::ut;
     using namespace gr::blocks::fileio;
     using namespace gr::testing;
@@ -51,7 +51,7 @@ void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thre
         auto& fileSink = flow.emplaceBlock<BasicFileSink<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"max_bytes_per_file", maxFileSize}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(source).template to<"in">(fileSink)));
 
-        auto sched                                        = scheduler{std::move(flow), threadPool};
+        auto sched                                        = scheduler{std::move(flow)};
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value()) << testCaseName;
 
@@ -89,7 +89,7 @@ void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thre
 
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));
 
-        auto schedRead                                            = scheduler{std::move(flow), threadPool};
+        auto schedRead                                            = scheduler{std::move(flow)};
         auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
         expect(schedRead.runAndWait().has_value()) << testCaseName;
 
@@ -112,7 +112,7 @@ void runTest(const gr::blocks::fileio::Mode mode, const std::shared_ptr<gr::thre
 
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));
 
-        auto schedRead                                            = scheduler{std::move(flow), threadPool};
+        auto schedRead                                            = scheduler{std::move(flow)};
         auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
         expect(schedRead.runAndWait().has_value()) << testCaseName;
 
@@ -136,16 +136,14 @@ const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
-    auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
-
     constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>();
 
     using enum gr::blocks::fileio::Mode;
-    "overwrite mode"_test = [&threadPool]<typename T>(const T&) { runTest<T>(overwrite, threadPool); } | kArithmeticTypes;
+    "overwrite mode"_test = []<typename T>(const T&) { runTest<T>(overwrite); } | kArithmeticTypes;
 
-    "append mode"_test = [&threadPool]<typename T>(const T&) { runTest<T>(append, threadPool); } | kArithmeticTypes;
+    "append mode"_test = []<typename T>(const T&) { runTest<T>(append); } | kArithmeticTypes;
 
-    "create new mode"_test = [&threadPool]<typename T>(const T&) { runTest<T>(multi, threadPool); } | kArithmeticTypes;
+    "create new mode"_test = []<typename T>(const T&) { runTest<T>(multi); } | kArithmeticTypes;
 };
 
 int main() { /* not needed for UT */ }

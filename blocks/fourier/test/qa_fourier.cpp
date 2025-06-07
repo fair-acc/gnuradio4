@@ -60,7 +60,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         constexpr float      sample_rate{1.f};
         constexpr float      testFrequency{0.1f * sample_rate};
         FFT<InType, OutType> fftBlock({{"fftSize", N}, {"sample_rate", sample_rate}, {"outputInDb", true}});
-        fftBlock.init(fftBlock.progress, fftBlock.ioThreadPool);
+        fftBlock.init(fftBlock.progress);
 
         expect(eq(fftBlock.algorithm, gr::meta::type_name<algorithm::FFT<InType, std::complex<typename OutType::value_type>>>()));
 
@@ -121,13 +121,12 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
     "FFT flow graph example"_test = [] {
         // This test checks how fftw works if one creates and destroys several fft blocks in different graph flows
         using namespace boost::ut;
-        using Scheduler      = gr::scheduler::Simple<>;
-        auto      threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
+        using Scheduler = gr::scheduler::Simple<>;
         gr::Graph flow1;
         auto&     source1  = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
         auto&     fftBlock = flow1.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect<"out">(source1).to<"in">(fftBlock)));
-        auto sched1 = Scheduler(std::move(flow1), threadPool);
+        auto sched1 = Scheduler(std::move(flow1));
 
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
@@ -135,7 +134,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             auto&     source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
             auto&     fft2    = flow2.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
             expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect<"out">(source2).to<"in">(fft2)));
-            auto sched2 = Scheduler(std::move(flow2), threadPool);
+            auto sched2 = Scheduler(std::move(flow2));
             expect(sched2.runAndWait().has_value());
             expect(eq(source2._nSamplesProduced, source2.n_samples_max));
         }
