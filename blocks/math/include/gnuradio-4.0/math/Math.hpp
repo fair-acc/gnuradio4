@@ -6,6 +6,7 @@
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <algorithm>   // std::max_element, std::distance
+#include<cmath>
 
 
 namespace gr::blocks::math {
@@ -150,7 +151,7 @@ using Max = MathOpMultiPortImpl<T, max<T>>;
 template<typename T>
 using Min = MathOpMultiPortImpl<T, min<T>>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Negate", gr::blocks::math::MathOpImpl, ([T], std::negate<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
+GR_REGISTER_BLOCK("gr::blocks::math::Negate", gr::blocks::math::MathOpImpl, ([T], std::negate<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 GR_REGISTER_BLOCK("gr::blocks::math::Not", gr::blocks::math::MathOpImpl, ([T], std::bit_not<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t ])
 GR_REGISTER_BLOCK("gr::blocks::math::Abs", gr::blocks::math::MathOpImpl, ([T], std::abs_op<[T]>), [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
@@ -202,6 +203,56 @@ struct abs_op {
 
 template<typename T>
 using Abs = MathOpSinglePortImpl<T, abs_op<T>>;
+
+/* ------------------------------------------------------------------ *
+ *  Log10  :  out = n · log10(|in|) + k                               *
+ * ------------------------------------------------------------------ */
+GR_REGISTER_BLOCK("gr::blocks::math::Log10",
+                  gr::blocks::math::Log10,
+                  ([T]),
+                  [ float, double ])
+
+template<typename T>
+requires std::is_floating_point_v<T>
+struct Log10 : gr::Block<Log10<T>>
+{
+    using Description = Doc<R""(
+@brief Compute \(n \cdot \log_{10}(|x|) + k\)
+
+This reproduces the behaviour of the historic *nlog10_ff* block:
+
+- **n** – multiplicative scale (defaults to 10).
+- **k** – additive offset       (defaults to 0).
+
+Only floating-point types make sense, therefore the block is
+registered for **float** and **double** streams.
+)"">;
+
+    /* ---------- ports ---------------------------- */
+    PortIn<T>  in;
+    PortOut<T> out;
+
+    /* ---------- settings ------------------------- */
+    Annotated<T, "n", Visible,
+              Doc<"scale factor">, Limits<T(0), T(1e6)>>  n = T(10);
+    Annotated<T, "k", Visible,
+              Doc<"additive offset">>                     k = T(0);
+
+    GR_MAKE_REFLECTABLE(Log10, in, out, n, k);
+
+    /* ---------- element-wise work ---------------- */
+    [[nodiscard]] constexpr T processOne(const T& v) const noexcept
+    {
+        /* |v| and a small floor avoid log10(0) */
+        const T mag = std::fabs(v);
+        const T safe = std::max(mag, std::numeric_limits<T>::min());
+        return n * std::log10(safe) + k;
+    }
+};
+
+/* convenient alias identical to 3.x name */
+template<typename T>
+using nlog10 = Log10<T>;
 
 /* ------------------------------------------------------------------ *
  *  Integrate : running sum over N samples, output 1 value, decimate   *

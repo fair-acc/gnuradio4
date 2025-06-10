@@ -27,16 +27,14 @@ void test_block(const TestParameters<T> p) {
 
     auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_ONE>>();
     
-    if (p.input.size() > 0) {
-
+    if (p.input.size() > 0) {    
         // single input
         auto& block = graph.emplaceBlock<BlockUnderTest>();
         auto& src   = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", static_cast<Size_t>(p.input.size())}});
         expect(eq(graph.connect(src, "out"s, block, "in"s), ConnectionResult::SUCCESS)) << std::format("Failed to connect output port of src to input port of block");
         expect(eq(graph.connect<"out">(block).template to<"in">(sink), ConnectionResult::SUCCESS)) << "Failed to connect output port 'out' of block to input port of sink";
 
-    } else {
-
+    } else {    
         // multiple inputs (1 or more)
         auto& block = graph.emplaceBlock<BlockUnderTest>({{"n_inputs", n_inputs}});
         for (Size_t i = 0; i < n_inputs; ++i) {
@@ -376,6 +374,20 @@ std::complex<float>, std::complex<double>*/>();
         run_case({ T(7),T(8),  T(9),T(6),  T(10),T(2) },
                  2, { 1U, 0U, 0U });                // three results
     } | kArithmeticTypes;    
+
+    "Log10"_test = []<typename T>(const T&) {
+        using gr::blocks::math::Log10;
+
+        /* n = 10, k = 0  (default)  →  10·log10(x)                       */
+        TestParameters<T> p{ .input  = { T(1.0), T(10.0), T(100.0) },
+                             .output = { T(0.0), T(10.0), T(20.0) } };
+        test_block<T, Log10<T>>(p);
+
+        /* n = 20, k = -10  →  20·log10(x) – 10                           */
+        auto block = Log10<T>(gr::property_map{{"n",T(20)},{"k",T(-10)}});
+        expect( eq(block.processOne(T(10.0)), T(10.0)) );
+    } | std::tuple<float,double>();
+
     
 };
 
