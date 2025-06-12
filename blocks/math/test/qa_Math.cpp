@@ -1,5 +1,24 @@
 #include <boost/ut.hpp>
 
+/* ---------- portable <format> wrapper ---------------------------- */
+#if __has_include(<format>) && defined(__cpp_lib_format)
+#  include <format>
+  using std::format;                           // real std::format
+#else
+#  include <sstream>                           // tiny fallback
+  namespace std {
+    template<typename... Args>
+    std::string format(const std::string& fmt, Args&&... args)
+    {
+        std::ostringstream oss;
+        oss << fmt;                            // print the pattern itself
+        ((oss << ' ' << std::forward<Args>(args)), ...);
+        return oss.str();
+    }
+  }
+#endif
+/* ----------------------------------------------------------------- */
+
 #include <gnuradio-4.0/math/Math.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -28,7 +47,6 @@ void test_block(const TestParameters<T> p) {
     auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_ONE>>();
     
     if (p.input.size() > 0) {    
-        // single input
         auto& block = graph.emplaceBlock<BlockUnderTest>();
         auto& src   = graph.emplaceBlock<TagSource<T>>({{"values", p.input}, {"n_samples_max", static_cast<Size_t>(p.input.size())}});
         expect(eq(graph.connect(src, "out"s, block, "in"s), ConnectionResult::SUCCESS)) << std::format("Failed to connect output port of src to input port of block");
