@@ -16118,10 +16118,10 @@ class BasicThreadPool {
     thread::Policy    _schedulingPolicy   = thread::Policy::OTHER;
     int               _schedulingPriority = 0;
 
-    const std::string _poolName;
-    const TaskType    _taskType;
-    const uint32_t    _minThreads;
-    const uint32_t    _maxThreads;
+    const std::string     _poolName;
+    const TaskType        _taskType;
+    std::atomic<uint32_t> _minThreads;
+    std::atomic<uint32_t> _maxThreads;
 
 public:
     std::chrono::microseconds sleepDuration     = std::chrono::milliseconds(1);
@@ -16129,7 +16129,7 @@ public:
 
     BasicThreadPool(const std::string_view& name = generateName(), const TaskType taskType = TaskType::CPU_BOUND, uint32_t min = std::thread::hardware_concurrency(), uint32_t max = std::thread::hardware_concurrency()) : _poolName(name), _taskType(taskType), _minThreads(std::min(min, max)), _maxThreads(max) {
         assert(min > 0 && "minimum number of threads must be > 0");
-        for (uint32_t i = 0; i < _minThreads; ++i) {
+        for (uint32_t i = 0; i < minThreads(); ++i) {
             createWorkerThread();
         }
     }
@@ -16147,23 +16147,29 @@ public:
     BasicThreadPool& operator=(const BasicThreadPool&) = delete;
     BasicThreadPool& operator=(BasicThreadPool&&)      = delete;
 
-    [[nodiscard]] std::string poolName() const noexcept { return _poolName; }
+    [[nodiscard]] std::string_view poolName() const noexcept { return _poolName; }
+    [[nodiscard]] TaskType         poolType() const noexcept { return _taskType; }
+    [[nodiscard]] uint32_t         minThreads() const noexcept { return _minThreads.load(std::memory_order_acquire); }
+    [[nodiscard]] uint32_t         maxThreads() const noexcept { return _maxThreads.load(std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numThreads() const noexcept { return std::atomic_load_explicit(&_numThreads, std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numTasksRunning() const noexcept { return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numTasksQueued() const { return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire); }
+    [[nodiscard]] std::size_t      numTasksRecycled() const { return _recycledTasks.size(); }
+    [[nodiscard]] bool             isInitialised() const { return _initialised.load(std::memory_order::acquire); }
+    void                           waitUntilInitialised() const { _initialised.wait(false); }
 
-    [[nodiscard]] uint32_t minThreads() const noexcept { return _minThreads; };
+    void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
+        if (minThreads == 0 || maxThreads == 0) {
+            throw std::invalid_argument("minThreads and maxThreads must be > 0");
+        }
+        if (minThreads > maxThreads) {
+            throw std::invalid_argument("minThreads must be <= maxThreads");
+        }
 
-    [[nodiscard]] uint32_t maxThreads() const noexcept { return _maxThreads; };
-
-    [[nodiscard]] std::size_t numThreads() const noexcept { return std::atomic_load_explicit(&_numThreads, std::memory_order_acquire); }
-
-    [[nodiscard]] std::size_t numTasksRunning() const noexcept { return std::atomic_load_explicit(&_numTasksRunning, std::memory_order_acquire); }
-
-    [[nodiscard]] std::size_t numTasksQueued() const { return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire); }
-
-    [[nodiscard]] std::size_t numTasksRecycled() const { return _recycledTasks.size(); }
-
-    [[nodiscard]] bool isInitialised() const { return _initialised.load(std::memory_order::acquire); }
-
-    void waitUntilInitialised() const { _initialised.wait(false); }
+        _minThreads.store(minThreads, std::memory_order_release);
+        _maxThreads.store(maxThreads, std::memory_order_release);
+        _condition.notify_all(); // Wake threads to adapt
+    }
 
     void requestShutdown() {
         _shutdown = true;
@@ -16174,8 +16180,6 @@ public:
     }
 
     [[nodiscard]] bool isShutdown() const { return _shutdown; }
-
-    //
 
     [[nodiscard]] std::vector<bool> getAffinityMask() const { return _affinityMask; }
 
@@ -16203,7 +16207,7 @@ public:
     void execute(Callable&& func, Args&&... args) {
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
-            if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
+            if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
                 throw std::invalid_argument(std::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
             }
         }
@@ -16215,7 +16219,7 @@ public:
             spinWait.spinOnce();
             spinWait.spinOnce();
             while (_taskQueue.size() > 0) {
-                if (const auto nThreads = numThreads(); nThreads <= numTasksRunning() && nThreads <= _maxThreads) {
+                if (const auto nThreads = numThreads(); nThreads <= numTasksRunning() && nThreads <= maxThreads()) {
                     createWorkerThread();
                 }
                 _condition.notify_one();
@@ -16230,7 +16234,7 @@ public:
     requires(!std::is_same_v<R, void>)
     [[nodiscard]] std::future<R> execute(Callable&& func, Args&&... funcArgs) {
         if constexpr (cpuID >= 0) {
-            if (cpuID >= _affinityMask.size() || (cpuID >= 0 && !_affinityMask[cpuID])) {
+            if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
                 throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
 #else
@@ -16290,7 +16294,7 @@ private:
         std::size_t       coreCount = 0;
         for (bool value : globalAffinityMask) {
             if (value) {
-                affinityMask.push_back(coreCount++ % _minThreads == threadID);
+                affinityMask.push_back(coreCount++ % minThreads() == threadID);
             } else {
                 affinityMask.push_back(false);
             }
@@ -16356,7 +16360,7 @@ private:
         std::unique_lock   lock(mutex);
         auto               lastUsed              = std::chrono::steady_clock::now();
         auto               timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
-        if (numThreads() >= _minThreads) {
+        if (numThreads() >= minThreads()) {
             std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
             _initialised.notify_all();
         }
@@ -16419,6 +16423,176 @@ private:
 inline std::atomic<uint64_t> BasicThreadPool::_globalPoolId = 0U;
 inline std::atomic<uint64_t> BasicThreadPool::_taskID       = 0U;
 static_assert(ThreadPool<BasicThreadPool>);
+
+inline constexpr std::string_view kDefaultCpuPoolId = "default_cpu";
+inline constexpr std::string_view kDefaultIoPoolId  = "default_io";
+
+struct TaskExecutor {
+    virtual ~TaskExecutor() = default;
+
+    virtual void execute(detail::move_only_function&& task) = 0;
+
+    [[nodiscard]] virtual TaskType         type() const noexcept   = 0;
+    [[nodiscard]] virtual std::string_view name() const noexcept   = 0;
+    [[nodiscard]] virtual std::string_view device() const noexcept = 0;
+
+    [[nodiscard]] virtual std::size_t numThreads() const       = 0;
+    [[nodiscard]] virtual std::size_t numTasksQueued() const   = 0;
+    [[nodiscard]] virtual std::size_t numTasksRunning() const  = 0;
+    [[nodiscard]] virtual std::size_t numTasksRecycled() const = 0;
+
+    virtual void                                        setThreadBounds(uint32_t min, uint32_t max) = 0;
+    [[nodiscard]] virtual std::pair<uint32_t, uint32_t> threadBounds() const                        = 0;
+    [[nodiscard]] virtual uint32_t                      minThreads() const                          = 0;
+    [[nodiscard]] virtual uint32_t                      maxThreads() const                          = 0;
+
+    virtual void               requestShutdown()  = 0;
+    [[nodiscard]] virtual bool isShutdown() const = 0;
+};
+
+class ThreadPoolWrapper : public TaskExecutor {
+    std::unique_ptr<BasicThreadPool> _pool;
+    std::string                      _device;
+
+public:
+    ThreadPoolWrapper(std::unique_ptr<BasicThreadPool> pool, std::string device) : _pool(std::move(pool)), _device(std::move(device)) {}
+
+    void execute(detail::move_only_function&& task) override { _pool->execute(std::move(task)); }
+
+    [[nodiscard]] std::string_view name() const noexcept override { return _pool->poolName(); }
+    [[nodiscard]] TaskType         type() const noexcept override { return _pool->poolType(); }
+    [[nodiscard]] std::string_view device() const noexcept override { return _device; }
+
+    [[nodiscard]] std::size_t numThreads() const override { return _pool->numThreads(); }
+    [[nodiscard]] std::size_t numTasksQueued() const override { return _pool->numTasksQueued(); }
+    [[nodiscard]] std::size_t numTasksRunning() const override { return _pool->numTasksRunning(); }
+    [[nodiscard]] std::size_t numTasksRecycled() const override { return _pool->numTasksRecycled(); }
+
+    void                                        setThreadBounds(uint32_t min, uint32_t max) override { _pool->setThreadBounds(min, max); }
+    [[nodiscard]] std::pair<uint32_t, uint32_t> threadBounds() const override { return {_pool->minThreads(), _pool->maxThreads()}; }
+    [[nodiscard]] uint32_t                      minThreads() const override { return _pool->minThreads(); }
+    [[nodiscard]] uint32_t                      maxThreads() const override { return _pool->maxThreads(); }
+
+    void               requestShutdown() override { _pool->requestShutdown(); }
+    [[nodiscard]] bool isShutdown() const override { return _pool->isShutdown(); }
+
+    [[nodiscard]] BasicThreadPool& impl() noexcept { return *_pool; }
+};
+
+/**
+ * <h2>Global GR runtime-selectable Thread Pool Manager (singleton).</h2>
+ *
+ * This class provides centralised access to shared and custom-named thread pools.
+ * Thread pools are registered with a string identifier and classified by their <code>TaskType</code>
+ * (e.g., CPU-bound or IO-bound). Pools can be accessed, replaced, listed, or extended with user-defined types
+ * that implement the <code>ThreadPoolInterface</code>.
+ *
+ * <br>
+ * It comes pre-initialised with two default pools:
+ * <ul>
+ *   <li> <code>"default_cpu"</code> &rarr; CPU-bound thread pool based on available hardware concurrency
+ *   <li> <code>"default_io"</code>  &rarr; IO-bound thread pool with up to 128 threads
+ * </ul>
+ *
+ * <h3>Usage</h3>
+ * <p>
+ * To retrieve a pool (thread-safe):
+ * </p>
+ * @code
+ * auto pool = gr::thread_pool::Manager::instance().get("default_cpu");
+ * pool->execute([] { std::print("executed in default_cpu\n"); });
+ * @endcode
+ *
+ * <p>
+ * To register a custom pool:
+ * </p>
+ * @code
+ * auto custom = std::make_unique<gr::thread_pool::BasicThreadPool>("custom", TaskType::CPU_BOUND, 1, 4);
+ * auto wrapper = std::make_shared<gr::thread_pool::ThreadPoolWrapper>(std::move(custom), TaskType::CPU_BOUND, "custom", "CustomDevice");
+ * gr::thread_pool::Manager::instance().registerPool("my_pool", std::move(wrapper));
+ * @endcode
+ *
+ * <p>
+ * To replace an existing pool (e.g. to update affinity or bounds):
+ * </p>
+ * @code
+ * auto updated = std::make_shared<gr::thread_pool::ThreadPoolWrapper>( ... );
+ * gr::thread_pool::Manager::instance().replacePool("default_cpu", std::move(updated));
+ * @endcode
+ *
+ * <h3>Thread safety and lifetime</h3>
+ * <ul>
+ *  <li> Internally, the registry uses <code>std::shared_ptr</code> to allow safe concurrent access and reference counting
+ *  <li> The manager’s <code>get()</code> returns a shared reference; pools remain valid while in use
+ *  <li> Registration and replacement are synchronised via <code>std::mutex</code>
+ * </ul>
+ *
+ * <h3>Helper methods</h3>
+ * <ul>
+ *  <li> <code>defaultCpuPool()</code> &mdash; returns the default CPU-bound pool
+ *  <li> <code>defaultIoPool()</code> &mdash; returns the default IO-bound pool
+ *  <li> <code>list()</code> &mdash; returns all currently registered pool names
+ * </ul>
+ *
+ * @see gr::thread_pool::BasicThreadPool
+ * @see gr::thread_pool::ThreadPoolInterface
+ */
+class Manager {
+    mutable std::mutex                                             _mutex;
+    std::unordered_map<std::string, std::shared_ptr<TaskExecutor>> _pools;
+
+    Manager() {
+#ifdef __EMSCRIPTEN__
+        const std::size_t maxConcurrency = std::max(4U, std::thread::hardware_concurrency());
+#else
+        const std::size_t maxConcurrency = std::thread::hardware_concurrency();
+#endif
+        const std::size_t maxThread = maxConcurrency <= 2UZ ? 2UZ : maxConcurrency - 2UZ;
+        auto              cpu       = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultCpuPoolId), TaskType::CPU_BOUND, maxThread, maxThread), "CPU");
+        auto              io        = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultIoPoolId), TaskType::IO_BOUND, 2U, std::numeric_limits<uint32_t>::max()), "CPU");
+        registerPool(std::string(kDefaultCpuPoolId), std::move(cpu));
+        registerPool(std::string(kDefaultIoPoolId), std::move(io));
+    }
+
+public:
+    static Manager& instance() {
+        static Manager singleton;
+        return singleton;
+    }
+
+    void registerPool(std::string name, std::shared_ptr<TaskExecutor> pool) {
+        std::scoped_lock lock(_mutex);
+        if (!_pools.emplace(std::move(name), std::move(pool)).second) {
+            throw std::invalid_argument(std::format("pool already registered with name: '{}'.", name));
+        }
+    }
+
+    void replacePool(std::string name, std::shared_ptr<TaskExecutor> pool) {
+        std::scoped_lock lock(_mutex);
+        _pools[std::move(name)] = std::move(pool);
+    }
+
+    [[nodiscard]] std::shared_ptr<TaskExecutor> get(std::string_view name) const {
+        std::scoped_lock lock(_mutex);
+        if (auto it = _pools.find(std::string{name}); it != _pools.end()) {
+            return it->second;
+        }
+        throw std::out_of_range(std::format("pool '{}' not found", name));
+    }
+
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultCpuPool() { return instance().get(kDefaultCpuPoolId); }
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultIoPool() { return instance().get(kDefaultIoPoolId); }
+
+    [[nodiscard]] std::vector<std::string> list() const {
+        std::scoped_lock         lock(_mutex);
+        std::vector<std::string> names;
+        names.reserve(_pools.size());
+        for (const auto& k : _pools | std::views::keys) {
+            names.push_back(k);
+        }
+        return names;
+    }
+};
 
 } // namespace gr::thread_pool
 
@@ -19019,7 +19193,6 @@ public:
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{work::Status::OK};
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool;
     alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{false};
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
@@ -19031,6 +19204,7 @@ public:
     using StrideValue                                                                                                                            = std::conditional_t<StrideControl::kIsConst, const gr::Size_t, gr::Size_t>;
     A<StrideValue, "stride", Doc<"samples between data processing. <N for overlap, >N for skip, =0 for back-to-back.">>       stride             = StrideControl::kStride;
     A<bool, "disconnect on done", Doc<"If no downstream blocks, declare itself 'DONE' and disconnect from upstream blocks.">> disconnect_on_done = true;
+    A<std::string, "compute domain", Doc<"compute domain/IO thread pool name">>                                               compute_domain     = gr::thread_pool::kDefaultIoPoolId;
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
@@ -19068,7 +19242,7 @@ public:
 
     A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
 
-    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, unique_name, name, meta_information);
+    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, meta_information);
 
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
@@ -19159,9 +19333,9 @@ public:
         emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::STOPPED));
     }
 
-    void init(std::shared_ptr<gr::Sequence> progress_, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool_) {
-        progress     = std::move(progress_);
-        ioThreadPool = std::move(ioThreadPool_);
+    void init(std::shared_ptr<gr::Sequence> progress_, std::string_view computeDomain = gr::thread_pool::kDefaultIoPoolId) {
+        progress       = std::move(progress_);
+        compute_domain = computeDomain;
 
         // Set names of port member variables
         // TODO: Refactor the library not to assign names to ports. The
@@ -20449,11 +20623,13 @@ public:
         bool expectedThreadState = false;
         if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
             if constexpr (useIoThread) { // use graph-provided ioThreadPool
-                if (!ioThreadPool) {
-                    emitErrorMessage("work(..)", "blockingIO with useIoThread - no ioThreadPool being set");
+                std::shared_ptr<thread_pool::TaskExecutor> executor = gr::thread_pool::Manager::instance().get(compute_domain);
+                if (!executor) {
+                    emitErrorMessage("work(..)", std::format("blockingIO with useIoThread - no ioThreadPool being set or '{}' is unknown", compute_domain));
                     return {requested_work, 0UZ, work::Status::ERROR};
                 }
-                ioThreadPool->execute([this]() {
+
+                executor->execute([this]() {
                     assert(lifecycle::isActive(this->state()));
 
                     lifecycle::State actualThreadState = this->state();
@@ -21295,7 +21471,7 @@ public:
     /**
      * @brief to be called by scheduler->graph to initialise block
      */
-    virtual void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) = 0;
+    virtual void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool) = 0;
 
     /**
      * @brief returns scheduling hint that invoking the work(...) function may block on IO or system-calls
@@ -21448,7 +21624,7 @@ public:
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
     ~BlockWrapper() override                           = default;
 
-    void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
+    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override { return blockRef().init(progress, ioThreadPool); }
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 
@@ -22277,11 +22453,9 @@ private:
 };
 
 class Graph : public gr::Block<Graph> {
-private:
-    std::shared_ptr<gr::Sequence>                     _progress     = std::make_shared<gr::Sequence>();
-    std::shared_ptr<gr::thread_pool::BasicThreadPool> _ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
-    std::vector<Edge>                                 _edges;
-    std::vector<std::unique_ptr<BlockModel>>          _blocks;
+    std::shared_ptr<gr::Sequence>            _progress = std::make_shared<gr::Sequence>();
+    std::vector<Edge>                        _edges;
+    std::vector<std::unique_ptr<BlockModel>> _blocks;
 
     gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
 
@@ -22427,10 +22601,10 @@ public:
         if (this == &other) {
             return *this;
         }
-        _progress     = std::move(other._progress);
-        _ioThreadPool = std::move(other._ioThreadPool);
-        _edges        = std::move(other._edges);
-        _blocks       = std::move(other._blocks);
+        compute_domain = std::move(other.compute_domain);
+        _progress      = std::move(other._progress);
+        _edges         = std::move(other._edges);
+        _blocks        = std::move(other._blocks);
 
         return *this;
     }
@@ -22450,7 +22624,7 @@ public:
 
     BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
         auto& newBlock = _blocks.emplace_back(std::move(block));
-        newBlock->init(_progress, _ioThreadPool);
+        newBlock->init(_progress, this->compute_domain);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
         return *newBlock.get();
     }
@@ -22461,7 +22635,7 @@ public:
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
         auto& newBlock    = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
         auto* rawBlockRef = static_cast<TBlock*>(newBlock->raw());
-        rawBlockRef->init(_progress, _ioThreadPool);
+        rawBlockRef->init(_progress);
         return *rawBlockRef;
     }
 

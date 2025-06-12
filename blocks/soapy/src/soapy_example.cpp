@@ -94,9 +94,8 @@ Default:
 
     Graph flow = createGraph(fileName1, fileName2, maxFileSize, sampleRate, rxCenterFrequency, bandwidth, rxGains);
 
-    auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 10UZ);
-    auto sched      = gr::scheduler::Simple<>{std::move(flow), threadPool};
-    auto retVal     = sched.runAndWait();
+    auto sched  = gr::scheduler::Simple<>{std::move(flow)};
+    auto retVal = sched.runAndWait();
     expect(retVal.has_value()) << std::format("scheduler execution error: {}", retVal.error());
 
     return 0;

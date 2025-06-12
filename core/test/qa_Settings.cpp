@@ -120,32 +120,32 @@ const boost::ut::suite SettingsTests = [] {
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->SettingsChangeRecorder->Sink flow graph
         auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
-        expect(eq(src.settings().defaultParameters().size(), 9UZ)); // 7 base + 2 derived
+        expect(eq(src.settings().defaultParameters().size(), 10UZ)); // 7 base + 2 derived
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
-        expect(eq(src.settings().getStored().value().size(), 9UZ));
+        expect(eq(src.settings().getStored().value().size(), 10UZ));
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
         expect(eq(src.sample_rate, 42.f)) << "check map constructor";
         expect(eq(src._nSamplesProduced, gr::Size_t(0))) << "default value";
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(eq(src.settings().autoUpdateParameters().size(), 3UL)); // 3 base + 0 derived
+        expect(eq(src.settings().autoUpdateParameters().size(), 4UL)); // 3 base + 0 derived
         expect(eq(src.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
 
         auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#1"}});
         auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#2"}});
-        expect(eq(block1.settings().defaultParameters().size(), 15UZ)); // 7 base + 6 derived
+        expect(eq(block1.settings().defaultParameters().size(), 16UZ));
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
-        expect(eq(block1.settings().getStored().value().size(), 15UZ));
+        expect(eq(block1.settings().getStored().value().size(), 16UZ));
         expect(eq(block1.name, "SettingsChangeRecorder#1"s));
         expect(eq(block1.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(eq(block1.settings().autoUpdateParameters().size(), 10UL)); // 2 base + 6 derived
+        expect(eq(block1.settings().autoUpdateParameters().size(), 11UL));
         expect(eq(block1.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
 
         auto& sink = testGraph.emplaceBlock<Sink<float>>();
-        expect(eq(sink.settings().defaultParameters().size(), 9UZ)); // 7 base + 2 derived
+        expect(eq(sink.settings().defaultParameters().size(), 10UZ)); // 8 base + 2 derived
         expect(eq(sink.settings().getNStoredParameters(), 1UZ));
-        expect(eq(sink.settings().getStored().value().size(), 9UZ));
+        expect(eq(sink.settings().getStored().value().size(), 10UZ));
         expect(eq(sink.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(eq(sink.settings().autoUpdateParameters().size(), 5UL)); // 3 base + 2 derived
+        expect(eq(sink.settings().autoUpdateParameters().size(), 6UL)); // 3 base + 2 derived
         expect(eq(sink.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
 
         // need to add 'n_samples_max' to forwarding list for the block to automatically forward it as the 'n_samples_max' tag is not part of the canonical 'gr::tag::kDefaultTags' list
@@ -157,7 +157,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(sink.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size() + 1UZ)); // + n_samples_max
 
         block1.context = "Test Context";
-        expect(eq(block1.settings().activeParameters().size(), 15UL)); // 7 base + 6 derived
+        expect(eq(block1.settings().activeParameters().size(), 16UL));
         expect(block1.settings().get(gr::tag::CONTEXT.shortKey()).has_value());
         expect(block1.settings().get({gr::tag::CONTEXT.shortKey()}).has_value());
         expect(not block1.settings().get({"test"}).has_value());
@@ -171,7 +171,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(block1.settings().get(keys1).empty());
         expect(block1.settings().get(keys2).empty());
         expect(block1.settings().get(keys3).empty());
-        expect(eq(block1.settings().get().size(), 15UL));
+        expect(eq(block1.settings().get().size(), 16UL));
 
         // set non-existent setting
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
@@ -207,8 +207,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(src.settings().activateContext() != std::nullopt);  // activateContext() fills staged parameters
         expect(eq(src.settings().stagedParameters().size(), 2UZ)); // "n_samples_max", sample_rate
 
-        auto                  thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2); // use custom pool to limit number of threads for emscripten
-        gr::scheduler::Simple sched{std::move(testGraph), thread_pool};
+        gr::scheduler::Simple sched{std::move(testGraph)};
         expect(sched.runAndWait().has_value());
 
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
@@ -261,13 +260,13 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 0UL));
             expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
-            block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
+            block.init(block.progress); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().getNStoredParameters(), 1UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
-            expect(eq(block.settings().autoUpdateParameters().size(), 11UL));
+            expect(eq(block.settings().autoUpdateParameters().size(), 12UL));
             expect(block.settings().activateContext() != std::nullopt);
             expect(eq(block.settings().stagedParameters().size(), 0UZ)); // same activeCtx, no changes
-            expect(eq(block.settings().get().size(), 15UL));             // all active settings
+            expect(eq(block.settings().get().size(), 16UL));             // all active settings
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
 
@@ -278,15 +277,15 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNAutoUpdateParameters(), 0UZ));
             expect(eq(block.settings().autoUpdateParameters().size(), 0UL));
             expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
-            block.init(block.progress, block.ioThreadPool); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
+            block.init(block.progress); // N.B. self-assign existing progress and thread-pool (just for unit-tests)
             expect(eq(block.settings().getNStoredParameters(), 1UZ));
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
-            expect(eq(block.settings().autoUpdateParameters().size(), 9UL)); // no "scaling_factor"
+            expect(eq(block.settings().autoUpdateParameters().size(), 10UL)); // no "scaling_factor"
             expect(eq(block.settings().autoUpdateParameters().contains("scaling_factor"), false));
             expect(block.settings().activateContext() != std::nullopt);
             expect(eq(block.settings().stagedParameters().size(), 0UZ)); // same activeCtx, no changes
             block.settings().updateActiveParameters();
-            expect(eq(block.settings().get().size(), 15UL));
+            expect(eq(block.settings().get().size(), 16UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -297,9 +296,9 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNStoredParameters(), 1UZ));              // store default parameters
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
-            expect(eq(block.settings().autoUpdateParameters().size(), 11UL)); // all isWritable settings (enable reflections)
+            expect(eq(block.settings().autoUpdateParameters().size(), 12UL)); // all isWritable settings (enable reflections)
             expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
-            expect(eq(block.settings().get().size(), 15UL));
+            expect(eq(block.settings().get().size(), 16UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
         };
@@ -310,9 +309,9 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().getNStoredParameters(), 1UZ)); // store default parameters
             expect(eq(block.settings().getNAutoUpdateParameters(), 1UZ));
             expect(eq(block.settings().stagedParameters().size(), 0UZ));
-            expect(eq(block.settings().autoUpdateParameters().size(), 10UL)); // "scaling_factor" removed from auto updates
+            expect(eq(block.settings().autoUpdateParameters().size(), 11UL)); // "scaling_factor" removed from auto updates
             expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
-            expect(eq(block.settings().get().size(), 15UL));
+            expect(eq(block.settings().get().size(), 16UL));
             expect(eq(block.scaling_factor, 2.f));
             expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
         };
@@ -324,7 +323,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // store default parameters
         expect(eq(block.settings().stagedParameters().size(), 0UZ));
         block.settings().updateActiveParameters();
-        expect(eq(block.settings().get().size(), 15UL));
+        expect(eq(block.settings().get().size(), 16UL));
         block._debug   = true;
         const auto val = block.settings().set({{"vector_setting", std::vector{42.f, 2.f, 3.f}}, {"string_vector_setting", std::vector<std::string>{"A", "B", "C"}}});
         expect(val.empty()) << "unable to stage settings";
@@ -356,11 +355,10 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "run-time type-erased node setter/getter"_test = [] {
-        auto progress     = std::make_shared<gr::Sequence>();
-        auto ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("test_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());
-        //
+        auto progress = std::make_shared<gr::Sequence>();
+
         auto wrapped1 = BlockWrapper<SettingsChangeRecorder<float>>();
-        wrapped1.init(progress, ioThreadPool);
+        wrapped1.init(progress);
         expect(eq(wrapped1.settings().getNStoredParameters(), 1UZ));
         wrapped1.setName("test_name");
         expect(eq(wrapped1.name(), "test_name"sv)) << "BlockModel wrapper name";
@@ -372,7 +370,7 @@ const boost::ut::suite SettingsTests = [] {
 
         // via constructor
         auto wrapped2 = BlockWrapper<SettingsChangeRecorder<float>>({{"name", "test_name"}});
-        wrapped2.init(progress, ioThreadPool);
+        wrapped2.init(progress);
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ));
         expect(wrapped2.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
@@ -428,7 +426,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block.name, "TestNameAlt"s));
         expect(eq(block.scaling_factor, 42.f));
         expect(not block._resetCalled);
-        expect(eq(block.settings().defaultParameters().size(), 15UZ));
+        expect(eq(block.settings().defaultParameters().size(), 16UZ));
         block.settings().resetDefaults();
         expect(eq(block.settings().getNStoredParameters(), 1UZ));
         expect(block._resetCalled);
@@ -445,12 +443,12 @@ const boost::ut::suite SettingsTests = [] {
 
         // test storeDefaults()
         const auto defaultParOld = block.settings().defaultParameters();
-        expect(eq(defaultParOld.size(), 15UZ));
+        expect(eq(defaultParOld.size(), 16UZ));
         expect(eq(std::get<std::string>(defaultParOld.at("name")), "TestName"s));
         expect(eq(std::get<float>(defaultParOld.at("scaling_factor")), 2.f));
         block.settings().storeDefaults();
         const auto defaultParNew = block.settings().defaultParameters();
-        expect(eq(defaultParNew.size(), 15UZ));
+        expect(eq(defaultParNew.size(), 16UZ));
         expect(eq(std::get<std::string>(defaultParNew.at("name")), "TestNameAlt"s));
         expect(eq(std::get<float>(defaultParNew.at("scaling_factor")), 42.f));
         expect(block.settings().set({{"name", "TestNameAlt2"}, {"scaling_factor", 43.f}}).empty()) << "successful set returns empty map\n";
@@ -855,12 +853,12 @@ const boost::ut::suite CtxSettingsTests = [] {
             expect(stored.contains("")) << block.name.value; // empty string is default context
             const auto& vec = stored.at("");
             expect(eq(vec.size(), 1UZ)) << block.name.value;            // no stored parameters were added via Tag
-            expect(eq(vec[0].second.size(), 13UZ)) << block.name.value; // always store all parameters
+            expect(eq(vec[0].second.size(), 14UZ)) << block.name.value; // always store all parameters
 
             expect(eq(std::get<float>(vec[0].second.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
 
             const auto& autoUpdate = block.settings().autoUpdateParameters();
-            expect(eq(autoUpdate.size(), 6UZ)) << block.name.value;
+            expect(eq(autoUpdate.size(), 7UZ)) << block.name.value;
             expect(eq(autoUpdate.contains("name"), false)) << block.name.value;
             expect(eq(autoUpdate.contains("n_samples_expected"), false)) << block.name.value;
             expect(eq(autoUpdate.contains("verbose_console"), false)) << block.name.value;

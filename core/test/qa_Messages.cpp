@@ -362,7 +362,7 @@ const boost::ut::suite MessagesTests = [] {
         "Block<T>-level active context tests"_test = [] {
             gr::MsgPortOut toBlock;
             TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
-            unitTestBlock.init(unitTestBlock.progress, unitTestBlock.ioThreadPool);
+            unitTestBlock.init(unitTestBlock.progress);
             gr::MsgPortIn fromBlock;
 
             expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
