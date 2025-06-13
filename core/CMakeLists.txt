@@ -57,11 +57,16 @@ configure_file("${PROJECT_SOURCE_DIR}/cmake/config.hpp.in"
                "${CMAKE_CURRENT_BINARY_DIR}/include/gnuradio-4.0/config.hpp" @ONLY)
 # TODO: install configure file... but not really meaningful for header only library, since compile flags are defined by
 # the user...
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/gnuradio-4.0/config.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 install(
   TARGETS gnuradio-core
-  EXPORT graphTargets
-  PUBLIC_HEADER DESTINATION include/)
+  EXPORT gnuradio4Targets
+  PUBLIC_HEADER DESTINATION include/gnuradio-4.0)
+
+# Just install the entire include directory
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 add_subdirectory(src)
 

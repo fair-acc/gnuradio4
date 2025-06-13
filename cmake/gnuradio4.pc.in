@@ -1,0 +1,13 @@
+# cmake/gnuradio4.pc.in
+
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: GNU Radio 4
+Description: Next-generation GNU Radio framework
+Version: @PROJECT_VERSION@
+
+Cflags: -I${includedir}
+Libs: -L${libdir} -lgnuradio-core

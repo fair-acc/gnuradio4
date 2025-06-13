@@ -293,6 +293,10 @@ if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
   target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
                              INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+
+  set(magic_enum_public_headers third_party/magic_enum/magic_enum.hpp third_party/magic_enum/magic_enum_utility.hpp)
+  set_target_properties(magic_enum PROPERTIES PUBLIC_HEADER "${magic_enum_public_headers}")
+  install(TARGETS magic_enum PUBLIC_HEADER DESTINATION include)
 endif()
 
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
@@ -350,6 +354,8 @@ endif()
 add_library(pmtv INTERFACE)
 target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
 target_link_libraries(pmtv INTERFACE)
+
+install(DIRECTORY ${pmt_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
@@ -543,6 +549,13 @@ if(ENABLE_TESTING
     EXCLUDE
     "$CMAKE_BUILD_DIR/*")
 endif()
+
+# Configure and install the pkg-config file TODO: This should become more granular - .pc for each in-tree module
+configure_file(cmake/gnuradio4.pc.in ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc @ONLY)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig # Standard location
+                                                                                                     # for .pc files
+)
 
 # print effective options
 message(STATUS "================================================")
