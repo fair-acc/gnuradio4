@@ -18,8 +18,8 @@ if(NOT EMSCRIPTEN)
 
   install(
     TARGETS gnuradio-plugin
-    EXPORT graphPluginTargets
-    PUBLIC_HEADER DESTINATION include/)
+    EXPORT gnuradio4PluginTargets
+    PUBLIC_HEADER DESTINATION include/gnuradio-4.0)
 endif()
 
 if(ENABLE_EXAMPLES)
