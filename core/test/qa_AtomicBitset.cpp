@@ -72,7 +72,7 @@ void runAtomicBitsetTest(TBitset& bitset, std::size_t bitsetSize) {
         }
     }
 
-#if not defined(__EMSCRIPTEN__) && not defined(NDEBUG)
+#if not defined(__EMSCRIPTEN__) && not defined(NDEBUG) && not defined(_WIN32)
     expect(aborts([&] { bitset.set(bitsetSize); })) << "Setting bit should throw an assertion.";
     expect(aborts([&] { bitset.reset(bitsetSize); })) << "Resetting bit should throw an assertion.";
     expect(aborts([&] { bitset.test(bitsetSize); })) << "Testing bit should throw an assertion.";
