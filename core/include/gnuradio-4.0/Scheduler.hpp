@@ -139,6 +139,9 @@ public:
 
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
+    [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return _graph.blocks(); }
+    [[nodiscard]] std::span<Edge>                        edges() noexcept { return _graph.edges(); }
+
     void connectBlockMessagePorts() {
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);

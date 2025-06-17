@@ -8,6 +8,7 @@
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <charconv>
+#include <type_traits>
 
 namespace gr {
 
@@ -158,7 +159,7 @@ protected:
             });
 
             if (it == what.end()) {
-                throw gr::exception(std::format("dynamicPortFromName([{}]) - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
+                throw gr::exception(std::format("dynamicPortFromName(), port count {} - Port {} not found in {}\n", what.size(), name, uniqueName()), location);
             }
 
             return std::get<gr::DynamicPort>(*it);
@@ -168,7 +169,7 @@ protected:
             std::size_t            index = -1UZ;
             auto [_, ec]                 = std::from_chars(indexString.data(), indexString.data() + indexString.size(), index);
             if (ec != std::errc()) {
-                throw gr::exception(std::format("dynamicPortFromName([{}]) - Invalid index {} specified, needs to be an integer", what.size(), indexString), location);
+                throw gr::exception(std::format("dynamicPortFromName(), port count {} - Port {} not found in {}\n", what.size(), name, indexString), location);
             }
 
             auto collectionIt = std::ranges::find_if(what, [&base](const DynamicPortOrCollection& portOrCollection) {
@@ -425,22 +426,6 @@ protected:
     T           _block;
     std::string _type_name = gr::meta::type_name<T>();
 
-    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
-    [[nodiscard]] constexpr auto& blockRef() noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
     void initMessagePorts() {
         msgIn  = std::addressof(_block.msgIn);
         msgOut = std::addressof(_block.msgOut);
@@ -488,7 +473,16 @@ protected:
 
 public:
     BlockWrapper() : BlockWrapper(gr::property_map()) {}
+
     explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
+        initMessagePorts();
+        _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
+        _dynamicPortsLoader.instance = this;
+    }
+
+    template<typename Arg, typename... Args>
+    requires(not std::is_same_v<std::remove_cvref_t<Arg>, gr::property_map> or sizeof...(Args) > 0)
+    explicit BlockWrapper(Arg&& arg, Args&&... args) : _block(std::forward<Arg>(arg), std::forward<Args>(args)...) {
         initMessagePorts();
         _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
         _dynamicPortsLoader.instance = this;
@@ -500,7 +494,11 @@ public:
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
     ~BlockWrapper() override                           = default;
 
-    void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override { return blockRef().init(progress, ioThreadPool); }
+    void init(std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::thread_pool::BasicThreadPool> ioThreadPool) override {
+        if constexpr (requires { blockRef().init(progress, ioThreadPool); }) {
+            return blockRef().init(progress, ioThreadPool);
+        }
+    }
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 
@@ -548,6 +546,22 @@ public:
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
+
+    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
+
+    [[nodiscard]] constexpr auto& blockRef() noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
 };
 
 } // namespace gr

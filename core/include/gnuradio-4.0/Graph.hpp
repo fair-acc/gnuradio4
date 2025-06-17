@@ -50,14 +50,22 @@ inline static constexpr std::int32_t defaultWeight   = 0;
 inline static const std::string      defaultEdgeName = "unnamed edge"; // Emscripten doesn't want constexpr strings
 } // namespace graph
 
-template<typename TSubGraph>
-class GraphWrapper : public BlockWrapper<TSubGraph> {
-private:
+template<typename TSelf, typename TSubGraph = TSelf>
+class GraphWrapper : public BlockWrapper<TSelf> {
+protected:
+    TSubGraph* _graph = nullptr;
+
     std::unordered_multimap<std::string, std::string> _exportedInputPortsForBlock;
     std::unordered_multimap<std::string, std::string> _exportedOutputPortsForBlock;
 
 public:
-    GraphWrapper() {
+    template<typename... Args>
+    GraphWrapper(Args&&... args) : BlockWrapper<TSelf>(std::forward<Args>(args)...) {
+        if constexpr (std::is_same_v<TSelf, TSubGraph>) {
+            // Wrapped block is the graph weare wrapping
+            _graph = std::addressof(this->_block);
+        }
+
         // We need to make sure nobody touches our dynamic ports
         // as this class will handle them
         this->_dynamicPortsLoader.instance = nullptr;
@@ -85,6 +93,7 @@ public:
         auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName);
         auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
+
         if (exportFlag) {
             bookkeepingCollection.emplace(uniqueBlockName, portName);
             portCollection.push_back(port.weakRef());
@@ -109,14 +118,11 @@ public:
         updateMetaInformation();
     }
 
-    auto& blockRef() { return BlockWrapper<TSubGraph>::blockRef(); }
-    auto& blockRef() const { return BlockWrapper<TSubGraph>::blockRef(); }
-
     const std::unordered_multimap<std::string, std::string>& exportedInputPortsForBlock() const { return _exportedInputPortsForBlock; }
     const std::unordered_multimap<std::string, std::string>& exportedOutputPortsForBlock() const { return _exportedOutputPortsForBlock; }
 
     BlockModel& findBlockWithUniqueName(std::string uniqueBlockName) {
-        for (const auto& block : this->blocks()) {
+        for (const auto& block : _graph->blocks()) {
             if (std::string(block->uniqueName()) == uniqueBlockName) {
                 return *block;
             }
@@ -125,13 +131,15 @@ public:
     }
 
     BlockModel& findFirstBlockWithName(std::string blockName) {
-        for (const auto& block : this->blocks()) {
+        for (const auto& block : _graph->blocks()) {
             if (std::string(block->name()) == blockName) {
                 return *block;
             }
         }
         throw Error(std::format("Block {} not found in {}", blockName, this->uniqueName()));
     }
+
+    TSubGraph& graph() { return *_graph; }
 
 private:
     DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
@@ -156,7 +164,7 @@ private:
     }
 
     void updateMetaInformation() {
-        auto& info = BlockWrapper<TSubGraph>::metaInformation();
+        auto& info = BlockWrapper<TSelf>::metaInformation();
 
         auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
             std::string              previousUniqueName;
@@ -184,7 +192,7 @@ private:
     }
 };
 
-class Graph : public gr::Block<Graph> {
+class Graph final : public gr::Block<Graph> {
 private:
     std::shared_ptr<gr::Sequence>                     _progress     = std::make_shared<gr::Sequence>();
     std::shared_ptr<gr::thread_pool::BasicThreadPool> _ioThreadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("graph_thread_pool", gr::thread_pool::TaskType::IO_BOUND, 2UZ, std::numeric_limits<uint32_t>::max());

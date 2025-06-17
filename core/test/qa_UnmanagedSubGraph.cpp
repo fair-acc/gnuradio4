@@ -22,28 +22,34 @@ using namespace gr::message;
 using namespace gr::testing;
 
 template<typename T>
-struct DemoSubGraph : public gr::Graph {
-public:
-    gr::testing::Copy<T>* pass1 = nullptr;
-    gr::testing::Copy<T>* pass2 = nullptr;
+struct DemoSubGraphResult {
+    using Wrapper = GraphWrapper<gr::Graph>;
+    DemoSubGraphResult() : _graph(std::make_unique<Wrapper>()), wrapper(static_cast<Wrapper*>(_graph.get())) {}
 
-    DemoSubGraph(const gr::property_map& init) : gr::Graph(init) {
-        pass1 = std::addressof(emplaceBlock<gr::testing::Copy<T>>());
-        pass2 = std::addressof(emplaceBlock<gr::testing::Copy<T>>());
+    std::unique_ptr<gr::BlockModel> _graph;
+    std::unique_ptr<gr::BlockModel> graph() && { return std::move(_graph); }
 
-        expect(eq(ConnectionResult::SUCCESS, gr::Graph::connect(*pass1, PortDefinition("out"), *pass2, PortDefinition("in"))));
-    }
+    Wrapper*                                wrapper          = nullptr;
+    gr::testing::Copy<T>*                   pass1            = nullptr;
+    gr::testing::Copy<T>*                   pass2            = nullptr;
+    gr::testing::SettingsChangeRecorder<T>* settingsRecorder = nullptr;
 };
 
 template<typename T>
-struct DemoSubGraphWithSettings : public DemoSubGraph<T> {
-public:
-    gr::testing::SettingsChangeRecorder<T>* settingsRecorder = nullptr;
+DemoSubGraphResult<T> createDemoSubGraph() {
+    DemoSubGraphResult<T> result;
+    result.pass1 = std::addressof(result.wrapper->graph().template emplaceBlock<gr::testing::Copy<T>>());
+    result.pass2 = std::addressof(result.wrapper->graph().template emplaceBlock<gr::testing::Copy<T>>());
+    expect(eq(ConnectionResult::SUCCESS, result.wrapper->graph().connect(*result.pass1, PortDefinition("out"), *result.pass2, PortDefinition("in"))));
+    return result;
+}
 
-    DemoSubGraphWithSettings(const gr::property_map& init) : DemoSubGraph<T>(init) { //
-        settingsRecorder = std::addressof(gr::Graph::emplaceBlock<gr::testing::SettingsChangeRecorder<T>>());
-    }
-};
+template<typename T>
+DemoSubGraphResult<T> createDemoSubGraphWithSettings() {
+    auto result             = createDemoSubGraph<T>();
+    result.settingsRecorder = std::addressof(result.wrapper->graph().template emplaceBlock<gr::testing::SettingsChangeRecorder<T>>());
+    return result;
+}
 
 const boost::ut::suite ExportPortsTests_ = [] {
     "Test if port export messages work"_test = [] {
@@ -60,9 +66,8 @@ const boost::ut::suite ExportPortsTests_ = [] {
         auto& sink   = graph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
-        using SubGraphType   = GraphWrapper<DemoSubGraph<float>>;
-        auto& subGraph       = graph.addBlock(std::make_unique<SubGraphType>());
-        auto* subGraphDirect = dynamic_cast<SubGraphType*>(&subGraph);
+        auto demo = createDemoSubGraph<float>();
+        graph.addBlock(std::move(demo).graph());
 
         // Connecting the message ports
         gr::MsgPortOut toScheduler;
@@ -73,10 +78,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
         std::expected<void, Error> schedulerRet;
         auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
 
-        sendMessage<Set>(toScheduler, subGraph.uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass2->unique_name}, {"portDirection"s, "output"}, {"portName"s, "out"}, {"exportFlag"s, true}});
-        sendMessage<Set>(toScheduler, subGraph.uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass1->unique_name}, {"portDirection"s, "input"}, {"portName"s, "in"}, {"exportFlag"s, true}});
+        sendMessage<Set>(toScheduler, demo.wrapper->uniqueName(), graph::property::kSubgraphExportPort, //
+            property_map{{"uniqueBlockName"s, demo.pass2->unique_name}, {"portDirection"s, "output"}, {"portName"s, "out"}, {"exportFlag"s, true}});
+        sendMessage<Set>(toScheduler, demo.wrapper->uniqueName(), graph::property::kSubgraphExportPort, //
+            property_map{{"uniqueBlockName"s, demo.pass1->unique_name}, {"portDirection"s, "input"}, {"portName"s, "in"}, {"exportFlag"s, true}});
         scheduler.processScheduledMessages();
 
         std::thread schedulerThread1(runScheduler);
@@ -98,8 +103,8 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
         // Make connections
-        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph.uniqueName()), "in", scheduler.unique_name);
-        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, std::string(subGraph.uniqueName()), "out", sink.unique_name, "in", scheduler.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(demo.wrapper->uniqueName()), "in", scheduler.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, std::string(demo.wrapper->uniqueName()), "out", sink.unique_name, "in", scheduler.unique_name);
 
         expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
@@ -130,10 +135,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
 
             for (const auto& [index, edge_] : edges) {
                 const auto& edge = std::get<property_map>(edge_);
-                if (std::get<std::string>(edge.at("destinationBlock")) == subGraph.uniqueName()) {
+                if (std::get<std::string>(edge.at("destinationBlock")) == demo.wrapper->uniqueName()) {
                     subGraphInConnections++;
                 }
-                if (std::get<std::string>(edge.at("sourceBlock")) == subGraph.uniqueName()) {
+                if (std::get<std::string>(edge.at("sourceBlock")) == demo.wrapper->uniqueName()) {
                     subGraphOutConnections++;
                 }
             }
@@ -141,7 +146,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
             expect(eq(subGraphOutConnections, 1UZ));
 
             // Check subgraph topology
-            const auto& subGraphData     = std::get<property_map>(children.at(std::string(subGraph.uniqueName())));
+            const auto& subGraphData     = std::get<property_map>(children.at(std::string(demo.wrapper->uniqueName())));
             const auto& subGraphChildren = std::get<property_map>(subGraphData.at("children"s));
             const auto& subGraphEdges    = std::get<property_map>(subGraphData.at("edges"s));
             expect(eq(subGraphChildren.size(), 2UZ));
@@ -170,21 +175,19 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         using enum gr::message::Command;
 
         gr::Graph graph;
-        // auto&     source = graph.emplaceBlock<SlowSource<float>>({{"n_samples_max", 32U}});
-        auto& source = graph.emplaceBlock<SlowSource<float>>();
-        auto& sink   = graph.emplaceBlock<CountingSink<float>>();
+        auto&     source = graph.emplaceBlock<SlowSource<float>>();
+        auto&     sink   = graph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
-        using SubGraphType   = GraphWrapper<DemoSubGraph<float>>;
-        auto& subGraph       = graph.addBlock(std::make_unique<SubGraphType>());
-        auto* subGraphDirect = dynamic_cast<SubGraphType*>(&subGraph);
-        subGraphDirect->exportPort(true, subGraphDirect->blockRef().pass1->unique_name, PortDirection::INPUT, "in");
-        subGraphDirect->exportPort(true, subGraphDirect->blockRef().pass2->unique_name, PortDirection::OUTPUT, "out");
+        auto demo = createDemoSubGraph<float>();
+        graph.addBlock(std::move(demo).graph());
+        demo.wrapper->exportPort(true, demo.pass1->unique_name, PortDirection::INPUT, "in");
+        demo.wrapper->exportPort(true, demo.pass2->unique_name, PortDirection::OUTPUT, "out");
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(source, PortDefinition("out"), subGraph, PortDefinition("in"))));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(subGraph, PortDefinition("out"), sink, PortDefinition("in"))));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(source, PortDefinition("out"), demo.wrapper->graph(), PortDefinition("in"))));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(demo.wrapper->graph(), PortDefinition("out"), sink, PortDefinition("in"))));
         expect(eq(graph.edges().size(), 2UZ));
-        expect(eq(subGraphDirect->blockRef().edges().size(), 1UZ));
+        expect(eq(demo.wrapper->blockRef().edges().size(), 1UZ));
 
         gr::scheduler::Simple scheduler{std::move(graph)};
 
@@ -201,8 +204,8 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         expect(source.state() == lifecycle::State::RUNNING);
         expect(sink.state() == lifecycle::State::RUNNING);
-        expect(subGraphDirect->blockRef().pass1->state() == lifecycle::State::RUNNING);
-        expect(subGraphDirect->blockRef().pass2->state() == lifecycle::State::RUNNING);
+        expect(demo.pass1->state() == lifecycle::State::RUNNING);
+        expect(demo.pass2->state() == lifecycle::State::RUNNING);
 
         // Stopping scheduler
         scheduler.requestStop();
@@ -235,9 +238,8 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         [[maybe_unused]] auto& sink   = graph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
-        using SubGraphType   = GraphWrapper<DemoSubGraphWithSettings<float>>;
-        auto& subGraph       = graph.addBlock(std::make_unique<SubGraphType>());
-        auto* subGraphDirect = dynamic_cast<SubGraphType*>(&subGraph);
+        auto demo = createDemoSubGraphWithSettings<float>();
+        graph.addBlock(std::move(demo).graph());
 
         // Connecting the message ports
         gr::MsgPortOut toScheduler;
@@ -256,7 +258,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
 
         // Sending messages to blocks in the subgraph
-        sendMessage<Set>(toScheduler, subGraphDirect->blockRef().settingsRecorder->unique_name /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"scaling_factor", 42.0f}} /* data  */);
+        sendMessage<Set>(toScheduler, demo.settingsRecorder->unique_name /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"scaling_factor", 42.0f}} /* data  */);
 
         // Stopping scheduler
         scheduler.requestStop();
@@ -265,8 +267,8 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
 
-        auto applyResult = subGraphDirect->blockRef().settingsRecorder->settings().applyStagedParameters();
-        expect(eq(subGraphDirect->blockRef().settingsRecorder->scaling_factor, 42.0f)) << "settings didn't change";
+        auto applyResult = demo.settingsRecorder->settings().applyStagedParameters();
+        expect(eq(demo.settingsRecorder->scaling_factor, 42.0f)) << "settings didn't change";
 
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
