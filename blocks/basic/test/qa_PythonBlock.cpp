@@ -73,7 +73,7 @@ def process_bulk(ins, outs):
 )";
 
         PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
-        myBlock.init(myBlock.progress, myBlock.ioThreadPool); // needed for unit-test only when executed outside a Scheduler/Graph
+        myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         int                                        count = 0;
         std::vector<std::int32_t>                  data1 = {1, 2, 3};
@@ -156,7 +156,7 @@ def process_bulk(ins, outs):
 )";
 
         PythonBlock<float> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
-        myBlock.init(myBlock.progress, myBlock.ioThreadPool); // needed for unit-test only when executed outside a Scheduler/Graph
+        myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         std::vector<float>                  data1 = {1, 2, 3};
         std::vector<float>                  data2 = {4, 5, 6};
