@@ -77,6 +77,7 @@ class SchedulerBase : public Block<Derived> {
     friend class lifecycle::StateMachine<Derived>;
     using JobLists     = std::shared_ptr<std::vector<std::vector<BlockModel*>>>;
     using TaskExecutor = gr::thread_pool::TaskExecutor;
+    using enum block::Category;
 
 protected:
     gr::Graph                           _graph;
@@ -101,29 +102,6 @@ protected:
     bool                     _messagePortsConnected = false;
 
     std::atomic_flag _processingScheduledMessages;
-
-    template<typename Fn>
-    void forAllUnmanagedBlocks(Fn&& function) {
-        auto doForNestedBlocks = [&function](auto& doForNestedBlocks_, auto& parent) -> void {
-            const auto& blocks = [&parent] -> std::span<std::unique_ptr<BlockModel>> {
-                if constexpr (requires { parent.blocks(); }) {
-                    return parent.blocks();
-                } else {
-                    return parent->blocks();
-                }
-                // Silence warnings
-                return {};
-            }();
-            for (auto& block : blocks) {
-                function(block);
-
-                if (block->blockCategory() == block::Category::TransparentBlockGroup) {
-                    doForNestedBlocks_(doForNestedBlocks_, block);
-                }
-            }
-        };
-        doForNestedBlocks(doForNestedBlocks, _graph);
-    }
 
     void registerPropertyCallbacks() noexcept {
         this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
@@ -192,7 +170,7 @@ public:
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
-        forAllUnmanagedBlocks([this, &toSchedulerBuffer](auto& block) {
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this, &toSchedulerBuffer](auto& block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block->msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
             }
@@ -237,7 +215,7 @@ public:
         // Process messages in the graph
         _graph.processScheduledMessages();
         if (_nRunningJobs->value() == 0UZ) {
-            forAllUnmanagedBlocks([](auto& block) { block->processScheduledMessages(); });
+            graph::forAllBlocks<TransparentBlockGroup>(_graph, [](auto& block) { block->processScheduledMessages(); });
         }
 
         ReaderSpanLike auto messagesFromChildren = _fromChildMessagePort.streamReader().get();
@@ -318,7 +296,7 @@ public:
 protected:
     void disconnectAllEdges() {
         _graph.disconnectAllEdges();
-        forAllUnmanagedBlocks([&](auto& block) {
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [&](auto& block) {
             if (block->blockCategory() == block::Category::TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 graph->blockRef().disconnectAllEdges();
@@ -328,7 +306,7 @@ protected:
 
     bool connectPendingEdges() {
         bool result = _graph.connectPendingEdges();
-        this->forAllUnmanagedBlocks([&](auto& block) {
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [&](auto& block) {
             if (block->blockCategory() == block::Category::TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 result      = result && graph->blockRef().connectPendingEdges();
@@ -365,7 +343,7 @@ protected:
 
     void reset() {
         _executionOrder->clear();
-        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
     }
 
@@ -378,7 +356,7 @@ protected:
         }
 
         std::lock_guard lock(_executionOrderMutex);
-        forAllUnmanagedBlocks([this](auto& block) { //
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) { //
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
         });
 
@@ -528,7 +506,7 @@ protected:
     }
 
     void stop() {
-        forAllUnmanagedBlocks([this](auto& block) {
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) {
             this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::STOPPED));
@@ -539,7 +517,7 @@ protected:
     }
 
     void pause() {
-        forAllUnmanagedBlocks([this](auto& block) {
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) {
             this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_PAUSE));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::PAUSED));
@@ -553,7 +531,7 @@ protected:
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
-        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
+        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
     }
 
     std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
@@ -904,10 +882,10 @@ private:
 
         // generate job list
         std::size_t nBlocks = 0UZ;
-        this->forAllUnmanagedBlocks([&nBlocks](auto&& /*block*/) { nBlocks++; });
+        graph::forAllBlocks<block::Category::TransparentBlockGroup>(this->_graph, [&nBlocks](auto&& /*block*/) { nBlocks++; });
         std::vector<BlockModel*> allBlocks;
         allBlocks.reserve(nBlocks);
-        this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
+        graph::forAllBlocks<block::Category::TransparentBlockGroup>(this->_graph, [&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
 
         std::size_t n_batches = 1UZ;
         switch (base_t::executionPolicy()) {
