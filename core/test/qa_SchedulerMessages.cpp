@@ -25,13 +25,23 @@ TestContext* context = new TestContext(paths{}, // plugin paths
     gr::blocklib::initGrTestingBlocks);
 
 class TestScheduler {
+    using TScheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>;
+    std::expected<void, gr::Error> schedulerRet_;
+    std::thread                    schedulerThread_;
+
+    gr::Graph& addSourceSink(gr::Graph& graph) const noexcept {
+        graph.emplaceBlock<gr::testing::SlowSource<float>>();
+        graph.emplaceBlock<gr::testing::CountingSink<float>>();
+        return graph;
+    }
+
 public:
-    TestScheduler(gr::Graph graph) : scheduler_(std::move(graph)) {
+    TScheduler     scheduler_;
+    gr::MsgPortOut toScheduler;
+    gr::MsgPortIn  fromScheduler;
+
+    TestScheduler(gr::Graph graph) : scheduler_(std::move(addSourceSink(graph))) {
         using namespace gr::testing;
-
-        scheduler_.graph().emplaceBlock<gr::testing::SlowSource<float>>();
-        scheduler_.graph().emplaceBlock<gr::testing::CountingSink<float>>();
-
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler_.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler_.msgOut.connect(fromScheduler)));
 
@@ -67,15 +77,6 @@ public:
     auto& msgOut() { return scheduler_.msgOut; }
 
     auto& graph() { return scheduler_.graph(); }
-
-    gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded> scheduler_;
-
-    gr::MsgPortOut toScheduler;
-    gr::MsgPortIn  fromScheduler;
-
-private:
-    std::expected<void, gr::Error> schedulerRet_;
-    std::thread                    schedulerThread_;
 };
 
 const boost::ut::suite TopologyGraphTests = [] {
@@ -188,18 +189,18 @@ const boost::ut::suite TopologyGraphTests = [] {
     };
 
     "Block removal tests"_test = [] {
-        TestScheduler scheduler(gr::Graph(context->loader));
+        gr::Graph graph = gr::Graph(context->loader);
+        graph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto& temporaryBlock = graph.emplaceBlock("gr::testing::Copy<float32>", {});
 
-        auto& testGraph = scheduler.graph();
-
-        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
-        expect(eq(testGraph.blocks().size(), 3UZ));
+        TestScheduler scheduler(std::move(graph));
+        const auto&   testGraph = scheduler.graph();
+        expect(eq(testGraph.blocks().size(), 4UZ));
         // expect(eq(getNReplyMessages(fromScheduler), 1UZ)); // emplaceBlock emits message
         consumeAllReplyMessages(scheduler.fromScheduler);
         expect(eq(getNReplyMessages(scheduler.fromScheduler), 0UZ)); // all messages are consumed
 
         "Remove a known block"_test = [&] {
-            auto& temporaryBlock = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
             expect(eq(testGraph.blocks().size(), 4UZ));
             // expect(eq(getNReplyMessages(fromScheduler), 1UZ)); // emplaceBlock emits message
             consumeAllReplyMessages(scheduler.fromScheduler);
@@ -232,15 +233,14 @@ const boost::ut::suite TopologyGraphTests = [] {
     };
 
     "Block replacement tests"_test = [] {
-        gr::Graph testGraph(context->loader);
+        gr::Graph graph(context->loader);
 
-        auto& block = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
-        expect(eq(testGraph.blocks().size(), 1UZ));
+        auto& block = graph.emplaceBlock("gr::testing::Copy<float32>", {});
+        expect(eq(graph.blocks().size(), 1UZ));
+        auto& temporaryBlock = graph.emplaceBlock("gr::testing::Copy<float32>", {});
 
-        TestScheduler scheduler(std::move(testGraph));
-
+        TestScheduler scheduler(std::move(graph));
         "Replace a known block"_test = [&] {
-            auto& temporaryBlock = scheduler.graph().emplaceBlock("gr::testing::Copy<float32>", {});
             expect(eq(scheduler.graph().blocks().size(), 4UZ));
 
             sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kReplaceBlock /* endpoint */, //
@@ -449,15 +449,15 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     using namespace gr::testing;
     using enum gr::message::Command;
 
-    gr::scheduler::Simple scheduler{gr::Graph(context->loader)};
+    gr::Graph graph  = gr::Graph(context->loader);
+    auto&     source = graph.emplaceBlock<SlowSource<float>>();
+    auto&     sink   = graph.emplaceBlock<CountingSink<float>>();
+    expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(source).to<"in">(sink)));
+    expect(eq(graph.edges().size(), 1UZ)) << "edge registered with connect";
 
-    auto& source = scheduler.graph().emplaceBlock<SlowSource<float>>();
-    auto& sink   = scheduler.graph().emplaceBlock<CountingSink<float>>();
-    expect(eq(ConnectionResult::SUCCESS, scheduler.graph().connect<"out">(source).to<"in">(sink)));
-    expect(eq(scheduler.graph().edges().size(), 1UZ)) << "edge registered with connect";
-
-    gr::MsgPortOut toScheduler;
-    gr::MsgPortIn  fromScheduler;
+    gr::scheduler::Simple scheduler(std::move(graph));
+    gr::MsgPortOut        toScheduler;
+    gr::MsgPortIn         fromScheduler;
     expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
     expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
