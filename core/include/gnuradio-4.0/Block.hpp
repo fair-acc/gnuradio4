@@ -209,6 +209,7 @@ inline static const char* kSettingsContexts = "SettingsContexts"; ///< retrieve/
 
 namespace block {
 enum class Category {
+    All,                   ///< all Blocks
     NormalBlock,           ///< Block that does not contain children blocks
     TransparentBlockGroup, ///< Block with children blocks which do not have a dedicated scheduler
     ScheduledBlockGroup    ///< Block with children that have a dedicated scheduler
