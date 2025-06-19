@@ -12,6 +12,13 @@
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
+#ifdef _WIN32
+[[maybe_unused]] const auto _ = [] {
+    SetConsoleOutputCP(CP_UTF8);
+    return 0;
+}();
+#endif
+
 template<gr::filter::ResponseType responseType, std::floating_point T>
 [[nodiscard]] std::vector<T> calculateFrequencyResponse(const std::vector<T>& frequencies, const gr::filter::iir::PoleZeroLocations& value) {
     using namespace gr::filter;

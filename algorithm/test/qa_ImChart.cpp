@@ -7,6 +7,13 @@
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
 
+#ifdef _WIN32
+[[maybe_unused]] const auto _ = [] {
+    SetConsoleOutputCP(CP_UTF8);
+    return 0;
+}();
+#endif
+
 const boost::ut::suite<"ImChart"> windowTests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;

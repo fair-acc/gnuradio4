@@ -7,6 +7,13 @@
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 
+#ifdef _WIN32
+[[maybe_unused]] const auto _ = [] {
+    SetConsoleOutputCP(CP_UTF8);
+    return 0;
+}();
+#endif
+
 namespace {
 
 template<typename T>

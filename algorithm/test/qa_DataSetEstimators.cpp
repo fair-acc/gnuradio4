@@ -9,6 +9,13 @@
 #include <gnuradio-4.0/algorithm/dataset/DataSetMath.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetTestFunctions.hpp>
 
+#ifdef _WIN32
+[[maybe_unused]] const auto _ = [] {
+    SetConsoleOutputCP(CP_UTF8);
+    return 0;
+}();
+#endif
+
 namespace test::detail {
 
 template<class TLhs, class TRhs, class TEpsilon>
