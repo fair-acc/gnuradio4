@@ -187,12 +187,12 @@ private:
 struct Graph : public gr::Block<Graph> {
     std::shared_ptr<gr::Sequence>            _progress = std::make_shared<gr::Sequence>();
     std::vector<Edge>                        _edges;
-    std::vector<std::unique_ptr<BlockModel>> _blocks;
+    std::vector<std::shared_ptr<BlockModel>> _blocks;
 
     gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
 
     template<typename TBlock>
-    std::unique_ptr<BlockModel>& findBlock(TBlock& what) {
+    std::shared_ptr<BlockModel>& findBlock(TBlock& what) {
         static_assert(!std::is_pointer_v<std::remove_cvref_t<TBlock>>);
         auto it = [&, this] {
             if constexpr (std::is_same_v<TBlock, BlockModel>) {
@@ -341,8 +341,8 @@ public:
         return *this;
     }
 
-    [[nodiscard]] std::span<const std::unique_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
-    [[nodiscard]] std::span<std::unique_ptr<BlockModel>>       blocks() noexcept { return {_blocks}; }
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return {_blocks}; }
     [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return {_edges}; }
     [[nodiscard]] std::span<Edge>                              edges() noexcept { return {_edges}; }
 
@@ -356,8 +356,8 @@ public:
      */
     [[nodiscard]] const Sequence& progress() const noexcept { return *_progress.get(); }
 
-    BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
-        auto& newBlock = _blocks.emplace_back(std::move(block));
+    BlockModel& addBlock(std::shared_ptr<BlockModel> block) {
+        auto& newBlock = _blocks.emplace_back(block);
         newBlock->init(_progress, this->compute_domain);
         // TODO: Should we connectChildMessagePorts for these blocks as well?
         return *newBlock.get();
@@ -367,7 +367,7 @@ public:
     requires std::is_constructible_v<TBlock, property_map>
     auto& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto& newBlock    = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
+        auto& newBlock    = _blocks.emplace_back(std::make_shared<BlockWrapper<TBlock>>(std::move(initialSettings)));
         auto* rawBlockRef = static_cast<TBlock*>(newBlock->raw());
         rawBlockRef->init(_progress);
         return *rawBlockRef;
@@ -375,7 +375,7 @@ public:
 
     [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings) {
         if (auto block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
-            auto& newBlock = addBlock(std::move(block_load));
+            auto& newBlock = addBlock(block_load);
             return newBlock;
         }
         throw gr::exception(std::format("Can not create block {}", type));
@@ -492,7 +492,7 @@ public:
         return {reply};
     }
 
-    std::unique_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
+    std::shared_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
 
         if (it == _blocks.end()) {
@@ -503,13 +503,13 @@ public:
             return std::addressof(edge.sourceBlock()) == it->get() || std::addressof(edge.destinationBlock()) == it->get();
         });
 
-        std::unique_ptr<BlockModel> removedBlock = std::move(*it);
+        std::shared_ptr<BlockModel> removedBlock = std::move(*it);
         _blocks.erase(it);
 
         return removedBlock;
     }
 
-    std::pair<std::unique_ptr<BlockModel>, BlockModel*> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
+    std::pair<std::shared_ptr<BlockModel>, BlockModel*> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
             throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
@@ -521,7 +521,7 @@ public:
             throw gr::exception(std::format("Can not create block {}", type));
         }
 
-        addBlock(std::move(newBlock));
+        addBlock(newBlock);
 
         for (auto& edge : _edges) {
             if (edge._sourceBlock == it->get()) {
@@ -533,7 +533,7 @@ public:
             }
         }
 
-        std::unique_ptr<BlockModel> oldBlock = std::move(*it);
+        std::shared_ptr<BlockModel> oldBlock = std::move(*it);
         _blocks.erase(it);
 
         return {std::move(oldBlock), newBlockRaw};
@@ -805,6 +805,97 @@ public:
 static_assert(BlockLike<Graph>);
 
 /*******************************************************************************************************/
+/**************************** Graph helper functions ***************************************************/
+/*******************************************************************************************************/
+
+namespace graph {
+
+template<block::Category traverseCategory, typename Fn>
+void forAllBlocks(const gr::Graph& root, Fn&& function, block::Category filterCallable = block::Category::All) {
+    using enum block::Category;
+    auto doForNestedBlocks = [&function, &filterCallable](auto& parent, auto& doForNestedBlocks_) -> void {
+        const auto& blocks = [&parent]() -> decltype(auto) /* returns -> std::span<[const] std::unique_ptr<BlockModel>> */ {
+            if constexpr (requires { parent.blocks(); }) {
+                return parent.blocks();
+            } else {
+                return parent->blocks();
+            }
+        }();
+
+        for (auto& block : blocks) {
+            const auto blockCat = block->blockCategory();
+            if (filterCallable == All || blockCat == filterCallable) {
+                function(block);
+            }
+
+            const bool isSubgraph = blockCat == TransparentBlockGroup || blockCat == ScheduledBlockGroup;
+            if constexpr (traverseCategory == All) {
+                if (isSubgraph) {
+                    doForNestedBlocks_(block, doForNestedBlocks_);
+                }
+            } else if (blockCat == traverseCategory) {
+                doForNestedBlocks_(block, doForNestedBlocks_);
+            }
+        }
+    };
+    doForNestedBlocks(root, doForNestedBlocks);
+}
+
+template<gr::block::Category category = gr::block::Category::TransparentBlockGroup>
+gr::Graph flatten(const gr::Graph& root) {
+    gr::Graph                                 flat;
+    std::unordered_set<const gr::BlockModel*> seen;
+
+    std::function<void(const gr::Graph&)> recurse;
+    recurse = [&flat, &seen, &recurse](const gr::Graph& g) {
+        gr::graph::forAllBlocks<category>(g, [&](const auto& block) {
+            auto* ptr = block.get();
+            if (!seen.insert(ptr).second) {
+                return;
+            }
+            flat.addBlock(block);
+
+            if constexpr (category == gr::block::Category::All) {
+                if (const auto* subgraph = dynamic_cast<const gr::Graph*>(block.get())) {
+                    recurse(*subgraph);
+                }
+            } else {
+                if (block->blockCategory() == category) {
+                    if (const auto* subgraph = dynamic_cast<const gr::Graph*>(block.get())) {
+                        recurse(*subgraph);
+                    }
+                }
+            }
+        });
+
+        // // add corresponding edges
+        // for (const auto& edge : g.edges()) {
+        //     const auto* src = edge._sourceBlock;
+        //     const auto* dst = edge._destinationBlock;
+        //     if (!seen.contains(src) || !seen.contains(dst)) {
+        //         continue;
+        //     }
+        //
+        //     const ConnectionResult connStatus = flat.connect(*src, edge._sourcePortDefinition, //
+        //         *dst, edge._destinationPortDefinition,                                         //
+        //         edge._minBufferSize, edge._weight, edge._name);
+        //     if (connStatus == ConnectionResult::FAILED) {
+        //         throw gr::exception(std::format("could not connect block {}->{}\n   for existing edge: {}", src->name(), dst->name(), edge));
+        //     }
+        // }
+    };
+
+    recurse(root);
+    std::println("flattened-block-graph:");
+    for (const auto& block : flat.blocks()) {
+        std::println("   block: {}", block->name());
+    }
+    return flat;
+}
+
+} // namespace graph
+
+/*******************************************************************************************************/
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/
 /*******************************************************************************************************/
 
@@ -1007,10 +1098,10 @@ public:
             auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
 
             if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
-                return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
+                return std::make_tuple(std::move(std::get < OutId ^ 1 > (left_out)), std::move(right_out));
 
             } else if constexpr (traits::block::stream_output_port_types<Left>::size == 2) {
-                return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
+                return std::tuple_cat(std::make_tuple(std::move(std::get < OutId ^ 1 > (left_out))), std::move(right_out));
 
             } else if constexpr (traits::block::stream_output_port_types<Right>::size == 1) {
                 return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) { return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out)); }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>());
