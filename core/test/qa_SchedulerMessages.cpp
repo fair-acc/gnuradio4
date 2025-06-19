@@ -370,6 +370,54 @@ const boost::ut::suite TopologyGraphTests = [] {
             // };
         }
     };
+
+    "Custom block property tests"_test = [] {
+        gr::Graph testGraph(context->loader);
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+
+        TestScheduler scheduler(std::move(testGraph));
+
+        // Setting a custom propertyfor all blocks, block by block
+        auto customProperty1 = "meta_information::some_namespace::some_value"s;
+        {
+            for (const auto& block : scheduler.graph().blocks()) {
+                sendMessage<Set>(scheduler.toScheduler, block->uniqueName() /* serviceName */, block::property::kSetting /* endpoint */, {{customProperty1, "42"s}} /* data  */);
+            }
+            waitForReply(scheduler.fromScheduler);
+        }
+
+        // Setting a custom propertyfor all blocks, universal
+        auto customProperty2 = "meta_information::some_namespace::another_value"s;
+        {
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{customProperty2, "42"s}} /* data  */);
+            waitForReply(scheduler.fromScheduler);
+        }
+
+        const auto replyCount = getNReplyMessages(scheduler.fromScheduler);
+        for (std::size_t replyIndex = 0UZ; replyIndex < replyCount; replyIndex++) {
+            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            std::println("Got a reply {}", reply);
+        }
+
+        sendMessage<Get>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {});
+        waitForReply(scheduler.fromScheduler);
+
+        expect(ge(getNReplyMessages(scheduler.fromScheduler), 1UZ));
+        const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+
+        expect(reply.data.has_value()) << "Reply should contain data";
+        if (reply.data.has_value()) {
+            const auto& data = reply.data.value();
+            expect(data.contains("value")) << "Reply should contain 'value' field";
+            const auto& yaml = std::get<std::string>(data.at("value"));
+            expect(!yaml.empty()) << "YAML string should not be empty";
+            std::println("YAML content:\n{}", yaml);
+
+            expect(yaml.find(customProperty1) != std::string::npos);
+            expect(yaml.find(customProperty2) != std::string::npos);
+        }
+    };
 };
 
 /// old tests, from the time graph handled messages. They're still good
