@@ -7,7 +7,12 @@
 #include <thread>
 
 int main() {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    setlocale(LC_ALL, "C.UTF-8");
+#else
     setlocale(LC_ALL, "");
+#endif
     constexpr std::size_t sizeX = 121;
     constexpr std::size_t sizeY = 41;
     constexpr double      xMin  = 0.0;

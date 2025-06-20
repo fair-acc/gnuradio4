@@ -3,6 +3,7 @@
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp> // for draw(...)
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/algorithm/dataset/DataSetEstimators.hpp>

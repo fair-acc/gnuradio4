@@ -6,6 +6,7 @@
 #include <gnuradio-4.0/math/Rotator.hpp>
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 namespace {
 

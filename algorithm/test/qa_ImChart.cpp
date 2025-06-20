@@ -6,6 +6,7 @@
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 const boost::ut::suite<"ImChart"> windowTests = [] {
     using namespace boost::ut;

@@ -8,7 +8,11 @@
 #include <numeric>
 #include <ranges>
 #include <source_location>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/ioctl.h>
+#endif
 #include <vector>
 
 #include <format>
@@ -216,8 +220,8 @@ public:
     double      axis_max_x{0.0};
     double      axis_min_y{0.0};
     double      axis_max_y{0.0};
-    std::size_t n_ticks_x = std::min(10LU, screenWidth / 2U);
-    std::size_t n_ticks_y = std::min(10LU, screenHeight / 2U);
+    std::size_t n_ticks_x = std::min(10UZ, screenWidth / 2UZ);
+    std::size_t n_ticks_y = std::min(10UZ, screenHeight / 2UZ);
 
     constexpr ImChart(std::size_t screenWidth_ = screenWidth, std::size_t screenHeight_ = screenHeight, const std::source_location location = std::source_location::current()) noexcept : _screen_width(screenWidth_), _screen_height(screenHeight_), _screen(_screen_height, std::vector<std::string>(_screen_width, " ")), _brailleArray(_screen_width * kCellWidth, std::vector<uint16_t>(_screen_height * kCellHeight, 0UZ)), _location(location) {}
 
@@ -395,7 +399,7 @@ public:
         std::string srcLocation = std::format("{}:{}", fullPath, _location.line());
 
         // calculate starting position, clamping to screen width
-        std::size_t startX = std::max(0LU, _screen_width - srcLocation.size() - 1UZ);
+        std::size_t startX = std::max(0UZ, _screen_width - srcLocation.size() - 1UZ);
         std::size_t y      = _screen_height - 1; // position for the last line
 
         for (std::size_t i = 0; i < srcLocation.size() && startX + i < _screen_width; ++i) {
@@ -406,7 +410,7 @@ public:
     [[nodiscard]] constexpr std::size_t getHorizontalAxisPositionY() const noexcept {
         const double relative_position = (0.0 - axis_min_y) / (axis_max_y - axis_min_y);
         const auto   position          = static_cast<std::size_t>((1.0 - relative_position) * static_cast<double>(_screen_height));
-        return std::clamp(position, 0LU, _screen_height - 3LU);
+        return std::clamp(position, 0UZ, _screen_height - 3UZ);
     }
 
     [[nodiscard]] constexpr std::size_t getVerticalAxisPositionX() const noexcept {
