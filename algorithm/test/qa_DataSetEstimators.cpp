@@ -3,18 +3,12 @@
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp> // for draw(...)
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/algorithm/dataset/DataSetEstimators.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetMath.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetTestFunctions.hpp>
-
-#ifdef _WIN32
-[[maybe_unused]] const auto _ = [] {
-    SetConsoleOutputCP(CP_UTF8);
-    return 0;
-}();
-#endif
 
 namespace test::detail {
 

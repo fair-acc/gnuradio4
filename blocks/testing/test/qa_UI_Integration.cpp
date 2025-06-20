@@ -8,15 +8,9 @@
 #include "gnuradio-4.0/algorithm/ImChart.hpp"
 #include "gnuradio-4.0/basic/ClockSource.hpp"
 #include "gnuradio-4.0/basic/FunctionGenerator.hpp"
+#include "gnuradio-4.0/meta/UnitTestHelper.hpp"
 #include "gnuradio-4.0/testing/ImChartMonitor.hpp"
 #include "gnuradio-4.0/testing/TagMonitors.hpp"
-
-#ifdef _WIN32
-[[maybe_unused]] const auto _ = [] {
-    SetConsoleOutputCP(CP_UTF8);
-    return 0;
-}();
-#endif
 
 const boost::ut::suite TagTests = [] {
     using namespace boost::ut;

@@ -6,13 +6,7 @@
 #include <gnuradio-4.0/math/Rotator.hpp>
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
-
-#ifdef _WIN32
-[[maybe_unused]] const auto _ = [] {
-    SetConsoleOutputCP(CP_UTF8);
-    return 0;
-}();
-#endif
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 namespace {
 
