@@ -242,6 +242,7 @@ std::complex<float>, std::complex<double>*/>();
         auto block = AddConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress, block.ioThreadPool);
         expect(eq(block.processOne(T(4)), T(4) + T(2))) << "AddConst(2) test for type " << meta::type_name<T>();
+
     } | kArithmeticTypes;
 
     "SubtractConst"_test = []<typename T>(const T&) {
@@ -249,6 +250,7 @@ std::complex<float>, std::complex<double>*/>();
         auto block = SubtractConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress, block.ioThreadPool);
         expect(eq(block.processOne(T(4)), T(4) - T(2))) << "SubtractConst(2) test for type " << meta::type_name<T>();
+
     } | kArithmeticTypes;
 
     "MultiplyConst"_test = []<typename T>(const T&) {
@@ -256,6 +258,7 @@ std::complex<float>, std::complex<double>*/>();
         auto block = MultiplyConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress, block.ioThreadPool);
         expect(eq(block.processOne(T(4)), T(4) * T(2))) << "MultiplyConst(2) test for type " << meta::type_name<T>();
+
     } | kArithmeticTypes;
 
     "DivideConst"_test = []<typename T>(const T&) {
@@ -263,6 +266,7 @@ std::complex<float>, std::complex<double>*/>();
         auto block = DivideConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress, block.ioThreadPool);
         expect(eq(block.processOne(T(4)), T(4) / T(2))) << "DivideConst(2) test for type " << meta::type_name<T>();
+
     } | kArithmeticTypes;
 
         /* ------------------------------------------------------------------ */

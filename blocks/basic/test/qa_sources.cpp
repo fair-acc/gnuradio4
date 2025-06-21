@@ -78,7 +78,7 @@ const boost::ut::suite TagTests = [] {
 
         for (const auto& sig : signals) {
             SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.shortKey(), 2048.f}, {"frequency", 256.}, {"amplitude", 1.}, {"offset", offset}, {"phase", std::numbers::pi / 4}});
-            signalGen.init(signalGen.progress, signalGen.ioThreadPool);
+            signalGen.init(signalGen.progress);
 
             // expected values corresponds to sample_rate = 1024., frequency = 128., amplitude = 1., offset = 0., phase = pi/4.
             std::map<std::string, std ::vector<double>> expResults = {{"Const", {1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.}}, {"Sin", {0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0., 0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0.}}, {"Cos", {0.707106, 0., -0.707106, -1., -0.7071067, 0., 0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0., 0.707106, 1.}}, {"Square", {1., 1., 1., -1., -1., -1., -1., 1., 1., 1., 1., -1., -1., -1., -1., 1.}}, {"Saw", {0.25, 0.5, 0.75, -1., -0.75, -0.5, -0.25, 0., 0.25, 0.5, 0.75, -1., -0.75, -0.5, -0.25, 0.}}, {"Triangle", {0.5, 1., 0.5, 0., -0.5, -1., -0.5, 0., 0.5, 1., 0.5, 0., -0.5, -1., -0.5, 0.}}};
@@ -96,7 +96,7 @@ const boost::ut::suite TagTests = [] {
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
         for (const auto& sig : signals) {
             SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.shortKey(), 8192.f}, {"frequency", 32.}, {"amplitude", 2.}, {"offset", 0.}, {"phase", std::numbers::pi / 4.}});
-            signalGen.init(signalGen.progress, signalGen.ioThreadPool);
+            signalGen.init(signalGen.progress);
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
@@ -133,7 +133,7 @@ const boost::ut::suite TagTests = [] {
         double                    finalValue = 20.;
         std::vector<SignalType>   signals{Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse};
         FunctionGenerator<double> funcGen;
-        funcGen.init(funcGen.progress, funcGen.ioThreadPool);
+        funcGen.init(funcGen.progress);
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         for (const auto& sig : signals) {

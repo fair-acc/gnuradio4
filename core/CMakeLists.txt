@@ -48,7 +48,7 @@ target_link_libraries(
 add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
 set_target_properties(gnuradio-blocklib-core
                       PROPERTIES PUBLIC_HEADER "include/gnuradio-4.0/BlockRegistry.hpp include/gnuradio-4.0/Plugin.hpp")
-message(WARNING "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
+message(INFO "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
 target_include_directories(gnuradio-blocklib-core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/>)
 target_link_libraries(gnuradio-blocklib-core PUBLIC gnuradio-core)
 
@@ -57,11 +57,16 @@ configure_file("${PROJECT_SOURCE_DIR}/cmake/config.hpp.in"
                "${CMAKE_CURRENT_BINARY_DIR}/include/gnuradio-4.0/config.hpp" @ONLY)
 # TODO: install configure file... but not really meaningful for header only library, since compile flags are defined by
 # the user...
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/gnuradio-4.0/config.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 install(
   TARGETS gnuradio-core
-  EXPORT graphTargets
-  PUBLIC_HEADER DESTINATION include/)
+  EXPORT gnuradio4Targets
+  PUBLIC_HEADER DESTINATION include/gnuradio-4.0)
+
+# Just install the entire include directory
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 add_subdirectory(src)
 

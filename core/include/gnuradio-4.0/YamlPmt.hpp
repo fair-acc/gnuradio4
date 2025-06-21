@@ -125,7 +125,13 @@ inline void serializeString(std::ostream& os, std::string_view value, int level,
         if constexpr (tagMode == TypeTagMode::Auto) {
             os << std::format("\"{}\"\n", escapeString(value, true));
         } else {
-            os << std::format("{}\n", escapeString(value, true));
+            auto       isSpace      = [](char c) { return std::isspace(static_cast<unsigned char>(c)); };
+            const bool quotesNeeded = !value.empty() && (isSpace(value.front()) || isSpace(value.back()));
+            if (quotesNeeded) {
+                os << std::format("\"{}\"\n", escapeString(value, true));
+            } else {
+                os << std::format("{}\n", escapeString(value, true));
+            }
         }
     }
 }
@@ -694,7 +700,14 @@ std::expected<pmtv::pmt, ParseError> parseNextString(ParseContext& ctx, std::str
 inline std::expected<pmtv::pmt, ParseError> parsePlainScalar(ParseContext& ctx, std::string_view typeTag, std::string_view extraDelimiters = {}) {
     // if we have a type tag, enforce the type
     if (!typeTag.empty()) {
-        return parseNextString(ctx, extraDelimiters, [typeTag](std::size_t, std::string_view sv) { return applyTag<std::expected<pmtv::pmt, ValueParseError>, ParseAs>(typeTag, sv); });
+        return parseNextString(ctx, extraDelimiters, [typeTag](std::size_t quoteOffset, std::string_view sv) -> std::expected<pmtv::pmt, ValueParseError> {
+            // string without quotes -> trim
+            if (typeTag == "!!str" && quoteOffset == 0) {
+                sv = trimAndStripComment(sv);
+            }
+
+            return applyTag<std::expected<pmtv::pmt, ValueParseError>, ParseAs>(typeTag, sv);
+        });
     }
 
     // fallback for parsing without a YAML tag

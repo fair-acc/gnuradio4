@@ -35,7 +35,7 @@ public:
     requires(!isSizeDynamic)
     {
         for (auto& word : _bits) {
-            word.store(0UL, std::memory_order_relaxed);
+            word.store(0UZ, std::memory_order_relaxed);
         }
     }
 
@@ -44,7 +44,7 @@ public:
         : _size(size), _bits(std::vector<std::atomic<std::size_t>>(size)) {
         // assert(size > 0UZ);
         for (std::size_t i = 0; i < _size; i++) {
-            _bits[i].store(0UL, std::memory_order_relaxed);
+            _bits[i].store(0UZ, std::memory_order_relaxed);
         }
     }
 
@@ -52,7 +52,7 @@ public:
         assert(bitPosition < _size);
         const std::size_t wordIndex = bitPosition / _bitsPerWord;
         const std::size_t bitIndex  = bitPosition % _bitsPerWord;
-        const std::size_t mask      = 1UL << bitIndex;
+        const std::size_t mask      = 1UZ << bitIndex;
 
         std::size_t oldBits;
         std::size_t newBits;
@@ -105,7 +105,11 @@ public:
         assert(bitPosition < _size);
         const std::size_t wordIndex = bitPosition / _bitsPerWord;
         const std::size_t bitIndex  = bitPosition % _bitsPerWord;
-        const std::size_t mask      = 1UL << bitIndex;
+#if defined(_WIN32)
+        const std::size_t mask = 1ULL << bitIndex;
+#else
+        const std::size_t mask = 1UL << bitIndex;
+#endif
 
         return (_bits[wordIndex].load(std::memory_order_acquire) & mask) != 0;
     }
@@ -115,7 +119,7 @@ public:
 private:
     void setBitsInWord(std::size_t wordIndex, std::size_t begin, std::size_t end, bool value) {
         assert(begin < end && end <= _bitsPerWord);
-        const std::size_t mask = (end == _bitsPerWord) ? ~((1UL << begin) - 1) : ((1UL << end) - 1) & ~((1UL << begin) - 1);
+        const std::size_t mask = (end == _bitsPerWord) ? ~((1UZ << begin) - 1) : ((1UZ << end) - 1) & ~((1UZ << begin) - 1);
         std::size_t       oldBits;
         std::size_t       newBits;
         do {
@@ -124,7 +128,7 @@ private:
         } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
     }
 
-    forceinline void setFullWord(std::size_t wordIndex, bool value) { _bits[wordIndex].store(value ? ~0UL : 0UL, std::memory_order_release); }
+    forceinline void setFullWord(std::size_t wordIndex, bool value) { _bits[wordIndex].store(value ? ~0UZ : 0UZ, std::memory_order_release); }
 };
 
 } // namespace gr
