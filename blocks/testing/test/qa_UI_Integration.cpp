@@ -8,6 +8,7 @@
 #include "gnuradio-4.0/algorithm/ImChart.hpp"
 #include "gnuradio-4.0/basic/ClockSource.hpp"
 #include "gnuradio-4.0/basic/FunctionGenerator.hpp"
+#include "gnuradio-4.0/meta/UnitTestHelper.hpp"
 #include "gnuradio-4.0/testing/ImChartMonitor.hpp"
 #include "gnuradio-4.0/testing/TagMonitors.hpp"
 
