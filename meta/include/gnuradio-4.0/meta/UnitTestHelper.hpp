@@ -9,6 +9,14 @@
 
 #include "formatter.hpp"
 
+#if defined(_WIN32)
+#include <windows.h>
+[[maybe_unused]] inline const int _set_console_output = [] {
+    SetConsoleOutputCP(CP_UTF8);
+    return 0;
+}();
+#endif
+
 namespace gr::test {
 using namespace boost::ut;
 
