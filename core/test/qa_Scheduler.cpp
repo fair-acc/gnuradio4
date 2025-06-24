@@ -330,6 +330,49 @@ bool awaitCondition(std::chrono::milliseconds timeout, std::function<bool()> con
     return false;
 }
 
+const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+
+    "Direct settings change"_test = [] {
+        using scheduler               = gr::scheduler::Simple<>;
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        auto                    sched = scheduler{getGraphLinear(trace), gr::thread_pool::kDefaultCpuPoolId};
+
+        auto ret1 = sched.settings().set({{"timeout_ms", gr::Size_t(6)}});
+        expect(ret1.empty()) << "setting one known parameter";
+        expect(sched.settings().stagedParameters().empty());          // set(...) does not change stagedParameters
+        expect(not sched.settings().changed()) << "settings changed"; // set(...) does not change changed()
+        std::ignore = sched.settings().activateContext();
+
+        std::println("Staged {}", sched.settings().stagedParameters());
+        expect(sched.settings().stagedParameters().contains("timeout_ms"));
+
+        expect(sched.settings().changed()) << "settings changed";
+        std::ignore = sched.settings().applyStagedParameters();
+
+        expect(eq(sched.timeout_ms.value, 6U));
+
+        sched.settings().updateActiveParameters();
+
+        auto ret2 = sched.settings().set({{"timeout_ms", gr::Size_t(42)}});
+        expect(ret2.empty()) << "setting one known parameter";
+        expect(sched.settings().stagedParameters().empty());          // set(...) does not change stagedParameters
+        expect(not sched.settings().changed()) << "settings changed"; // set(...) does not change changed()
+        std::ignore = sched.settings().activateContext();
+
+        std::println("Staged {}", sched.settings().stagedParameters());
+        expect(sched.settings().stagedParameters().contains("timeout_ms"));
+
+        expect(sched.settings().changed()) << "settings changed";
+        std::ignore = sched.settings().applyStagedParameters();
+
+        expect(eq(sched.timeout_ms.value, 42U));
+
+        sched.settings().updateActiveParameters();
+    };
+};
+
 const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
