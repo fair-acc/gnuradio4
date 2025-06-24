@@ -118,6 +118,7 @@ public:
         this->propertyCallbacks[scheduler::property::kEmplaceEdge]  = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
         this->propertyCallbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
         this->propertyCallbacks[scheduler::property::kGraphGRC]     = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
+        this->settings().updateActiveParameters();
     }
 
     ~SchedulerBase() {
@@ -204,6 +205,7 @@ public:
         {
             WriterSpanLike auto msgSpan = this->msgOut.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(messagesFromChildren.size());
             std::ranges::copy(messagesFromChildren, msgSpan.begin());
+            msgSpan.publish(messagesFromChildren.size());
         } // to force publish
         if (!messagesFromChildren.consume(messagesFromChildren.size())) {
             this->emitErrorMessage("process child return messages", "Failed to consume messages from child message port");
@@ -364,8 +366,8 @@ protected:
                 currentProgress = this->_graph.progress().value();
             }
 
-            bool processMessages = msgToCount == 0UZ;
-            if (processMessages) {
+            bool hasMessagesToProcess = msgToCount == 0UZ;
+            if (hasMessagesToProcess) {
                 if (runnerID == 0UZ || _nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
                 }
