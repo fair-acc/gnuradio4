@@ -338,6 +338,75 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
     };
 
+    "Settings change via messages"_test = [] {
+        static auto returnReplyMsgs = [](gr::MsgPortIn& port) {
+            ReaderSpanLike auto  span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(port.streamReader().available());
+            std::vector<Message> msgs(span.begin(), span.end());
+            expect(span.consume(span.size()));
+            return msgs;
+        };
+
+        gr::Graph testGraph(context->loader);
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+
+        TestScheduler scheduler(std::move(testGraph));
+
+        "get scheduler settings"_test = [&] {
+            sendMessage<Get>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {} /* data  */);
+            waitForReply(scheduler.fromScheduler);
+            expect(nothrow([&] { scheduler.scheduler().processScheduledMessages(); })) << "manually execute processing of messages";
+
+            bool        atLeastOneReplyFromScheduler = false;
+            std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
+            expect(ge(availableMessages, 1UZ)) << "didn't receive reply message";
+            for (const auto& reply : returnReplyMsgs(scheduler.fromScheduler)) {
+                if (reply.serviceName != scheduler.scheduler().unique_name) {
+                    continue;
+                }
+
+                std::println("Got reply: {}", reply);
+                expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
+                expect(eq(reply.endpoint, std::string(block::property::kSetting)));
+                expect(reply.data.has_value());
+                expect(!reply.data.value().empty());
+                expect(reply.data.value().contains("timeout_ms"));
+                atLeastOneReplyFromScheduler = true;
+            }
+
+            expect(atLeastOneReplyFromScheduler);
+        };
+
+        "set scheduler settings"_test = [&] {
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"timeout_ms", 42}} /* data  */);
+            waitForReply(scheduler.fromScheduler);
+            expect(nothrow([&] { scheduler.scheduler().processScheduledMessages(); })) << "manually execute processing of messages";
+
+            bool        atLeastOneReplyFromScheduler = false;
+            std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
+            expect(ge(availableMessages, 1UZ)) << "didn't receive reply message";
+            for (const auto& reply : returnReplyMsgs(scheduler.fromScheduler)) {
+                if (reply.serviceName != scheduler.scheduler().unique_name) {
+                    continue;
+                }
+                atLeastOneReplyFromScheduler = true;
+            }
+            expect(!atLeastOneReplyFromScheduler) << "should not receive a reply";
+            property_map stagedSettings = scheduler.scheduler().settings().stagedParameters();
+            expect(stagedSettings.contains("timeout_ms"));
+            expect(eq(42UZ, std::get<gr::Size_t>(stagedSettings.at("timeout_ms"))));
+
+            // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"timeout_ms", 43}} /* data  */);
+            expect(nothrow([&] { scheduler.scheduler().processScheduledMessages(); })) << "manually execute processing of messages";
+
+            stagedSettings = scheduler.scheduler().settings().stagedParameters();
+            expect(stagedSettings.contains("timeout_ms"));
+            expect(eq(43UZ, std::get<gr::Size_t>(stagedSettings.at("timeout_ms"))));
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"timeout_ms", 43}} /* data  */);
+        };
+    };
+
     "Get GRC Yaml tests"_test = [] {
         gr::Graph testGraph(context->loader);
         testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
