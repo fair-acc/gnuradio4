@@ -62,16 +62,16 @@ struct SlowSource : Block<SlowSource<T>> {
     using value_t     = std::conditional_t<std::is_same_v<T, std::string>, std::string, meta::fundamental_base_value_type_t<T>>; // use base-type for types not supported by settings
     using Description = Doc<R""(A source block that emits a constant default value every n miliseconds)"">;
 
-    gr::PortOut<T>                                                                     out;
-    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">> default_value{};
-    Annotated<gr::Size_t, "delay", Doc<"how many milliseconds between each value">>    n_delay = 100U;
+    gr::PortOut<T>                                                                              out;
+    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">>          default_value{};
+    Annotated<gr::Size_t, "delay", Unit<"ms">, Doc<"how many milliseconds between each value">> delay = 100U;
 
-    GR_MAKE_REFLECTABLE(SlowSource, out, n_delay);
+    GR_MAKE_REFLECTABLE(SlowSource, out, default_value, delay);
 
     std::optional<std::chrono::time_point<std::chrono::system_clock>> lastEventAt;
 
     [[nodiscard]] gr::work::Status processBulk(OutputSpanLike auto& output) {
-        if (!lastEventAt || std::chrono::system_clock::now() - *lastEventAt > std::chrono::milliseconds(n_delay)) {
+        if (!lastEventAt || std::chrono::system_clock::now() - *lastEventAt > std::chrono::milliseconds(delay)) {
             lastEventAt = std::chrono::system_clock::now();
 
             output[0] = T(default_value.value);
@@ -135,7 +135,7 @@ Commonly used used to isolate parts of a flowgraph, manage buffer sizes, or simp
 GR_REGISTER_BLOCK(gr::testing::HeadBlock, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
 
 template<typename T>
-struct HeadBlock : Block<HeadBlock<T>> { // TODO confirm naming: while known in GR3, the semantic name seems to be odd. (Maybe add an alias?!)
+struct HeadBlock : Block<HeadBlock<T>> {
     using Description = Doc<R""(Limits the number of output samples by copying the first N items from the input to the output and then signaling completion.
 Commonly used to control data flow in systems where precise sample counts are critical, such as in file recording or when executing flow graphs without a GUI.)"">;
 
@@ -170,7 +170,7 @@ Commonly used for testing, performance benchmarking, and in scenarios where sign
     GR_MAKE_REFLECTABLE(NullSink, in);
 
     template<gr::meta::t_or_simd<T> V>
-    void processOne(V) const noexcept {}
+    void processOne(V) const noexcept { /* do nothing */ }
 };
 
 GR_REGISTER_BLOCK(gr::testing::CountingSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
@@ -195,6 +195,53 @@ Commonly used for testing scenarios and signal termination where output is unnec
         if (n_samples_max > 0 && count >= n_samples_max) {
             this->requestStop();
         }
+    }
+};
+
+GR_REGISTER_BLOCK(gr::testing::SimCompute, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
+
+template<typename T>
+struct SimCompute : Block<SimCompute<T>> {
+    using Description = Doc<R""(Block to simulate compute delay and model latency effects for a given complexity order
+
+Delay depends on work size: delay_seconds = (N / reference_work_size)^complexity_order * (reference_work_size / target_throughput)
+
+Default: linear O(N) delay that limits the block processing to 100 MS/s)"">;
+
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    Annotated<float, "target_throughput", Unit<"S/s">, Doc<"Target throughput in samples per second at reference_work_size.">>               target_throughput   = 100e6f;
+    Annotated<gr::Size_t, "reference_work_size", Unit<"[N]">, Doc<"Reference work size N_r (samples) for which target_throughput applies.">> reference_work_size = 1024U;
+    Annotated<float, "complexity_order", Doc<"compute complexity: 1.0 = linear, 2.0 = quadratic, 3.0 = cubic.">>                             complexity_order    = 1.0f;
+    Annotated<bool, "busy_wait", Doc<"true: busy loop (CPU burn), False: sleep loop (lower power, less accurate).">>                         busy_wait           = true;
+
+    GR_MAKE_REFLECTABLE(SimCompute, in, out, target_throughput, reference_work_size, complexity_order, busy_wait);
+
+    [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
+        using Clock_t    = std::chrono::high_resolution_clock;
+        const auto start = Clock_t::now();
+
+        std::ranges::copy(input, output.begin());
+
+        const std::chrono::duration<double> delay_seconds = compute_delay_seconds(input.size());
+        const std::chrono::nanoseconds      delay_ns      = std::chrono::duration_cast<std::chrono::nanoseconds>(delay_seconds);
+        while (Clock_t::now() - start < delay_ns) {
+            if (!busy_wait) {
+                std::this_thread::sleep_for(std::chrono::microseconds(10)); // avoid hard spin
+            }
+        }
+        return gr::work::Status::OK;
+    }
+
+    [[nodiscard]] constexpr std::chrono::duration<double> compute_delay_seconds(std::size_t N) const noexcept {
+        const auto N_r        = static_cast<double>(reference_work_size);
+        const auto throughput = static_cast<double>(target_throughput);
+        const auto k          = static_cast<double>(complexity_order);
+
+        const double delay_s = std::pow(static_cast<double>(N) / N_r, k) * (N_r / throughput);
+
+        return std::chrono::duration<double>(delay_s);
     }
 };
 

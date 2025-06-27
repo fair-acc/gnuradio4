@@ -341,8 +341,10 @@ public:
         return *this;
     }
 
-    [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {_blocks}; }
-    [[nodiscard]] std::span<Edge>                        edges() noexcept { return {_edges}; }
+    [[nodiscard]] std::span<const std::unique_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
+    [[nodiscard]] std::span<std::unique_ptr<BlockModel>>       blocks() noexcept { return {_blocks}; }
+    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return {_edges}; }
+    [[nodiscard]] std::span<Edge>                              edges() noexcept { return {_edges}; }
 
     void clear() {
         _blocks.clear();
@@ -352,7 +354,7 @@ public:
     /**
      * @return atomic sequence counter that indicates if any block could process some data or messages
      */
-    [[nodiscard]] const Sequence& progress() noexcept { return *_progress.get(); }
+    [[nodiscard]] const Sequence& progress() const noexcept { return *_progress.get(); }
 
     BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
         auto& newBlock = _blocks.emplace_back(std::move(block));

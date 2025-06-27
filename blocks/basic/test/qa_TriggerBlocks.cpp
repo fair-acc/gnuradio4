@@ -71,16 +71,14 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"in">(funcGen))) << "connect clockSrc->funcGen";
             expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(schmittTrigger))) << "connect funcGen->schmittTrigger";
             expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(tagSink))) << "connect schmittTrigger->tagSink";
-
-            gr::scheduler::Simple sched{std::move(graph)}; // declared here to ensure life-time of graph and blocks inside.
-            if (enableVisualTests) {                       // execute UI-based tests
-                auto& uiSink1 = sched.graph().emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink1"}});
-                auto& uiSink2 = sched.graph().emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink2"}});
+            std::thread uiLoop;
+            if (enableVisualTests) {
+                auto& uiSink1 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink1"}});
+                auto& uiSink2 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink2"}});
                 // connect UI blocks
-                expect(eq(ConnectionResult::SUCCESS, sched.graph().connect<"out">(funcGen).to<"in">(uiSink1))) << "connect funcGen->uiSink1";
-                expect(eq(ConnectionResult::SUCCESS, sched.graph().connect<"out">(schmittTrigger).template to<"in">(uiSink2))) << "connect schmittTrigger->uiSink2";
-
-                std::thread uiLoop([&uiSink1, &uiSink2]() {
+                expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(uiSink1))) << "connect funcGen->uiSink1";
+                expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(uiSink2))) << "connect schmittTrigger->uiSink2";
+                uiLoop = std::thread([&uiSink1, &uiSink2]() {
                     bool drawUI = true;
                     while (drawUI) {
                         using enum gr::work::Status;
@@ -91,15 +89,15 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                     }
                     std::this_thread::sleep_for(std::chrono::seconds(1)); // wait before shutting down
                 });
-
-                expect(sched.runAndWait().has_value()) << "runAndWait";
-
-                uiLoop.join();
-                enableVisualTests = false; // only for first test
-            } else {
-                // non-UI test
-                expect(sched.runAndWait().has_value()) << "runAndWait";
             }
+
+            gr::scheduler::Simple sched{std::move(graph)}; // declared here to ensure life-time of graph and blocks inside.
+            expect(sched.runAndWait().has_value()) << "runAndWait";
+
+            if (uiLoop.joinable()) {
+                uiLoop.join();
+            }
+            enableVisualTests = false; // only for first test
 
             expect(eq(tagSink._tags.size(), 7UZ)) << std::format("test {} : expected total number of tags", magic_enum::enum_name(Method::value));
 

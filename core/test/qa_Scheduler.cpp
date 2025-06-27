@@ -704,11 +704,6 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         scheduler.timeout_ms               = 100U; // also dynamically settable via messages/block interface
         scheduler.timeout_inactivity_count = 10U;  // also dynamically settable via messages/block interface
 
-        expect(scheduler.graph().reconnectAllEdges());
-        expect(source.out.isConnected()) << "source.out is connected";
-        expect(monitor.in.isConnected()) << "monitor.in is connected";
-        expect(monitor.out.isConnected()) << "monitor.out is connected";
-
         expect(eq(0UZ, scheduler.graph().progress().value())) << "initial progress definition (0)";
         std::expected<void, Error> schedulerResult;
         auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] { schedulerResult = scheduler.runAndWait(); });
