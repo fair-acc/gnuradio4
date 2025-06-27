@@ -859,49 +859,55 @@ public:
             // update staged and forward parameters based on member properties
             property_map staged;
             for (const auto& [key, stagedValue] : _stagedParameters) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using RawType    = std::remove_cvref_t<MemberType>;
-                    using Type       = unwrap_if_wrapped_t<RawType>;
 
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        if (refl::data_member_name<TBlock, kIdx>.view() != key) {
-                            return;
-                        }
-                        auto& member = refl::data_member<kIdx>(*_block);
+                if (key.starts_with("meta_information::")) {
+                    _block->meta_information.value.insert_or_assign(key, stagedValue);
+                    staged.insert_or_assign(key, stagedValue);
+                } else {
+                    refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                        using MemberType = refl::data_member_type<TBlock, kIdx>;
+                        using RawType    = std::remove_cvref_t<MemberType>;
+                        using Type       = unwrap_if_wrapped_t<RawType>;
 
-                        std::expected<Type, std::string> maybe_value;
-                        if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
-                            maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
-                        } else {
-                            maybe_value = std::get<Type>(stagedValue);
-                        }
+                        if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                            if (refl::data_member_name<TBlock, kIdx>.view() != key) {
+                                return;
+                            }
+                            auto& member = refl::data_member<kIdx>(*_block);
 
-                        if constexpr (is_annotated<RawType>()) {
-                            if (maybe_value && member.validate_and_set(*maybe_value)) {
+                            std::expected<Type, std::string> maybe_value;
+                            if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
+                                maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
+                            } else {
+                                maybe_value = std::get<Type>(stagedValue);
+                            }
+
+                            if constexpr (is_annotated<RawType>()) {
+                                if (maybe_value && member.validate_and_set(*maybe_value)) {
+                                    if constexpr (HasSettingsChangedCallback<TBlock>) {
+                                        staged.insert_or_assign(key, stagedValue);
+                                    }
+                                } else {
+                                    std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", key, stagedValue).c_str(), stderr);
+                                }
+                            } else {
+                                if (!maybe_value) {
+                                    std::fputs(std::format("Failed to convert key '{}': {}\n", key, maybe_value.error()).c_str(), stderr);
+                                    return;
+                                }
+                                member = *maybe_value;
+                                result.appliedParameters.insert_or_assign(key, stagedValue);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, stagedValue);
                                 }
-                            } else {
-                                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", key, stagedValue).c_str(), stderr);
                             }
-                        } else {
-                            if (!maybe_value) {
-                                std::fputs(std::format("Failed to convert key '{}': {}\n", key, maybe_value.error()).c_str(), stderr);
-                                return;
-                            }
-                            member = *maybe_value;
-                            result.appliedParameters.insert_or_assign(key, stagedValue);
-                            if constexpr (HasSettingsChangedCallback<TBlock>) {
-                                staged.insert_or_assign(key, stagedValue);
-                            }
-                        }
 
-                        if (_autoForwardParameters.contains(key)) {
-                            result.forwardParameters.insert_or_assign(key, stagedValue);
+                            if (_autoForwardParameters.contains(key)) {
+                                result.forwardParameters.insert_or_assign(key, stagedValue);
+                            }
                         }
-                    }
-                });
+                    });
+                }
             }
 
             updateActiveParametersImpl();
@@ -1089,27 +1095,32 @@ private:
         if constexpr (refl::reflectable<TBlock>) {
             for (const auto& [key, value] : parameters) {
                 bool isSet = false;
-                refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                        if (fieldName != key) {
-                            return;
-                        }
-
-                        if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-                            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                                _stagedParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
-                            } else {
-                                _stagedParameters.insert_or_assign(key, convertedValue.value());
+                if (key.starts_with("meta_information::")) {
+                    _stagedParameters.insert_or_assign(key, value);
+                    isSet = true;
+                } else {
+                    refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
+                        using MemberType = refl::data_member_type<TBlock, kIdx>;
+                        using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                        if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                            const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
+                            if (fieldName != key) {
+                                return;
                             }
-                            isSet = true;
-                        } else {
-                            throw gr::exception(convertedValue.error());
+
+                            if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
+                                if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                                    _stagedParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
+                                } else {
+                                    _stagedParameters.insert_or_assign(key, convertedValue.value());
+                                }
+                                isSet = true;
+                            } else {
+                                throw gr::exception(convertedValue.error());
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 if (!isSet) {
                     ret.insert_or_assign(key, pmtv::pmt(value));
                 }
@@ -1227,7 +1238,6 @@ private:
             });
         }
     }
-
 }; // class CtxSettings
 
 } // namespace gr

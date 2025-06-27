@@ -357,6 +357,30 @@ const boost::ut::suite MessagesTests = [] {
                 expect(stagedSettings.contains("factor"));
                 expect(eq(43, std::get<int>(stagedSettings.at("factor"))));
             };
+
+            "set - StagedSettings, custom property"_test = [&] {
+                auto customProperty = "meta_information::some_value"s;
+
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{customProperty, "42"s}} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
+                property_map stagedSettings = unitTestBlock.settings().stagedParameters();
+                expect(stagedSettings.contains(customProperty));
+                expect(eq("42"s, std::get<std::string>(stagedSettings.at(customProperty))));
+
+                // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, {{customProperty, "43"s}} /* data  */);
+                expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
+
+                expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
+                stagedSettings = unitTestBlock.settings().stagedParameters();
+                expect(stagedSettings.contains(customProperty));
+                expect(eq("43"s, std::get<std::string>(stagedSettings.at(customProperty))));
+
+                std::ignore = unitTestBlock.settings().applyStagedParameters();
+                expect(eq("43"s, std::get<std::string>(unitTestBlock.meta_information.value.at(customProperty))));
+            };
         };
 
         "Block<T>-level active context tests"_test = [] {
