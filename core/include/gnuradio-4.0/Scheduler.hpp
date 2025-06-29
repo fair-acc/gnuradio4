@@ -96,7 +96,7 @@ protected:
     JobLists                            _executionOrder = std::make_shared<std::vector<std::vector<BlockModel*>>>();
 
     std::mutex                               _zombieBlocksMutex;
-    std::vector<std::unique_ptr<BlockModel>> _zombieBlocks;
+    std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
 
     // for blocks that were added while scheduler was running. They need to be adopted by a thread
     std::mutex _adoptionBlocksMutex;
@@ -733,7 +733,7 @@ protected:
 
       The block will be physically deleted by cleanupZombieBlocks() when it reaches a safe state.
     */
-    void makeZombie(std::unique_ptr<BlockModel> block) {
+    void makeZombie(std::shared_ptr<BlockModel> block) {
         if (block->state() == lifecycle::State::PAUSED || block->state() == lifecycle::State::RUNNING) {
             this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
@@ -888,11 +888,8 @@ private:
         [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("scheduler_simple.init");
 
         // generate job list
-        std::size_t nBlocks = 0UZ;
-        graph::forAllBlocks<block::Category::TransparentBlockGroup>(this->_graph, [&nBlocks](auto&& /*block*/) { nBlocks++; });
-        std::vector<BlockModel*> allBlocks;
-        allBlocks.reserve(nBlocks);
-        graph::forAllBlocks<block::Category::TransparentBlockGroup>(this->_graph, [&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
+        const gr::Graph   flatGraph = graph::flatten(this->_graph);
+        const std::size_t nBlocks   = flatGraph.blocks().size();
 
         std::size_t n_batches = 1UZ;
         switch (base_t::executionPolicy()) {
@@ -910,9 +907,9 @@ private:
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
             auto& job = this->_executionOrder->emplace_back(std::vector<BlockModel*>());
-            job.reserve(allBlocks.size() / n_batches + 1);
-            for (std::size_t j = i; j < allBlocks.size(); j += n_batches) {
-                job.push_back(allBlocks[j]);
+            job.reserve(nBlocks / n_batches + 1);
+            for (std::size_t j = i; j < nBlocks; j += n_batches) {
+                job.push_back(flatGraph.blocks()[j].get());
             }
         }
     }

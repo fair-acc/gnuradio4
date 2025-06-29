@@ -41,7 +41,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     throw std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
                 }
 
-                auto& block = subGraphDirect->findFirstBlockWithName(std::get<std::string>(exportedPort[0]));
+                auto& block = graph::findFirstBlockWithName(subGraphDirect->blockRef(), std::get<std::string>(exportedPort[0]));
 
                 subGraphDirect->exportPort(true,
                     /* block's unique name */ std::string(block.uniqueName()),
