@@ -184,7 +184,7 @@ public:
         return result;
     }
 
-    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
+    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
         // Try to create a node from the global registry
         if (auto result = _registry->create(name, params)) {
             return result;
@@ -229,7 +229,7 @@ public:
 
     auto availableBlocks() const { return _registry->keys(); }
 
-    std::unique_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->create(name, params); }
+    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->create(name, params); }
 
     bool isBlockAvailable(std::string_view block) const { return _registry->contains(block); }
 };
