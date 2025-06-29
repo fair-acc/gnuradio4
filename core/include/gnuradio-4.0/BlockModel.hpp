@@ -212,7 +212,7 @@ public:
             portOrCollection);
     }
 
-    [[nodiscard]] virtual std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {}; };
+    [[nodiscard]] virtual std::span<std::shared_ptr<BlockModel>> blocks() noexcept { return {}; };
     [[nodiscard]] virtual std::span<Edge>                        edges() noexcept { return {}; }
 
     DynamicPorts& dynamicInputPorts() {
@@ -518,7 +518,7 @@ public:
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
 
     // For blocks that contain nested blocks (Graphs, Schedulers)
-    [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept override {
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>> blocks() noexcept override {
         if constexpr (requires { blockRef().blocks(); }) {
             return blockRef().blocks();
         } else {
