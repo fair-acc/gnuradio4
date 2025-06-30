@@ -96,7 +96,7 @@ protected:
         doForNestedBlocks(doForNestedBlocks, _graph);
     }
 
-    void registerPropertyCallBacks() noexcept {
+    void registerPropertyCallbacks() noexcept {
         this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
         this->propertyCallbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
         this->propertyCallbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
@@ -124,12 +124,12 @@ public:
 
     explicit SchedulerBase(gr::Graph&& graph, std::string_view defaultPoolName, const profiling::Options& profiling_options = {}) //
         : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
-        registerPropertyCallBacks();
+        registerPropertyCallbacks();
     }
 
     explicit SchedulerBase(gr::Graph&& graph, property_map initialSettings, std::string_view defaultPoolName = gr::thread_pool::kDefaultCpuPoolId) //
         : base_t(initialSettings), _graph(std::move(graph)), _profiler{{}}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
-        registerPropertyCallBacks();
+        registerPropertyCallbacks();
         std::ignore = this->settings().set(initialSettings);
         std::ignore = this->settings().activateContext();
         std::ignore = this->settings().applyStagedParameters();
@@ -990,7 +990,7 @@ private:
         // depth first traversal — use stack
         std::set<block_t> visited;
 
-        std::function<void(block_t)> dfs = [&](block_t node) {
+        auto dfs = [&]<typename Self>(Self&& self, block_t node) -> void {
             if (visited.contains(node)) {
                 return;
             }
@@ -1000,14 +1000,14 @@ private:
 
             if (_adjacency_list.contains(node)) {
                 for (auto& dst : _adjacency_list.at(node)) {
-                    dfs(dst);
+                    self(self, dst); // recursive call
                 }
             }
         };
 
         // launch from all source blocks
         for (auto sourceBlock : _source_blocks) {
-            dfs(sourceBlock);
+            dfs(dfs, sourceBlock);
         }
 
         // batching
