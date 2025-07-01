@@ -73,6 +73,8 @@ protected:
     std::vector<gr::Message> _pendingMessagesToChildren;
     bool                     _messagePortsConnected = false;
 
+    std::atomic_flag _processingScheduledMessages;
+
     template<typename Fn>
     void forAllUnmanagedBlocks(Fn&& function) {
         auto doForNestedBlocks = [&function](auto& doForNestedBlocks_, auto& parent) -> void {
@@ -179,6 +181,12 @@ public:
     }
 
     void processScheduledMessages() {
+        if (std::atomic_flag_test_and_set_explicit(&_processingScheduledMessages, std::memory_order_acquire)) {
+            return;
+        }
+
+        on_scope_exit _ = [&] { std::atomic_flag_clear_explicit(&_processingScheduledMessages, std::memory_order_release); };
+
         base_t::processScheduledMessages(); // filters messages and calls own property handler
 
         // Process messages in the graph
