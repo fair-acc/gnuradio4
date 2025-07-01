@@ -4180,7 +4180,19 @@ public:
                             keyID < transposed_map.size() - 1 ? "├" : "└", keyID, transposed_map[0].first, transposed_map[keyID].first);
 
                         auto& marker_result_map = ResultType::add_result(meas);
-                        add_statistics(marker_result_map, utils::diff<N_ITERATIONS, long double>(transposed_map[keyID].second, transposed_map[0].second));
+
+                        const auto marker_latencies = utils::diff<N_ITERATIONS, long double>(transposed_map[keyID].second, transposed_map[0].second);
+
+                        if constexpr (N_ITERATIONS > 1) {
+                            add_statistics(marker_result_map, marker_latencies);
+                        } else {
+                            // even with N_ITER=1: show "min" and "mean" as the actual latency
+                            marker_result_map.try_emplace("min", marker_latencies[0], "s", _precision);
+                            marker_result_map.try_emplace("mean", marker_latencies[0], "s", _precision);
+                            marker_result_map.try_emplace("stddev", std::monostate{}, "s", _precision);
+                            marker_result_map.try_emplace("median", std::monostate{}, "s", _precision);
+                            marker_result_map.try_emplace("max", marker_latencies[0], "s", _precision);
+                        }
                     }
                 }
             }

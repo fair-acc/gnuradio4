@@ -57,8 +57,8 @@ protected:
     decltype(_profiler.forThisThread()) _profilerHandler;
     std::shared_ptr<TaskExecutor>       _pool;
     std::atomic_size_t                  _nRunningJobs{0UZ};
-    std::recursive_mutex                _jobListsMutex; // only used when modifying and copying the graph->local job list
-    JobLists                            _jobLists = std::make_shared<std::vector<std::vector<BlockModel*>>>();
+    std::recursive_mutex                _executionOrderMutex; // only used when modifying and copying the graph->local job list
+    JobLists                            _executionOrder = std::make_shared<std::vector<std::vector<BlockModel*>>>();
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::unique_ptr<BlockModel>> _zombieBlocks;
@@ -96,22 +96,7 @@ protected:
         doForNestedBlocks(doForNestedBlocks, _graph);
     }
 
-public:
-    using base_t = Block<Derived>;
-
-    Annotated<gr::Size_t, "timeout", Doc<"sleep timeout to wait if graph has made no progress ">>                              timeout_ms                      = 10U;
-    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 20U;
-    Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
-    Annotated<std::string, "pool name", Doc<"default pool name">>                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
-
-    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio);
-
-    constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
-
-    [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
-
-    explicit SchedulerBase(gr::Graph&& graph, std::string_view defaultPoolName, const profiling::Options& profiling_options = {}) //
-        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
+    void registerPropertyCallbacks() noexcept {
         this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
         this->propertyCallbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
         this->propertyCallbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
@@ -119,6 +104,35 @@ public:
         this->propertyCallbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
         this->propertyCallbacks[scheduler::property::kGraphGRC]     = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
         this->settings().updateActiveParameters();
+    }
+
+public:
+    using base_t = Block<Derived>;
+
+    Annotated<gr::Size_t, "timeout", Doc<"sleep timeout to wait if graph has made no progress ">>                              timeout_ms                      = 10U;
+    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 20U;
+    Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
+    Annotated<std::string, "pool name", Doc<"default pool name">>                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
+    Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>      max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
+    Annotated<property_map, "sched_settings", Doc<"scheduler implementation specific settings">>                               sched_settings{};
+
+    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio, max_work_items, sched_settings);
+
+    constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
+
+    [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
+
+    explicit SchedulerBase(gr::Graph&& graph, std::string_view defaultPoolName, const profiling::Options& profiling_options = {}) //
+        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
+        registerPropertyCallbacks();
+    }
+
+    explicit SchedulerBase(gr::Graph&& graph, property_map initialSettings, std::string_view defaultPoolName = gr::thread_pool::kDefaultCpuPoolId) //
+        : base_t(initialSettings), _graph(std::move(graph)), _profiler{{}}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
+        registerPropertyCallbacks();
+        std::ignore = this->settings().set(initialSettings);
+        std::ignore = this->settings().activateContext();
+        std::ignore = this->settings().applyStagedParameters();
     }
 
     ~SchedulerBase() {
@@ -129,8 +143,11 @@ public:
             }
         }
         waitDone();
-        _jobLists.reset(); // force earlier crashes is accessed after destruction
+        _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
+
+    [[nodiscard]] const gr::Graph& graph() const noexcept { return _graph; }
+    [[nodiscard]] const TProfiler& profiler() const noexcept { return _profiler; }
 
     [[nodiscard]] bool isProcessing() const
     requires(executionPolicy() == ExecutionPolicy::multiThreaded)
@@ -212,11 +229,15 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr auto& graph() { return _graph; }
-
     std::expected<void, Error> runAndWait() {
         [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("scheduler_base.runAndWait");
         processScheduledMessages(); // make sure initial subscriptions are processed
+        if (this->state() == lifecycle::State::STOPPED || this->state() == lifecycle::State::ERROR) {
+            if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
+                this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
+                return std::unexpected(e.error());
+            }
+        }
         if (this->state() == lifecycle::State::IDLE) {
             if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
@@ -256,7 +277,7 @@ public:
         }
     }
 
-    [[nodiscard]] const JobLists& jobs() const noexcept { return _jobLists; }
+    [[nodiscard]] const JobLists& jobs() const noexcept { return _executionOrder; }
 
 protected:
     void disconnectAllEdges() {
@@ -280,10 +301,10 @@ protected:
         return result;
     }
 
-    work::Result traverseBlockListOnce(const std::vector<BlockModel*>& blocks) noexcept {
-        constexpr std::size_t requestedWorkAllBlocks = std::numeric_limits<std::size_t>::max();
-        std::size_t           performedWorkAllBlocks = 0UZ;
-        bool                  unfinishedBlocksExist  = false; // i.e. at least one block returned OK, INSUFFICIENT_INPUT_ITEMS, or INSUFFICIENT_OUTPU_ITEMS
+    work::Result traverseBlockListOnce(const std::vector<BlockModel*>& blocks) const {
+        const std::size_t requestedWorkAllBlocks = max_work_items;
+        std::size_t       performedWorkAllBlocks = 0UZ;
+        bool              unfinishedBlocksExist  = false; // i.e. at least one block returned OK, INSUFFICIENT_INPUT_ITEMS, or INSUFFICIENT_OUTPU_ITEMS
         for (auto& currentBlock : blocks) {
             const auto [requested_work, performed_work, status] = currentBlock->work(requestedWorkAllBlocks);
             performedWorkAllBlocks += performed_work;
@@ -297,7 +318,7 @@ protected:
 #ifdef __EMSCRIPTEN__
         std::this_thread::sleep_for(std::chrono::microseconds(10u)); // workaround for incomplete std::atomic implementation (at least it seems for nodejs)
 #endif
-        return {requestedWorkAllBlocks, performedWorkAllBlocks, unfinishedBlocksExist ? work::Status::OK : work::Status::DONE};
+        return {max_work_items, performedWorkAllBlocks, unfinishedBlocksExist ? work::Status::OK : work::Status::DONE};
     }
 
     void init() {
@@ -307,6 +328,7 @@ protected:
     }
 
     void reset() {
+        _executionOrder->clear();
         forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
     }
@@ -319,21 +341,21 @@ protected:
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
 
-        std::lock_guard lock(_jobListsMutex);
+        std::lock_guard lock(_executionOrderMutex);
         forAllUnmanagedBlocks([this](auto& block) { //
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
         });
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
-            static_cast<Derived*>(this)->poolWorker(0UZ, _jobLists);
+            static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder);
         } else { // run on processing thread pool
             [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.runOnPool");
             assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
-            auto jobListsCopy = _jobLists;
-            for (std::size_t runnerID = 0UZ; runnerID < _jobLists->size(); runnerID++) {
+            auto jobListsCopy = _executionOrder;
+            for (std::size_t runnerID = 0UZ; runnerID < _executionOrder->size(); runnerID++) {
                 _pool->execute([this, runnerID, jobListsCopy]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy); });
             }
-            if (!_jobLists->empty()) {
+            if (!_executionOrder->empty()) {
                 _nRunningJobs.wait(0UZ, std::memory_order_acquire); // waits until at least one pool worker started
             }
         }
@@ -347,7 +369,7 @@ protected:
 
         std::vector<BlockModel*> localBlockList;
         {
-            std::lock_guard          lock(_jobListsMutex);
+            std::lock_guard          lock(_executionOrderMutex);
             std::vector<BlockModel*> blocks = jobList->at(runnerID);
             localBlockList.reserve(blocks.size());
             for (const auto& block : blocks) {
@@ -553,18 +575,17 @@ protected:
     /*
       Zombie Tutorial:
 
-      Blocks can't be deleted unless stopped, but since stopping can take time (async) we move such blocks
-      to the "zombie list" and disconnect them immediately from the graph. This allows them to stop and be deleted
-      safely.
+      Blocks cannot be deleted unless stopped, but stopping may take time (asynchronous).
+      We therefore move such blocks to the "zombie list" and disconnect them immediately from the graph,
+      allowing them to stop and be deleted safely.
 
-      Periodically, we call cleanupZombieBlocks(), which iterates the zombie list and deletes the blocks that are now stopped.
+      Each worker thread periodically calls cleanupZombieBlocks(), which:
+      - removes fully stopped zombies from the zombie list
+      - erases corresponding entries from its own localBlockList
+      - updates the shared _executionOrder to ensure zombies do not reappear on restart
 
-      cleanupZombieBlocks() is called *per-thread*, since we also need to update the localBlockList, i.e.: removing dangling block pointers
-      from the localBlockList.
-
-      We also update the _jobLists member variable, but probably that member can be removed, seems unneeded and only used so unit-tests can
-      query it.
-     */
+      This mechanism supports safe dynamic block removal while the scheduler is running, without blocking execution.
+    */
     void cleanupZombieBlocks(std::vector<BlockModel*>& localBlockList) {
         if (localBlockList.empty()) {
             return;
@@ -587,24 +608,19 @@ protected:
             switch ((*it)->state()) {
             case lifecycle::State::IDLE:
             case lifecycle::State::STOPPED:
-            case lifecycle::State::INITIALISED:
-                // This block can be deleted immediately
+            case lifecycle::State::INITIALISED: // block can be deleted immediately
                 shouldDelete = true;
                 break;
-            case lifecycle::State::ERROR:
-                // Delete as well. (Separate case block, as better ideas welcome)
+            case lifecycle::State::ERROR: // delete as well
                 shouldDelete = true;
                 break;
-            case lifecycle::State::REQUESTED_STOP:
-                // This block will be deleted later
+            case lifecycle::State::REQUESTED_STOP: // block will be deleted later
                 break;
-            case lifecycle::State::REQUESTED_PAUSE:
-                // This block will be deleted later
+            case lifecycle::State::REQUESTED_PAUSE: // block will be deleted later
                 // There's no transition from REQUESTED_PAUSE to REQUESTED_STOP
                 // Will be moved to REQUESTED_STOP as soon as it's possible
                 break;
-            case lifecycle::State::PAUSED:
-                // This zombie was in REQUESTED_PAUSE and now finally in PAUSED. Can be stopped now.
+            case lifecycle::State::PAUSED: // zombie was in REQUESTED_PAUSE and now finally in PAUSED. Can be stopped now.
                 // Will be deleted in a next zombie maintenance period
                 this->emitErrorMessageIfAny("cleanupZombieBlocks", (*it)->changeStateTo(lifecycle::State::REQUESTED_STOP));
                 break;
@@ -617,12 +633,9 @@ protected:
                 BlockModel* zombieRaw = it->get();
                 it                    = _zombieBlocks.erase(it); // ~Block() runs here
 
-                // We need to remove zombieRaw from jobLists as well, in case Scheduler ever goes to INITIALIZED
-                // again.
-                // TODO: I'd argue we should remove _jobLists to minimize having to maintain state. Instead, a job list can be
-                // calculated in start().
-                std::lock_guard lock(_jobListsMutex);
-                for (auto& jobList : *this->_jobLists) {
+                // We need to remove zombieRaw from jobLists as well, in case Scheduler ever goes to INITIALIZED again.
+                std::lock_guard lock(_executionOrderMutex);
+                for (auto& jobList : *this->_executionOrder) {
                     auto job_it = std::remove(jobList.begin(), jobList.end(), zombieRaw);
                     if (job_it != jobList.end()) {
                         jobList.erase(job_it, jobList.end());
@@ -647,6 +660,15 @@ protected:
         newBlocks.clear();
     }
 
+    /*
+      Moves a block to the zombie list:
+
+      - Requests stop if the block is still running or paused.
+      - Removes the block from adoption lists (to handle edge cases such as Add Block → Remove Block).
+      - Adds it to the zombie list.
+
+      The block will be physically deleted by cleanupZombieBlocks() when it reaches a safe state.
+    */
     void makeZombie(std::unique_ptr<BlockModel> block) {
         if (block->state() == lifecycle::State::PAUSED || block->state() == lifecycle::State::RUNNING) {
             this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
@@ -691,6 +713,7 @@ protected:
             case lifecycle::State::REQUESTED_STOP:
                 // Can go into the zombie list and deleted
                 break;
+            default:;
             }
 
             _zombieBlocks.push_back(std::move(block));
@@ -732,6 +755,7 @@ protected:
                     break;
                 case lifecycle::State::STOPPED:
                 case lifecycle::State::ERROR: break;
+                default:;
                 }
 
                 _graph = std::move(newGraph);
@@ -742,7 +766,7 @@ protected:
                 // Alternatively, we could forbid kGraphGRC unless Scheduler was in STOPPED state. That would simplify logic, but
                 // put more burden on the client.
 
-                message.data = property_map{{"originalSchedulerState", int(originalState)}};
+                message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
             } catch (const std::exception& e) {
                 message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", e.what())});
             }
@@ -792,6 +816,7 @@ public:
     using base_t = SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
 
     explicit Simple(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
+    explicit Simple(gr::Graph&& graph, property_map initialSettings, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId) : base_t(std::move(graph), std::move(initialSettings), defaultThreadPool) {}
 
 private:
     void init() {
@@ -799,28 +824,28 @@ private:
         [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("scheduler_simple.init");
 
         // generate job list
+        std::size_t nBlocks = 0UZ;
+        this->forAllUnmanagedBlocks([&nBlocks](auto&& /*block*/) { nBlocks++; });
+        std::vector<BlockModel*> allBlocks;
+        allBlocks.reserve(nBlocks);
+        this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
+
         std::size_t n_batches = 1UZ;
         switch (base_t::executionPolicy()) {
         case ExecutionPolicy::singleThreaded:
         case ExecutionPolicy::singleThreadedBlocking: break;
-        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), this->_graph.blocks().size()); break;
+        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), nBlocks); break;
+        default:;
         }
 
-        std::lock_guard lock(base_t::_jobListsMutex);
-
-        std::size_t blockCount = 0UZ;
-        this->forAllUnmanagedBlocks([&blockCount](auto&& /*block*/) { blockCount++; });
-        std::vector<BlockModel*> allBlocks;
-        allBlocks.reserve(blockCount);
-        this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
-
+        std::lock_guard lock(base_t::_executionOrderMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
-        this->_jobLists->clear();
-        this->_jobLists->reserve(n_batches);
+        this->_executionOrder->clear();
+        this->_executionOrder->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
-            auto& job = this->_jobLists->emplace_back(std::vector<BlockModel*>());
+            auto& job = this->_executionOrder->emplace_back(std::vector<BlockModel*>());
             job.reserve(allBlocks.size() / n_batches + 1);
             for (std::size_t j = i; j < allBlocks.size(); j += n_batches) {
                 job.push_back(allBlocks[j]);
@@ -842,15 +867,16 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
     friend class lifecycle::StateMachine<BreadthFirst<execution, TProfiler>>;
     friend class SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
-    std::vector<BlockModel*> _blocklist;
 
 public:
     using base_t = SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
 
     explicit BreadthFirst(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
+    explicit BreadthFirst(gr::Graph&& graph, property_map initialSettings, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId) : base_t(std::move(graph), std::move(initialSettings), defaultThreadPool) {}
 
 private:
     void init() {
+        std::vector<BlockModel*>    blockList;
         [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("breadth_first.init");
         using block_t                  = BlockModel*;
         base_t::init();
@@ -877,10 +903,16 @@ private:
         }
 
         // process all blocks, adding all unvisited child blocks to the queue
+        std::unordered_set<block_t> visited;
         while (!queue.empty()) {
             block_t currentBlock = queue.front();
             queue.pop();
-            _blocklist.push_back(currentBlock);
+
+            if (visited.insert(currentBlock).second) {
+                blockList.push_back(currentBlock);
+                visited.insert(currentBlock);
+            }
+
             if (_adjacency_list.contains(currentBlock)) { // node has outgoing edges
                 for (auto& dst : _adjacency_list.at(currentBlock)) {
                     if (!reached.contains(dst)) { // detect cycles. this could be removed if we guarantee cycle free graphs earlier
@@ -896,20 +928,21 @@ private:
         switch (base_t::executionPolicy()) {
         case ExecutionPolicy::singleThreaded:
         case ExecutionPolicy::singleThreadedBlocking: break;
-        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), _blocklist.size()); break;
+        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()); break;
+        default: assert(false && "ExecutionPolicy case not handled");
         }
 
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
-        std::lock_guard lock(base_t::_jobListsMutex);
-        this->_jobLists->clear();
-        this->_jobLists->reserve(n_batches);
+        std::lock_guard lock(base_t::_executionOrderMutex);
+        this->_executionOrder->clear();
+        this->_executionOrder->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
-            auto& job = this->_jobLists->emplace_back(std::vector<BlockModel*>());
-            job.reserve(_blocklist.size() / n_batches + 1);
-            for (std::size_t j = i; j < _blocklist.size(); j += n_batches) {
-                job.push_back(_blocklist[j]);
+            auto& job = this->_executionOrder->emplace_back(std::vector<BlockModel*>());
+            job.reserve(blockList.size() / n_batches + 1);
+            for (std::size_t j = i; j < blockList.size(); j += n_batches) {
+                job.push_back(blockList[j]);
             }
         }
     }
@@ -919,6 +952,94 @@ private:
         init();
     }
 };
+
+template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
+class DepthFirst : public SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler> {
+    using Description = Doc<R""(Depth First Scheduler which traverses the graph starting from the source blocks in a depth-first manner.)"">;
+
+    friend class lifecycle::StateMachine<DepthFirst<execution, TProfiler>>;
+    friend class SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>;
+    static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
+
+public:
+    using base_t = SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>;
+
+    explicit DepthFirst(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
+    explicit DepthFirst(gr::Graph&& graph, property_map initialSettings, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId) : base_t(std::move(graph), std::move(initialSettings), defaultThreadPool) {}
+
+private:
+    void init() {
+        std::vector<BlockModel*>    blocklist;
+        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("depth_first.init");
+        using block_t                  = BlockModel*;
+        base_t::init();
+
+        // adjacency list
+        std::map<block_t, std::vector<block_t>> _adjacency_list{};
+        std::vector<block_t>                    _source_blocks{};
+        std::set<block_t>                       block_reached;
+
+        for (auto& e : this->_graph.edges()) {
+            _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
+            _source_blocks.push_back(e._sourceBlock);
+            block_reached.insert(e._destinationBlock);
+        }
+
+        _source_blocks.erase(std::remove_if(_source_blocks.begin(), _source_blocks.end(), [&block_reached](auto currentBlock) { return block_reached.contains(currentBlock); }), _source_blocks.end());
+
+        // depth first traversal — use stack
+        std::set<block_t> visited;
+
+        auto dfs = [&]<typename Self>(Self&& self, block_t node) -> void {
+            if (visited.contains(node)) {
+                return;
+            }
+            visited.insert(node);
+
+            blocklist.push_back(node);
+
+            if (_adjacency_list.contains(node)) {
+                for (auto& dst : _adjacency_list.at(node)) {
+                    self(self, dst); // recursive call
+                }
+            }
+        };
+
+        // launch from all source blocks
+        for (auto sourceBlock : _source_blocks) {
+            dfs(dfs, sourceBlock);
+        }
+
+        // batching
+        std::size_t n_batches = 1UZ;
+        switch (base_t::executionPolicy()) {
+        case ExecutionPolicy::singleThreaded:
+        case ExecutionPolicy::singleThreadedBlocking: break;
+        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blocklist.size()); break;
+        default: assert(false && "ExecutionPolicy case not handled");
+        }
+
+        this->_adoptionBlocks.clear();
+        this->_adoptionBlocks.resize(n_batches);
+
+        std::lock_guard lock(base_t::_executionOrderMutex);
+        this->_executionOrder->clear();
+        this->_executionOrder->reserve(n_batches);
+        for (std::size_t i = 0; i < n_batches; i++) {
+            auto& job = this->_executionOrder->emplace_back(std::vector<BlockModel*>());
+            job.reserve(blocklist.size() / n_batches + 1);
+            for (std::size_t j = i; j < blocklist.size(); j += n_batches) {
+                job.push_back(blocklist[j]);
+            }
+        }
+    }
+
+    void reset() {
+        base_t::reset();
+        init();
+    }
+};
+
 } // namespace gr::scheduler
 
 #endif // GNURADIO_SCHEDULER_HPP

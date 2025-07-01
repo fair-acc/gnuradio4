@@ -116,6 +116,8 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     std::size_t      _valueIndex{0};          // current index in values array
     gr::Size_t       _nSamplesProduced{0ULL}; // for infinite samples the counter wraps around back to 0, _tagIndex = 0, _valueIndex = 0
 
+    std::function<void(const Tag&)> _tagCallback{}; // optional tag callback
+
     void start() {
         _nSamplesProduced = 0U;
         _valueIndex       = 0U;
@@ -222,6 +224,9 @@ private:
                 print_tag(_tags[_tagIndex], std::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
             publishTagFn(_tags[_tagIndex].map, 0UZ);
+            if (_tagCallback) {
+                _tagCallback(_tags[_tagIndex]);
+            }
             this->_outputTagsChanged = true;
             _tagIndex++;
             if (repeat_tags && _tagIndex == _tags.size()) {
@@ -261,6 +266,8 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     std::vector<Tag> _tags;
     gr::Size_t       _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
 
+    std::function<void(const Tag&)> _tagCallback{}; // optional tag callback
+
     void start() {
         if (verbose_console) {
             std::println("started TagMonitor {} aka. '{}'", this->unique_name, this->name);
@@ -281,7 +288,10 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
         if (log_samples) {
@@ -300,7 +310,10 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
 
@@ -336,6 +349,8 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     std::vector<Tag> _tags{};
     gr::Size_t       _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
 
+    std::function<void(const Tag&)> _tagCallback{};
+
     void start() {
         if (verbose_console) {
             std::println("started sink {} aka. '{}'", this->unique_name, this->name);
@@ -362,7 +377,10 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processOne(...1)    \t received tag at {:6}", this->name, _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
         if (log_samples) {
@@ -384,7 +402,10 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
         if (log_samples) {
