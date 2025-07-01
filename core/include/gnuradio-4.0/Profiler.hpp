@@ -281,7 +281,8 @@ public:
 };
 
 class Profiler {
-    gr::CircularBuffer<detail::TraceEvent> _buffer;
+    using BufferType = gr::CircularBuffer<detail::TraceEvent, std::dynamic_extent, ProducerType::Multi>;
+    BufferType _buffer;
     using WriterType  = decltype(_buffer.new_writer());
     using HandlerType = Handler<Profiler, WriterType>;
     std::mutex                             _handlers_lock;
@@ -292,7 +293,7 @@ class Profiler {
     detail::time_point                     _start = detail::clock::now();
 
 public:
-    explicit Profiler(const Options& options = {}) : _buffer(500000) {
+    explicit Profiler(const Options& options = {}) : _buffer(524288) {
         _event_handler = std::thread([options, &reader = _reader, &finished = _finished]() {
             auto          file_name = options.output_file;
             std::ofstream out_file;

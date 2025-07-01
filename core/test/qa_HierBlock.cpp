@@ -52,21 +52,22 @@ const boost::ut::suite ExportPortsTests_ = [] {
         using namespace gr;
         using enum gr::message::Command;
 
-        gr::scheduler::Simple scheduler{gr::Graph()};
-        auto&                 graph = scheduler.graph();
+        gr::Graph initGraph;
 
         // Basic source and sink
-        auto& source = graph.emplaceBlock<SlowSource<float>>();
-        auto& sink   = graph.emplaceBlock<CountingSink<float>>();
+        auto& source = initGraph.emplaceBlock<SlowSource<float>>();
+        auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
         using SubGraphType   = GraphWrapper<DemoSubGraph<float>>;
-        auto& subGraph       = graph.addBlock(std::make_unique<SubGraphType>());
+        auto& subGraph       = initGraph.addBlock(std::make_unique<SubGraphType>());
         auto* subGraphDirect = dynamic_cast<SubGraphType*>(&subGraph);
 
         // Connecting the message ports
-        gr::MsgPortOut toScheduler;
-        gr::MsgPortIn  fromScheduler;
+        gr::scheduler::Simple scheduler{std::move(initGraph)};
+        const auto&           graph = scheduler.graph();
+        gr::MsgPortOut        toScheduler;
+        gr::MsgPortIn         fromScheduler;
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
@@ -169,25 +170,24 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         using namespace gr;
         using enum gr::message::Command;
 
-        gr::Graph graph;
+        gr::Graph initGraph;
         // auto&     source = graph.emplaceBlock<SlowSource<float>>({{"n_samples_max", 32U}});
-        auto& source = graph.emplaceBlock<SlowSource<float>>();
-        auto& sink   = graph.emplaceBlock<CountingSink<float>>();
+        auto& source = initGraph.emplaceBlock<SlowSource<float>>();
+        auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
         using SubGraphType   = GraphWrapper<DemoSubGraph<float>>;
-        auto& subGraph       = graph.addBlock(std::make_unique<SubGraphType>());
+        auto& subGraph       = initGraph.addBlock(std::make_unique<SubGraphType>());
         auto* subGraphDirect = dynamic_cast<SubGraphType*>(&subGraph);
         subGraphDirect->exportPort(true, subGraphDirect->blockRef().pass1->unique_name, PortDirection::INPUT, "in");
         subGraphDirect->exportPort(true, subGraphDirect->blockRef().pass2->unique_name, PortDirection::OUTPUT, "out");
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(source, PortDefinition("out"), subGraph, PortDefinition("in"))));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(subGraph, PortDefinition("out"), sink, PortDefinition("in"))));
-        expect(eq(graph.edges().size(), 2UZ));
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(source, PortDefinition("out"), subGraph, PortDefinition("in"))));
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(subGraph, PortDefinition("out"), sink, PortDefinition("in"))));
+        expect(eq(initGraph.edges().size(), 2UZ));
         expect(eq(subGraphDirect->blockRef().edges().size(), 1UZ));
 
-        gr::scheduler::Simple scheduler{std::move(graph)};
-
+        gr::scheduler::Simple      scheduler{std::move(initGraph)};
         std::expected<void, Error> schedulerRet;
         auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
 
@@ -227,21 +227,22 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         using namespace gr;
         using enum gr::message::Command;
 
-        gr::scheduler::Simple scheduler{gr::Graph()};
-        auto&                 graph = scheduler.graph();
+        gr::Graph initGraph;
 
         // Basic source and sink
-        [[maybe_unused]] auto& source = graph.emplaceBlock<SlowSource<float>>();
-        [[maybe_unused]] auto& sink   = graph.emplaceBlock<CountingSink<float>>();
+        [[maybe_unused]] auto& source = initGraph.emplaceBlock<SlowSource<float>>();
+        [[maybe_unused]] auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
         using SubGraphType   = GraphWrapper<DemoSubGraphWithSettings<float>>;
-        auto& subGraph       = graph.addBlock(std::make_unique<SubGraphType>());
+        auto& subGraph       = initGraph.addBlock(std::make_unique<SubGraphType>());
         auto* subGraphDirect = dynamic_cast<SubGraphType*>(&subGraph);
 
         // Connecting the message ports
-        gr::MsgPortOut toScheduler;
-        gr::MsgPortIn  fromScheduler;
+        gr::scheduler::Simple scheduler{std::move(initGraph)};
+        const auto&           graph = scheduler.graph();
+        gr::MsgPortOut        toScheduler;
+        gr::MsgPortIn         fromScheduler;
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
