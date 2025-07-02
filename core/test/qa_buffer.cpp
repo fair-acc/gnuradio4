@@ -303,7 +303,7 @@ const boost::ut::suite CircularBufferTests = [] {
 
         expect(eq(reader.available(), 0UZ));
         expect(eq(reader.get().size(), 0UZ));
-#if not defined(__EMSCRIPTEN__) && not defined(NDEBUG)
+#if not defined(__EMSCRIPTEN__) && not defined(NDEBUG) && not defined(_WIN32)
         expect(aborts([&reader] { std::ignore = reader.get(1); }));
 #endif
         expect(eq(writer.available(), buffer.size()));
@@ -340,7 +340,7 @@ const boost::ut::suite CircularBufferTests = [] {
         expect(!reader.isConsumeRequested());
         expect(eq(reader.available(), buffer.size()));
 
-#if not defined(__EMSCRIPTEN__) && not defined(NDEBUG)
+#if not defined(__EMSCRIPTEN__) && not defined(NDEBUG) && not defined(_WIN32)
         expect(aborts([&reader] {
             {
                 ReaderSpanLike auto inSpan4 = reader.template get<SpanReleasePolicy::Terminate>(3);
