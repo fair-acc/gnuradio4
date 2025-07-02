@@ -206,6 +206,7 @@ The result is provided on a single output port as a map with the following keys:
             _thread.reset();
         }
         _thread = std::shared_ptr<std::thread>(new std::thread([this]() {
+            gr::thread_pool::thread::setThreadName(std::format("uT:{}", gr::meta::shorten_type_name(this->unique_name)));
 #ifdef __EMSCRIPTEN__
             runThreadEmscripten();
 #else

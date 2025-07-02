@@ -706,7 +706,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
         expect(eq(0UZ, scheduler.graph().progress().value())) << "initial progress definition (0)";
         std::expected<void, Error> schedulerResult;
-        auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] { schedulerResult = scheduler.runAndWait(); });
+        auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] {
+            gr::thread_pool::thread::setThreadName("qa_Sched");
+            schedulerResult = scheduler.runAndWait();
+        });
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";

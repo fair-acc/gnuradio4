@@ -210,6 +210,7 @@ private:
             auto createManagedThread = [](auto&& threadFunction, auto&& threadDeleter) { return std::shared_ptr<std::thread>(new std::thread(std::forward<decltype(threadFunction)>(threadFunction)), std::forward<decltype(threadDeleter)>(threadDeleter)); };
             userProvidedThread       = createManagedThread(
                 [this]() {
+                    gr::thread_pool::thread::setThreadName(std::format("uT:{}", gr::meta::shorten_type_name(this->unique_name)));
                     if (verbose_console) {
                         std::println("started user-provided thread");
                     }

@@ -1811,6 +1811,7 @@ public:
 
                 executor->execute([this]() {
                     assert(lifecycle::isActive(this->state()));
+                    gr::thread_pool::thread::setThreadName(gr::meta::shorten_type_name(this->unique_name));
 
                     lifecycle::State actualThreadState = this->state();
                     while (lifecycle::isActive(actualThreadState)) {

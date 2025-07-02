@@ -45,7 +45,10 @@ public:
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler_.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler_.msgOut.connect(fromScheduler)));
 
-        schedulerThread_ = std::thread([this] { schedulerRet_ = scheduler_.runAndWait(); });
+        schedulerThread_ = std::thread([this] {
+            gr::thread_pool::thread::setThreadName("qa_SchMess::scheduler");
+            schedulerRet_ = scheduler_.runAndWait();
+        });
 
         using namespace boost::ut;
         // Wait for the scheduler to start running
@@ -142,7 +145,10 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
         std::expected<void, Error> schedulerResult;
-        auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] { schedulerResult = scheduler.runAndWait(); });
+        auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] {
+            gr::thread_pool::thread::setThreadName("qa_SchMess::scheduler");
+            schedulerResult = scheduler.runAndWait();
+        });
 
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
