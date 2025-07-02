@@ -1750,7 +1750,9 @@ protected:
                 performedWork = 1UZ;
             }
 
-            progress->incrementAndGet();
+            if (performedWork > 0UZ) {
+                progress->incrementAndGet();
+            }
             if constexpr (blockingIO) {
                 progress->notify_all();
             }
