@@ -785,7 +785,10 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
 
-        auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
+        auto schedulerThread = std::thread([&scheduler] {
+            gr::thread_pool::thread::setThreadName("qa_Messages::scheduler");
+            scheduler.runAndWait();
+        });
 
         std::vector<std::string> receivedStates;
 
@@ -838,6 +841,7 @@ const boost::ut::suite MessagesTests = [] {
         sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
 
         auto client = std::thread([&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
+            gr::thread_pool::thread::setThreadName("qa_Mess::Client");
             sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting, {{"factor", 43.0f}});
             bool       seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
@@ -864,7 +868,10 @@ const boost::ut::suite MessagesTests = [] {
             sendMessage<Command::Set>(toScheduler, schedulerName, block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP))}});
         });
 
-        auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
+        auto schedulerThread = std::thread([&scheduler] {
+            gr::thread_pool::thread::setThreadName("qa_Messages::scheduler");
+            scheduler.runAndWait();
+        });
 
         client.join();
         while (source.state() != lifecycle::State::STOPPED) {

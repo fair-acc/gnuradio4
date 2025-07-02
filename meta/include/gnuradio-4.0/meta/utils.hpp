@@ -14,6 +14,22 @@
 #include <typeinfo>
 #include <unordered_map>
 
+#if __has_include(<stdfloat>)
+#include <stdfloat>
+#else
+#include <cstdint>
+#include <limits>
+
+// Inject into std only if truly unavailable (nonstandard, but pragmatic for compatibility)
+namespace std {
+using float32_t = float;
+using float64_t = double;
+
+static_assert(std::numeric_limits<float32_t>::is_iec559 && sizeof(float32_t) * 8 == 32, "float32_t must be a 32-bit IEEE 754 float");
+static_assert(std::numeric_limits<float64_t>::is_iec559 && sizeof(float64_t) * 8 == 64, "float64_t must be a 64-bit IEEE 754 double");
+} // namespace std
+#endif
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
@@ -428,12 +444,14 @@ inline std::string makePortableTypeName(std::string_view name) {
 
     using namespace std::string_literals;
     using gr::meta::detail::local_type_name;
-    static const auto typeMapping = std::array<std::pair<std::string, std::string>, 13>{{
+    static const auto typeMapping = std::array<std::pair<std::string, std::string>, 17>{{
         {local_type_name<std::int8_t>(), "int8"s}, {local_type_name<std::int16_t>(), "int16"s}, {local_type_name<std::int32_t>(), "int32"s}, {local_type_name<std::int64_t>(), "int64"s},         //
         {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
         {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
+        {local_type_name<std::float32_t>(), "float32"s}, {local_type_name<std::float64_t>(), "float64"},                                                                                          //
         {local_type_name<std::string>(), "string"s},                                                                                                                                              //
         {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s},                                                            //
+        {local_type_name<std::complex<std::float32_t>>(), "complex<float32>"s}, {local_type_name<std::complex<std::float64_t>>(), "complex<float64>"s},                                           //
     }};
 
     const auto it = std::ranges::find_if(typeMapping, [&](const auto& pair) { return pair.first == name; });
@@ -549,6 +567,48 @@ static_assert((fixed_string("out") + fixed_string_from_number<123>) == fixed_str
 template<typename T>
 [[nodiscard]] std::string type_name() noexcept {
     return detail::makePortableTypeName(detail::local_type_name<T>());
+}
+
+inline std::string shorten_type_name(std::string_view name) {
+    using namespace std::string_view_literals;
+
+    const bool hasLeading   = name.starts_with("::"sv);
+    const bool hasTrailing  = name.ends_with("::"sv);
+    const auto toStringView = [](auto&& r) { return std::string_view(&*r.begin(), static_cast<std::size_t>(std::ranges::distance(r))); };
+
+    std::vector<std::string_view> parts;
+    for (auto&& token : name | std::views::split("::"sv)) {
+        if (auto sv = toStringView(token); !sv.empty()) {
+            parts.push_back(sv);
+        }
+    }
+
+    if (parts.empty()) {
+        return hasLeading || hasTrailing ? "::" : "";
+    }
+
+    std::string result;
+    if (hasLeading) {
+        result += "::"sv;
+    }
+
+    if (parts.size() == 1UZ) {
+        result += hasTrailing ? std::string(1, parts.front().front()) : std::string(parts.front());
+    } else {
+        for (auto&& part : parts | std::views::take(parts.size() - 1UZ)) {
+            result += part.front();
+        }
+        if (!hasTrailing) {
+            result += "::";
+        }
+        result += parts.back();
+    }
+
+    if (hasTrailing) {
+        result += "::";
+    }
+
+    return result;
 }
 
 template<fixed_string val>

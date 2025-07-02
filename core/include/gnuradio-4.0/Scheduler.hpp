@@ -372,6 +372,7 @@ protected:
     void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<BlockModel*>>> jobList) noexcept {
         _nRunningJobs.fetch_add(1UZ, std::memory_order_acq_rel);
         _nRunningJobs.notify_all();
+        gr::thread_pool::thread::setThreadName(std::format("pW{}-{}", runnerID, gr::meta::shorten_type_name(this->unique_name)));
 
         [[maybe_unused]] auto& profiler_handler = _profiler.forThisThread();
 
