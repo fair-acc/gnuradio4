@@ -319,17 +319,6 @@ struct BusyLoopBlock : public gr::Block<BusyLoopBlock<T>> {
     }
 };
 
-bool awaitCondition(std::chrono::milliseconds timeout, std::function<bool()> condition) {
-    auto start = std::chrono::steady_clock::now();
-    while (std::chrono::steady_clock::now() - start < timeout) {
-        if (condition()) {
-            return true;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return false;
-}
-
 const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
     using namespace boost::ut;
     using namespace gr;

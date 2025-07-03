@@ -799,6 +799,13 @@ inline auto this_source_location(std::source_location l = std::source_location::
 inline auto this_source_location() { return "not yet implemented"; }
 #endif // HAVE_SOURCE_LOCATION
 
+template<typename Fn>
+struct on_scope_exit {
+    Fn function;
+    on_scope_exit(Fn fn) : function(std::move(fn)) {}
+    ~on_scope_exit() { function(); }
+};
+
 } // namespace gr
 
 #endif // include guard
