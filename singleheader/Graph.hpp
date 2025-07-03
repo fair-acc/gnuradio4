@@ -7366,7 +7366,12 @@ template<typename Clock, typename Duration>
 [[nodiscard]] inline std::string getIsoTime(std::chrono::time_point<Clock, Duration> timePoint) noexcept {
     const auto secs = std::chrono::time_point_cast<std::chrono::seconds>(timePoint);
     const auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(timePoint - secs).count();
+#if defined(_WIN32)
+    // In windows the colon (:) characer is reserved.  Using _ instead.
+    return std::format("{:%Y-%m-%dT%H_%M_%S}.{:06}", secs, ms); // ms-precision ISO time-format
+#else
     return std::format("{:%Y-%m-%dT%H:%M:%S}.{:06}", secs, ms); // ms-precision ISO time-format
+#endif
 }
 
 [[nodiscard]] inline std::string getIsoTime() noexcept { return getIsoTime(std::chrono::system_clock::now()); }
