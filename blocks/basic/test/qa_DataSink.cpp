@@ -333,6 +333,7 @@ const boost::ut::suite DataSinkTests = [] {
         };
 
         auto registerThread = std::thread([&] {
+            gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
             bool callbackRegistered                = false;
             bool callbackWithTagsRegistered        = false;
             bool callbackWithTagsAndSinkRegistered = false;
@@ -610,7 +611,10 @@ const boost::ut::suite DataSinkTests = [] {
             return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
         };
 
-        auto registerThread = std::thread([&] { expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerSnapshotCallback<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, callback); })) << boost::ut::fatal; });
+        auto registerThread = std::thread([&] {
+            gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
+            expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerSnapshotCallback<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, callback); })) << boost::ut::fatal;
+        });
 
         auto poller_result = std::async([isTrigger, kDelay] {
             std::shared_ptr<DataSetPoller<int32_t>> poller;
@@ -689,6 +693,7 @@ const boost::ut::suite DataSinkTests = [] {
         std::array<std::vector<int32_t>, matchers.size()> resultsCb;
 
         auto registerThread = std::thread([&] {
+            gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
             std::array<bool, resultsCb.size()> registered;
             std::ranges::fill(registered, false);
             expect(spinUntil(3s, [&] {
@@ -842,6 +847,7 @@ const boost::ut::suite DataSinkTests = [] {
         };
 
         auto registerThread = std::thread([&] { //
+            gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
             expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerTriggerCallback<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, 3000, 2000, callback); })) << boost::ut::fatal;
         });
 
@@ -976,6 +982,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto                        callback = [&receivedDataSets](const auto& ds) { receivedDataSets.push_back(ds); };
 
         auto registerThread = std::thread([&] { //
+            gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
             expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerDataSetCallback<float>(DataSinkQuery::sinkName("test_sink"), callback); })) << boost::ut::fatal;
         });
 

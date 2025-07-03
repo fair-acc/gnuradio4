@@ -19,6 +19,33 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#include <emscripten/threading.h>
+#endif
+
+template<typename T>
+inline void waitUntilChanged(gr::Sequence& sequence, T oldValue, [[maybe_unused]] unsigned int delay_ms = 1U) {
+    if (sequence.value() != oldValue) {
+        return;
+    }
+    do {
+#ifdef __EMSCRIPTEN__
+        if (emscripten_is_main_runtime_thread()) {
+            emscripten_sleep(delay_ms); // yields control back to browser, may need to disable/remove this depending on Emscripten flags
+        } else {
+#ifdef __EMSCRIPTEN_PTHREADS__
+            sequence.wait(oldValue); // only works in worker threads with PThreads
+#else
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms)); // fallback spin sleep
+#endif
+        }
+#else
+        sequence.wait(oldValue); // C++ native
+#endif
+    } while (sequence.value() == oldValue);
+}
+
 namespace gr::scheduler {
 using namespace gr::message;
 
@@ -56,7 +83,7 @@ protected:
     TProfiler                           _profiler;
     decltype(_profiler.forThisThread()) _profilerHandler;
     std::shared_ptr<TaskExecutor>       _pool;
-    std::atomic_size_t                  _nRunningJobs{0UZ};
+    std::shared_ptr<gr::Sequence>       _nRunningJobs = std::make_shared<gr::Sequence>();
     std::recursive_mutex                _executionOrderMutex; // only used when modifying and copying the graph->local job list
     JobLists                            _executionOrder = std::make_shared<std::vector<std::vector<BlockModel*>>>();
 
@@ -111,8 +138,9 @@ protected:
 public:
     using base_t = Block<Derived>;
 
-    Annotated<gr::Size_t, "timeout", Doc<"sleep timeout to wait if graph has made no progress ">>                              timeout_ms                      = 10U;
-    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 20U;
+    Annotated<gr::Size_t, "timeout", Unit<"ms">, Doc<"sleep timeout to wait if graph has made no progress ">>                  timeout_ms                      = 100U;
+    Annotated<gr::Size_t, "watchdog_timeout", Unit<"ms">, Doc<"sleep timeout for watchdog">>                                   watchdog_timeout                = 1000U;
+    Annotated<gr::Size_t, "timeout_inactivity_count", Doc<"number of inactive cycles w/o progress before sleep is triggered">> timeout_inactivity_count        = 5U;
     Annotated<gr::Size_t, "process_stream_to_message_ratio", Doc<"number of stream to msg processing">>                        process_stream_to_message_ratio = 16U;
     Annotated<std::string, "pool name", Doc<"default pool name">>                                                              poolName                        = std::string(gr::thread_pool::kDefaultCpuPoolId);
     Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>      max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
@@ -154,7 +182,7 @@ public:
     [[nodiscard]] bool isProcessing() const
     requires(executionPolicy() == ExecutionPolicy::multiThreaded)
     {
-        return _nRunningJobs.load(std::memory_order_acquire) > 0UZ;
+        return _nRunningJobs->value() > 0UZ;
     }
 
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
@@ -208,7 +236,7 @@ public:
 
         // Process messages in the graph
         _graph.processScheduledMessages();
-        if (_nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
+        if (_nRunningJobs->value() == 0UZ) {
             forAllUnmanagedBlocks([](auto& block) { block->processScheduledMessages(); });
         }
 
@@ -280,7 +308,7 @@ public:
 
     void waitDone() {
         [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.waitDone");
-        while (_nRunningJobs.load(std::memory_order_acquire) > 0UZ) {
+        while (_nRunningJobs->value() > 0UZ) {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
         }
     }
@@ -353,25 +381,34 @@ protected:
         forAllUnmanagedBlocks([this](auto& block) { //
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
         });
+
+        // start watchdog
+        auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
+        ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
+
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
-            assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
+            assert(_nRunningJobs->value() == 0UZ);
             static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder);
         } else { // run on processing thread pool
             [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.runOnPool");
-            assert(_nRunningJobs.load(std::memory_order_acquire) == 0UZ);
+            assert(_nRunningJobs->value() == 0UZ);
             auto jobListsCopy = _executionOrder;
             for (std::size_t runnerID = 0UZ; runnerID < _executionOrder->size(); runnerID++) {
                 _pool->execute([this, runnerID, jobListsCopy]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy); });
             }
             if (!_executionOrder->empty()) {
-                _nRunningJobs.wait(0UZ, std::memory_order_acquire); // waits until at least one pool worker started
+                _nRunningJobs->wait(0UZ); // waits until at least one pool worker started
             }
         }
     }
 
     void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<BlockModel*>>> jobList) noexcept {
-        _nRunningJobs.fetch_add(1UZ, std::memory_order_acq_rel);
-        _nRunningJobs.notify_all();
+        std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
+        std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
+
+        nRunningJobs->incrementAndGet();
+        nRunningJobs->notify_all();
+        gr::thread_pool::thread::setThreadName(std::format("pW{}-{}", runnerID, gr::meta::shorten_type_name(this->unique_name)));
 
         [[maybe_unused]] auto& profiler_handler = _profiler.forThisThread();
 
@@ -393,12 +430,12 @@ protected:
             [[maybe_unused]] auto pe = profiler_handler.startCompleteEvent("scheduler_base.work");
             if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
                 // optionally tracking progress and block if there is none
-                currentProgress = this->_graph.progress().value();
+                currentProgress = progress->value();
             }
 
             bool hasMessagesToProcess = msgToCount == 0UZ;
             if (hasMessagesToProcess) {
-                if (runnerID == 0UZ || _nRunningJobs.load(std::memory_order_acquire) == 0UZ) {
+                if (runnerID == 0UZ || nRunningJobs->value() == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
                 }
 
@@ -437,7 +474,7 @@ protected:
 
             // optionally tracking progress and block if there is none
             if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
-                auto progressAfter = this->_graph.progress().value();
+                auto progressAfter = progress->value();
                 if (currentProgress == progressAfter) {
                     inactiveCycleCount++;
                 } else {
@@ -446,14 +483,47 @@ protected:
 
                 currentProgress = progressAfter;
                 if (inactiveCycleCount > timeout_inactivity_count) {
-                    // allow scheduler process to sleep before retrying (N.B. intended to save CPU/battery power)
-                    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+                    // allow a scheduler process to wait on progress before retrying (N.B. intended to save CPU/battery power)
+                    // N.B. a watchdog will periodically update the progress to check for non-responsive blocks.
+                    waitUntilChanged(*progress, currentProgress, timeout_ms);
                     msgToCount = 0UZ;
                 }
             }
         } while (lifecycle::isActive(activeState));
-        _nRunningJobs.fetch_sub(1UZ, std::memory_order_acq_rel);
-        _nRunningJobs.notify_all();
+        std::ignore = nRunningJobs->subAndGet(1UZ);
+        nRunningJobs->notify_all();
+    }
+
+    void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
+        std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
+        std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
+        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", gr::meta::shorten_type_name(this->unique_name)));
+
+        if constexpr (execution != ExecutionPolicy::singleThreaded) {
+#ifndef __EMSCRIPTEN__
+            waitUntilChanged(*nRunningJobs, 0UZ, timeout_ms);
+#endif
+        }
+        std::size_t lastProgress = progress->value();
+        std::size_t nWarnings    = 0;
+        do {
+            std::this_thread::sleep_for(std::chrono::milliseconds(timeOut_ms));
+            // check and increase progress if there hasn't been none.
+
+            std::size_t currentProgress = progress->value();
+            if (currentProgress == lastProgress) {
+                nWarnings++;
+                lastProgress = progress->incrementAndGet(); // watchdog triggered manual update
+                progress->notify_all();
+                if (nWarnings >= timeOut_count) {
+                    std::println("trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, this->unique_name);
+                    // log or escalate (e.g., throw, abort, notify external watchdog)
+                }
+            } else {
+                lastProgress = currentProgress;
+                nWarnings    = 0UZ;
+            }
+        } while (nRunningJobs->value() > 0UZ);
     }
 
     void stop() {

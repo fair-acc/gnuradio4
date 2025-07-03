@@ -15,6 +15,7 @@
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
 #include <gnuradio-4.0/WaitStrategy.hpp>
+#include <gnuradio-4.0/thread/thread_affinity.hpp>
 
 template<gr::WaitStrategyLike auto wait = gr::NoWaitStrategy()>
 struct TestStruct {
@@ -176,7 +177,8 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
 #endif
 
 template<typename Writer, std::size_t N>
-void writeVaryingChunkSizes(Writer& writer) {
+void writeVaryingChunkSizes(Writer& writer, std::size_t writerID) {
+    gr::thread_pool::thread::setThreadName(std::format("writer#{}", writerID));
     std::size_t pos    = 0;
     std::size_t iWrite = 0;
     while (pos < N) {
@@ -474,9 +476,10 @@ const boost::ut::suite CircularBufferTests = [] {
         gr::BufferReaderLike auto reader2 = buffer.new_reader();
 
         constexpr auto kWrites      = 200000UZ;
-        auto           writerThread = std::thread(&writeVaryingChunkSizes<decltype(writer), kWrites>, std::ref(writer));
+        auto           writerThread = std::thread(&writeVaryingChunkSizes<decltype(writer), kWrites>, std::ref(writer), 0Uz);
 
-        auto readerFnc = [](auto reader) {
+        auto readerFnc = [](auto reader, std::size_t readerID) {
+            gr::thread_pool::thread::setThreadName(std::format("reader#{}", readerID));
             std::size_t i = 0;
             while (i < kWrites) {
                 auto in = reader.get().get();
@@ -492,8 +495,8 @@ const boost::ut::suite CircularBufferTests = [] {
             }
         };
 
-        auto reader1Thread = std::thread(readerFnc, std::ref(reader1));
-        auto reader2Thread = std::thread(readerFnc, std::ref(reader2));
+        auto reader1Thread = std::thread(readerFnc, std::ref(reader1), 0UZ);
+        auto reader2Thread = std::thread(readerFnc, std::ref(reader2), 1UZ);
         writerThread.join();
         reader1Thread.join();
         reader2Thread.join();
@@ -510,19 +513,19 @@ const boost::ut::suite CircularBufferTests = [] {
         gr::BufferReaderLike auto reader2 = buffer.new_reader();
 
         std::vector<WriterType> writers;
-        for (std::size_t i = 0; i < kNWriters; i++) {
+        for (std::size_t i = 0UZ; i < kNWriters; i++) {
             writers.push_back(buffer.new_writer());
         }
 
         std::array<std::thread, kNWriters> writerThreads;
-        for (std::size_t i = 0; i < kNWriters; i++) {
-            writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]));
+        for (std::size_t i = 0UZ; i < kNWriters; i++) {
+            writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]), i);
         }
 
         auto readerFnc = [](auto reader) {
             std::array<int, kNWriters> next;
             std::ranges::fill(next, 0);
-            std::size_t read = 0;
+            std::size_t read = 0UZ;
             while (read < kWrites * kNWriters) {
                 auto in = reader.get().get();
                 for (const auto& map : in) {

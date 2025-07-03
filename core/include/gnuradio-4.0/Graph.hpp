@@ -184,7 +184,7 @@ private:
     }
 };
 
-class Graph : public gr::Block<Graph> {
+struct Graph : public gr::Block<Graph> {
     std::shared_ptr<gr::Sequence>            _progress = std::make_shared<gr::Sequence>();
     std::vector<Edge>                        _edges;
     std::vector<std::unique_ptr<BlockModel>> _blocks;

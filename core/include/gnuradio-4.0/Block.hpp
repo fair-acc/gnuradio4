@@ -1750,7 +1750,9 @@ protected:
                 performedWork = 1UZ;
             }
 
-            progress->incrementAndGet();
+            if (performedWork > 0UZ) {
+                progress->incrementAndGet();
+            }
             if constexpr (blockingIO) {
                 progress->notify_all();
             }
@@ -1811,6 +1813,7 @@ public:
 
                 executor->execute([this]() {
                     assert(lifecycle::isActive(this->state()));
+                    gr::thread_pool::thread::setThreadName(gr::meta::shorten_type_name(this->unique_name));
 
                     lifecycle::State actualThreadState = this->state();
                     while (lifecycle::isActive(actualThreadState)) {

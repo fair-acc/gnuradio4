@@ -15,6 +15,8 @@
 
 #include <unistd.h>
 
+#include <gnuradio-4.0/thread/thread_affinity.hpp>
+
 namespace gr::profiling {
 
 using arg_value = std::pair<std::string, std::variant<std::string, int, double>>;
@@ -295,6 +297,7 @@ class Profiler {
 public:
     explicit Profiler(const Options& options = {}) : _buffer(524288) {
         _event_handler = std::thread([options, &reader = _reader, &finished = _finished]() {
+            gr::thread_pool::thread::setThreadName(gr::meta::shorten_type_name(gr::meta::type_name<Profiler>()));
             auto          file_name = options.output_file;
             std::ofstream out_file;
             if (file_name.empty() && options.output_mode == OutputMode::File) {

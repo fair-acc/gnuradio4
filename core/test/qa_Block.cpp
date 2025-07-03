@@ -1039,6 +1039,7 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
         auto scheduler = scheduler::Simple(std::move(flow));
 
         auto client = std::thread([&scheduler] {
+            gr::thread_pool::thread::setThreadName("qa_Block::Client");
             const auto startTime = std::chrono::steady_clock::now();
             auto       isExpired = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
             bool       expired   = false;
@@ -1049,7 +1050,10 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
             scheduler.requestStop();
         });
 
-        auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
+        auto schedulerThread = std::thread([&scheduler] {
+            gr::thread_pool::thread::setThreadName("qa_Block::sched");
+            scheduler.runAndWait();
+        });
         client.join();
 
         // Additional check to be sure that ClockSource is in STOPPED state.

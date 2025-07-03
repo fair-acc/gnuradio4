@@ -79,6 +79,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                 expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(uiSink1))) << "connect funcGen->uiSink1";
                 expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(uiSink2))) << "connect schmittTrigger->uiSink2";
                 uiLoop = std::thread([&uiSink1, &uiSink2]() {
+                    gr::thread_pool::thread::setThreadName("uiLoop");
                     bool drawUI = true;
                     while (drawUI) {
                         using enum gr::work::Status;
