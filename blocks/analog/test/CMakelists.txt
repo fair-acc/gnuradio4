@@ -1,0 +1,13 @@
+add_executable(qa_Analog qa_Analog.cpp)
+
+# Link libraries - matching the pattern from other block tests
+target_link_libraries(qa_Analog PRIVATE
+    GrAnalogBlocksObject)
+
+# Conditionally link test dependencies if they exist
+if(TARGET gr-testing)
+    target_link_libraries(qa_Analog PRIVATE gr-testing)
+endif()
+
+# Add the test
+add_test(NAME qa_Analog COMMAND qa_Analog)
