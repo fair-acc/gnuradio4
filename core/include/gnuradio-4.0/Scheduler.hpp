@@ -497,7 +497,8 @@ protected:
     void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
         std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
         std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
-        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", gr::meta::shorten_type_name(this->unique_name)));
+        const std::string             thisName     = this->unique_name;
+        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", gr::meta::shorten_type_name(thisName)));
 
         if constexpr (execution != ExecutionPolicy::singleThreaded) {
 #ifndef __EMSCRIPTEN__
@@ -511,12 +512,12 @@ protected:
             // check and increase progress if there hasn't been none.
 
             std::size_t currentProgress = progress->value();
-            if (currentProgress == lastProgress) {
+            if ((nRunningJobs->value() > 0UZ) && (currentProgress == lastProgress)) {
                 nWarnings++;
                 lastProgress = progress->incrementAndGet(); // watchdog triggered manual update
                 progress->notify_all();
                 if (nWarnings >= timeOut_count) {
-                    std::println("trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, this->unique_name);
+                    std::println(stderr, "trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, thisName);
                     // log or escalate (e.g., throw, abort, notify external watchdog)
                 }
             } else {
