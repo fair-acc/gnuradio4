@@ -1,98 +1,84 @@
-/* blocks/analog/test/qa_Analog.cpp
- * ------------------------------------------------------------
- * Simple test suite for the Analog block collection.
- * Uses standard assertions instead of boost/ut.
- */
+/*  blocks/analog/test/qa_Analog.cpp
+ *  ------------------------------------------------------------------
+ *  Unit-tests for the tiny “analog” block-library (Boost.UT)
+ *  ------------------------------------------------------------------ */
+#include <boost/ut.hpp>
 
-#include <iostream>
+#include <numeric>
 #include <cmath>
-#include <cassert>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
-
-#include <gnuradio-4.0/analog/Analog.hpp>           // the blocks under test
+#include <gnuradio-4.0/analog/Analog.hpp>
 
 using namespace gr;
 using namespace gr::testing;
 using namespace gr::blocks::analog;
+using namespace boost::ut;
 
-/* Helper function for float comparison */
-bool near(float a, float b, float tol) {
-    return std::abs(a - b) <= tol;
-}
-
-/* Test 1: SigSource - sine wave */
-void test_sigsource_sine() {
-    std::cout << "Testing SigSource - sine wave... ";
-    
-    constexpr std::size_t N     = 8;       // one full period
-    constexpr double      freq  = 1.0;   // double, not float
-    constexpr double      fs    = 8.0;
-    constexpr double      amp   = 1.0;
-    constexpr float       tol   = 1e-6f;
+/* helper – run a source block until N samples have been produced */
+template<typename Block, typename T>
+std::vector<T> run_n_samples(std::size_t N [[maybe_unused]],
+                             property_map cfg = {})
+{
+    cfg.insert_or_assign("n_samples_max", N);              // stop source
 
     Graph g;
-    /* SigSource test -------------------------------------------------- */
-    auto& src  = g.emplaceBlock<SigSource<float>>(property_map{
-                {"f0", freq}, {"fs", fs}, {"amp", amp},
-                {"n_samples_max", N}});
-    auto& sink = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>();
+    auto& src  = g.emplaceBlock<Block>(std::move(cfg));
+    auto& sink = g.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>();
 
-    assert(g.connect<"out">(src).to<"in">(sink) == ConnectionResult::SUCCESS);
+    const auto rc = g.connect<"out">(src).template to<"in">(sink);
+    expect(eq(rc, ConnectionResult::SUCCESS));
 
     scheduler::Simple sch{std::move(g)};
-    assert(sch.runAndWait().has_value());
+    expect(bool{sch.runAndWait()});
 
-    assert(sink._samples.size() == N);
-
-    for (std::size_t k = 0; k < N; ++k) {
-        const float expected = static_cast<float>(
-            amp * std::sin(2.0 * M_PI * static_cast<double>(k) /
-                           static_cast<double>(N)));
-        assert(near(sink._samples[k], expected, tol));
-    }
-    
-    std::cout << "PASSED" << std::endl;
+    return sink._samples;                                  // exactly N
 }
 
-/* Test 2: NoiseSource - RMS test */
-void test_noisesource_rms() {
-    std::cout << "Testing NoiseSource - RMS... ";
-    
-    constexpr std::size_t N   = 1024;
-    constexpr float       tol = 0.4f;
+/* near-equality for floats ----------------------------------------- */
+static constexpr auto fnear = [](float a, float b, float tol = 1e-6f) {
+    return std::fabs(a - b) <= tol;
+};
 
-    Graph g;
-    /* NoiseSource test ------------------------------------------------ */
-    auto& src  = g.emplaceBlock<NoiseSource<float>>(property_map{
-                {"amp", 1.0}, {"seed", 42u},
-                {"n_samples_max", N}});
-    auto& sink = g.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>();
+/* ------------------------------------------------------------------ */
+/*  test-suite                                                        */
+/* ------------------------------------------------------------------ */
+suite analog_basic = [] {
 
-    assert(g.connect<"out">(src).to<"in">(sink) == ConnectionResult::SUCCESS);
+    "SigSource – sine wave"_test = [] {
+        constexpr std::size_t N   = 8;      // one full period
+        constexpr double      fs  = 8.0;
+        constexpr double      f0  = 1.0;
+        constexpr double      amp = 1.0;
 
-    scheduler::Simple sch{std::move(g)};
-    assert(sch.runAndWait().has_value());
+        auto y = run_n_samples<SigSource<float>, float>(
+                     N, {{"fs", fs}, {"f0", f0}, {"amp", amp}});
 
-    assert(sink._samples.size() == N);
+        expect(y.size() == N);
 
-    float sum_sq = 0.0f;
-    for (auto v : sink._samples)
-        sum_sq += v * v;
-    const float rms = std::sqrt(sum_sq / float(N));
+        for (std::size_t k = 0; k < N; ++k) {
+            const float ref = static_cast<float>(amp *
+                               std::sin(2.0 * M_PI * double(k) / double(N)));
+            expect(fnear(y[k], ref)) << "k=" << k << " got " << y[k]
+                                     << " ref " << ref;
+        }
+    };
 
-    assert(rms > 1.0f - tol && rms < 1.0f + tol);
-    
-    std::cout << "PASSED (RMS = " << rms << ")" << std::endl;
-}
+    "NoiseSource – RMS around unity"_test = [] {
+        constexpr std::size_t N   = 1024;
+        constexpr float       tol = 0.4f;
 
-int main() {
-    std::cout << "Running Analog block tests..." << std::endl;
-    
-    test_sigsource_sine();
-    test_noisesource_rms();
-    
-    std::cout << "All tests passed!" << std::endl;
-    return 0;
-}
+        auto y = run_n_samples<NoiseSource<float>, float>(
+                     N, {{"amp", 1.0}, {"seed", 42u}});
+
+        expect(y.size() == N);
+
+        const float rms = std::sqrt(std::accumulate(y.begin(), y.end(), 0.0f,
+                                   [](float a, float v) { return a + v*v; }) / N);
+
+        expect(fnear(rms, 1.0f, tol)) << " RMS=" << rms;
+    };
+};
+
+int main() { /* Boost.UT runs suites before entering main */ }
