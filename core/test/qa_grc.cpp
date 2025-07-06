@@ -37,7 +37,7 @@ auto makeTestContext() {
 namespace {
 auto collectBlocks(const gr::Graph& graph) {
     std::set<std::string> result;
-    graph.forEachBlock([&](const auto& node) { result.insert(std::format("{}-{}", node.name(), node.typeName())); });
+    gr::graph::forAllBlocks<gr::block::Category::NormalBlock>(graph, [&](const auto node) { result.insert(std::format("{}-{}", node->name(), node->typeName())); });
     return result;
 }
 
@@ -50,9 +50,9 @@ auto collectEdges(const gr::Graph& graph) {
                                   [](const gr::PortDefinition::StringBased& _definition) { return _definition.name; }),                                               //
                 definition.definition);
         };
-        result.insert(std::format("{}#{} - {}#{}",                                          //
-            edge.sourceBlock().name(), portDefinitionToString(edge.sourcePortDefinition()), //
-            edge.destinationBlock().name(), portDefinitionToString(edge.destinationPortDefinition())));
+        result.insert(std::format("{}#{} - {}#{}",                                           //
+            edge.sourceBlock()->name(), portDefinitionToString(edge.sourcePortDefinition()), //
+            edge.destinationBlock()->name(), portDefinitionToString(edge.destinationPortDefinition())));
     });
     return result;
 }
@@ -445,8 +445,8 @@ const boost::ut::suite SettingsTests = [] {
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
-            graph2.forEachBlock([&](const auto& node) {
-                const auto settings = node.settings().get();
+            gr::graph::forAllBlocks<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
+                const auto settings = node->settings().get();
                 expect(eq(std::get<bool>(settings.at("bool_setting")), expectedBool));
                 expect(eq(std::get<std::string>(settings.at("string_setting")), expectedString));
                 expect(eq(std::get<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
@@ -481,9 +481,9 @@ const boost::ut::suite SettingsTests = [] {
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
-            graph2.forEachBlock([&](const auto& node) {
-                const auto& stored = node.settings().getStoredAll();
-                expect(eq(node.settings().getNStoredParameters(), 6UZ));
+            gr::graph::forAllBlocks<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
+                const auto& stored = node->settings().getStoredAll();
+                expect(eq(node->settings().getNStoredParameters(), 6UZ));
                 for (const auto& [ctx, ctxParameters] : stored) {
                     for (const auto& [ctxTime, settingsMap] : ctxParameters) {
                         std::string expectedName = "ArraySink0";
