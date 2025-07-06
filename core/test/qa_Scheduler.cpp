@@ -359,6 +359,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
         expect(eq(sched.timeout_ms.value, 42U));
 
         sched.settings().updateActiveParameters();
+
+        expect(sched.runAndWait().has_value());
     };
 };
 

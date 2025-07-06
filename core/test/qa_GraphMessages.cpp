@@ -37,7 +37,7 @@ const boost::ut::suite<"Graph Formatter Tests"> graphFormatterTests = [] {
         Graph                  graph;
         [[maybe_unused]] auto& source = graph.emplaceBlock<NullSource<float>>();
         [[maybe_unused]] auto& sink   = graph.emplaceBlock<NullSink<float>>();
-        Edge                   edge{graph.blocks()[0UZ].get(), {1}, graph.blocks()[1UZ].get(), {2}, 1024, 1, "test_edge"};
+        Edge                   edge{graph.blocks()[0UZ], {1}, graph.blocks()[1UZ], {2}, 1024, 1, "test_edge"};
 
         "default"_test = [&edge] {
             std::string result = std::format("{:s}", edge);

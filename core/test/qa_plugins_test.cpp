@@ -153,12 +153,12 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         expect(connection_5 == gr::ConnectionResult::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
-            std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_source->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_multiply_double.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_convert_to_float.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_multiply_float.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_convert_to_double.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_sink.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_convert_to_float->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_multiply_float->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_convert_to_double->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_sink->work(std::numeric_limits<std::size_t>::max());
         }
     };
 };
