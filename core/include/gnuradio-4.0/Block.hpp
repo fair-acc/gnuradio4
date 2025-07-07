@@ -489,7 +489,7 @@ public:
         }
     }
 
-    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), _settings(std::move(other._settings)) {}
+    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
 
     // There are a few const or conditionally const member variables,
     // we can not have a move-assignment that is equivalent to
@@ -561,7 +561,8 @@ public:
 
     [[nodiscard]] constexpr SettingsBase& settings() noexcept { return _settings; }
 
-    void setSettings(CtxSettings<Derived>& settings) { _settings = std::move(settings); }
+    void setSettings(const CtxSettings<Derived>& settings) { _settings.assignFrom(settings); }
+    void setSettings(CtxSettings<Derived>&& settings) { _settings.assignFrom(std::move(settings)); }
 
     template<std::size_t Index, typename Self>
     friend constexpr auto& inputPort(Self* self) noexcept;
