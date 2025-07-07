@@ -449,60 +449,51 @@ public:
         _autoForwardParameters.insert(gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end());
     }
 
-    CtxSettings(const CtxSettings& other) {
-        std::scoped_lock lock(_mutex, other._mutex);
-        copyFrom(other);
+    // Not safe as CtxSettings has a pointer back to the block
+    // that owns it
+    CtxSettings(const CtxSettings& other)            = delete;
+    CtxSettings(CtxSettings&& other)                 = delete;
+    CtxSettings& operator=(const CtxSettings& other) = delete;
+    CtxSettings& operator=(CtxSettings&& other)      = delete;
+
+    CtxSettings(TBlock& block, const CtxSettings& other) {
+        _block = std::addressof(block);
+        assignFrom(other);
     }
 
-    CtxSettings(CtxSettings&& other) noexcept {
-        std::scoped_lock lock(_mutex, other._mutex);
-        moveFrom(other);
+    CtxSettings(TBlock& block, CtxSettings&& other) noexcept {
+        _block = std::addressof(block);
+        assignFrom(std::move(other));
     }
 
-    CtxSettings& operator=(const CtxSettings& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
+    void assignFrom(const CtxSettings& other) {
         std::scoped_lock lock(_mutex, other._mutex);
-        copyFrom(other);
-        return *this;
-    }
-
-    CtxSettings& operator=(CtxSettings&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-        std::scoped_lock lock(_mutex, other._mutex);
-        moveFrom(other);
-        return *this;
-    }
-
-private:
-    void copyFrom(const CtxSettings& other) {
-        _block = other._block;
         std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
-        _activeParameters      = other._activeParameters;
         _storedParameters      = other._storedParameters;
         _defaultParameters     = other._defaultParameters;
+        _initBlockParameters   = other._initBlockParameters;
         _allWritableMembers    = other._allWritableMembers;
         _autoUpdateParameters  = other._autoUpdateParameters;
         _autoForwardParameters = other._autoForwardParameters;
         _matchPred             = other._matchPred;
         _activeCtx             = other._activeCtx;
+        _stagedParameters      = other._stagedParameters;
+        _activeParameters      = other._activeParameters;
     }
 
-    void moveFrom(CtxSettings& other) noexcept {
-        _block = std::exchange(other._block, nullptr);
+    void assignFrom(CtxSettings&& other) noexcept {
+        std::scoped_lock lock(_mutex, other._mutex);
         std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
-        _activeParameters      = std::move(other._activeParameters);
         _storedParameters      = std::move(other._storedParameters);
         _defaultParameters     = std::move(other._defaultParameters);
+        _initBlockParameters   = std::move(other._initBlockParameters);
         _allWritableMembers    = std::move(other._allWritableMembers);
         _autoUpdateParameters  = std::move(other._autoUpdateParameters);
         _autoForwardParameters = std::move(other._autoForwardParameters);
         _matchPred             = std::exchange(other._matchPred, settings::nullMatchPred);
         _activeCtx             = std::exchange(other._activeCtx, {});
+        _stagedParameters      = std::move(other._stagedParameters);
+        _activeParameters      = std::move(other._activeParameters);
     }
 
 public:
