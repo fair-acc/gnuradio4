@@ -498,6 +498,8 @@ protected:
             }
         }
 
+        std::println("kBlockEmplaced {}", type);
+
         this->emitMessage(scheduler::property::kBlockEmplaced, Graph::serializeBlock(std::addressof(newBlock)));
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one

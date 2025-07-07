@@ -49,6 +49,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     /* port name */ std::get<std::string>(exportedPort[2]));
             }
         } else {
+            std::println("loadGraphFromMap blockName {}", blockName);
+
             auto currentBlock = loader.instantiate(blockType);
             if (!currentBlock) {
                 throw std::format("Unable to create block of type '{}'", blockType);
@@ -61,6 +63,14 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 currentBlock->settings().loadParametersFromPropertyMap(*parameters);
             } else {
                 currentBlock->settings().loadParametersFromPropertyMap({});
+            }
+
+            const auto uiConstraints = grcBlock["ui_constraints"];
+            if (const auto parameters = std::get_if<property_map>(&uiConstraints)) {
+                for (auto& [key, value] : *parameters) {
+                    std::println("ui_constraints ui_constraints {}", key);
+                }
+                currentBlock->ui_constraints = *parameters;
             }
 
             if (auto it = grcBlock.find("ctx_parameters"); it != grcBlock.end()) {
