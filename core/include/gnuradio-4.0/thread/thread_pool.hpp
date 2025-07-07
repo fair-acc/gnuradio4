@@ -770,7 +770,18 @@ class Manager {
     mutable std::mutex                                             _mutex;
     std::unordered_map<std::string, std::shared_ptr<TaskExecutor>> _pools;
 
-    Manager() {}
+    Manager() {
+#ifdef __EMSCRIPTEN__
+        const std::size_t maxConcurrency = std::min(4U, std::thread::hardware_concurrency());
+#else
+        const std::size_t maxConcurrency = std::thread::hardware_concurrency();
+#endif
+        const std::size_t maxThread = maxConcurrency <= 2UZ ? 2UZ : maxConcurrency - 2UZ;
+        auto              cpu       = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultCpuPoolId), TaskType::CPU_BOUND, maxThread, maxThread), "CPU");
+        auto              io        = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultIoPoolId), TaskType::IO_BOUND, 2U, std::numeric_limits<uint32_t>::max()), "CPU");
+        registerPool(std::string(kDefaultCpuPoolId), std::move(cpu));
+        registerPool(std::string(kDefaultIoPoolId), std::move(io));
+    }
 
 public:
     static Manager& instance() {
@@ -798,27 +809,8 @@ public:
         throw std::out_of_range(std::format("pool '{}' not found", name));
     }
 
-    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultCpuPool() {
-        if (!instance()._pools.contains(std::string(kDefaultCpuPoolId))) {
-#ifdef __EMSCRIPTEN__
-            const std::size_t maxConcurrency = std::max(4U, std::thread::hardware_concurrency());
-#else
-            const std::size_t maxConcurrency = std::thread::hardware_concurrency();
-#endif
-            const std::size_t maxThread = maxConcurrency <= 2UZ ? 2UZ : maxConcurrency - 2UZ;
-            auto              cpu       = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultCpuPoolId), TaskType::CPU_BOUND, maxThread, maxThread), "CPU");
-            instance().registerPool(std::string(kDefaultCpuPoolId), std::move(cpu));
-        }
-        return instance().get(kDefaultCpuPoolId);
-    }
-
-    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultIoPool() {
-        if (!instance()._pools.contains(std::string(kDefaultIoPoolId))) {
-            auto io = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultIoPoolId), TaskType::IO_BOUND, 2U, std::numeric_limits<uint32_t>::max()), "CPU");
-            instance().registerPool(std::string(kDefaultIoPoolId), std::move(io));
-        }
-        return instance().get(kDefaultIoPoolId);
-    }
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultCpuPool() { return instance().get(kDefaultCpuPoolId); }
+    [[nodiscard]] static std::shared_ptr<TaskExecutor> defaultIoPool() { return instance().get(kDefaultIoPoolId); }
 
     [[nodiscard]] std::vector<std::string> list() const {
         std::scoped_lock         lock(_mutex);
