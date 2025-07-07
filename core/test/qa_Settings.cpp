@@ -120,7 +120,7 @@ const boost::ut::suite SettingsTests = [] {
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->SettingsChangeRecorder->Sink flow graph
         auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
-        expect(eq(src.settings().defaultParameters().size(), 11UZ)); // 9 base + 2 derived
+        expect(eq(src.settings().defaultParameters().size(), 10UZ)); // 7 base + 2 derived
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getStored().value().size(), 11UZ));
         expect(eq(src.n_samples_max, n_samples)) << "check map constructor";
@@ -141,11 +141,11 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
 
         auto& sink = testGraph.emplaceBlock<Sink<float>>();
-        expect(eq(sink.settings().defaultParameters().size(), 11UZ)); // 9 base + 2 derived
+        expect(eq(sink.settings().defaultParameters().size(), 10UZ)); // 8 base + 2 derived
         expect(eq(sink.settings().getNStoredParameters(), 1UZ));
         expect(eq(sink.settings().getStored().value().size(), 11UZ));
         expect(eq(sink.settings().getNAutoUpdateParameters(), 1UZ));
-        expect(eq(sink.settings().autoUpdateParameters().size(), 7UL));
+        expect(eq(sink.settings().autoUpdateParameters().size(), 6UL)); // 3 base + 2 derived
         expect(eq(sink.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
 
         // need to add 'n_samples_max' to forwarding list for the block to automatically forward it as the 'n_samples_max' tag is not part of the canonical 'gr::tag::kDefaultTags' list
@@ -380,6 +380,18 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         (wrapped2.metaInformation())["key"] = "value";
         expect(eq(std::get<std::string>(wrapped2.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
+    };
+
+    "basic ui constraints test"_test = []() {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<Source<float>>({{"ui_constraints", property_map{{"x", 6.f}, {"y", 42.f}}}});
+        auto& sink = testGraph.emplaceBlock<Sink<float>>();
+
+        expect(sink.settings().setStaged(property_map{{"ui_constraints", property_map{{"x", 6.f}, {"y", 42.f}}}}).empty());
+        expect(eq(sink.settings().applyStagedParameters().forwardParameters.size(), 0UZ)); // no autoForwardParameters
+
+        expect(eq(std::get<float>(src.ui_constraints["x"s]), 6.f));
+        expect(eq(src.ui_constraints, sink.ui_constraints));
     };
 
     "basic decimation test"_test = []() {
@@ -852,10 +864,10 @@ const boost::ut::suite CtxSettingsTests = [] {
             const auto& stored = block.settings().getStoredAll();
             expect(stored.contains("")) << block.name.value; // empty string is default context
             const auto& vec = stored.at("");
-            expect(eq(vec.size(), 1UZ)) << block.name.value;            // no stored parameters were added via Tag
-            expect(eq(vec[0].second.size(), 15UZ)) << block.name.value; // always store all parameters
+            expect(eq(vec.size(), 1UZ)) << block.name.value;              // no stored parameters were added via Tag
+            expect(eq(vec[0].settings.size(), 15UZ)) << block.name.value; // always store all parameters
 
-            expect(eq(std::get<float>(vec[0].second.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
+            expect(eq(std::get<float>(vec[0].settings.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
 
             const auto& autoUpdate = block.settings().autoUpdateParameters();
             expect(eq(autoUpdate.size(), 8UZ)) << block.name.value;

@@ -134,8 +134,12 @@ blocks:
       name: ArraySourceOne<float64>
   - name: ArraySource<float64>
     id: gr::testing::ArraySource<float64>
+    ui_constraints:
+      x: !!float32 43
+      y: !!float32 7070
     parameters:
       name: ArraySource<float64>
+
 connections:
   - [ArraySourceOne<float64>, [0, 0], 'ArraySinkImpl<float64, true, 42>', [1, 1]]
   - [ArraySourceOne<float64>, [0, 1], 'ArraySinkImpl<float64, true, 42>', [1, 0]]
@@ -150,9 +154,16 @@ connections:
                 std::print("Block {} is known\n", block);
             }
 
-            const auto graphSrc      = ymlDecodeEncode(testGrc);
-            auto       graph         = gr::loadGrc(context->loader, graphSrc);
-            auto       graphSavedSrc = gr::saveGrc(context->loader, graph);
+            const auto graphSrc = ymlDecodeEncode(testGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            for (const auto& block : graph.blocks()) {
+                if (block->name() == "ArraySource<float64>") {
+                    expect(block->uiConstraints() == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
+                }
+            }
+
+            auto graphSavedSrc = gr::saveGrc(context->loader, graph);
             expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
             std::println(std::cerr, "Unexpected exception: {}", e);

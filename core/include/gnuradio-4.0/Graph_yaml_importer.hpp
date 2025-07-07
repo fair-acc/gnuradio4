@@ -5,6 +5,7 @@
 
 #include <gnuradio-4.0/YamlPmt.hpp>
 
+#include "BlockModel.hpp"
 #include "Graph.hpp"
 #include "PluginLoader.hpp"
 
@@ -63,7 +64,24 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 throw std::format("Unable to create block of type '{}'", blockType);
             }
 
+            // This sets the previously read "name" field for the block
             currentBlock->setName(blockName);
+
+            // These fields might be serialized (see serializeBlock function)
+            // but can not be set as they are either automatically assigned
+            // or a property of the specific block type
+            // - id
+            // - type_name
+            // - unique_name
+            // - is_blocking
+            // - block_category
+            // - ui_category
+            // - meta_information
+
+            if (auto it = grcBlock.find("ui_constraints"); it != grcBlock.end()) {
+                auto uiConstraints = std::get<property_map>(it->second);
+                currentBlock->setUiConstraints(std::move(uiConstraints));
+            }
 
             const auto parametersPmt = grcBlock["parameters"];
             if (const auto parameters = std::get_if<property_map>(&parametersPmt)) {
@@ -83,9 +101,11 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     currentBlock->settings().loadParametersFromPropertyMap(ctxParameters, SettingsCtx{ctxTime, ctxName});
                 }
             }
+
             if (const auto failed = currentBlock->settings().activateContext(); failed == std::nullopt) {
                 throw gr::exception("Settings for context could not be activated");
             }
+
             createdBlocks[blockName] = resultGraph.addBlock(std::move(currentBlock));
         }
     } // for blocks
@@ -147,17 +167,18 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 }
 
 inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& rootGraph) {
-    pmtv::map_t result;
+    property_map result;
 
     {
         std::vector<pmtv::pmt> serializedBlocks;
-        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel> block) {
-            pmtv::map_t map;
-            map["name"] = std::string(block->name());
-
-            const auto& fullTypeName = loader.registry().typeName(*block);
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel>& block) {
+            property_map map;
+            const auto&  fullTypeName = loader.registry().typeName(block);
             if (fullTypeName == "gr::Graph") {
                 map.emplace("id", "SUBGRAPH");
+                map["uniqueName"] = std::string(block->uniqueName());
+                map["name"]       = std::string(block->name());
+
                 auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(block.get());
                 if (subGraphDirect == nullptr) {
                     throw gr::Error(std::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block->uniqueName(), rootGraph.unique_name));
@@ -176,62 +197,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                 map.emplace("graph", std::move(graphYaml));
 
             } else {
-                map.emplace("id", fullTypeName);
-
-                // Helper function to write parameters
-                auto writeParameters = [&](const property_map& settingsMap, const property_map& metaInformation = {}) {
-                    pmtv::map_t parameters;
-                    auto        writeMap = [&](const auto& localMap) {
-                        for (const auto& [settingsKey, settingsValue] : localMap) {
-                            std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
-                        }
-                    };
-                    writeMap(settingsMap);
-                    if (!metaInformation.empty()) {
-                        writeMap(metaInformation);
-                    }
-                    return parameters;
-                };
-
-                const auto& stored = block->settings().getStoredAll();
-                if (stored.contains("")) {
-                    const auto& ctxParameters = stored.at("");
-                    const auto& settingsMap   = ctxParameters.back().second; // write only the last parameters
-                    if (!block->metaInformation().empty() || !settingsMap.empty()) {
-                        map["parameters"] = writeParameters(settingsMap, block->metaInformation());
-                    }
-                }
-
-                using namespace std::string_literals;
-                std::vector<pmtv::pmt> ctxParamsSeq;
-                for (const auto& [ctx, ctxParameters] : stored) {
-                    if (std::holds_alternative<std::string>(ctx) && std::get<std::string>(ctx) == ""s) {
-                        continue;
-                    }
-
-                    for (const auto& [ctxTime, settingsMap] : ctxParameters) {
-                        pmtv::map_t ctxParam;
-
-                        // Convert ctxTime.context to a string, regardless of its actual type
-                        std::string contextStr = std::visit(
-                            [](const auto& arg) -> std::string {
-                                using T = std::decay_t<decltype(arg)>;
-                                if constexpr (std::is_same_v<T, std::string>) {
-                                    return arg;
-                                } else if constexpr (std::is_arithmetic_v<T>) {
-                                    return std::to_string(arg);
-                                }
-                                return "";
-                            },
-                            ctxTime.context);
-
-                        ctxParam[gr::tag::CONTEXT.shortKey()]      = contextStr;
-                        ctxParam[gr::tag::CONTEXT_TIME.shortKey()] = ctxTime.time;
-                        ctxParam["parameters"]                     = writeParameters(settingsMap);
-                        ctxParamsSeq.emplace_back(std::move(ctxParam));
-                    }
-                }
-                map["ctx_parameters"] = ctxParamsSeq;
+                map = serializeBlock(loader, block, BlockSerializationFlags::All & (~BlockSerializationFlags::Ports));
             }
 
             serializedBlocks.emplace_back(std::move(map));
@@ -292,7 +258,7 @@ inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::so
     return resultGraph;
 }
 
-inline std::string saveGrc(PluginLoader& loader, const gr::Graph& rootGraph) { return pmtv::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
+inline std::string saveGrc(PluginLoader& loader, gr::Graph& rootGraph) { return pmtv::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
 
 } // namespace gr
 

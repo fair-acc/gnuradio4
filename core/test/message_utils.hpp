@@ -110,7 +110,13 @@ inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::M
         {{"type", std::move(type)}, {"properties", std::move(properties)}},                                                                       //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kBlockEmplaced});
 
-    return std::get<std::string>(reply.value().data.value().at("uniqueName"s));
+    expect(waitForReply(fromGraph)) << std::format("Reply message not received. Requested at: {}\n", sourceLocation);
+
+    const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+    if (!reply.data.has_value()) {
+        expect(false) << std::format("Emplace block failed and returned an error. Requested at: {}. Error: {}\n", sourceLocation, reply.data.error());
+    }
+    return std::get<std::string>(reply.data.value().at("unique_name"s));
 };
 
 inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {

@@ -116,10 +116,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
 
                     for (const auto& [index, edge_] : edges) {
                         const auto& edge = std::get<property_map>(edge_);
-                        if (std::get<std::string>(edge.at("destinationBlock")) == subGraph->uniqueName()) {
+                        if (std::get<std::string>(edge.at("destination_block")) == subGraph->uniqueName()) {
                             subGraphInConnections++;
                         }
-                        if (std::get<std::string>(edge.at("sourceBlock")) == subGraph->uniqueName()) {
+                        if (std::get<std::string>(edge.at("source_block")) == subGraph->uniqueName()) {
                             subGraphOutConnections++;
                         }
                     }

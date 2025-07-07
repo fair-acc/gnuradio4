@@ -352,6 +352,64 @@ const boost::ut::suite TopologyGraphTests = [] {
                 return false;
             });
     };
+
+    "Custom block property tests"_test = [] {
+        gr::Graph testGraph(context->loader);
+        auto&     copy1 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto&     copy2 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+
+        TestScheduler scheduler(std::move(testGraph));
+        auto          makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", x}, {"y", y}}; };
+
+        // Setting ui_constraints property for all blocks, universal
+        {
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7070)}} /* data  */);
+            waitForReply(scheduler.fromScheduler);
+        }
+
+        // Setting ui_constraints property for one block
+        {
+            sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName() /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
+            waitForReply(scheduler.fromScheduler);
+        }
+
+        const auto replyCount = getNReplyMessages(scheduler.fromScheduler);
+        for (std::size_t replyIndex = 0UZ; replyIndex < replyCount; replyIndex++) {
+            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            std::println("Got a reply {}", reply);
+        }
+
+        expect(eq(42.f, std::get<float>(copy1->uiConstraints()["x"])));
+        expect(eq(43.f, std::get<float>(copy2->uiConstraints()["x"])));
+
+        sendMessage<Get>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {});
+        waitForReply(scheduler.fromScheduler);
+
+        expect(ge(getNReplyMessages(scheduler.fromScheduler), 1UZ));
+        const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+
+        expect(reply.data.has_value()) << "Reply should contain data";
+        if (reply.data.has_value()) {
+            const auto& data = reply.data.value();
+            expect(data.contains("value")) << "Reply should contain 'value' field";
+            const auto& yaml = std::get<std::string>(data.at("value"));
+            expect(!yaml.empty()) << "YAML string should not be empty";
+            std::println("YAML content:\n{}", yaml);
+
+            expect(yaml.find("7070") != std::string::npos) << "ui_constraints not saved in YAML";
+        }
+
+        scheduler.scheduler().requestStop();
+
+        auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
+        auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
+
+        expect(eq(42.f, std::get<float>(copy1->uiConstraints()["x"])));
+        expect(eq(43.f, std::get<float>(copy2->uiConstraints()["x"])));
+
+        expect(eq(42.f, std::get<float>(copy1direct->ui_constraints["x"])));
+        expect(eq(43.f, std::get<float>(copy2direct->ui_constraints["x"])));
+    };
 };
 
 /// old tests, from the time graph handled messages. They're still good
