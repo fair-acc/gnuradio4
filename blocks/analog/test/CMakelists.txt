@@ -1,26 +1,3 @@
-add_executable(qa_Analog qa_Analog.cpp)
-
-# ------------------------------------------------------------------
-#  Boost.UT – the target name differs between environments
-# ------------------------------------------------------------------
-if(TARGET ut::ut)
-    set(_UT_TARGET ut::ut)
-elseif(TARGET ut)
-    set(_UT_TARGET ut)
-elseif(TARGET ut-benchmark)
-    set(_UT_TARGET ut-benchmark)
-else()
-    message(FATAL_ERROR "Boost.UT target not found – enable ENABLE_TESTING")
-endif()
-
-target_link_libraries(qa_Analog PRIVATE
-    GrAnalogBlocksObject        # object-lib under test
-    gr-testing                  # TagSource / TagSink helpers
-    ${_UT_TARGET})
-
-# For some setups ut-benchmark exports its include path only
-# on INTERFACE_*, so make sure we see it
-target_include_directories(qa_Analog PRIVATE
-    $<TARGET_PROPERTY:${_UT_TARGET},INTERFACE_INCLUDE_DIRECTORIES>)
-
-add_test(NAME qa_Analog COMMAND qa_Analog)
+# blocks/analog/test/CMakeLists.txt
+add_ut_test(qa_Analog)                       # helper macro defined by GNURadio-4
+target_link_libraries(qa_Analog PRIVATE gr-analog)
