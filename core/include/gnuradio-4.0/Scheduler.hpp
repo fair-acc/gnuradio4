@@ -586,7 +586,7 @@ protected:
             }
         }
 
-        this->emitMessage(scheduler::property::kBlockEmplaced, Graph::serializeBlock(newBlock));
+        this->emitMessage(scheduler::property::kBlockEmplaced, serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All));
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
@@ -861,7 +861,7 @@ protected:
 
         std::optional<Message> result = gr::Message{};
         result->endpoint              = scheduler::property::kBlockReplaced;
-        result->data                  = Graph::serializeBlock(newBlockRaw);
+        result->data                  = serializeBlock(gr::globalPluginLoader(), newBlockRaw, BlockSerializationFlags::All);
 
         (*result->data)["replacedBlockUniqueName"s] = uniqueName;
 

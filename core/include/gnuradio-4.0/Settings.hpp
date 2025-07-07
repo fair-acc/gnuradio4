@@ -239,6 +239,10 @@ template<typename T>
 } // namespace settings
 
 struct SettingsBase {
+    struct ContextSettings {
+        SettingsCtx  context;
+        property_map settings;
+    };
     virtual ~SettingsBase() = default;
 
     /**
@@ -329,7 +333,7 @@ struct SettingsBase {
     /**
      * @brief return _storedParameters
      */
-    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept = 0;
+    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<ContextSettings>, settings::PMTCompare> getStoredAll() const noexcept = 0;
 
     /**
      * @brief returns the staged/not-yet-applied new parameters
@@ -384,8 +388,8 @@ class CtxSettings : public SettingsBase {
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> _storedParameters{};
-    property_map                                                                                         _defaultParameters{};
+    mutable std::map<pmtv::pmt, std::vector<ContextSettings>, settings::PMTCompare> _storedParameters{};
+    property_map                                                                    _defaultParameters{};
     // Store the initial parameters provided in the Block constructor. These parameters cannot be set directly in the constructor
     // because `_defaultParameters` cannot be initialized using Settings::storeDefaults() within the Block constructor.
     // Instead, we store them now and set them later in the Block::init method.
@@ -620,8 +624,8 @@ public:
 #endif
         }
 
-        std::vector<std::pair<SettingsCtx, property_map>>& vec     = it->second;
-        auto                                               exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.first.time == ctx.time; });
+        std::vector<ContextSettings>& vec     = it->second;
+        auto                          exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.context.time == ctx.time; });
 
         if (exactIt == vec.end()) {
             return false;
@@ -813,7 +817,7 @@ public:
         return static_cast<gr::Size_t>(_autoUpdateParameters.size());
     }
 
-    [[nodiscard]] std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
+    [[nodiscard]] std::map<pmtv::pmt, std::vector<ContextSettings>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
 
     [[nodiscard]] const property_map& stagedParameters() const noexcept override {
         std::lock_guard lg(_mutex);
@@ -1022,18 +1026,18 @@ private:
         if (vec.empty()) {
             return std::nullopt;
         }
-        if (ctx.time == 0ULL || vec.back().first.time <= ctx.time) {
-            return vec.back().first;
+        if (ctx.time == 0ULL || vec.back().context.time <= ctx.time) {
+            return vec.back().context;
         } else {
-            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.first.time; });
+            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.context.time; });
             if (lower == vec.end()) {
-                return vec.back().first;
+                return vec.back().context;
             } else {
-                if (lower->first.time == ctx.time) {
-                    return lower->first;
+                if (lower->context.time == ctx.time) {
+                    return lower->context;
                 } else if (lower != vec.begin()) {
                     --lower;
-                    return lower->first;
+                    return lower->context;
                 }
             }
         }
@@ -1046,9 +1050,9 @@ private:
             return std::nullopt;
         }
         const auto& vec        = _storedParameters[bestMatchSettingsCtx.value().context];
-        const auto  parameters = std::ranges::find_if(vec, [&](const auto& pair) { return pair.first == bestMatchSettingsCtx.value(); });
+        const auto  parameters = std::ranges::find_if(vec, [&](const ContextSettings& contextSettings) { return contextSettings.context == bestMatchSettingsCtx.value(); });
 
-        return parameters != vec.end() ? std::optional(parameters->second) : std::nullopt;
+        return parameters != vec.end() ? std::optional(parameters->settings) : std::nullopt;
     }
 
     [[nodiscard]] inline std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
@@ -1068,10 +1072,10 @@ private:
         const auto&       vec       = vecIt->second;
         const std::size_t tolerance = 1000; // ns
         // find the last context in sorted vector such that `ctx.time <= ctxToFind <= ctx.time + tolerance`
-        const auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& elem) { return elem.first.time; });
-        const auto upper = std::ranges::upper_bound(vec, ctx.time + tolerance, {}, [](const auto& elem) { return elem.first.time; });
+        const auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& elem) { return elem.context.time; });
+        const auto upper = std::ranges::upper_bound(vec, ctx.time + tolerance, {}, [](const auto& elem) { return elem.context.time; });
         if (lower != upper && lower != vec.end()) {
-            ctx.time = (*(upper - 1)).first.time + 1;
+            ctx.time = (*(upper - 1)).context.time + 1;
         }
     }
 
@@ -1117,16 +1121,16 @@ private:
             _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(_allWritableMembers);
         }
 
-        std::vector<std::pair<SettingsCtx, property_map>>& sortedVectorForContext = _storedParameters[ctx.context];
+        std::vector<ContextSettings>& sortedVectorForContext = _storedParameters[ctx.context];
         // binary search and merge-sort
-        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.first.time; });
+        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.context.time; });
         sortedVectorForContext.insert(it, {ctx, newParameters});
     }
 
     NO_INLINE void removeExpiredStoredParameters() {
         const auto removeFromAutoUpdateParameters = [this](const auto& begin, const auto& end) {
             for (auto it = begin; it != end; it++) {
-                _autoUpdateParameters.erase(it->first);
+                _autoUpdateParameters.erase(it->context);
             }
         };
         std::uint64_t now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
@@ -1136,7 +1140,7 @@ private:
         for (auto& [ctx, vec] : _storedParameters) {
             // remove all expired parameters
             if (expiry_time != std::numeric_limits<std::uint64_t>::max()) {
-                const auto [first, last] = std::ranges::remove_if(vec, [&](const auto& elem) { return elem.first.time + expiry_time <= now; });
+                const auto [first, last] = std::ranges::remove_if(vec, [&](const auto& elem) { return elem.context.time + expiry_time <= now; });
                 removeFromAutoUpdateParameters(first, last);
                 vec.erase(first, last);
             }
@@ -1145,12 +1149,12 @@ private:
                 continue;
             }
             // always keep at least one past parameter set
-            auto lower = std::ranges::lower_bound(vec, now, {}, [](const auto& elem) { return elem.first.time; });
+            auto lower = std::ranges::lower_bound(vec, now, {}, [](const auto& elem) { return elem.context.time; });
             if (lower == vec.end()) {
                 removeFromAutoUpdateParameters(vec.begin(), vec.end() - 1);
                 vec.erase(vec.begin(), vec.end() - 1);
             } else {
-                if (lower->first.time == now) {
+                if (lower->context.time == now) {
                     removeFromAutoUpdateParameters(vec.begin(), lower);
                     vec.erase(vec.begin(), lower);
                 } else if (lower != vec.begin() && lower - 1 != vec.begin()) {

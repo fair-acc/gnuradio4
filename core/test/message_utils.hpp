@@ -112,7 +112,7 @@ inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::M
     if (!reply.data.has_value()) {
         expect(false) << std::format("Emplace block failed and returned an error. Requested at: {}. Error: {}\n", sourceLocation, reply.data.error());
     }
-    return std::get<std::string>(reply.data.value().at("uniqueName"s));
+    return std::get<std::string>(reply.data.value().at("unique_name"s));
 };
 
 inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
