@@ -823,35 +823,28 @@ namespace graph {
 
 template<block::Category traverseCategory, typename Fn>
 requires(std::invocable<Fn, const std::shared_ptr<BlockModel>> || std::invocable<Fn, std::shared_ptr<BlockModel>>)
-void forAllBlocks(GraphLike auto const& root, Fn&& function, block::Category filterCallable = block::Category::All) {
+void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filterCallable = block::Category::All) {
     using enum block::Category;
-    auto doForNestedBlocks = [&function, &filterCallable](auto& parent, auto& doForNestedBlocks_) -> void {
-        const auto& blocks = [&parent]() -> decltype(auto) /* returns -> std::span<[const] std::shared_ptr<BlockModel>> */ {
-            if constexpr (requires { parent.blocks(); }) {
-                return parent.blocks();
-            } else {
-                return parent->blocks();
-            }
-        }();
+    using BlockType = std::conditional_t<std::invocable<Fn, const std::shared_ptr<BlockModel>>, const std::shared_ptr<BlockModel>&, std::shared_ptr<BlockModel>&>;
 
-        using BlockType = std::conditional_t<std::invocable<Fn, const std::shared_ptr<BlockModel>>, const std::shared_ptr<BlockModel>&, std::shared_ptr<BlockModel>&>;
-        for (BlockType block : blocks) {
+    auto recurse = [&function, &filterCallable](auto const& parent, auto& recurse_) -> void {
+        for (BlockType block : parent.blocks()) {
             const auto blockCat = block->blockCategory();
             if (filterCallable == All || blockCat == filterCallable) {
                 function(block);
             }
 
-            const bool isSubgraph = blockCat == TransparentBlockGroup || blockCat == ScheduledBlockGroup;
             if constexpr (traverseCategory == All) {
+                const bool isSubgraph = blockCat == TransparentBlockGroup || blockCat == ScheduledBlockGroup;
                 if (isSubgraph) {
-                    doForNestedBlocks_(block, doForNestedBlocks_);
+                    recurse_(*block, recurse_);
                 }
             } else if (blockCat == traverseCategory) {
-                doForNestedBlocks_(block, doForNestedBlocks_);
+                recurse_(*block, recurse_);
             }
         }
     };
-    doForNestedBlocks(root, doForNestedBlocks);
+    recurse(root, recurse);
 }
 
 template<gr::block::Category traverseCategory = gr::block::Category::TransparentBlockGroup>
@@ -860,7 +853,7 @@ gr::Graph flatten(const gr::Graph& root, std::source_location location = std::so
 
     gr::Graph flattenedGraph;
     flattenedGraph._progress = root._progress;
-    gr::graph::forAllBlocks<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
+    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
 
     auto copyEdges = [&flattenedGraph, &location](const gr::Graph& graph) {
         for (const auto& edge : graph.edges()) {
@@ -878,7 +871,7 @@ gr::Graph flatten(const gr::Graph& root, std::source_location location = std::so
     copyEdges(root);
 
     // add edges related to blocks in flattened Graph
-    gr::graph::forAllBlocks<traverseCategory>(root, [&](const auto& block) {
+    gr::graph::forEachBlock<traverseCategory>(root, [&](const auto& block) {
         if (block->blockCategory() != TransparentBlockGroup && block->blockCategory() != ScheduledBlockGroup) {
             return;
         }

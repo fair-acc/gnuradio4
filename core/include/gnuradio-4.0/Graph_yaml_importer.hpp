@@ -151,7 +151,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
     {
         std::vector<pmtv::pmt> serializedBlocks;
-        gr::graph::forAllBlocks<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel> block) {
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel> block) {
             pmtv::map_t map;
             map["name"] = std::string(block->name());
 
