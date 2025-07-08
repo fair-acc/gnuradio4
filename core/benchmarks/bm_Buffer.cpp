@@ -15,7 +15,7 @@
 
 using namespace gr;
 
-#if defined(__has_include) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(__has_include) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__) && not defined(_WIN32)
 #if __has_include(<pthread.h>) && __has_include(<sched.h>)
 #include <errno.h>
 #include <pthread.h>
@@ -138,7 +138,7 @@ inline const boost::ut::suite _buffer_tests = [] {
             benchmark::results::add_separator();
             for (std::size_t nP = 1; nP <= maxProducers; nP *= 2) {
                 for (std::size_t nC = 1; nC <= maxConsumers; nC *= 2) {
-                    const std::size_t size      = std::max(4096UL, veclen) * nC * 10UL;
+                    const std::size_t size      = std::max(4096UZ, veclen) * nC * 10UZ;
                     const bool        isPosix   = strategy == BufferStrategy::posix;
                     const auto        allocator = (isPosix) ? gr::double_mapped_memory_resource::allocator<int32_t>() : std::pmr::polymorphic_allocator<int32_t>();
                     auto              invoke    = [&](auto buffer) { runTest(buffer, veclen, samples, nP, nC, isPosix ? "POSIX" : "portable"); };

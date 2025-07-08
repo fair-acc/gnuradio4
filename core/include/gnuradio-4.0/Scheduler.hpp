@@ -24,6 +24,13 @@
 #include <emscripten/threading.h>
 #endif
 
+// Under Windows windows.h defines ERROR as 0.  This messes the ERROR function work::status::ERROR.
+#ifdef _WIN32
+#ifdef ERROR
+#undef ERROR
+#endif // #ifdef ERROR
+#endif // #ifdef _WIN32
+
 template<typename T>
 inline void waitUntilChanged(gr::Sequence& sequence, T oldValue, [[maybe_unused]] unsigned int delay_ms = 1U) {
     if (sequence.value() != oldValue) {

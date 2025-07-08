@@ -145,7 +145,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
             for (std::size_t i = 0UZ; i < rx_channels->size(); ++i) {
                 output[i] = std::span<T>(outputs[i]).subspan(0, maxSamples);
             }
-            ret = _rxStream.readStreamIntoBufferList(flags, time_ns, max_time_out_us, output);
+            ret = _rxStream.readStreamIntoBufferList(flags, time_ns, static_cast<long int>(max_time_out_us), output);
         }
         // for detailed debugging: detail::printSoapyReturnDebugInfo(ret, flags, time_ns);
 
