@@ -37,7 +37,7 @@ auto makeTestContext() {
 namespace {
 auto collectBlocks(const gr::Graph& graph) {
     std::set<std::string> result;
-    gr::graph::forAllBlocks<gr::block::Category::NormalBlock>(graph, [&](const auto node) { result.insert(std::format("{}-{}", node->name(), node->typeName())); });
+    gr::graph::forEachBlock<gr::block::Category::NormalBlock>(graph, [&](const auto node) { result.insert(std::format("{}-{}", node->name(), node->typeName())); });
     return result;
 }
 
@@ -445,7 +445,7 @@ const boost::ut::suite SettingsTests = [] {
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
-            gr::graph::forAllBlocks<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
                 const auto settings = node->settings().get();
                 expect(eq(std::get<bool>(settings.at("bool_setting")), expectedBool));
                 expect(eq(std::get<std::string>(settings.at("string_setting")), expectedString));
@@ -481,7 +481,7 @@ const boost::ut::suite SettingsTests = [] {
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
-            gr::graph::forAllBlocks<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
                 const auto& stored = node->settings().getStoredAll();
                 expect(eq(node->settings().getNStoredParameters(), 6UZ));
                 for (const auto& [ctx, ctxParameters] : stored) {

@@ -177,7 +177,7 @@ public:
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this, &toSchedulerBuffer](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this, &toSchedulerBuffer](auto& block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block->msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
             }
@@ -222,7 +222,7 @@ public:
         // Process messages in the graph
         _graph.processScheduledMessages();
         if (_nRunningJobs->value() == 0UZ) {
-            graph::forAllBlocks<TransparentBlockGroup>(_graph, [](auto& block) { block->processScheduledMessages(); });
+            graph::forEachBlock<TransparentBlockGroup>(_graph, [](auto& block) { block->processScheduledMessages(); });
         }
 
         ReaderSpanLike auto messagesFromChildren = _fromChildMessagePort.streamReader().get();
@@ -303,7 +303,7 @@ public:
 protected:
     void disconnectAllEdges() {
         _graph.disconnectAllEdges();
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [&](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [&](auto& block) {
             if (block->blockCategory() == block::Category::TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 graph->blockRef().disconnectAllEdges();
@@ -313,7 +313,7 @@ protected:
 
     bool connectPendingEdges() {
         bool result = _graph.connectPendingEdges();
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [&](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [&](auto& block) {
             if (block->blockCategory() == block::Category::TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 result      = result && graph->blockRef().connectPendingEdges();
@@ -350,7 +350,7 @@ protected:
 
     void reset() {
         _executionOrder->clear();
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
     }
 
@@ -363,7 +363,7 @@ protected:
         }
 
         std::lock_guard lock(_executionOrderMutex);
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) { //
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { //
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
         });
 
@@ -513,7 +513,7 @@ protected:
     }
 
     void stop() {
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) {
             this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::STOPPED));
@@ -524,7 +524,7 @@ protected:
     }
 
     void pause() {
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) {
             this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_PAUSE));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::PAUSED));
@@ -538,7 +538,7 @@ protected:
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
-        graph::forAllBlocks<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
     }
 
     std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
