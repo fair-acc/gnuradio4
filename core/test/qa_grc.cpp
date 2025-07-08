@@ -43,7 +43,7 @@ auto collectBlocks(const gr::Graph& graph) {
 
 auto collectEdges(const gr::Graph& graph) {
     std::set<std::string> result;
-    graph.forEachEdge([&](const auto& edge) {
+    gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&](const auto& edge) {
         auto portDefinitionToString = [](const gr::PortDefinition& definition) {
             return std::visit(gr::meta::overloaded(                                                                                                                   //
                                   [](const gr::PortDefinition::IndexBased& _definition) { return std::format("{}#{}", _definition.topLevel, _definition.subIndex); }, //
@@ -327,7 +327,7 @@ connections:
 
             {
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
-                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
                     if (it != expectedSizes.end()) {
                         expectedSizes.erase(it);
@@ -340,7 +340,7 @@ connections:
                 expect(graph.connectPendingEdges());
 
                 std::size_t thresholdSize = 2 * 8192UZ;
-                graph.forEachEdge([&thresholdSize](const auto& edge) { //
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&thresholdSize](const auto& edge) { //
                     expect(thresholdSize >= edge.bufferSize());
                 });
             }
@@ -350,7 +350,7 @@ connections:
             {
                 auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc);
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
-                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
                     if (it != expectedSizes.end()) {
                         expectedSizes.erase(it);

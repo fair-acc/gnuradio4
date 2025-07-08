@@ -35,7 +35,7 @@ struct PortDefinition {
 };
 
 struct Edge {
-    enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts };
+    enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts, Unknown };
 
     // Member variables that are controlled by the graph and scheduler
     std::shared_ptr<BlockModel> _sourceBlock;
@@ -53,35 +53,14 @@ struct Edge {
     std::int32_t _weight = 0;
     std::string  _name   = "unnamed edge"; // custom edge name
 
-public:
     Edge() = delete;
 
-    Edge(const Edge&) = delete;
-
-    Edge& operator=(const Edge&) = delete;
-
-    Edge(Edge&& other) noexcept : _sourceBlock(std::exchange(other._sourceBlock, nullptr)), _destinationBlock(std::exchange(other._destinationBlock, nullptr)), _sourcePortDefinition(std::move(other._sourcePortDefinition)), _destinationPortDefinition(std::move(other._destinationPortDefinition)), _state(other._state), _actualBufferSize(other._actualBufferSize), _edgeType(other._edgeType), _sourcePort(std::exchange(other._sourcePort, nullptr)), _destinationPort(std::exchange(other._destinationPort, nullptr)), _minBufferSize(other._minBufferSize), _weight(other._weight), _name(std::move(other._name)) {}
-
-    Edge& operator=(Edge&& other) noexcept {
-        auto tmp = std::move(other);
-        std::swap(tmp._sourceBlock, _sourceBlock);
-        std::swap(tmp._destinationBlock, _destinationBlock);
-        std::swap(tmp._sourcePortDefinition, _sourcePortDefinition);
-        std::swap(tmp._destinationPortDefinition, _destinationPortDefinition);
-        std::swap(tmp._state, _state);
-        std::swap(tmp._actualBufferSize, _actualBufferSize);
-        std::swap(tmp._edgeType, _edgeType);
-        std::swap(tmp._sourcePort, _sourcePort);
-        std::swap(tmp._destinationPort, _destinationPort);
-
-        std::swap(tmp._minBufferSize, _minBufferSize);
-        std::swap(tmp._weight, _weight);
-        std::swap(tmp._name, _name);
-
-        return *this;
-    }
-
-    Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition, std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPortDefinition, std::size_t minBufferSize, std::int32_t weight, std::string name) : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock), _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
+    explicit Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition,               //
+        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPortDefinition,               //
+        std::size_t minBufferSize, std::int32_t weight, std::string name) noexcept                            //
+        : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock),                                     //
+          _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), //
+          _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
 
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& sourceBlock() const noexcept { return _sourceBlock; }
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& destinationBlock() const noexcept { return _destinationBlock; }
@@ -103,13 +82,20 @@ public:
     constexpr PortType    edgeType() const { return _edgeType; }
 
     constexpr bool hasSameSourcePort(const Edge& other) const noexcept {
-        if (_sourceBlock != other._sourceBlock) {
+        if (_sourceBlock.get() != other._sourceBlock.get()) {
             return false;
         }
         if (_sourcePortDefinition.definition == other._sourcePortDefinition.definition) {
             return true;
         }
         return false;
+    }
+
+    constexpr bool operator==(const Edge& other) const noexcept {
+        return sourceBlock() == other.sourceBlock()                                                       //
+               && destinationBlock() == other.destinationBlock()                                          //
+               && sourcePortDefinition().definition == other.sourcePortDefinition().definition            //
+               && destinationPortDefinition().definition == other.destinationPortDefinition().definition; //
     }
 };
 
