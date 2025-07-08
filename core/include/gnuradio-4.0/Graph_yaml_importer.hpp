@@ -241,7 +241,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
     {
         std::vector<pmtv::pmt> serializedConnections;
-        rootGraph.forEachEdge([&](const auto& edge) {
+        graph::forEachEdge<block::Category::NormalBlock>(rootGraph, [&](const Edge& edge) { // NormalBlock -> perhaps can be modelled to 'ALL' for a cleaner sub-graph handling
             std::vector<pmtv::pmt> seq;
 
             auto writePortDefinition = [&](const auto& definition) { //

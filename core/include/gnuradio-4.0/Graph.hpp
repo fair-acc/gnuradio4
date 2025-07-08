@@ -105,6 +105,11 @@ std::optional<std::shared_ptr<BlockModel>> findBlockWithUniqueName(GraphLike aut
     return std::nullopt;
 }
 
+// forward declaration
+template<block::Category traverseCategory, typename Fn>
+requires(std::invocable<Fn, const Edge&> || std::invocable<Fn, Edge&>)
+void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filterCallable = Edge::EdgeState::Unknown);
+
 } // namespace graph
 
 template<typename TSubGraph>
@@ -408,6 +413,23 @@ public:
             return newBlock;
         }
         throw gr::exception(std::format("Can not create block {}", type));
+    }
+
+    bool containsEdge(const Edge& edge) const {
+        return std::ranges::any_of(_edges, [&](const Edge& e) { return e == edge; });
+    }
+
+    template<typename T>
+    requires std::same_as<std::remove_cvref_t<T>, Edge>
+    [[maybe_unused]] Edge& addEdge(T&& edge, std::source_location location = std::source_location::current()) {
+        if (containsEdge(edge)) {
+            throw gr::exception(std::format("Edge already exists in graph:\n{}", edge), location);
+        }
+        return _edges.emplace_back(std::forward<T>(edge));
+    }
+
+    [[maybe_unused]] bool removeEdge(const Edge& edge) {
+        return std::erase_if(_edges, [&](const Edge& e) { return e == edge; });
     }
 
     static property_map serializeEdge(const auto& edge) {
@@ -750,7 +772,7 @@ public:
         }
 
         std::size_t maxSize = 0UZ;
-        forEachEdge([&](const Edge& e) {
+        graph::forEachEdge<block::Category::All>(*this, [&](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
                 std::size_t minBufferSize = e.minBufferSize();
                 if (minBufferSize != undefined_size) {
@@ -801,16 +823,6 @@ public:
         }
         return allConnected;
     }
-
-    template<std::invocable<Edge&> F>
-    void forEachEdgeMutable(F&& f) {
-        std::ranges::for_each(_edges, f);
-    }
-
-    template<std::invocable<const Edge&> F>
-    void forEachEdge(F&& f) const {
-        std::ranges::for_each(_edges, f);
-    }
 };
 
 static_assert(BlockLike<Graph>);
@@ -821,65 +833,72 @@ static_assert(BlockLike<Graph>);
 
 namespace graph {
 
+namespace detail {
 template<block::Category traverseCategory, typename Fn>
-requires(std::invocable<Fn, const std::shared_ptr<BlockModel>> || std::invocable<Fn, std::shared_ptr<BlockModel>>)
-void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filterCallable = block::Category::All) {
+void traverseSubgraphs(GraphLike auto const& root, Fn&& visitGraph) {
     using enum block::Category;
-    using BlockType = std::conditional_t<std::invocable<Fn, const std::shared_ptr<BlockModel>>, const std::shared_ptr<BlockModel>&, std::shared_ptr<BlockModel>&>;
 
-    auto recurse = [&function, &filterCallable](auto const& parent, auto& recurse_) -> void {
-        for (BlockType block : parent.blocks()) {
-            const auto blockCat = block->blockCategory();
-            if (filterCallable == All || blockCat == filterCallable) {
-                function(block);
-            }
+    auto recurse = [&visitGraph](GraphLike auto const& graph, auto& self) -> void {
+        visitGraph(graph);
 
+        for (const auto& block : graph.blocks()) {
+            const auto cat = block->blockCategory();
             if constexpr (traverseCategory == All) {
-                const bool isSubgraph = blockCat == TransparentBlockGroup || blockCat == ScheduledBlockGroup;
-                if (isSubgraph) {
-                    recurse_(*block, recurse_);
+                if (cat == TransparentBlockGroup || cat == ScheduledBlockGroup) { // block is a sub-graph
+                    self(*block, self);
                 }
-            } else if (blockCat == traverseCategory) {
-                recurse_(*block, recurse_);
+            } else if (cat == traverseCategory) {
+                self(*block, self);
             }
         }
     };
     recurse(root, recurse);
 }
 
+} // namespace detail
+
+template<block::Category traverseCategory, typename Fn>
+requires(std::invocable<Fn, const std::shared_ptr<BlockModel>> || std::invocable<Fn, std::shared_ptr<BlockModel>>)
+void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filter = block::Category::All) {
+    using enum block::Category;
+    using BlockType = std::conditional_t<std::invocable<Fn, const std::shared_ptr<BlockModel>>, const std::shared_ptr<BlockModel>&, std::shared_ptr<BlockModel>&>;
+
+    detail::traverseSubgraphs<traverseCategory>(root, [&](GraphLike auto const& graph) {
+        for (BlockType block : graph.blocks()) {
+            const block::Category cat = block->blockCategory();
+            if (filter == All || cat == filter) {
+                function(block);
+            }
+        }
+    });
+}
+
+template<block::Category traverseCategory, typename Fn>
+requires(std::invocable<Fn, const Edge&> || std::invocable<Fn, Edge&>)
+void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
+    using enum Edge::EdgeState;
+    using EdgeType = std::conditional_t<std::invocable<Fn, const Edge&>, const Edge&, Edge&>;
+
+    detail::traverseSubgraphs<traverseCategory>(root, [&](auto const& graph) {
+        for (EdgeType edge : graph.edges()) {
+            if (filter == Unknown || edge._state == filter) {
+                function(edge);
+            }
+        }
+    });
+}
+
 template<gr::block::Category traverseCategory = gr::block::Category::TransparentBlockGroup>
-gr::Graph flatten(const gr::Graph& root, std::source_location location = std::source_location::current()) {
+gr::Graph flatten(GraphLike auto const& root, std::source_location location = std::source_location::current()) {
     using enum block::Category;
 
     gr::Graph flattenedGraph;
     flattenedGraph._progress = root._progress;
     gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
-
-    auto copyEdges = [&flattenedGraph, &location](const gr::Graph& graph) {
-        for (const auto& edge : graph.edges()) {
-            std::shared_ptr<BlockModel> src = graph::findBlock<true>(flattenedGraph, edge._sourceBlock, location).value();
-            std::shared_ptr<BlockModel> dst = graph::findBlock<true>(flattenedGraph, edge._destinationBlock, location).value();
-
-            if (flattenedGraph.connect(src, edge._sourcePortDefinition, dst, edge._destinationPortDefinition, //
-                    edge._minBufferSize, edge._weight, edge._name, location) == ConnectionResult::FAILED) {
-                throw gr::exception(std::format("could not connect block {} ({}) -> {} ({})\n   for edge: {}\nflattenedGraph:\n{}", //
-                    src->name(), src->uniqueName(), dst->name(), dst->uniqueName(), edge, format(flattenedGraph)));
-            }
-        }
-    };
-
-    copyEdges(root);
+    std::ranges::for_each(root.edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); // add edges from root graph
 
     // add edges related to blocks in flattened Graph
-    gr::graph::forEachBlock<traverseCategory>(root, [&](const auto& block) {
-        if (block->blockCategory() != TransparentBlockGroup && block->blockCategory() != ScheduledBlockGroup) {
-            return;
-        }
-        // block is a Sub-Graph
-        if (const auto* subGraph = dynamic_cast<const gr::Graph*>(block.get())) {
-            copyEdges(*subGraph);
-        }
-    });
+    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { std::ranges::for_each(block->edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); });
 
     return flattenedGraph;
 }
@@ -1195,7 +1214,6 @@ template<PortDomainLike T>
 inline std::ostream& operator<<(std::ostream& os, const T& value) {
     return os << value.Name;
 }
-
 } // namespace gr
 
 #endif // GNURADIO_GRAPH_HPP
