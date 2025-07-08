@@ -204,8 +204,8 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         expect(source.state() == lifecycle::State::RUNNING);
         expect(sink.state() == lifecycle::State::RUNNING);
-        expect(graph::findBlockWithUniqueName(*subGraphDirect, subGraphDirect->blockRef().pass1_unique_id).value()->state() == lifecycle::State::RUNNING);
-        expect(graph::findBlockWithUniqueName(*subGraphDirect, subGraphDirect->blockRef().pass2_unique_id).value()->state() == lifecycle::State::RUNNING);
+        expect(graph::findBlock(*subGraphDirect, subGraphDirect->blockRef().pass1_unique_id).value()->state() == lifecycle::State::RUNNING);
+        expect(graph::findBlock(*subGraphDirect, subGraphDirect->blockRef().pass2_unique_id).value()->state() == lifecycle::State::RUNNING);
 
         // Stopping scheduler
         scheduler.requestStop();

@@ -68,41 +68,27 @@ inline std::string format(GraphLike auto const& graph) {
     return os.str();
 }
 
-template<bool throwException>
-std::optional<std::shared_ptr<BlockModel>> findBlock(GraphLike auto const& graph, BlockLike auto& what, std::source_location location = std::source_location::current()) {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto& what, std::source_location location = std::source_location::current()) {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block->uniqueName() == what.unique_name; }); it != graph.blocks().end()) {
         return *it;
     }
-
-    if constexpr (throwException) {
-        throw gr::exception(std::format("Block {} ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location);
-    }
-    return std::nullopt;
+    return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location));
 }
 
-template<bool throwException>
-std::optional<std::shared_ptr<BlockModel>> findBlock(GraphLike auto const& graph, std::shared_ptr<BlockModel> what, std::source_location location = std::source_location::current()) {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::shared_ptr<BlockModel> what, std::source_location location = std::source_location::current()) {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block.get() == std::addressof(*what); }); it != graph.blocks().end()) {
         return *it;
     }
-
-    if constexpr (throwException) {
-        throw gr::exception(std::format("Block {} ({}) not in this graph:\n{}", what->name(), what->uniqueName(), format(graph)), location);
-    }
-    return std::nullopt;
+    return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what->name(), what->uniqueName(), format(graph)), location));
 }
 
-template<bool throwException = true>
-std::optional<std::shared_ptr<BlockModel>> findBlockWithUniqueName(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) {
     for (const auto& block : graph.blocks()) {
         if (block->uniqueName() == uniqueBlockName) {
             return block;
         }
     }
-    if constexpr (throwException) {
-        throw gr::exception(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location);
-    }
-    return std::nullopt;
+    return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
 }
 
 // forward declaration
@@ -137,13 +123,13 @@ public:
         };
     }
 
-    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
+    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
         if (infoFound == exportFlag) {
             throw Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
         }
 
-        auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName);
+        auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName, location);
         auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
         if (exportFlag) {
@@ -163,7 +149,7 @@ public:
             if (portIt != portCollection.end()) {
                 portCollection.erase(portIt);
             } else {
-                throw Error("Port was not exported, while it is registered as such");
+                throw gr::exception("Port was not exported, while it is registered as such");
             }
         }
 
@@ -182,13 +168,16 @@ public:
     const std::unordered_multimap<std::string, std::string>& exportedOutputPortsForBlock() const { return _exportedOutputPortsForBlock; }
 
 private:
-    DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
-        std::shared_ptr<BlockModel> block = graph::findBlockWithUniqueName<true>(this->blockRef(), uniqueBlockName).value();
+    DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) {
+        std::expected<std::shared_ptr<BlockModel>, Error> block = graph::findBlock(this->blockRef(), uniqueBlockName, location);
+        if (!block.has_value()) {
+            throw gr::exception(block.error().message, location);
+        }
 
         if (portDirection == PortDirection::INPUT) {
-            return block->dynamicInputPort(portName);
+            return block.value()->dynamicInputPort(portName);
         } else {
-            return block->dynamicOutputPort(portName);
+            return block.value()->dynamicOutputPort(portName);
         }
     }
 
@@ -264,12 +253,12 @@ struct Graph : Block<Graph> {
 
     private:
         template<typename Destination, typename DestinationPort, std::size_t destinationPortIndex = meta::invalid_index, std::size_t destinationPortSubIndex = meta::invalid_index>
-        [[nodiscard]] constexpr ConnectionResult to(Destination& destinationBlockRaw, DestinationPort& destinationPortOrCollectionRaw) {
-            std::optional<std::shared_ptr<BlockModel>> sourceBlock      = graph::findBlock<false>(self, sourceBlockRaw);
-            std::optional<std::shared_ptr<BlockModel>> destinationBlock = graph::findBlock<false>(self, destinationBlockRaw);
+        [[nodiscard]] constexpr ConnectionResult to(Destination& destinationBlockRaw, DestinationPort& destinationPortOrCollectionRaw, std::source_location location = std::source_location::current()) {
+            std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = graph::findBlock(self, sourceBlockRaw, location);
+            std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = graph::findBlock(self, destinationBlockRaw, location);
 
             if (!sourceBlock.has_value() && !destinationBlock.has_value()) {
-                std::print("Source {} and/or destination {} do not belong to this graph\n", sourceBlockRaw.name, destinationBlockRaw.name);
+                std::print("Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlockRaw.name, destinationBlockRaw.name, location);
                 return ConnectionResult::FAILED;
             }
 
@@ -709,8 +698,8 @@ public:
     template<typename Source, typename Destination>
     requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
-        std::optional<std::shared_ptr<BlockModel>> sourceBlock      = gr::graph::findBlock<false>(*this, sourceBlockRaw);
-        std::optional<std::shared_ptr<BlockModel>> destinationBlock = gr::graph::findBlock<false>(*this, destinationBlockRaw);
+        std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = gr::graph::findBlock(*this, sourceBlockRaw, location);
+        std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = gr::graph::findBlock(*this, destinationBlockRaw, location);
 
         if (!sourceBlock.has_value() || !destinationBlock.has_value()) {
             return ConnectionResult::FAILED;
