@@ -939,7 +939,8 @@ private:
         std::vector<block_t>                    _source_blocks{};
         // compute the adjacency list
         std::set<block_t> block_reached;
-        for (auto& e : this->_graph.edges()) {
+        const gr::Graph   flatGraph = gr::graph::flatten(this->_graph);
+        for (auto& e : flatGraph.edges()) {
             _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
             _source_blocks.push_back(e._sourceBlock);
             block_reached.insert(e._destinationBlock);
@@ -1033,7 +1034,8 @@ private:
         std::vector<block_t>                    _source_blocks{};
         std::set<block_t>                       block_reached;
 
-        for (auto& e : this->_graph.edges()) {
+        const gr::Graph flatGraph = gr::graph::flatten(this->_graph);
+        for (auto& e : flatGraph.edges()) {
             _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
             _source_blocks.push_back(e._sourceBlock);
             block_reached.insert(e._destinationBlock);
