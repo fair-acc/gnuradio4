@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
     constexpr double     defaultRxGains           = 10.0;            // 10 dB
 
     std::filesystem::path exePath    = std::filesystem::current_path();
-    auto                  parsedArgs = parseArguments(argc, argv, exePath / "test_ch0.bin", exePath / "test_ch1.bin", defaultMaxFileSize, defaultSampleRate, defaultRxCenterFrequency, defaultBandwidth, defaultRxGains);
+    auto                  parsedArgs = parseArguments(argc, argv, (exePath / "test_ch0.bin").string(), (exePath / "test_ch1.bin").string(), defaultMaxFileSize, defaultSampleRate, defaultRxCenterFrequency, defaultBandwidth, defaultRxGains);
     if (!parsedArgs) {
         std::println(R"(
 Usage:

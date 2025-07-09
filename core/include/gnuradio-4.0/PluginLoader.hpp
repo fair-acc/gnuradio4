@@ -157,7 +157,7 @@ public:
                         _pluginHandlers.push_back(std::move(handler));
 
                     } else {
-                        _failedPlugins[file.path()] = handler.status();
+                        _failedPlugins[file.path().string()] = handler.status();
                     }
                 }
             }

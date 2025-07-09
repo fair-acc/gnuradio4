@@ -298,7 +298,7 @@ int main(int argc, char** argv) try {
 
     const auto integratorSourceFile = (options.outDir / "integrator.cpp");
     if (!std::filesystem::exists(integratorSourceFile)) {
-        std::ofstream integrator = openFile(integratorSourceFile);
+        std::ofstream integrator = openFile(integratorSourceFile.string());
         integrator << std::format(R"cppcode(
             #include <gnuradio-4.0/BlockRegistry.hpp>
 
@@ -318,7 +318,7 @@ int main(int argc, char** argv) try {
 
     const auto integratorHeaderFile = (options.outDir / (moduleName + ".hpp"));
     if (!std::filesystem::exists(integratorHeaderFile)) {
-        std::ofstream integrator = openFile(integratorHeaderFile);
+        std::ofstream integrator = openFile(integratorHeaderFile.string());
         integrator << std::format(R"cppcode(
             #ifndef GR_BLOCKLIB_INIT_MODULE_{0}
             #define GR_BLOCKLIB_INIT_MODULE_{0}
