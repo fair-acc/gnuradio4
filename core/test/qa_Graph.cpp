@@ -40,7 +40,7 @@ struct MultiPortTestSource : public gr::Block<MultiPortTestSource<T, nPorts>> {
     }
 };
 
-const boost::ut::suite GraphTests = [] {
+const boost::ut::suite<"GraphTests"> _1 = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
@@ -113,6 +113,166 @@ const boost::ut::suite GraphTests = [] {
 
         expect(eq(src.out[1].bufferSize(), 4096UZ)); // port default buffer size
         expect(eq(src.out[2].bufferSize(), 4096UZ)); // port default buffer size
+    };
+};
+
+const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "findBlock by name"_test = [] {
+        Graph                               graph;
+        [[maybe_unused]] NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&                    snk = graph.emplaceBlock<NullSink<float>>();
+
+        std::expected<std::shared_ptr<BlockModel>, Error> findSinkBlock = graph::findBlock(graph, snk.unique_name);
+        expect(findSinkBlock.has_value());
+        expect(eq(findSinkBlock.value()->uniqueName(), snk.unique_name));
+
+        expect(!graph::findBlock(graph, "bogus").has_value());
+    };
+
+    "findBlock by BlockLike&"_test = [] {
+        Graph                                             graph;
+        NullSource<float>&                                block  = graph.emplaceBlock<NullSource<float>>();
+        std::expected<std::shared_ptr<BlockModel>, Error> result = graph::findBlock(graph, block);
+        expect(result.has_value());
+        expect(eq(result.value()->uniqueName(), block.unique_name));
+
+        NullSource<float> other;
+        expect(!graph::findBlock(graph, other).has_value());
+    };
+
+    "findBlock by shared_ptr<BlockModel>"_test = [] {
+        Graph                                             graph;
+        NullSource<float>&                                block    = graph.emplaceBlock<NullSource<float>>();
+        std::shared_ptr<BlockModel>                       blockPtr = graph::findBlock(graph, block).value();
+        std::expected<std::shared_ptr<BlockModel>, Error> result   = graph::findBlock(graph, blockPtr);
+        expect(result.has_value());
+        expect(eq(result.value()->uniqueName(), block.unique_name));
+
+        std::shared_ptr<BlockModel> bogus = std::make_shared<BlockWrapper<NullSource<float>>>();
+        expect(!graph::findBlock(graph, bogus).has_value());
+    };
+
+    "containsEdge returns true after connection"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+        expect(eq(graph.connect<"out">(src).to<"in">(snk), ConnectionResult::SUCCESS));
+
+        expect(graph.containsEdge(graph.edges().front()));
+        graph.connectPendingEdges();
+        expect(graph.containsEdge(graph.edges().front()));
+    };
+
+    "addEdge and removeEdge work correctly"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+        expect(eq(graph.connect<"out">(src).to<"in">(snk), ConnectionResult::SUCCESS));
+        graph.connectPendingEdges();
+
+        const auto edge = graph.edges().front();
+        expect(graph.containsEdge(edge));
+        expect(graph.removeEdge(edge));
+        expect(!graph.containsEdge(edge));
+    };
+
+    "forEachBlock visits all blocks"_test = [] {
+        Graph                    graph;
+        std::vector<std::string> visited;
+
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+
+        graph::forEachBlock<gr::block::Category::TransparentBlockGroup>(graph, [&](std::shared_ptr<BlockModel> block) { //
+            visited.push_back(std::string(block->uniqueName()));
+        });
+
+        expect(eq(visited.size(), 2UZ));
+        expect(std::ranges::find(visited, src.unique_name) != visited.end());
+        expect(std::ranges::find(visited, snk.unique_name) != visited.end());
+    };
+
+    "forEachEdge visits all edges"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(snk)));
+        graph.connectPendingEdges();
+
+        int count = 0;
+        graph::forEachEdge<gr::block::Category::TransparentBlockGroup>(graph, [&](auto) { ++count; });
+        expect(eq(count, 1));
+    };
+
+    "traverseSubgraphs visits nested blocks"_test = [] {
+        std::shared_ptr<BlockModel> wrappedGraph = std::make_shared<BlockWrapper<Graph>>();
+        Graph*                      root         = static_cast<Graph*>(wrappedGraph->raw());
+
+        auto& src    = root->emplaceBlock<NullSource<float>>();
+        auto& nested = root->emplaceBlock<Graph>();
+        auto& sink   = nested.emplaceBlock<NullSink<float>>();
+
+        using enum gr::block::Category;
+        "visit transparend (unmanaged) sub-graphs"_test = [&] {
+            std::vector<std::string> visited;
+            gr::graph::detail::traverseSubgraphs<TransparentBlockGroup>(*wrappedGraph, [&](auto& graph) {
+                for (const auto& block : graph.blocks()) {
+                    visited.push_back(std::string(block->uniqueName()));
+                }
+            });
+
+            expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
+            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, sink.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+        };
+
+        "visit nmanaged sub-graphs"_test = [&] {
+            std::vector<std::string> visited;
+            gr::graph::detail::traverseSubgraphs<ScheduledBlockGroup>(*wrappedGraph, [&](auto& graph) {
+                for (const auto& block : graph.blocks()) {
+                    visited.push_back(std::string(block->uniqueName()));
+                }
+            });
+
+            expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
+            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, sink.unique_name) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+        };
+
+        "visit all sub-graphs"_test = [&] {
+            std::vector<std::string> visited;
+            gr::graph::detail::traverseSubgraphs<All>(*wrappedGraph, [&](auto& graph) {
+                for (const auto& block : graph.blocks()) {
+                    visited.push_back(std::string(block->uniqueName()));
+                }
+            });
+
+            expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
+            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, sink.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+        };
+
+        "visit top-level Blocks only"_test = [&] {
+            std::vector<std::string> visited;
+            gr::graph::detail::traverseSubgraphs<NormalBlock>(*wrappedGraph, [&](auto& graph) {
+                for (const auto& block : graph.blocks()) {
+                    visited.push_back(std::string(block->uniqueName()));
+                }
+            });
+
+            expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
+            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, sink.unique_name) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+        };
     };
 };
 

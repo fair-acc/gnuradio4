@@ -31,7 +31,6 @@
 #endif
 
 namespace gr {
-
 template<typename T>
 concept GraphLike = requires(T t, const T& tc) {
     { tc.blocks() } -> std::same_as<std::span<const std::shared_ptr<BlockModel>>>;
@@ -887,7 +886,84 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
     return flattenedGraph;
 }
 
+using AdjacencyList = std::unordered_map<std::shared_ptr<gr::BlockModel>, //
+    std::unordered_map<gr::PortDefinition, std::vector<gr::Edge*>>>;
+
+inline AdjacencyList computeAdjacencyList(GraphLike auto& root) {
+    AdjacencyList result;
+    for (gr::Edge& edge : root.edges()) {
+        std::vector<gr::Edge*>& srcMapPort = result[edge.sourceBlock()][edge.sourcePortDefinition()];
+        srcMapPort.push_back(std::addressof(edge));
+    }
+    return result;
+}
+
+inline std::span<gr::Edge* const> outgoingEdges(const AdjacencyList& adj, const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& port) {
+    if (auto it = adj.find(block); it != adj.end()) {
+        if (auto pit = it->second.find(port); pit != it->second.end()) {
+            return std::span(pit->second);
+        }
+    }
+    return {};
+}
+
+inline std::vector<std::shared_ptr<BlockModel>> findSourceBlocks(const AdjacencyList& adj) {
+    std::vector<std::shared_ptr<BlockModel>> sources;
+    std::set<std::shared_ptr<BlockModel>>    destinations;
+
+    for (const auto& [src, ports] : adj) {
+        sources.push_back(src);
+        for (const auto& [_, edges] : ports) {
+            for (const auto* edge : edges) {
+                destinations.insert(edge->destinationBlock());
+            }
+        }
+    }
+
+    sources.erase(std::remove_if(sources.begin(), sources.end(), [&](const auto& b) { return destinations.contains(b); }), sources.end());
+    std::sort(sources.begin(), sources.end(), [](const auto& a, const auto& b) { return a->name() < b->name(); });
+    return sources;
+}
+
 } // namespace graph
+} // namespace gr
+
+template<>
+struct std::formatter<gr::graph::AdjacencyList> {
+    char formatSpecifier = 's'; // 's' = short name, 'l' = long (unique) name
+
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && (*it == 's' || *it == 'l')) {
+            formatSpecifier = *it++;
+        } else if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid format specifier for AdjacencyList: must be 's' or 'l'");
+        }
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto format(const gr::graph::AdjacencyList& adj, FormatContext& ctx) const {
+        auto       out     = ctx.out();
+        const auto getName = [this](const std::shared_ptr<gr::BlockModel>& block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
+
+        for (const auto& [srcBlock, portMap] : adj) {
+            for (const auto& [srcPort, edges] : portMap) {
+                out = std::format_to(out, "{}:{}\n", getName(srcBlock), srcPort);
+                for (const gr::Edge* edge : edges) {
+                    if (formatSpecifier == 'l') {
+                        out = std::format_to(out, "    → {:l}\n", *edge);
+                    } else {
+                        out = std::format_to(out, "    → {:s}\n", *edge);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+};
+
+namespace gr {
 
 /*******************************************************************************************************/
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/
