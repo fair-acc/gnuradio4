@@ -14,7 +14,7 @@ namespace detail {
 
 inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml, std::source_location location = std::source_location::current()) {
 
-    std::map<std::string, BlockModel*> createdBlocks;
+    std::map<std::string, std::shared_ptr<BlockModel>> createdBlocks;
 
     auto blks = std::get<std::vector<pmtv::pmt>>(yaml.at("blocks"));
     for (const auto& blk : blks) {
@@ -24,11 +24,11 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         const auto blockType = std::get<std::string>(grcBlock["id"]);
 
         if (blockType == "SUBGRAPH") {
-            auto& subGraph           = resultGraph.addBlock(std::make_unique<GraphWrapper<gr::Graph>>());
-            createdBlocks[blockName] = &subGraph;
-            subGraph.setName(blockName);
+            const std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
+            createdBlocks[blockName]                    = subGraph;
+            subGraph->setName(blockName);
 
-            auto* subGraphDirect = static_cast<GraphWrapper<gr::Graph>*>(&subGraph);
+            auto* subGraphDirect = static_cast<GraphWrapper<gr::Graph>*>(subGraph.get());
             subGraphDirect->setName(blockName);
 
             const auto& graphData = std::get<property_map>(grcBlock["graph"]);
@@ -41,10 +41,19 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     throw std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
                 }
 
-                auto& block = subGraphDirect->findFirstBlockWithName(std::get<std::string>(exportedPort[0]));
+                std::string requiredBlockName = std::get<std::string>(exportedPort[0]);
+                std::string blockUniqueName;
+                for (auto& b : subGraphDirect->blockRef().blocks()) {
+                    if (b->name() == requiredBlockName) {
+                        blockUniqueName = b->uniqueName();
+                    }
+                }
+                if (blockUniqueName.empty()) {
+                    throw gr::exception(std::format("Required Block {} not found in:\n{}", requiredBlockName, gr::graph::format(subGraphDirect->blockRef())), location);
+                }
 
                 subGraphDirect->exportPort(true,
-                    /* block's unique name */ std::string(block.uniqueName()),
+                    /* block's unique name */ blockUniqueName,
                     /* port direction */ std::get<std::string>(exportedPort[1]) == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT,
                     /* port name */ std::get<std::string>(exportedPort[2]));
             }
@@ -77,7 +86,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
             if (const auto failed = currentBlock->settings().activateContext(); failed == std::nullopt) {
                 throw gr::exception("Settings for context could not be activated");
             }
-            createdBlocks[blockName] = &resultGraph.addBlock(std::move(currentBlock));
+            createdBlocks[blockName] = resultGraph.addBlock(std::move(currentBlock));
         }
     } // for blocks
 
@@ -118,7 +127,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         auto dst = parseBlockPort(connection[2], connection[3]);
 
         if (connection.size() == 4) {
-            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition, undefined_size, graph::defaultWeight, graph::defaultEdgeName, location);
+            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, undefined_size, graph::defaultWeight, graph::defaultEdgeName, location);
         } else {
             auto minBufferSize = std::visit(
                 []<typename TValue>(const TValue& value) {
@@ -132,7 +141,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 },
                 connection[4]);
 
-            resultGraph.connect(*src.block_it->second, src.port_definition, *dst.block_it->second, dst.port_definition, minBufferSize, graph::defaultWeight, graph::defaultEdgeName, location);
+            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, minBufferSize, graph::defaultWeight, graph::defaultEdgeName, location);
         }
     } // for connections
 }
@@ -142,16 +151,16 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
     {
         std::vector<pmtv::pmt> serializedBlocks;
-        rootGraph.forEachBlock([&](const auto& block) {
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel> block) {
             pmtv::map_t map;
-            map["name"] = std::string(block.name());
+            map["name"] = std::string(block->name());
 
-            const auto& fullTypeName = loader.registry().typeName(block);
+            const auto& fullTypeName = loader.registry().typeName(*block);
             if (fullTypeName == "gr::Graph") {
                 map.emplace("id", "SUBGRAPH");
-                auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(std::addressof(block));
+                auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(block.get());
                 if (subGraphDirect == nullptr) {
-                    throw gr::Error(std::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block.uniqueName(), rootGraph.unique_name));
+                    throw gr::Error(std::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block->uniqueName(), rootGraph.unique_name));
                 }
                 property_map graphYaml = detail::saveGraphToMap(loader, subGraphDirect->blockRef());
 
@@ -184,18 +193,19 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                     return parameters;
                 };
 
-                const auto& stored = block.settings().getStoredAll();
+                const auto& stored = block->settings().getStoredAll();
                 if (stored.contains("")) {
                     const auto& ctxParameters = stored.at("");
                     const auto& settingsMap   = ctxParameters.back().second; // write only the last parameters
-                    if (!block.metaInformation().empty() || !settingsMap.empty()) {
-                        map["parameters"] = writeParameters(settingsMap, block.metaInformation());
+                    if (!block->metaInformation().empty() || !settingsMap.empty()) {
+                        map["parameters"] = writeParameters(settingsMap, block->metaInformation());
                     }
                 }
 
+                using namespace std::string_literals;
                 std::vector<pmtv::pmt> ctxParamsSeq;
                 for (const auto& [ctx, ctxParameters] : stored) {
-                    if (ctx == "") {
+                    if (std::holds_alternative<std::string>(ctx) && std::get<std::string>(ctx) == ""s) {
                         continue;
                     }
 
@@ -231,7 +241,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
     {
         std::vector<pmtv::pmt> serializedConnections;
-        rootGraph.forEachEdge([&](const auto& edge) {
+        graph::forEachEdge<block::Category::NormalBlock>(rootGraph, [&](const Edge& edge) { // NormalBlock -> perhaps can be modelled to 'ALL' for a cleaner sub-graph handling
             std::vector<pmtv::pmt> seq;
 
             auto writePortDefinition = [&](const auto& definition) { //
@@ -251,10 +261,10 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                     definition.definition);
             };
 
-            seq.push_back(edge.sourceBlock().name().data());
+            seq.push_back(edge.sourceBlock()->name().data());
             writePortDefinition(edge.sourcePortDefinition());
 
-            seq.push_back(edge.destinationBlock().name().data());
+            seq.push_back(edge.destinationBlock()->name().data());
             writePortDefinition(edge.destinationPortDefinition());
 
             if (edge.minBufferSize() != std::numeric_limits<std::size_t>::max()) {

@@ -37,22 +37,22 @@ auto makeTestContext() {
 namespace {
 auto collectBlocks(const gr::Graph& graph) {
     std::set<std::string> result;
-    graph.forEachBlock([&](const auto& node) { result.insert(std::format("{}-{}", node.name(), node.typeName())); });
+    gr::graph::forEachBlock<gr::block::Category::NormalBlock>(graph, [&](const auto node) { result.insert(std::format("{}-{}", node->name(), node->typeName())); });
     return result;
 }
 
 auto collectEdges(const gr::Graph& graph) {
     std::set<std::string> result;
-    graph.forEachEdge([&](const auto& edge) {
+    gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&](const auto& edge) {
         auto portDefinitionToString = [](const gr::PortDefinition& definition) {
             return std::visit(gr::meta::overloaded(                                                                                                                   //
                                   [](const gr::PortDefinition::IndexBased& _definition) { return std::format("{}#{}", _definition.topLevel, _definition.subIndex); }, //
                                   [](const gr::PortDefinition::StringBased& _definition) { return _definition.name; }),                                               //
                 definition.definition);
         };
-        result.insert(std::format("{}#{} - {}#{}",                                          //
-            edge.sourceBlock().name(), portDefinitionToString(edge.sourcePortDefinition()), //
-            edge.destinationBlock().name(), portDefinitionToString(edge.destinationPortDefinition())));
+        result.insert(std::format("{}#{} - {}#{}",                                           //
+            edge.sourceBlock()->name(), portDefinitionToString(edge.sourcePortDefinition()), //
+            edge.destinationBlock()->name(), portDefinitionToString(edge.destinationPortDefinition())));
     });
     return result;
 }
@@ -327,7 +327,7 @@ connections:
 
             {
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
-                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
                     if (it != expectedSizes.end()) {
                         expectedSizes.erase(it);
@@ -340,7 +340,7 @@ connections:
                 expect(graph.connectPendingEdges());
 
                 std::size_t thresholdSize = 2 * 8192UZ;
-                graph.forEachEdge([&thresholdSize](const auto& edge) { //
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&thresholdSize](const auto& edge) { //
                     expect(thresholdSize >= edge.bufferSize());
                 });
             }
@@ -350,7 +350,7 @@ connections:
             {
                 auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc);
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
-                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
                     if (it != expectedSizes.end()) {
                         expectedSizes.erase(it);
@@ -445,8 +445,8 @@ const boost::ut::suite SettingsTests = [] {
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
-            graph2.forEachBlock([&](const auto& node) {
-                const auto settings = node.settings().get();
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
+                const auto settings = node->settings().get();
                 expect(eq(std::get<bool>(settings.at("bool_setting")), expectedBool));
                 expect(eq(std::get<std::string>(settings.at("string_setting")), expectedString));
                 expect(eq(std::get<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
@@ -481,9 +481,9 @@ const boost::ut::suite SettingsTests = [] {
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
-            graph2.forEachBlock([&](const auto& node) {
-                const auto& stored = node.settings().getStoredAll();
-                expect(eq(node.settings().getNStoredParameters(), 6UZ));
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(graph2, [&](const auto node) {
+                const auto& stored = node->settings().getStoredAll();
+                expect(eq(node->settings().getNStoredParameters(), 6UZ));
                 for (const auto& [ctx, ctxParameters] : stored) {
                     for (const auto& [ctxTime, settingsMap] : ctxParameters) {
                         std::string expectedName = "ArraySink0";

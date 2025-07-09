@@ -921,7 +921,7 @@ connections:
         try {
             scheduler::Simple sched{loadGrc(loader, std::string(grc))};
             expect(sched.runAndWait().has_value());
-            sched.graph().forEachBlock([](auto& block) { expect(eq(std::get<float>(*block.settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << std::format("sample_rate forwarded to {}", block.name()); });
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(sched.graph(), [](std::shared_ptr<BlockModel> block) { expect(eq(std::get<float>(*block->settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << std::format("sample_rate forwarded to {}", block->name()); });
         } catch (const std::string& e) {
             expect(false) << std::format("GRC loading failed: {}\n", e);
         }

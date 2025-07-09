@@ -82,8 +82,9 @@ enum class ExecutionPolicy {
 template<typename Derived, ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class SchedulerBase : public Block<Derived> {
     friend class lifecycle::StateMachine<Derived>;
-    using JobLists     = std::shared_ptr<std::vector<std::vector<BlockModel*>>>;
+    using JobLists     = std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>>;
     using TaskExecutor = gr::thread_pool::TaskExecutor;
+    using enum block::Category;
 
 protected:
     gr::Graph                           _graph;
@@ -92,15 +93,15 @@ protected:
     std::shared_ptr<TaskExecutor>       _pool;
     std::shared_ptr<gr::Sequence>       _nRunningJobs = std::make_shared<gr::Sequence>();
     std::recursive_mutex                _executionOrderMutex; // only used when modifying and copying the graph->local job list
-    JobLists                            _executionOrder = std::make_shared<std::vector<std::vector<BlockModel*>>>();
+    JobLists                            _executionOrder = std::make_shared<std::vector<std::vector<std::shared_ptr<BlockModel>>>>();
 
     std::mutex                               _zombieBlocksMutex;
-    std::vector<std::unique_ptr<BlockModel>> _zombieBlocks;
+    std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
 
     // for blocks that were added while scheduler was running. They need to be adopted by a thread
     std::mutex _adoptionBlocksMutex;
     // fixed-sized vector indexed by runnerId. Cheaper than a map.
-    std::vector<std::vector<BlockModel*>> _adoptionBlocks;
+    std::vector<std::vector<std::shared_ptr<BlockModel>>> _adoptionBlocks;
 
     MsgPortOutForChildren    _toChildMessagePort;
     MsgPortInFromChildren    _fromChildMessagePort;
@@ -108,29 +109,6 @@ protected:
     bool                     _messagePortsConnected = false;
 
     std::atomic_flag _processingScheduledMessages;
-
-    template<typename Fn>
-    void forAllUnmanagedBlocks(Fn&& function) {
-        auto doForNestedBlocks = [&function](auto& doForNestedBlocks_, auto& parent) -> void {
-            const auto& blocks = [&parent] -> std::span<std::unique_ptr<BlockModel>> {
-                if constexpr (requires { parent.blocks(); }) {
-                    return parent.blocks();
-                } else {
-                    return parent->blocks();
-                }
-                // Silence warnings
-                return {};
-            }();
-            for (auto& block : blocks) {
-                function(block);
-
-                if (block->blockCategory() == block::Category::TransparentBlockGroup) {
-                    doForNestedBlocks_(doForNestedBlocks_, block);
-                }
-            }
-        };
-        doForNestedBlocks(doForNestedBlocks, _graph);
-    }
 
     void registerPropertyCallbacks() noexcept {
         this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
@@ -199,7 +177,7 @@ public:
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
-        forAllUnmanagedBlocks([this, &toSchedulerBuffer](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this, &toSchedulerBuffer](auto& block) {
             if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block->msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
             }
@@ -244,7 +222,7 @@ public:
         // Process messages in the graph
         _graph.processScheduledMessages();
         if (_nRunningJobs->value() == 0UZ) {
-            forAllUnmanagedBlocks([](auto& block) { block->processScheduledMessages(); });
+            graph::forEachBlock<TransparentBlockGroup>(_graph, [](auto& block) { block->processScheduledMessages(); });
         }
 
         ReaderSpanLike auto messagesFromChildren = _fromChildMessagePort.streamReader().get();
@@ -325,7 +303,7 @@ public:
 protected:
     void disconnectAllEdges() {
         _graph.disconnectAllEdges();
-        forAllUnmanagedBlocks([&](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [&](auto& block) {
             if (block->blockCategory() == block::Category::TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 graph->blockRef().disconnectAllEdges();
@@ -335,7 +313,7 @@ protected:
 
     bool connectPendingEdges() {
         bool result = _graph.connectPendingEdges();
-        this->forAllUnmanagedBlocks([&](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [&](auto& block) {
             if (block->blockCategory() == block::Category::TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 result      = result && graph->blockRef().connectPendingEdges();
@@ -344,7 +322,7 @@ protected:
         return result;
     }
 
-    work::Result traverseBlockListOnce(const std::vector<BlockModel*>& blocks) const {
+    work::Result traverseBlockListOnce(const std::vector<std::shared_ptr<BlockModel>>& blocks) const {
         const std::size_t requestedWorkAllBlocks = max_work_items;
         std::size_t       performedWorkAllBlocks = 0UZ;
         bool              unfinishedBlocksExist  = false; // i.e. at least one block returned OK, INSUFFICIENT_INPUT_ITEMS, or INSUFFICIENT_OUTPU_ITEMS
@@ -372,7 +350,7 @@ protected:
 
     void reset() {
         _executionOrder->clear();
-        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
     }
 
@@ -385,7 +363,7 @@ protected:
         }
 
         std::lock_guard lock(_executionOrderMutex);
-        forAllUnmanagedBlocks([this](auto& block) { //
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { //
             this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
         });
 
@@ -409,7 +387,7 @@ protected:
         }
     }
 
-    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<BlockModel*>>> jobList) noexcept {
+    void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList) noexcept {
         std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
         std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
 
@@ -419,10 +397,10 @@ protected:
 
         [[maybe_unused]] auto& profiler_handler = _profiler.forThisThread();
 
-        std::vector<BlockModel*> localBlockList;
+        std::vector<std::shared_ptr<BlockModel>> localBlockList;
         {
-            std::lock_guard          lock(_executionOrderMutex);
-            std::vector<BlockModel*> blocks = jobList->at(runnerID);
+            std::lock_guard                          lock(_executionOrderMutex);
+            std::vector<std::shared_ptr<BlockModel>> blocks = jobList->at(runnerID);
             localBlockList.reserve(blocks.size());
             for (const auto& block : blocks) {
                 localBlockList.push_back(block);
@@ -504,7 +482,8 @@ protected:
     void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
         std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
         std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
-        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", gr::meta::shorten_type_name(this->unique_name)));
+        const std::string             thisName     = this->unique_name;
+        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", gr::meta::shorten_type_name(thisName)));
 
         if constexpr (execution != ExecutionPolicy::singleThreaded) {
 #ifndef __EMSCRIPTEN__
@@ -518,12 +497,12 @@ protected:
             // check and increase progress if there hasn't been none.
 
             std::size_t currentProgress = progress->value();
-            if (currentProgress == lastProgress) {
+            if ((nRunningJobs->value() > 0UZ) && (currentProgress == lastProgress)) {
                 nWarnings++;
                 lastProgress = progress->incrementAndGet(); // watchdog triggered manual update
                 progress->notify_all();
                 if (nWarnings >= timeOut_count) {
-                    std::println("trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, this->unique_name);
+                    std::println(stderr, "trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, thisName);
                     // log or escalate (e.g., throw, abort, notify external watchdog)
                 }
             } else {
@@ -534,7 +513,7 @@ protected:
     }
 
     void stop() {
-        forAllUnmanagedBlocks([this](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) {
             this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::STOPPED));
@@ -545,7 +524,7 @@ protected:
     }
 
     void pause() {
-        forAllUnmanagedBlocks([this](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) {
             this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_PAUSE));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::PAUSED));
@@ -559,7 +538,7 @@ protected:
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
-        forAllUnmanagedBlocks([this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
     }
 
     std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
@@ -585,29 +564,29 @@ protected:
                 // pseudo-randomize which thread gets it
                 auto blockAddress = reinterpret_cast<std::uintptr_t>(&newBlock);
                 auto runnerIndex  = (blockAddress / sizeof(void*)) % nBatches;
-                _adoptionBlocks[runnerIndex].push_back(&newBlock);
+                _adoptionBlocks[runnerIndex].push_back(newBlock);
 
-                switch (newBlock.state()) {
+                switch (newBlock->state()) {
                 case lifecycle::State::STOPPED:
                 case lifecycle::State::IDLE: //
-                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::INITIALISED));
-                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::RUNNING));
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(lifecycle::State::INITIALISED));
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(lifecycle::State::RUNNING));
                     break;
                 case lifecycle::State::INITIALISED: //
-                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock.changeStateTo(lifecycle::State::RUNNING));
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(lifecycle::State::RUNNING));
                     break;
                 case lifecycle::State::RUNNING:
                 case lifecycle::State::REQUESTED_PAUSE:
                 case lifecycle::State::PAUSED:
                 case lifecycle::State::REQUESTED_STOP:
                 case lifecycle::State::ERROR: //
-                    this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", magic_enum::enum_name(newBlock.state())));
+                    this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", magic_enum::enum_name(newBlock->state())));
                     break;
                 }
             }
         }
 
-        this->emitMessage(scheduler::property::kBlockEmplaced, Graph::serializeBlock(std::addressof(newBlock)));
+        this->emitMessage(scheduler::property::kBlockEmplaced, Graph::serializeBlock(newBlock));
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
@@ -671,7 +650,7 @@ protected:
 
       This mechanism supports safe dynamic block removal while the scheduler is running, without blocking execution.
     */
-    void cleanupZombieBlocks(std::vector<BlockModel*>& localBlockList) {
+    void cleanupZombieBlocks(std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
         if (localBlockList.empty()) {
             return;
         }
@@ -681,7 +660,7 @@ protected:
         auto it = _zombieBlocks.begin();
 
         while (it != _zombieBlocks.end()) {
-            auto localBlockIt = std::find(localBlockList.begin(), localBlockList.end(), it->get());
+            auto localBlockIt = std::find(localBlockList.begin(), localBlockList.end(), *it);
             if (localBlockIt == localBlockList.end()) {
                 // we only care about the blocks local to our thread.
                 ++it;
@@ -715,8 +694,8 @@ protected:
             if (shouldDelete) {
                 localBlockList.erase(localBlockIt);
 
-                BlockModel* zombieRaw = it->get();
-                it                    = _zombieBlocks.erase(it); // ~Block() runs here
+                std::shared_ptr<BlockModel> zombieRaw = *it;
+                it                                    = _zombieBlocks.erase(it); // ~Block() runs here
 
                 // We need to remove zombieRaw from jobLists as well, in case Scheduler ever goes to INITIALIZED again.
                 std::lock_guard lock(_executionOrderMutex);
@@ -734,7 +713,7 @@ protected:
         }
     }
 
-    void adoptBlocks(std::size_t runnerID, std::vector<BlockModel*>& localBlockList) {
+    void adoptBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
         std::lock_guard guard(_adoptionBlocksMutex);
 
         assert(_adoptionBlocks.size() > runnerID);
@@ -754,7 +733,7 @@ protected:
 
       The block will be physically deleted by cleanupZombieBlocks() when it reaches a safe state.
     */
-    void makeZombie(std::unique_ptr<BlockModel> block) {
+    void makeZombie(std::shared_ptr<BlockModel> block) {
         if (block->state() == lifecycle::State::PAUSED || block->state() == lifecycle::State::RUNNING) {
             this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
@@ -763,8 +742,8 @@ protected:
             // Handle edge case: If we receive two consecutive "Add Block X" "Remove Block X" messages
             // it would be zombie before being adopted, so we need to remove it from adoption list
             std::lock_guard guard(_adoptionBlocksMutex);
-            for (auto& adoptionList : _adoptionBlocks) {
-                auto it = std::find(adoptionList.begin(), adoptionList.end(), block.get());
+            for (std::vector<std::shared_ptr<BlockModel>>& adoptionList : _adoptionBlocks) {
+                auto it = std::find(adoptionList.begin(), adoptionList.end(), block);
                 if (it != adoptionList.end()) {
                     adoptionList.erase(it);
                     break;
@@ -909,11 +888,8 @@ private:
         [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("scheduler_simple.init");
 
         // generate job list
-        std::size_t nBlocks = 0UZ;
-        this->forAllUnmanagedBlocks([&nBlocks](auto&& /*block*/) { nBlocks++; });
-        std::vector<BlockModel*> allBlocks;
-        allBlocks.reserve(nBlocks);
-        this->forAllUnmanagedBlocks([&allBlocks](auto&& block) { allBlocks.push_back(block.get()); });
+        const gr::Graph   flatGraph = graph::flatten(this->_graph);
+        const std::size_t nBlocks   = flatGraph.blocks().size();
 
         std::size_t n_batches = 1UZ;
         switch (base_t::executionPolicy()) {
@@ -930,10 +906,10 @@ private:
         this->_executionOrder->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
-            auto& job = this->_executionOrder->emplace_back(std::vector<BlockModel*>());
-            job.reserve(allBlocks.size() / n_batches + 1);
-            for (std::size_t j = i; j < allBlocks.size(); j += n_batches) {
-                job.push_back(allBlocks[j]);
+            auto& job = this->_executionOrder->emplace_back(std::vector<std::shared_ptr<BlockModel>>());
+            job.reserve(nBlocks / n_batches + 1);
+            for (std::size_t j = i; j < nBlocks; j += n_batches) {
+                job.push_back(flatGraph.blocks()[j]);
             }
         }
     }
@@ -961,16 +937,17 @@ public:
 
 private:
     void init() {
-        std::vector<BlockModel*>    blockList;
-        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("breadth_first.init");
-        using block_t                  = BlockModel*;
+        std::vector<std::shared_ptr<BlockModel>> blockList;
+        [[maybe_unused]] const auto              pe = this->_profilerHandler.startCompleteEvent("breadth_first.init");
+        using block_t                               = std::shared_ptr<BlockModel>;
         base_t::init();
         // calculate adjacency list
         std::map<block_t, std::vector<block_t>> _adjacency_list{};
         std::vector<block_t>                    _source_blocks{};
         // compute the adjacency list
         std::set<block_t> block_reached;
-        for (auto& e : this->_graph.edges()) {
+        const gr::Graph   flatGraph = gr::graph::flatten(this->_graph);
+        for (auto& e : flatGraph.edges()) {
             _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
             _source_blocks.push_back(e._sourceBlock);
             block_reached.insert(e._destinationBlock);
@@ -1024,7 +1001,7 @@ private:
         this->_executionOrder->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
             // create job-set for thread
-            auto& job = this->_executionOrder->emplace_back(std::vector<BlockModel*>());
+            auto& job = this->_executionOrder->emplace_back(std::vector<std::shared_ptr<BlockModel>>());
             job.reserve(blockList.size() / n_batches + 1);
             for (std::size_t j = i; j < blockList.size(); j += n_batches) {
                 job.push_back(blockList[j]);
@@ -1054,9 +1031,9 @@ public:
 
 private:
     void init() {
-        std::vector<BlockModel*>    blocklist;
-        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("depth_first.init");
-        using block_t                  = BlockModel*;
+        std::vector<std::shared_ptr<BlockModel>> blocklist;
+        [[maybe_unused]] const auto              pe = this->_profilerHandler.startCompleteEvent("depth_first.init");
+        using block_t                               = std::shared_ptr<BlockModel>;
         base_t::init();
 
         // adjacency list
@@ -1064,7 +1041,8 @@ private:
         std::vector<block_t>                    _source_blocks{};
         std::set<block_t>                       block_reached;
 
-        for (auto& e : this->_graph.edges()) {
+        const gr::Graph flatGraph = gr::graph::flatten(this->_graph);
+        for (auto& e : flatGraph.edges()) {
             _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
             _source_blocks.push_back(e._sourceBlock);
             block_reached.insert(e._destinationBlock);
@@ -1111,7 +1089,7 @@ private:
         this->_executionOrder->clear();
         this->_executionOrder->reserve(n_batches);
         for (std::size_t i = 0; i < n_batches; i++) {
-            auto& job = this->_executionOrder->emplace_back(std::vector<BlockModel*>());
+            auto& job = this->_executionOrder->emplace_back(std::vector<std::shared_ptr<BlockModel>>());
             job.reserve(blocklist.size() / n_batches + 1);
             for (std::size_t j = i; j < blocklist.size(); j += n_batches) {
                 job.push_back(blocklist[j]);

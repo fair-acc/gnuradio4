@@ -35,59 +35,38 @@ struct PortDefinition {
 };
 
 struct Edge {
-    enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts };
+    enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts, Unknown };
 
     // Member variables that are controlled by the graph and scheduler
-    BlockModel*    _sourceBlock      = nullptr; /// non-owning reference
-    BlockModel*    _destinationBlock = nullptr; /// non-owning reference
-    PortDefinition _sourcePortDefinition;
-    PortDefinition _destinationPortDefinition;
-    EdgeState      _state            = EdgeState::WaitingToBeConnected;
-    std::size_t    _actualBufferSize = -1UZ;
-    PortType       _edgeType         = PortType::ANY;
-    DynamicPort*   _sourcePort       = nullptr; /// non-owning reference
-    DynamicPort*   _destinationPort  = nullptr; /// non-owning reference
+    std::shared_ptr<BlockModel> _sourceBlock;
+    std::shared_ptr<BlockModel> _destinationBlock;
+    PortDefinition              _sourcePortDefinition;
+    PortDefinition              _destinationPortDefinition;
+    EdgeState                   _state            = EdgeState::WaitingToBeConnected;
+    std::size_t                 _actualBufferSize = -1UZ;
+    PortType                    _edgeType         = PortType::ANY;
+    DynamicPort*                _sourcePort       = nullptr; /// non-owning reference
+    DynamicPort*                _destinationPort  = nullptr; /// non-owning reference
 
     // User-controlled member variables
     std::size_t  _minBufferSize;
     std::int32_t _weight = 0;
     std::string  _name   = "unnamed edge"; // custom edge name
 
-public:
     Edge() = delete;
 
-    Edge(const Edge&) = delete;
+    explicit Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition,               //
+        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPortDefinition,               //
+        std::size_t minBufferSize, std::int32_t weight, std::string name) noexcept                            //
+        : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock),                                     //
+          _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), //
+          _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
 
-    Edge& operator=(const Edge&) = delete;
-
-    Edge(Edge&& other) noexcept : _sourceBlock(std::exchange(other._sourceBlock, nullptr)), _destinationBlock(std::exchange(other._destinationBlock, nullptr)), _sourcePortDefinition(std::move(other._sourcePortDefinition)), _destinationPortDefinition(std::move(other._destinationPortDefinition)), _state(other._state), _actualBufferSize(other._actualBufferSize), _edgeType(other._edgeType), _sourcePort(std::exchange(other._sourcePort, nullptr)), _destinationPort(std::exchange(other._destinationPort, nullptr)), _minBufferSize(other._minBufferSize), _weight(other._weight), _name(std::move(other._name)) {}
-
-    Edge& operator=(Edge&& other) noexcept {
-        auto tmp = std::move(other);
-        std::swap(tmp._sourceBlock, _sourceBlock);
-        std::swap(tmp._destinationBlock, _destinationBlock);
-        std::swap(tmp._sourcePortDefinition, _sourcePortDefinition);
-        std::swap(tmp._destinationPortDefinition, _destinationPortDefinition);
-        std::swap(tmp._state, _state);
-        std::swap(tmp._actualBufferSize, _actualBufferSize);
-        std::swap(tmp._edgeType, _edgeType);
-        std::swap(tmp._sourcePort, _sourcePort);
-        std::swap(tmp._destinationPort, _destinationPort);
-
-        std::swap(tmp._minBufferSize, _minBufferSize);
-        std::swap(tmp._weight, _weight);
-        std::swap(tmp._name, _name);
-
-        return *this;
-    }
-
-    Edge(BlockModel* sourceBlock, PortDefinition sourcePortDefinition, BlockModel* destinationBlock, PortDefinition destinationPortDefinition, std::size_t minBufferSize, std::int32_t weight, std::string name) : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock), _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
-
-    [[nodiscard]] constexpr const BlockModel& sourceBlock() const noexcept { return *_sourceBlock; }
-    [[nodiscard]] constexpr const BlockModel& destinationBlock() const noexcept { return *_destinationBlock; }
-    [[nodiscard]] PortDefinition              sourcePortDefinition() const noexcept { return _sourcePortDefinition; }
-    [[nodiscard]] PortDefinition              destinationPortDefinition() const noexcept { return _destinationPortDefinition; }
-    [[nodiscard]] constexpr EdgeState         state() const noexcept { return _state; }
+    [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& sourceBlock() const noexcept { return _sourceBlock; }
+    [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& destinationBlock() const noexcept { return _destinationBlock; }
+    [[nodiscard]] PortDefinition                               sourcePortDefinition() const noexcept { return _sourcePortDefinition; }
+    [[nodiscard]] PortDefinition                               destinationPortDefinition() const noexcept { return _destinationPortDefinition; }
+    [[nodiscard]] constexpr EdgeState                          state() const noexcept { return _state; }
 
     [[nodiscard]] constexpr std::size_t      minBufferSize() const noexcept { return _minBufferSize; }
     [[nodiscard]] constexpr std::int32_t     weight() const noexcept { return _weight; }
@@ -102,14 +81,13 @@ public:
     constexpr std::size_t nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
     constexpr PortType    edgeType() const { return _edgeType; }
 
-    constexpr bool hasSameSourcePort(const Edge& other) const noexcept {
-        if (_sourceBlock != other._sourceBlock) {
-            return false;
-        }
-        if (_sourcePortDefinition.definition == other._sourcePortDefinition.definition) {
-            return true;
-        }
-        return false;
+    constexpr bool hasSameSourcePort(const Edge& other) const noexcept { return sourceBlock() == other.sourceBlock() && sourcePortDefinition().definition == other.sourcePortDefinition().definition; }
+
+    constexpr bool operator==(const Edge& other) const noexcept {
+        return sourceBlock() == other.sourceBlock()                                                       //
+               && destinationBlock() == other.destinationBlock()                                          //
+               && sourcePortDefinition().definition == other.sourcePortDefinition().definition            //
+               && destinationPortDefinition().definition == other.destinationPortDefinition().definition; //
     }
 };
 
@@ -212,8 +190,10 @@ public:
             portOrCollection);
     }
 
-    [[nodiscard]] virtual std::span<std::unique_ptr<BlockModel>> blocks() noexcept { return {}; };
-    [[nodiscard]] virtual std::span<Edge>                        edges() noexcept { return {}; }
+    [[nodiscard]] virtual std::span<std::shared_ptr<BlockModel>>       blocks() noexcept       = 0;
+    [[nodiscard]] virtual std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept = 0;
+    [[nodiscard]] virtual std::span<Edge>                              edges() noexcept        = 0;
+    [[nodiscard]] virtual std::span<const Edge>                        edges() const noexcept  = 0;
 
     DynamicPorts& dynamicInputPorts() {
         initDynamicPorts();
@@ -518,7 +498,15 @@ public:
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
 
     // For blocks that contain nested blocks (Graphs, Schedulers)
-    [[nodiscard]] std::span<std::unique_ptr<BlockModel>> blocks() noexcept override {
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>> blocks() noexcept override {
+        if constexpr (requires { blockRef().blocks(); }) {
+            return blockRef().blocks();
+        } else {
+            return {};
+        }
+    }
+
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept override {
         if constexpr (requires { blockRef().blocks(); }) {
             return blockRef().blocks();
         } else {
@@ -528,6 +516,14 @@ public:
 
     // For blocks that contain nested blocks (Graphs, Schedulers)
     [[nodiscard]] std::span<Edge> edges() noexcept override {
+        if constexpr (requires { blockRef().edges(); }) {
+            return blockRef().edges();
+        } else {
+            return {};
+        }
+    }
+
+    [[nodiscard]] std::span<const Edge> edges() const noexcept override {
         if constexpr (requires { blockRef().edges(); }) {
             return blockRef().edges();
         } else {
@@ -568,7 +564,7 @@ struct std::formatter<gr::Edge> {
 
     template<typename FormatContext>
     auto format(const gr::Edge& e, FormatContext& ctx) const {
-        const auto& name = [this](const gr::BlockModel* block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
+        const auto& name = [this](const std::shared_ptr<gr::BlockModel> block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
 
         const auto portIndex = [](const gr::PortDefinition& port) {
             return std::visit(gr::meta::overloaded(

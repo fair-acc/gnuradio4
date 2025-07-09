@@ -32,6 +32,14 @@
 
 namespace gr {
 
+template<typename T>
+concept GraphLike = requires(T t, const T& tc) {
+    { tc.blocks() } -> std::same_as<std::span<const std::shared_ptr<BlockModel>>>;
+    { t.blocks() } -> std::same_as<std::span<std::shared_ptr<BlockModel>>>;
+    { tc.edges() } -> std::same_as<std::span<const Edge>>;
+    { t.edges() } -> std::same_as<std::span<Edge>>;
+};
+
 namespace graph::property {
 inline static const char* kInspectBlock   = "InspectBlock";
 inline static const char* kBlockInspected = "BlockInspected";
@@ -48,16 +56,54 @@ namespace graph {
 inline static constexpr std::size_t  defaultMinBufferSize(bool isArithmeticLike) { return isArithmeticLike ? 65536UZ : 64UZ; }
 inline static constexpr std::int32_t defaultWeight   = 0;
 inline static const std::string      defaultEdgeName = "unnamed edge"; // Emscripten doesn't want constexpr strings
+
+inline std::string format(GraphLike auto const& graph) {
+    std::ostringstream os;
+    for (const auto& block : graph.blocks()) {
+        os << std::format("   -block: {} ({})\n", block->name(), block->uniqueName());
+    }
+    for (const auto& edge : graph.edges()) {
+        os << std::format("   -edge: {}\n", edge);
+    }
+    return os.str();
+}
+
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto& what, std::source_location location = std::source_location::current()) noexcept {
+    if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block->uniqueName() == what.unique_name; }); it != graph.blocks().end()) {
+        return *it;
+    }
+    return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location));
+}
+
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::shared_ptr<BlockModel> what, std::source_location location = std::source_location::current()) noexcept {
+    if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block.get() == std::addressof(*what); }); it != graph.blocks().end()) {
+        return *it;
+    }
+    return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what->name(), what->uniqueName(), format(graph)), location));
+}
+
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
+    for (const auto& block : graph.blocks()) {
+        if (block->uniqueName() == uniqueBlockName) {
+            return block;
+        }
+    }
+    return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
+}
+
+// forward declaration
+template<block::Category traverseCategory, typename Fn>
+void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filterCallable = Edge::EdgeState::Unknown);
+
 } // namespace graph
 
 template<typename TSubGraph>
 class GraphWrapper : public BlockWrapper<TSubGraph> {
-private:
     std::unordered_multimap<std::string, std::string> _exportedInputPortsForBlock;
     std::unordered_multimap<std::string, std::string> _exportedOutputPortsForBlock;
 
 public:
-    GraphWrapper() {
+    GraphWrapper(gr::property_map init = {}) : gr::BlockWrapper<TSubGraph>(std::move(init)) {
         // We need to make sure nobody touches our dynamic ports
         // as this class will handle them
         this->_dynamicPortsLoader.instance = nullptr;
@@ -76,13 +122,13 @@ public:
         };
     }
 
-    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
+    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
         if (infoFound == exportFlag) {
             throw Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
         }
 
-        auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName);
+        auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName, location);
         auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
         if (exportFlag) {
@@ -102,7 +148,7 @@ public:
             if (portIt != portCollection.end()) {
                 portCollection.erase(portIt);
             } else {
-                throw Error("Port was not exported, while it is registered as such");
+                throw gr::exception("Port was not exported, while it is registered as such");
             }
         }
 
@@ -112,35 +158,25 @@ public:
     auto& blockRef() { return BlockWrapper<TSubGraph>::blockRef(); }
     auto& blockRef() const { return BlockWrapper<TSubGraph>::blockRef(); }
 
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return this->blockRef().blocks(); }
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return this->blockRef().blocks(); }
+    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return this->blockRef().edges(); }
+    [[nodiscard]] std::span<Edge>                              edges() noexcept { return this->blockRef().edges(); }
+
     const std::unordered_multimap<std::string, std::string>& exportedInputPortsForBlock() const { return _exportedInputPortsForBlock; }
     const std::unordered_multimap<std::string, std::string>& exportedOutputPortsForBlock() const { return _exportedOutputPortsForBlock; }
 
-    BlockModel& findBlockWithUniqueName(std::string uniqueBlockName) {
-        for (const auto& block : this->blocks()) {
-            if (std::string(block->uniqueName()) == uniqueBlockName) {
-                return *block;
-            }
-        }
-        throw Error(std::format("Block {} not found in {}", uniqueBlockName, this->uniqueName()));
-    }
-
-    BlockModel& findFirstBlockWithName(std::string blockName) {
-        for (const auto& block : this->blocks()) {
-            if (std::string(block->name()) == blockName) {
-                return *block;
-            }
-        }
-        throw Error(std::format("Block {} not found in {}", blockName, this->uniqueName()));
-    }
-
 private:
-    DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName) {
-        auto& block = findBlockWithUniqueName(uniqueBlockName);
+    DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) {
+        std::expected<std::shared_ptr<BlockModel>, Error> block = graph::findBlock(this->blockRef(), uniqueBlockName, location);
+        if (!block.has_value()) {
+            throw gr::exception(block.error().message, location);
+        }
 
         if (portDirection == PortDirection::INPUT) {
-            return block.dynamicInputPort(portName);
+            return block.value()->dynamicInputPort(portName);
         } else {
-            return block.dynamicOutputPort(portName);
+            return block.value()->dynamicOutputPort(portName);
         }
     }
 
@@ -184,29 +220,12 @@ private:
     }
 };
 
-struct Graph : public gr::Block<Graph> {
+struct Graph : Block<Graph> {
     std::shared_ptr<gr::Sequence>            _progress = std::make_shared<gr::Sequence>();
     std::vector<Edge>                        _edges;
-    std::vector<std::unique_ptr<BlockModel>> _blocks;
+    std::vector<std::shared_ptr<BlockModel>> _blocks;
 
     gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
-
-    template<typename TBlock>
-    std::unique_ptr<BlockModel>& findBlock(TBlock& what) {
-        static_assert(!std::is_pointer_v<std::remove_cvref_t<TBlock>>);
-        auto it = [&, this] {
-            if constexpr (std::is_same_v<TBlock, BlockModel>) {
-                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto& block) { return block.get() == &what; });
-            } else {
-                return std::find_if(_blocks.begin(), _blocks.end(), [&](const auto& block) { return block->raw() == &what; });
-            }
-        }();
-
-        if (it == _blocks.end()) {
-            throw std::runtime_error(std::format("No such block in this graph"));
-        }
-        return *it;
-    }
 
     // Just a dummy class that stores the graph and the source block and port
     // to be able to split the connection into two separate calls
@@ -233,12 +252,12 @@ struct Graph : public gr::Block<Graph> {
 
     private:
         template<typename Destination, typename DestinationPort, std::size_t destinationPortIndex = meta::invalid_index, std::size_t destinationPortSubIndex = meta::invalid_index>
-        [[nodiscard]] constexpr ConnectionResult to(Destination& destinationBlockRaw, DestinationPort& destinationPortOrCollectionRaw) {
-            auto* sourceBlock      = self.findBlock(sourceBlockRaw).get();
-            auto* destinationBlock = self.findBlock(destinationBlockRaw).get();
+        [[nodiscard]] constexpr ConnectionResult to(Destination& destinationBlockRaw, DestinationPort& destinationPortOrCollectionRaw, std::source_location location = std::source_location::current()) {
+            std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = graph::findBlock(self, sourceBlockRaw, location);
+            std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = graph::findBlock(self, destinationBlockRaw, location);
 
-            if (sourceBlock == nullptr || destinationBlock == nullptr) {
-                std::print("Source {} and/or destination {} do not belong to this graph\n", sourceBlockRaw.name, destinationBlockRaw.name);
+            if (!sourceBlock.has_value() && !destinationBlock.has_value()) {
+                std::print("Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlockRaw.name, destinationBlockRaw.name, location);
                 return ConnectionResult::FAILED;
             }
 
@@ -264,7 +283,9 @@ struct Graph : public gr::Block<Graph> {
 
             const bool        isArithmeticLike       = sourcePort->kIsArithmeticLikeValueType;
             const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-            self._edges.emplace_back(sourceBlock, PortDefinition{sourcePortIndex, sourcePortSubIndex}, destinationBlock, PortDefinition{destinationPortIndex, destinationPortSubIndex}, sanitizedMinBufferSize, weight, std::move(edgeName));
+            self._edges.emplace_back(sourceBlock.value(), PortDefinition{sourcePortIndex, sourcePortSubIndex}, //
+                destinationBlock.value(), PortDefinition{destinationPortIndex, destinationPortSubIndex},       //
+                sanitizedMinBufferSize, weight, std::move(edgeName));
 
             return ConnectionResult::SUCCESS;
         }
@@ -341,8 +362,8 @@ public:
         return *this;
     }
 
-    [[nodiscard]] std::span<const std::unique_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
-    [[nodiscard]] std::span<std::unique_ptr<BlockModel>>       blocks() noexcept { return {_blocks}; }
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return {_blocks}; }
     [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return {_edges}; }
     [[nodiscard]] std::span<Edge>                              edges() noexcept { return {_edges}; }
 
@@ -356,29 +377,47 @@ public:
      */
     [[nodiscard]] const Sequence& progress() const noexcept { return *_progress.get(); }
 
-    BlockModel& addBlock(std::unique_ptr<BlockModel> block) {
-        auto& newBlock = _blocks.emplace_back(std::move(block));
-        newBlock->init(_progress, this->compute_domain);
-        // TODO: Should we connectChildMessagePorts for these blocks as well?
-        return *newBlock.get();
+    std::shared_ptr<BlockModel> const& addBlock(std::shared_ptr<BlockModel> block, bool initBlock = true) {
+        const std::shared_ptr<BlockModel>& newBlock = _blocks.emplace_back(block);
+        if (initBlock) {
+            newBlock->init(_progress, this->compute_domain);
+        }
+        return newBlock;
     }
 
     template<BlockLike TBlock>
     requires std::is_constructible_v<TBlock, property_map>
-    auto& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
+    TBlock& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto& newBlock    = _blocks.emplace_back(std::make_unique<BlockWrapper<TBlock>>(std::move(initialSettings)));
-        auto* rawBlockRef = static_cast<TBlock*>(newBlock->raw());
+        const std::shared_ptr<BlockModel>& newBlock    = _blocks.emplace_back(std::make_shared<BlockWrapper<TBlock>>(std::move(initialSettings)));
+        TBlock*                            rawBlockRef = static_cast<TBlock*>(newBlock->raw());
         rawBlockRef->init(_progress);
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings) {
-        if (auto block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
-            auto& newBlock = addBlock(std::move(block_load));
+    [[maybe_unused]] std::shared_ptr<BlockModel> const& emplaceBlock(std::string_view type, property_map initialSettings) {
+        if (std::shared_ptr<BlockModel> block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
+            const std::shared_ptr<BlockModel>& newBlock = addBlock(block_load);
             return newBlock;
         }
-        throw gr::exception(std::format("Can not create block {}", type));
+        throw gr::exception(std::format("Cannot create block '{}'", type));
+    }
+
+    bool containsEdge(const Edge& edge) const {
+        return std::ranges::any_of(_edges, [&](const Edge& e) { return e == edge; });
+    }
+
+    template<typename T>
+    requires std::same_as<std::remove_cvref_t<T>, Edge>
+    [[maybe_unused]] Edge& addEdge(T&& edge, std::source_location location = std::source_location::current()) {
+        if (containsEdge(edge)) {
+            throw gr::exception(std::format("Edge already exists in graph:\n{}", edge), location);
+        }
+        return _edges.emplace_back(std::forward<T>(edge));
+    }
+
+    [[maybe_unused]] bool removeEdge(const Edge& edge) {
+        return std::erase_if(_edges, [&](const Edge& e) { return e == edge; });
     }
 
     static property_map serializeEdge(const auto& edge) {
@@ -393,9 +432,9 @@ public:
                         portDefinition.definition);
         };
 
-        result["sourceBlock"s] = std::string(edge.sourceBlock().uniqueName());
+        result["sourceBlock"s] = std::string(edge.sourceBlock()->uniqueName());
         serializePortDefinition("sourcePort"s, edge.sourcePortDefinition());
-        result["destinationBlock"s] = std::string(edge.destinationBlock().uniqueName());
+        result["destinationBlock"s] = std::string(edge.destinationBlock()->uniqueName());
         serializePortDefinition("destinationPort"s, edge.destinationPortDefinition());
 
         result["weight"s]        = edge.weight();
@@ -411,7 +450,7 @@ public:
         return result;
     };
 
-    static property_map serializeBlock(BlockModel* block) {
+    static property_map serializeBlock(std::shared_ptr<BlockModel> block) {
         auto serializePortOrCollection = [](const auto& portOrCollection) {
             // clang-format off
             // TODO: Type names can be mangled. We need proper type names...
@@ -458,7 +497,7 @@ public:
         if (block->blockCategory() != block::Category::NormalBlock) {
             property_map serializedChildren;
             for (const auto& child : block->blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child.get());
+                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child);
             }
             result["children"] = std::move(serializedChildren);
         }
@@ -488,11 +527,11 @@ public:
 
         gr::Message reply;
         reply.endpoint = graph::property::kBlockInspected;
-        reply.data     = serializeBlock(it->get());
+        reply.data     = serializeBlock(*it);
         return {reply};
     }
 
-    std::unique_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
+    std::shared_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
 
         if (it == _blocks.end()) {
@@ -500,43 +539,42 @@ public:
         }
 
         std::erase_if(_edges, [&it](const Edge& edge) { //
-            return std::addressof(edge.sourceBlock()) == it->get() || std::addressof(edge.destinationBlock()) == it->get();
+            return edge.sourceBlock() == *it || edge.destinationBlock() == *it;
         });
 
-        std::unique_ptr<BlockModel> removedBlock = std::move(*it);
+        std::shared_ptr<BlockModel> removedBlock = *it;
         _blocks.erase(it);
 
         return removedBlock;
     }
 
-    std::pair<std::unique_ptr<BlockModel>, BlockModel*> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
+    std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
         if (it == _blocks.end()) {
             throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
         }
 
-        auto newBlock    = gr::globalPluginLoader().instantiate(type, properties);
-        auto newBlockRaw = newBlock.get();
+        auto newBlock = gr::globalPluginLoader().instantiate(type, properties);
         if (!newBlock) {
             throw gr::exception(std::format("Can not create block {}", type));
         }
 
-        addBlock(std::move(newBlock));
+        addBlock(newBlock);
 
         for (auto& edge : _edges) {
-            if (edge._sourceBlock == it->get()) {
-                edge._sourceBlock = newBlockRaw;
+            if (edge._sourceBlock == *it) {
+                edge._sourceBlock = newBlock;
             }
 
-            if (edge._destinationBlock == it->get()) {
-                edge._destinationBlock = newBlockRaw;
+            if (edge._destinationBlock == *it) {
+                edge._destinationBlock = newBlock;
             }
         }
 
-        std::unique_ptr<BlockModel> oldBlock = std::move(*it);
+        std::shared_ptr<BlockModel> oldBlock = std::move(*it);
         _blocks.erase(it);
 
-        return {std::move(oldBlock), newBlockRaw};
+        return {std::move(oldBlock), newBlock};
     }
 
     void emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
@@ -566,7 +604,7 @@ public:
 
         const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-        _edges.emplace_back(sourceBlockIt->get(), sourcePort, destinationBlockIt->get(), destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
+        _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
     }
 
     void removeEdgeBySourcePort(std::string_view sourceBlock, std::string_view sourcePort) {
@@ -592,7 +630,7 @@ public:
 
             property_map serializedChildren;
             for (const auto& child : blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child.get());
+                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child);
             }
             result["children"] = std::move(serializedChildren);
 
@@ -659,24 +697,17 @@ public:
     template<typename Source, typename Destination>
     requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
     ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
-        auto findBlockNoexcept = [this]<typename Block>(Block&& blockRaw) noexcept -> BlockModel* {
-            try {
-                return this->findBlock(std::forward<Block>(blockRaw)).get();
-            } catch (...) {
-                return nullptr;
-            }
-        };
-        auto* sourceBlock      = findBlockNoexcept(sourceBlockRaw);
-        auto* destinationBlock = findBlockNoexcept(destinationBlockRaw);
+        std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = gr::graph::findBlock(*this, sourceBlockRaw, location);
+        std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = gr::graph::findBlock(*this, destinationBlockRaw, location);
 
-        if (sourceBlock == nullptr || destinationBlock == nullptr) {
+        if (!sourceBlock.has_value() || !destinationBlock.has_value()) {
             return ConnectionResult::FAILED;
         }
 
-        const auto&       sourcePort             = sourceBlock->dynamicOutputPort(sourcePortDefinition, location);
+        const auto&       sourcePort             = sourceBlock.value()->dynamicOutputPort(sourcePortDefinition, location);
         const bool        isArithmeticLike       = sourcePort.portInfo().isValueTypeArithmeticLike;
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-        _edges.emplace_back(sourceBlock, sourcePortDefinition, destinationBlock, destinationPortDefinition, sanitizedMinBufferSize, weight, std::move(edgeName));
+        _edges.emplace_back(sourceBlock.value(), sourcePortDefinition, destinationBlock.value(), destinationPortDefinition, sanitizedMinBufferSize, weight, std::move(edgeName));
         return ConnectionResult::SUCCESS;
     }
 
@@ -729,7 +760,7 @@ public:
         }
 
         std::size_t maxSize = 0UZ;
-        forEachEdge([&](const Edge& e) {
+        graph::forEachEdge<block::Category::All>(*this, [&](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
                 std::size_t minBufferSize = e.minBufferSize();
                 if (minBufferSize != undefined_size) {
@@ -780,29 +811,83 @@ public:
         }
         return allConnected;
     }
-
-    template<std::invocable<BlockModel&> F>
-    void forEachBlockMutable(F&& f) {
-        std::ranges::for_each(_blocks, [f](auto& block_ptr) { std::invoke(f, *block_ptr.get()); });
-    }
-
-    template<std::invocable<Edge&> F>
-    void forEachEdgeMutable(F&& f) {
-        std::ranges::for_each(_edges, f);
-    }
-
-    template<std::invocable<const BlockModel&> F>
-    void forEachBlock(F&& f) const {
-        std::ranges::for_each(_blocks, [f](auto& block_ptr) { std::invoke(f, std::as_const(*block_ptr.get())); });
-    }
-
-    template<std::invocable<const Edge&> F>
-    void forEachEdge(F&& f) const {
-        std::ranges::for_each(_edges, f);
-    }
 };
 
 static_assert(BlockLike<Graph>);
+
+/*******************************************************************************************************/
+/**************************** Graph helper functions ***************************************************/
+/*******************************************************************************************************/
+
+namespace graph {
+
+namespace detail {
+template<block::Category traverseCategory, typename Fn>
+void traverseSubgraphs(GraphLike auto const& root, Fn&& visitGraph) {
+    using enum block::Category;
+
+    auto recurse = [&visitGraph](GraphLike auto const& graph, auto& self) -> void {
+        visitGraph(graph);
+
+        for (const auto& block : graph.blocks()) {
+            const auto cat = block->blockCategory();
+            if constexpr (traverseCategory == All) {
+                if (cat == TransparentBlockGroup || cat == ScheduledBlockGroup) { // block is a sub-graph
+                    self(*block, self);
+                }
+            } else if (cat == traverseCategory) {
+                self(*block, self);
+            }
+        }
+    };
+    recurse(root, recurse);
+}
+
+} // namespace detail
+
+template<block::Category traverseCategory, typename Fn>
+void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filter = block::Category::All) {
+    using enum block::Category;
+
+    detail::traverseSubgraphs<traverseCategory>(root, [&](GraphLike auto const& graph) {
+        for (auto& block : graph.blocks()) {
+            const block::Category cat = block->blockCategory();
+            if (filter == All || cat == filter) {
+                function(block);
+            }
+        }
+    });
+}
+
+template<block::Category traverseCategory, typename Fn>
+void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
+    using enum Edge::EdgeState;
+
+    detail::traverseSubgraphs<traverseCategory>(root, [&](auto const& graph) {
+        for (auto& edge : graph.edges()) {
+            if (filter == Unknown || edge._state == filter) {
+                function(edge);
+            }
+        }
+    });
+}
+
+template<gr::block::Category traverseCategory = gr::block::Category::TransparentBlockGroup>
+gr::Graph flatten(GraphLike auto const& root, std::source_location location = std::source_location::current()) {
+    using enum block::Category;
+
+    gr::Graph flattenedGraph;
+    flattenedGraph._progress = root._progress;
+    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
+    std::ranges::for_each(root.edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); // add edges from root graph
+
+    // add edges related to blocks in flattened Graph
+    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { std::ranges::for_each(block->edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); });
+
+    return flattenedGraph;
+}
+
+} // namespace graph
 
 /*******************************************************************************************************/
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/
@@ -1113,7 +1198,6 @@ template<PortDomainLike T>
 inline std::ostream& operator<<(std::ostream& os, const T& value) {
     return os << value.Name;
 }
-
 } // namespace gr
 
-#endif // include guard
+#endif // GNURADIO_GRAPH_HPP
