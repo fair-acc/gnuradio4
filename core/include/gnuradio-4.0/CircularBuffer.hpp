@@ -705,7 +705,7 @@ class CircularBuffer {
     // static_assert(BufferReaderLike<Reader<T>>);
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
-        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
+        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T> && std::has_single_bit(sizeof(T))) {
             return double_mapped_memory_resource::allocator<T>();
         } else {
             return Allocator();
