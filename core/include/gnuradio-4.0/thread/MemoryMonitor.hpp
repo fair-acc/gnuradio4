@@ -6,8 +6,10 @@
 #include <string>
 
 #if defined(_WIN32) || defined(_WIN64)
-#include <psapi.h>
+// clang-format off
 #include <windows.h>
+#include <psapi.h>
+// clang-format on
 #elif defined(__linux__)
 #include <fstream>
 #include <unistd.h>

@@ -317,7 +317,7 @@ public:
      * @brief Returns a span of elements with given (optional) length with the last element being the newest
      */
     [[nodiscard]] constexpr std::span<const T> get_span(std::size_t index, std::size_t length = std::dynamic_extent) const {
-        length = std::clamp(length, 0LU, std::min(_size - index, length));
+        length = std::clamp(length, 0UZ, std::min(_size - index, length));
         return std::span<const T>(&_buffer[map_index(index)], length);
     }
 
