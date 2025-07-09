@@ -24,8 +24,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         const auto blockType = std::get<std::string>(grcBlock["id"]);
 
         if (blockType == "SUBGRAPH") {
-            std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
-            createdBlocks[blockName]              = subGraph;
+            const std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
+            createdBlocks[blockName]                    = subGraph;
             subGraph->setName(blockName);
 
             auto* subGraphDirect = static_cast<GraphWrapper<gr::Graph>*>(subGraph.get());

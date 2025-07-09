@@ -68,21 +68,21 @@ inline std::string format(GraphLike auto const& graph) {
     return os.str();
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto& what, std::source_location location = std::source_location::current()) {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto& what, std::source_location location = std::source_location::current()) noexcept {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block->uniqueName() == what.unique_name; }); it != graph.blocks().end()) {
         return *it;
     }
     return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location));
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::shared_ptr<BlockModel> what, std::source_location location = std::source_location::current()) {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::shared_ptr<BlockModel> what, std::source_location location = std::source_location::current()) noexcept {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block.get() == std::addressof(*what); }); it != graph.blocks().end()) {
         return *it;
     }
     return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what->name(), what->uniqueName(), format(graph)), location));
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
     for (const auto& block : graph.blocks()) {
         if (block->uniqueName() == uniqueBlockName) {
             return block;
@@ -93,7 +93,6 @@ std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const
 
 // forward declaration
 template<block::Category traverseCategory, typename Fn>
-requires(std::invocable<Fn, const Edge&> || std::invocable<Fn, Edge&>)
 void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filterCallable = Edge::EdgeState::Unknown);
 
 } // namespace graph
@@ -378,8 +377,8 @@ public:
      */
     [[nodiscard]] const Sequence& progress() const noexcept { return *_progress.get(); }
 
-    std::shared_ptr<BlockModel>& addBlock(std::shared_ptr<BlockModel> block, bool initBlock = true) {
-        std::shared_ptr<BlockModel>& newBlock = _blocks.emplace_back(block);
+    std::shared_ptr<BlockModel> const& addBlock(std::shared_ptr<BlockModel> block, bool initBlock = true) {
+        const std::shared_ptr<BlockModel>& newBlock = _blocks.emplace_back(block);
         if (initBlock) {
             newBlock->init(_progress, this->compute_domain);
         }
@@ -390,18 +389,18 @@ public:
     requires std::is_constructible_v<TBlock, property_map>
     TBlock& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        auto& newBlock    = _blocks.emplace_back(std::make_shared<BlockWrapper<TBlock>>(std::move(initialSettings)));
-        auto* rawBlockRef = static_cast<TBlock*>(newBlock->raw());
+        const std::shared_ptr<BlockModel>& newBlock    = _blocks.emplace_back(std::make_shared<BlockWrapper<TBlock>>(std::move(initialSettings)));
+        TBlock*                            rawBlockRef = static_cast<TBlock*>(newBlock->raw());
         rawBlockRef->init(_progress);
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] auto& emplaceBlock(std::string_view type, property_map initialSettings) {
-        if (auto block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
-            auto& newBlock = addBlock(block_load);
+    [[maybe_unused]] std::shared_ptr<BlockModel> const& emplaceBlock(std::string_view type, property_map initialSettings) {
+        if (std::shared_ptr<BlockModel> block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
+            const std::shared_ptr<BlockModel>& newBlock = addBlock(block_load);
             return newBlock;
         }
-        throw gr::exception(std::format("Can not create block {}", type));
+        throw gr::exception(std::format("Cannot create block '{}'", type));
     }
 
     bool containsEdge(const Edge& edge) const {
@@ -847,13 +846,11 @@ void traverseSubgraphs(GraphLike auto const& root, Fn&& visitGraph) {
 } // namespace detail
 
 template<block::Category traverseCategory, typename Fn>
-requires(std::invocable<Fn, const std::shared_ptr<BlockModel>> || std::invocable<Fn, std::shared_ptr<BlockModel>>)
 void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filter = block::Category::All) {
     using enum block::Category;
-    using BlockType = std::conditional_t<std::invocable<Fn, const std::shared_ptr<BlockModel>>, const std::shared_ptr<BlockModel>&, std::shared_ptr<BlockModel>&>;
 
     detail::traverseSubgraphs<traverseCategory>(root, [&](GraphLike auto const& graph) {
-        for (BlockType block : graph.blocks()) {
+        for (auto& block : graph.blocks()) {
             const block::Category cat = block->blockCategory();
             if (filter == All || cat == filter) {
                 function(block);
@@ -863,13 +860,11 @@ void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category fil
 }
 
 template<block::Category traverseCategory, typename Fn>
-requires(std::invocable<Fn, const Edge&> || std::invocable<Fn, Edge&>)
 void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
     using enum Edge::EdgeState;
-    using EdgeType = std::conditional_t<std::invocable<Fn, const Edge&>, const Edge&, Edge&>;
 
     detail::traverseSubgraphs<traverseCategory>(root, [&](auto const& graph) {
-        for (EdgeType edge : graph.edges()) {
+        for (auto& edge : graph.edges()) {
             if (filter == Unknown || edge._state == filter) {
                 function(edge);
             }
