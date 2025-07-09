@@ -166,13 +166,19 @@ auto& createSink(gr::Graph& graph, bool instrumentalise = true) {
 enum class GraphTopology { DEFAULT, LINEAR, FORKED, SPLIT };
 
 void printGraphTopology(const gr::Graph& graph, GraphTopology topology) {
-    std::println("Graph Topology: {}:", magic_enum::enum_name(topology));
-    for (const auto& block : graph.blocks()) {
+    gr::Graph  flatGraph        = gr::graph::flatten(graph);
+    const bool neededFlattening = graph.blocks().size() < flatGraph.blocks().size();
+    std::println("Graph Topology: {}{}:", magic_enum::enum_name(topology), neededFlattening ? "-flattened" : "");
+
+    for (const auto& block : flatGraph.blocks()) {
         std::println("  - block: {}", block->name());
     }
-    for (const auto& edge : graph.edges()) {
+    for (const auto& edge : flatGraph.edges()) {
         std::println("  - edge: {}", edge);
     }
+    const gr::graph::AdjacencyList adjacencyList = gr::graph::computeAdjacencyList(flatGraph);
+    const auto                     sourceBlocks  = gr::graph::findSourceBlocks(adjacencyList);
+    std::println("AdjacencyList - #SrcBlocks {}\n{}", sourceBlocks.size(), adjacencyList);
 }
 
 template<typename T>

@@ -754,6 +754,118 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(schedulerResult.has_value()) << errorMsg;
     };
 
+    "AdjacencyList_basic_linear_graph"_test = [] {
+        using namespace gr;
+        using TBlock = Scale<int>;
+        gr::Graph graph;
+
+        TBlock& A = graph.emplaceBlock<TBlock>({{"name", "A"}});
+        TBlock& B = graph.emplaceBlock<TBlock>({{"name", "B"}});
+        TBlock& C = graph.emplaceBlock<TBlock>({{"name", "C"}});
+
+        expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
+        expect(eq(graph.connect<"scaled">(B).to<"original">(C), ConnectionResult::SUCCESS));
+
+        gr::Graph                                flat       = gr::graph::flatten(graph);
+        gr::graph::AdjacencyList                 acencyList = gr::graph::computeAdjacencyList(flat);
+        std::vector<std::shared_ptr<BlockModel>> sources    = gr::graph::findSourceBlocks(acencyList);
+
+        expect(eq(sources.size(), 1UZ));
+        expect(eq(sources[0UZ]->name(), "A"sv));
+
+        std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
+        std::span<Edge* const>          edges    = gr::graph::outgoingEdges(acencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
+        expect(eq(edges.size(), 1UZ)) << fatal;
+        expect(eq(edges[0UZ]->_destinationBlock->name(), "B"sv));
+    };
+
+    "AdjacencyList_forked_graph"_test = [] {
+        using namespace gr;
+        using TBlock = Scale<int>;
+        gr::Graph graph;
+
+        TBlock& A = graph.emplaceBlock<TBlock>({{"name", "A"}});
+        TBlock& B = graph.emplaceBlock<TBlock>({{"name", "B"}});
+        TBlock& C = graph.emplaceBlock<TBlock>({{"name", "C"}});
+
+        expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
+        expect(eq(graph.connect<"scaled">(A).to<"original">(C), ConnectionResult::SUCCESS));
+
+        gr::Graph                                flat          = gr::graph::flatten(graph);
+        gr::graph::AdjacencyList                 adjacencyList = gr::graph::computeAdjacencyList(flat);
+        std::vector<std::shared_ptr<BlockModel>> srcs          = gr::graph::findSourceBlocks(adjacencyList);
+
+        expect(eq(srcs.size(), 1UZ));
+        expect(eq(srcs[0UZ]->name(), "A"sv));
+
+        std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
+        std::span<gr::Edge* const>      edges    = gr::graph::outgoingEdges(adjacencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
+        expect(eq(edges.size(), 2UZ)) << fatal;
+        std::set<std::string_view> targets{edges[0UZ]->_destinationBlock->name(), edges[1UZ]->_destinationBlock->name()};
+        expect(targets.contains("B"sv) && targets.contains("C"sv));
+    };
+
+    "Scheduler_batchBlocks_round_robin"_test = [] {
+        using namespace gr;
+        using TBlock = Scale<int>;
+        std::vector<std::shared_ptr<gr::BlockModel>> blocks;
+        for (std::size_t i = 0UZ; i < 6UZ; ++i) {
+            const std::shared_ptr<BlockModel>& newBlock    = std::make_shared<BlockWrapper<TBlock>>();
+            TBlock*                            rawBlockRef = static_cast<TBlock*>(newBlock->raw());
+            rawBlockRef->name                              = std::format("B{}", i);
+            blocks.push_back(newBlock);
+        }
+
+        gr::scheduler::JobLists batches = gr::scheduler::detail::batchBlocks(blocks, 3UZ);
+        expect(eq(batches.size(), 3UZ));
+        expect(eq(batches[0UZ].size(), 2UZ));
+        expect(eq(batches[1UZ].size(), 2UZ));
+        expect(eq(batches[2UZ].size(), 2UZ));
+
+        // check round-robin assignment (B0, B3), (B1, B4), (B2, B5)
+        expect(eq(batches[0UZ][0UZ]->name(), "B0"sv));
+        expect(eq(batches[1UZ][0UZ]->name(), "B1"sv));
+        expect(eq(batches[2UZ][0UZ]->name(), "B2"sv));
+    };
+
+    "findSourceBlocks_mixed_topology"_test = [] {
+        using namespace gr;
+        using TBlock = Scale<int>;
+        gr::Graph graph;
+
+        TBlock& blockA = graph.emplaceBlock<TBlock>({{"name", "A"}});
+        TBlock& blockB = graph.emplaceBlock<TBlock>({{"name", "B"}});
+        TBlock& blockC = graph.emplaceBlock<TBlock>({{"name", "C"}});
+        TBlock& blockD = graph.emplaceBlock<TBlock>({{"name", "D"}}); // isolated
+
+        expect(eq(graph.connect<"scaled">(blockA).to<"original">(blockB), ConnectionResult::SUCCESS));
+        expect(eq(graph.connect<"scaled">(blockB).to<"original">(blockC), ConnectionResult::SUCCESS));
+
+        gr::Graph                flattened     = gr::graph::flatten(graph);
+        gr::graph::AdjacencyList adjacencyList = gr::graph::computeAdjacencyList(flattened);
+
+        std::set<std::string_view> srcNames;
+        for (std::shared_ptr<BlockModel> s : gr::graph::findSourceBlocks(adjacencyList)) {
+            srcNames.insert(s->uniqueName());
+        }
+        expect(srcNames.contains(blockA.unique_name)) << "didn't find source block";
+        expect(!srcNames.contains(blockB.unique_name)) << "blockB is not a source block";
+        expect(!srcNames.contains(blockC.unique_name)) << "blockC is not a source block";
+        expect(!srcNames.contains(blockD.unique_name)) << "blockD is not a source block"; // isolated node also not in adjacency list (see below)
+
+        std::set<std::string_view> names;
+        for (const auto& fromBlock : adjacencyList | std::views::keys) {
+            names.insert(fromBlock->uniqueName());
+        }
+
+        expect(names.contains(blockA.unique_name)) << "didn't find blockA";
+        expect(names.contains(blockB.unique_name)) << "didn't find blockB";
+        expect(!names.contains(blockC.unique_name)) << "found blockC though nothing is connected to it";
+        expect(!names.contains(blockD.unique_name)) << "isolated node should not be in adjacency list";
+    };
+
+    // TODO: add flatten test for nested graph once they are fully integrated by Ivan & Dantti
+
     std::println("N.B. test-suite finished");
 };
 

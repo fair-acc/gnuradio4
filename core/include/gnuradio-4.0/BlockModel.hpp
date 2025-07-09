@@ -10,7 +10,6 @@
 #include <charconv>
 
 namespace gr {
-
 class BlockModel;
 
 struct PortDefinition {
@@ -33,6 +32,26 @@ struct PortDefinition {
     constexpr PortDefinition(std::string name) : definition(StringBased(std::move(name))) {}
     bool operator==(const PortDefinition& other) const { return (definition == other.definition); }
 };
+} // namespace gr
+
+namespace std { // needs to be defined in std namespace to be used e.g. in std::unordered_map
+template<>
+struct hash<gr::PortDefinition> {
+    std::size_t operator()(const gr::PortDefinition& p) const noexcept {
+        if (std::holds_alternative<gr::PortDefinition::IndexBased>(p.definition)) {
+            const auto& def = std::get<gr::PortDefinition::IndexBased>(p.definition);
+            std::size_t h1  = std::hash<std::size_t>{}(def.topLevel);
+            std::size_t h2  = std::hash<std::size_t>{}(def.subIndex);
+            return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)); // hash_combine
+        } else {                                                   // string-based
+            const auto& def = std::get<gr::PortDefinition::StringBased>(p.definition);
+            return std::hash<std::string>{}(def.name);
+        }
+    }
+};
+} // namespace std
+
+namespace gr {
 
 struct Edge {
     enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts, Unknown };
@@ -549,6 +568,28 @@ public:
 } // namespace gr
 
 template<>
+struct std::formatter<gr::PortDefinition> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        return ctx.begin(); // no format-spec yet
+    }
+
+    template<typename FormatContext>
+    auto format(const gr::PortDefinition& port, FormatContext& ctx) const {
+        if (std::holds_alternative<gr::PortDefinition::IndexBased>(port.definition)) {
+            const auto& index = std::get<gr::PortDefinition::IndexBased>(port.definition);
+            if (index.subIndex == gr::meta::invalid_index) {
+                return std::format_to(ctx.out(), "{}", index.topLevel);
+            } else {
+                return std::format_to(ctx.out(), "{}#{}", index.topLevel, index.subIndex);
+            }
+        } else {
+            const auto& str = std::get<gr::PortDefinition::StringBased>(port.definition);
+            return std::format_to(ctx.out(), "{}", str.name);
+        }
+    }
+};
+
+template<>
 struct std::formatter<gr::Edge> {
     char formatSpecifier = 's';
 
@@ -564,25 +605,12 @@ struct std::formatter<gr::Edge> {
 
     template<typename FormatContext>
     auto format(const gr::Edge& e, FormatContext& ctx) const {
-        const auto& name = [this](const std::shared_ptr<gr::BlockModel> block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
-
-        const auto portIndex = [](const gr::PortDefinition& port) {
-            return std::visit(gr::meta::overloaded(
-                                  [](const gr::PortDefinition::IndexBased& index) {
-                                      if (index.subIndex == gr::meta::invalid_index) {
-                                          return std::format("{}", index.topLevel);
-                                      } else {
-                                          return std::format("{}#{}", index.topLevel, index.subIndex);
-                                      }
-                                  },
-                                  [](const gr::PortDefinition::StringBased& index) { return index.name; }),
-                port.definition);
-        };
+        auto getName = [this](const std::shared_ptr<gr::BlockModel>& block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
 
         return std::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
-            name(e._sourceBlock), portIndex(e._sourcePortDefinition),                                         //
-            e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            //
-            name(e._destinationBlock), portIndex(e._destinationPortDefinition));
+            getName(e._sourceBlock), e._sourcePortDefinition,                                                 // src
+            e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            // edge
+            getName(e._destinationBlock), e._destinationPortDefinition);                                      // dst
     }
 };
 
