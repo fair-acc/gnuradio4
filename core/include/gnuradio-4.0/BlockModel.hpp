@@ -81,15 +81,7 @@ struct Edge {
     constexpr std::size_t nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
     constexpr PortType    edgeType() const { return _edgeType; }
 
-    constexpr bool hasSameSourcePort(const Edge& other) const noexcept {
-        if (_sourceBlock.get() != other._sourceBlock.get()) {
-            return false;
-        }
-        if (_sourcePortDefinition.definition == other._sourcePortDefinition.definition) {
-            return true;
-        }
-        return false;
-    }
+    constexpr bool hasSameSourcePort(const Edge& other) const noexcept { return sourceBlock() == other.sourceBlock() && sourcePortDefinition().definition == other.sourcePortDefinition().definition; }
 
     constexpr bool operator==(const Edge& other) const noexcept {
         return sourceBlock() == other.sourceBlock()                                                       //
