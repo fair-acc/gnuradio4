@@ -154,7 +154,7 @@ private:
         } break;
         case Mode::multi: {
             // _fileCounter ensures that the filenames are unique and still sortable by date-time, with an additional counter to handle rapid successive file creation.
-            _actualFileName = filePath.parent_path() / (gr::time::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string());
+            _actualFileName = (filePath.parent_path() / (gr::time::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string())).string();
             _file.open(_actualFileName, std::ios::binary);
             break;
         }
