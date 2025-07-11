@@ -853,7 +853,7 @@ const boost::ut::suite MessagesTests = [] {
         gr::Graph flow;
 
         auto& source    = flow.emplaceBlock<ClockSource<float>>({{"n_samples_max", gr::Size_t(0)}});
-        auto& testBlock = flow.emplaceBlock<TestBlock<float>>({{"factor", 42.f}});
+        auto& testBlock = flow.emplaceBlock<TestBlock<float>>({{"factor", 42.f}, {"ui_constraints", gr::property_map{{"x"s, 42.f}, {"y"s, 6.f}}}});
         auto& sink      = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
 
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(testBlock)));
@@ -867,9 +867,13 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
 
-        auto client = std::thread([&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
+        auto client = std::thread([&fromScheduler, &toScheduler, &testBlock, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
             gr::thread_pool::thread::setThreadName("qa_Mess::Client");
-            sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting, {{"factor", 43.0f}});
+            sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting,
+                {                             //
+                    {"factor", 43.0f},        //
+                    {"name", "My New Name"s}, //
+                    {"ui_constraints", gr::property_map{{"x"s, 43.f}, {"y"s, 7.f}}}});
             bool       seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
             auto       isExpired  = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
@@ -884,9 +888,26 @@ const boost::ut::suite MessagesTests = [] {
                     const auto msg = returnReplyMsg(fromScheduler);
                     if (msg.serviceName == blockName && msg.endpoint == block::property::kStagedSetting) {
                         expect(msg.data.has_value());
+                        std::println("Got a reply {}", msg.data.value());
+
                         expect(msg.data.value().contains("factor"));
                         const auto factor = std::get<float>(msg.data.value().at("factor"));
                         expect(eq(factor, 43.0f));
+
+                        expect(msg.data.value().contains("name"));
+                        const auto name = std::get<std::string>(msg.data.value().at("name"));
+                        expect(eq(name, "My New Name"s));
+
+                        expect(msg.data.value().contains("ui_constraints"));
+                        const auto uiConstraints = std::get<gr::property_map>(msg.data.value().at("ui_constraints"));
+                        expect(uiConstraints == gr::property_map{{"x"s, 43.f}, {"y"s, 7.f}});
+
+                        expect(testBlock.settings().applyStagedParameters().forwardParameters.empty());
+                        expect(eq(std::get<float>(testBlock.settings().get("factor").value()), 43.0f));
+                        expect(eq(std::get<std::string>(testBlock.settings().get("name"s).value()), "My New Name"s));
+                        expect(eq(std::get<float>(std::get<gr::property_map>(testBlock.settings().get("ui_constraints").value())["x"]), 43.f));
+                        expect(eq(std::get<float>(std::get<gr::property_map>(testBlock.settings().get("ui_constraints").value())["y"]), 7.f));
+
                         seenUpdate = true;
                     }
                 }

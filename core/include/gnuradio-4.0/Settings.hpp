@@ -874,6 +874,7 @@ public:
 
                         if constexpr (is_annotated<RawType>()) {
                             if (maybe_value && member.validate_and_set(*maybe_value)) {
+                                result.appliedParameters.insert_or_assign(key, stagedValue);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, stagedValue);
                                 }

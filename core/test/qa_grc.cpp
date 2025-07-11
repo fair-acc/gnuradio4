@@ -159,7 +159,7 @@ connections:
 
             for (const auto& block : graph.blocks()) {
                 if (block->name() == "ArraySource<float64>") {
-                    expect(block->uiConstraints() == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
+                    expect(std::get<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
                 }
             }
 
