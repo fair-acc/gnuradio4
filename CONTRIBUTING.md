@@ -80,9 +80,9 @@ GNU Radio 4 uses the MIT License for the core runtime and libraries, with the op
 
 - Encourage Contributions from a Diverse Ecosystem: By lowering legal barriers, we aim to attract contributors from companies, academic institutions, and individuals who might otherwise avoid contributing to more restrictively licensed codebases due to internal policies or licensing constraints.
 
-- Remain free/libre in the spirit of the open source principles: For certain submodules that implement signal processing algorithms or higher-level blocks, the LGPLv3 license withcan be used to preserve the copyleft spirit of GNU Radio.
+- Remain free/libre in the spirit of the open source principles: For certain submodules that implement signal processing algorithms or higher-level blocks, the LGPLv3 license can be used to preserve the copyleft spirit of GNU Radio.
 
-- Empower Submodule Authors: We recognize that some contributors may wish to enforce stronger copyleft guarantees. By allowing submodules to choose LGPLv3 + linking exception (and out of tree authors to choose GPLv3 or any other license), we provide flexibility for authors to assert more control over how their code is reused.
+- Empower Submodule Authors: We recognize that some contributors may wish to enforce stronger copyleft guarantees. By allowing submodules to choose LGPLv3 (and out of tree authors to choose GPLv3 or any other license), we provide flexibility for authors to assert more control over how their code is reused.
 
 - Stay Compliant with Evolving Legal Landscapes: A modular, permissive licensing approach ensures GNU Radio can remain compliant under changing national and international laws - particularly around cybersecurity, product liability, AI governance, and data protection regulations like GDPR.
 
