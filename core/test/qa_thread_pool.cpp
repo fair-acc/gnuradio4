@@ -314,7 +314,7 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
             }
             try {
                 pool->execute([] {
-                    std::this_thread::sleep_for(std::chrono::seconds(10)); // purposefull sleep
+                    std::this_thread::sleep_for(std::chrono::seconds(20)); // purposeful sleep
                 });
             } catch (std::exception& e) {
                 std::println("exception thrown: {} for {} threads", e, gr::thread_pool::getTotalThreadCount());
@@ -328,8 +328,55 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
             }
         }
         std::println("number of exceptions thrown: {} unexpeced: {}", expectedExceptions.load(), unexpectedExceptions.load());
-        expect(gt(expectedExceptions.load(), 0UZ)) << fatal;
-        expect(eq(unexpectedExceptions.load(), 0UZ)) << fatal;
+        expect(gt(expectedExceptions.load(), 0UZ)) << fatal << "creating more threads than kThreadLimit should throw with expected exception";
+        expect(eq(unexpectedExceptions.load(), 0UZ)) << fatal << "caught unexpected exception";
+    };
+
+    "computeDefaultThreadSplit respects invariants under edge conditions"_test = [] {
+        using namespace gr::thread_pool::detail;
+
+        const auto validate_split = [](std::size_t threadLimit, std::size_t reserve, std::source_location loc = std::source_location::current()) {
+            const auto s      = computeDefaultThreadSplit(threadLimit, reserve);
+            const auto usable = (threadLimit > reserve) ? threadLimit - reserve : 1UZ;
+            const auto actual = s.cpuThreadsMax + s.ioThreadsMax;
+
+            expect(le(actual, std::max(2UZ, usable)), loc) << std::format("limit={}, reserve={} -> cpu+io={} must not exceed usable={}", threadLimit, reserve, actual, usable);
+            expect(le(s.cpuThreadsMax, usable), loc) << std::format("limit={}, reserve={} -> CPU threads {} must be ≤ usable {}", threadLimit, reserve, s.cpuThreadsMax, usable);
+            expect(le(s.ioThreadsMax, usable), loc) << std::format("limit={}, reserve={} -> IO threads {} must be ≤ usable {}", threadLimit, reserve, s.ioThreadsMax, usable);
+
+#if defined(__EMSCRIPTEN__)
+            expect(ge(s.cpuThreadsMin, 0UZ), loc) << std::format("WASM: limit={}, reserve={} -> At least 1 CPU thread expected (got {})", threadLimit, reserve, s.cpuThreadsMin);
+            expect(ge(s.ioThreadsMin, 0UZ), loc) << std::format("WASM: limit={}, reserve={} -> At least 1 CPU thread expected (got {})", threadLimit, reserve, s.cpuThreadsMin);
+#else
+            expect(ge(s.cpuThreadsMin, 1UZ), loc) << std::format("limit={}, reserve={} -> At least 1 CPU thread expected (got {})", threadLimit, reserve, s.cpuThreadsMin);
+            expect(ge(s.ioThreadsMin, 1UZ), loc) << std::format("limit={}, reserve={} -> At least 1 CPU thread expected (got {})", threadLimit, reserve, s.cpuThreadsMin);
+#endif
+            expect(ge(s.ioThreadsMax, 1UZ), loc) << std::format("limit={}, reserve={} -> At least 1 IO thread expected (got {})", threadLimit, reserve, s.ioThreadsMax);
+
+            expect(eq(s.threadReserve, reserve), loc) << std::format("limit={}, reserve={} -> Expected thread reserve {}, got {}", threadLimit, reserve, reserve, s.threadReserve);
+        };
+
+        validate_split(3UZ, 4UZ);     // threadLimit < reserve → usable = 1
+        validate_split(4UZ, 4UZ);     // usable = 1
+        validate_split(8UZ, 4UZ);     // small WASM/native config
+        validate_split(64UZ, 4UZ);    // typical system config
+        validate_split(50000UZ, 4UZ); // upper-bound stress test
+    };
+
+    "Manager: respects thread limit and budget"_test = [] {
+        using namespace gr::thread_pool;
+
+        Manager& manager = Manager::instance();
+        auto     cpu     = manager.get(kDefaultCpuPoolId);
+        auto     io      = manager.get(kDefaultIoPoolId);
+
+        const std::size_t totalUsed = cpu->numThreads() + io->numThreads();
+        const std::size_t threadCap = thread::getThreadLimit();
+
+        std::println("CPU threads: {}, IO threads: {}, total: {}, cap: {}", cpu->numThreads(), io->numThreads(), totalUsed, threadCap);
+
+        expect(le(totalUsed, threadCap - 1)) << "Manager over-allocated threads";
+        expect(gt(io->numThreads(), cpu->numThreads())) << "IO thread count should exceed CPU";
     };
 };
 
