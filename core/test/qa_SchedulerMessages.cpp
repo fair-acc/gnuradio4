@@ -353,7 +353,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             });
     };
 
-    "Custom block property tests"_test = [] {
+    "UI constraints setting test"_test = [] {
         gr::Graph testGraph(context->loader);
         auto&     copy1 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
         auto&     copy2 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
@@ -361,26 +361,37 @@ const boost::ut::suite TopologyGraphTests = [] {
         TestScheduler scheduler(std::move(testGraph));
         auto          makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", x}, {"y", y}}; };
 
-        // Setting ui_constraints property for all blocks, universal
         {
-            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7070)}} /* data  */);
+            // Setting ui_constraints property for all blocks, universal
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7070)}} /* data  */);
+            // Setting ui_constraints property for one block
+            sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName() /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
+
             waitForReply(scheduler.fromScheduler);
         }
 
-        // Setting ui_constraints property for one block
-        {
-            sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName() /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
-            waitForReply(scheduler.fromScheduler);
-        }
-
-        const auto replyCount = getNReplyMessages(scheduler.fromScheduler);
+        const auto replyCount = scheduler.fromScheduler.streamReader().available();
         for (std::size_t replyIndex = 0UZ; replyIndex < replyCount; replyIndex++) {
             const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
-            std::println("Got a reply {}", reply);
+            std::println("Got a reply {}:\n{}", replyIndex, reply);
         }
 
-        expect(eq(42.f, std::get<float>(copy1->uiConstraints()["x"])));
-        expect(eq(43.f, std::get<float>(copy2->uiConstraints()["x"])));
+        expect(copy1->settings().applyStagedParameters().forwardParameters.empty());
+        expect(copy2->settings().applyStagedParameters().forwardParameters.empty());
+
+        auto uiConstraintsFor = [](const auto& block) {
+            return std::visit(meta::overloaded{
+                                  //
+                                  []<typename... Args>(const std::map<Args...>& map) { return gr::property_map(map); },
+                                  //
+                                  [](const auto& /*v*/) { return gr::property_map{}; }
+                                  //
+                              },
+                block->settings().get("ui_constraints").value());
+        };
+
+        expect(eq(42.f, std::get<float>(uiConstraintsFor(copy1)["x"])));
+        expect(eq(43.f, std::get<float>(uiConstraintsFor(copy2)["x"])));
 
         sendMessage<Get>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {});
         waitForReply(scheduler.fromScheduler);
@@ -403,9 +414,6 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
         auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
-
-        expect(eq(42.f, std::get<float>(copy1->uiConstraints()["x"])));
-        expect(eq(43.f, std::get<float>(copy2->uiConstraints()["x"])));
 
         expect(eq(42.f, std::get<float>(copy1direct->ui_constraints["x"])));
         expect(eq(43.f, std::get<float>(copy2direct->ui_constraints["x"])));

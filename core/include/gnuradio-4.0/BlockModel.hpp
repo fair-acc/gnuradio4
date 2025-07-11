@@ -462,9 +462,6 @@ public:
      */
     [[nodiscard]] virtual std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept = 0;
 
-    virtual property_map uiConstraints() const                           = 0;
-    virtual void         setUiConstraints(property_map newUiConstraints) = 0;
-
     [[nodiscard]] virtual void* raw() = 0;
 };
 
@@ -588,9 +585,6 @@ public:
     [[nodiscard]] std::vector<gr::PortMetaInfo>  outputMetaInfos(bool reset = true) noexcept override { return blockRef().outputStreamCache.metaInfos(reset); }
 
     [[nodiscard]] std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept override { return blockRef().inputStreamCache.primePort(portIdx, nSamples, loc); }
-
-    property_map uiConstraints() const override { return blockRef().ui_constraints; }
-    void         setUiConstraints(property_map newUiConstraints) override { blockRef().ui_constraints = std::move(newUiConstraints); }
 
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
 
@@ -719,7 +713,7 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
 
     if (flags & BlockSerializationFlags::Data) {
         result.emplace("name"s, std::string(block->name()));
-        result.emplace("ui_constraints"s, block->uiConstraints());
+        result.emplace("ui_constraints"s, std::get<property_map>(block->settings().get("ui_constraints").value()));
     }
 
     if (flags & BlockSerializationFlags::StaticData) {
