@@ -2,11 +2,13 @@
 #define THREADAFFINITY_HPP
 
 #include <algorithm>
+#include <charconv>
 #include <format>
 #include <fstream>
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -19,6 +21,13 @@
 #include <pthread.h>
 #include <sched.h>
 #endif
+#endif
+
+#if defined(__EMSCRIPTEN__)
+#include <cstdlib> // for atoi()
+#include <emscripten.h>
+#else
+#include <sys/resource.h>
 #endif
 
 namespace gr::thread_pool::thread {
@@ -213,7 +222,8 @@ inline std::vector<bool> getProcessAffinity(const int pid = detail::getPid()) {
     }
     cpu_set_t cpuSet;
     if (int rc = sched_getaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), std::format("getProcessAffinity(std::bitset<{{}}> = {{}}, thread_type)")); // todo: fix format string
+        const std::vector<bool> mask = detail::getAffinityMask(cpuSet);
+        throw std::system_error(rc, thread_exception(), std::format("getProcessAffinity({}> = {}", pid, mask));
     }
     return detail::getAffinityMask(cpuSet);
 }
@@ -369,6 +379,59 @@ inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_
 #else
 inline void setThreadSchedulingParameter(Policy /*scheduler*/, int /*priority*/, thread_type auto&... /*thread*/) {}
 #endif
+
+/// retrieve getThreadLimit()
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+namespace detail {
+inline std::size_t getUserProcessLimit() {
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NPROC, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY) {
+        return rl.rlim_cur;
+    }
+    return 50000UZ; // fallback
+}
+
+inline std::size_t getKernelThreadLimit() {
+    std::ifstream file("/proc/sys/kernel/threads-max");
+    std::string   line;
+    if (file && std::getline(file, line)) {
+        std::size_t val = 0;
+        std::from_chars(line.data(), line.data() + line.size(), val);
+        return val;
+    }
+    return 50000UZ; // fallback
+}
+} // namespace detail
+#endif
+
+inline std::size_t getThreadLimit() {
+    static const std::size_t limit = []() -> std::size_t {
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+        // native Linux: use kernel/user process limits
+        return std::min({detail::getUserProcessLimit(), detail::getKernelThreadLimit(), 50000UZ});
+#elif defined(__EMSCRIPTEN__)
+#ifdef GR_MAX_WASM_THREAD_COUNT
+        // WASM: use compile-time override if defined
+        return GR_MAX_WASM_THREAD_COUNT;
+#else
+        // WASM: query browser thread count dynamically
+        return static_cast<std::size_t>(EM_ASM_INT({ return navigator.hardwareConcurrency || 2; }));
+#endif
+#elif defined(_WIN32) || defined(__APPLE__)
+        // Windows or macOS: use default 50k fallback
+        return 50000UZ;
+#else
+#ifdef GR_MAX_WASM_THREAD_COUNT
+        // Embedded/non-POSIX: use compile-time override
+        return GR_MAX_WASM_THREAD_COUNT;
+#else
+        // Embedded/non-POSIX: fallback to 0 (unknown concurrency)
+        return 0UZ;
+#endif
+#endif
+    }();
+    return limit;
+}
 
 } // namespace gr::thread_pool::thread
 

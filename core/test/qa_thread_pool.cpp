@@ -259,4 +259,78 @@ const boost::ut::suite<"gr::thread_pool Manager"> ThreadPoolManager = [] {
     };
 };
 
+#ifndef GR_MAX_WASM_THREAD_COUNT
+#define GR_MAX_WASM_THREAD_COUNT 60 // fallback
+#endif
+
+const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
+    using namespace boost::ut;
+    using namespace gr::thread_pool;
+
+    "getTotalThreadCount"_test = [] {
+        const std::size_t count = gr::thread_pool::getTotalThreadCount();
+        expect(gt(count, 0UZ));
+        expect(le(count, gr::thread_pool::thread::getThreadLimit()));
+    };
+
+    "global thread counter tracking thread creation"_test = [] {
+        const std::size_t before = gr::thread_pool::getTotalThreadCount();
+        {
+            BasicThreadPool temp("test_pool", CPU_BOUND, 2, 2);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            const std::size_t during = gr::thread_pool::getTotalThreadCount();
+            expect(ge(during, before + 2));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const std::size_t after = gr::thread_pool::getTotalThreadCount();
+        expect(eq(after, before)) << "Expected cleanup after pool destruction";
+    };
+
+    "GR_MAX_WASM_THREAD_COUNT compile-time constant"_test = [] {
+#ifdef __EMSCRIPTEN__
+#ifdef GR_MAX_WASM_THREAD_COUNT
+        expect(eq(static_cast<std::size_t>(GR_MAX_WASM_THREAD_COUNT), gr::thread_pool::thread::getThreadLimit()));
+#else
+        expect(false) << "GR_MAX_WASM_THREAD_COUNT not defined";
+#endif
+#else
+        expect(gt(gr::thread_pool::thread::getThreadLimit(), 1UZ));
+#endif
+    };
+
+    "Manager: WASM exhausting available threads"_test = [] {
+        Manager& manager = Manager::instance();
+        // replace IO pool to unlimited upper bound
+        manager.replacePool(std::string(kDefaultIoPoolId), std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, 1U, gr::thread_pool::thread::getThreadLimit()), "CPU"));
+        std::shared_ptr<TaskExecutor> pool = manager.get(gr::thread_pool::kDefaultIoPoolId);
+
+        std::println("HW threads = {} - max wasm threads: {} actual: {} - pool max size: {}", //
+            std::thread::hardware_concurrency(), gr::thread_pool::thread::getThreadLimit(), gr::thread_pool::getTotalThreadCount(), pool->maxThreads());
+        std::atomic<std::size_t> unexpectedExceptions{0UZ};
+        std::atomic<std::size_t> expectedExceptions{0UZ};
+        for (std::size_t i = 0UZ; i < gr::thread_pool::thread::getThreadLimit() + 10UZ; ++i) {
+            if (i >= (gr::thread_pool::thread::getThreadLimit() - 10UZ)) {
+                std::println("start thread {}", i);
+            }
+            try {
+                pool->execute([] {
+                    std::this_thread::sleep_for(std::chrono::seconds(10)); // purposefull sleep
+                });
+            } catch (std::exception& e) {
+                std::println("exception thrown: {} for {} threads", e, gr::thread_pool::getTotalThreadCount());
+                expectedExceptions.fetch_add(1UZ, std::memory_order_relaxed);
+            } catch (...) {
+                std::println("unknown exception thrown for {} threads", gr::thread_pool::getTotalThreadCount());
+                unexpectedExceptions.fetch_add(1UZ, std::memory_order_relaxed);
+            }
+            if ((expectedExceptions.load() + unexpectedExceptions.load()) >= 10UZ) {
+                break;
+            }
+        }
+        std::println("number of exceptions thrown: {} unexpeced: {}", expectedExceptions.load(), unexpectedExceptions.load());
+        expect(gt(expectedExceptions.load(), 0UZ)) << fatal;
+        expect(eq(unexpectedExceptions.load(), 0UZ)) << fatal;
+    };
+};
+
 int main() { /* tests are statically executed */ }
