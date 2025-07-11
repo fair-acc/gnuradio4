@@ -79,10 +79,11 @@ enum class ExecutionPolicy {
     singleThreadedBlocking /// blocks with a time-out if none of the blocks in the graph made progress (N.B. a CPU/battery power-saving measures)
 };
 
+using JobLists = std::vector<std::vector<std::shared_ptr<BlockModel>>>;
+
 template<typename Derived, ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
-class SchedulerBase : public Block<Derived> {
+struct SchedulerBase : Block<Derived> {
     friend class lifecycle::StateMachine<Derived>;
-    using JobLists     = std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>>;
     using TaskExecutor = gr::thread_pool::TaskExecutor;
     using enum block::Category;
 
@@ -93,7 +94,7 @@ protected:
     std::shared_ptr<TaskExecutor>       _pool;
     std::shared_ptr<gr::Sequence>       _nRunningJobs = std::make_shared<gr::Sequence>();
     std::recursive_mutex                _executionOrderMutex; // only used when modifying and copying the graph->local job list
-    JobLists                            _executionOrder = std::make_shared<std::vector<std::vector<std::shared_ptr<BlockModel>>>>();
+    std::shared_ptr<JobLists>           _executionOrder = std::make_shared<JobLists>();
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
@@ -298,7 +299,7 @@ public:
         }
     }
 
-    [[nodiscard]] const JobLists& jobs() const noexcept { return _executionOrder; }
+    [[nodiscard]] std::shared_ptr<JobLists> jobs() const noexcept { return _executionOrder; }
 
 protected:
     void disconnectAllEdges() {
@@ -874,7 +875,7 @@ class Simple : public SchedulerBase<Simple<execution, TProfiler>, execution, TPr
     using Description = Doc<R""(Simple loop based Scheduler, which iterates over all blocks in the order they have beein defined and emplaced definition in the graph.)"">;
 
     friend class lifecycle::StateMachine<Simple<execution, TProfiler>>;
-    friend class SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
+    friend struct SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
 
 public:
     using base_t = SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
@@ -920,13 +921,37 @@ private:
     }
 };
 
+namespace detail {
+inline JobLists batchBlocks(const std::vector<std::shared_ptr<BlockModel>>& blocks, std::size_t n_batches) {
+    JobLists result(n_batches);
+    for (std::size_t batch = 0UZ; batch < n_batches; ++batch) {
+        result[batch].reserve(blocks.size() / n_batches + 1UZ);
+        for (std::size_t i = batch; i < blocks.size(); i += n_batches) {
+            result[batch].push_back(blocks[i]);
+        }
+    }
+    return result;
+}
+
+inline void printExecutionOrder(const std::vector<std::vector<std::shared_ptr<BlockModel>>>& executionOrder) {
+    std::size_t batchIndex = 0;
+    for (const auto& batch : executionOrder) {
+        std::print("Batch #{}:\n", batchIndex++);
+        for (const auto& block : batch) {
+            std::print("  - {} ({})\n", block->name(), block->uniqueName());
+        }
+    }
+}
+
+} // namespace detail
+
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 class BreadthFirst : public SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Breadth First Scheduler which traverses the graph starting from the source blocks in a breath first fashion
 detecting cycles and blocks which can be reached from several source blocks.)"">;
 
     friend class lifecycle::StateMachine<BreadthFirst<execution, TProfiler>>;
-    friend class SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
+    friend struct SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
 
 public:
@@ -937,76 +962,69 @@ public:
 
 private:
     void init() {
-        std::vector<std::shared_ptr<BlockModel>> blockList;
-        [[maybe_unused]] const auto              pe = this->_profilerHandler.startCompleteEvent("breadth_first.init");
-        using block_t                               = std::shared_ptr<BlockModel>;
+        /* implements Breadth-first search scheduling algorithm (https://en.wikipedia.org/wiki/Breadth-first_search)
+         * 1. compute 'adjacencyList'
+         * 2. determine all 'sourceBlocks' S (no incoming edges)
+         * 3. initialise queue Q with S
+         * 4. while Q not empty:
+         *   - dequeue Block B
+         *   - if B not visited:
+         *     - mark visited
+         *     - add B to result
+         *   - for each outgoing edge from B:
+         *     - if target not yet reached, enqueue target
+         *
+         * For more details see also:
+         * [1] T. H. Cormen, C. E. Leiserson, R. L. Rivest, and C. Stein, "Introduction to Algorithms", 3rd ed., MIT Press, 2009, ch. 22.2.
+         * [2] P. Morin, "Open Data Structures". [Online]. available at: https://opendatastructures.org/
+         */
+        using block_t                  = std::shared_ptr<BlockModel>;
+        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("breadth_first.init");
         base_t::init();
-        // calculate adjacency list
-        std::map<block_t, std::vector<block_t>> _adjacency_list{};
-        std::vector<block_t>                    _source_blocks{};
-        // compute the adjacency list
-        std::set<block_t> block_reached;
-        const gr::Graph   flatGraph = gr::graph::flatten(this->_graph);
-        for (auto& e : flatGraph.edges()) {
-            _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
-            _source_blocks.push_back(e._sourceBlock);
-            block_reached.insert(e._destinationBlock);
-        }
-        _source_blocks.erase(std::remove_if(_source_blocks.begin(), _source_blocks.end(), [&block_reached](auto currentBlock) { return block_reached.contains(currentBlock); }), _source_blocks.end());
-        // traverse graph
-        std::queue<block_t> queue{};
-        std::set<block_t>   reached;
-        // add all source blocks to queue
-        for (block_t sourceBlock : _source_blocks) {
-            if (!reached.contains(sourceBlock)) {
-                queue.push(sourceBlock);
+
+        gr::Graph                      flatGraph     = gr::graph::flatten(this->_graph);
+        const gr::graph::AdjacencyList adjacencyList = graph::computeAdjacencyList(flatGraph);
+        const std::vector<block_t>     sourceBlocks  = graph::findSourceBlocks(adjacencyList);
+
+        std::vector<block_t>        blockList;
+        std::unordered_set<block_t> visited;
+        std::queue<block_t>         queue;
+        std::set<block_t>           reached;
+
+        for (const auto& src : sourceBlocks) {
+            if (reached.insert(src).second) {
+                queue.push(src);
             }
-            reached.insert(sourceBlock);
         }
 
-        // process all blocks, adding all unvisited child blocks to the queue
-        std::unordered_set<block_t> visited;
         while (!queue.empty()) {
-            block_t currentBlock = queue.front();
+            block_t current = queue.front();
             queue.pop();
 
-            if (visited.insert(currentBlock).second) {
-                blockList.push_back(currentBlock);
-                visited.insert(currentBlock);
+            if (visited.insert(current).second) {
+                blockList.push_back(current);
             }
 
-            if (_adjacency_list.contains(currentBlock)) { // node has outgoing edges
-                for (auto& dst : _adjacency_list.at(currentBlock)) {
-                    if (!reached.contains(dst)) { // detect cycles. this could be removed if we guarantee cycle free graphs earlier
-                        queue.push(dst);
-                        reached.insert(dst);
+            // enqueue outgoing neighbours, but only once
+            if (adjacencyList.contains(current)) {
+                for (const auto& edges : adjacencyList.at(current) | std::views::values) {
+                    for (const auto* edge : edges) {
+                        const auto& dst = edge->destinationBlock();
+                        if (reached.insert(dst).second) {
+                            queue.push(dst);
+                        }
                     }
                 }
             }
         }
 
-        // generate job list
-        std::size_t n_batches = 1UZ;
-        switch (base_t::executionPolicy()) {
-        case ExecutionPolicy::singleThreaded:
-        case ExecutionPolicy::singleThreadedBlocking: break;
-        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()); break;
-        default: assert(false && "ExecutionPolicy case not handled");
-        }
+        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
+        std::lock_guard guard(base_t::_adoptionBlocksMutex);
+        std::lock_guard lock(base_t::_executionOrderMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
-        std::lock_guard lock(base_t::_executionOrderMutex);
-        this->_executionOrder->clear();
-        this->_executionOrder->reserve(n_batches);
-        for (std::size_t i = 0; i < n_batches; i++) {
-            // create job-set for thread
-            auto& job = this->_executionOrder->emplace_back(std::vector<std::shared_ptr<BlockModel>>());
-            job.reserve(blockList.size() / n_batches + 1);
-            for (std::size_t j = i; j < blockList.size(); j += n_batches) {
-                job.push_back(blockList[j]);
-            }
-        }
+        *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
     }
 
     void reset() {
@@ -1020,7 +1038,7 @@ class DepthFirst : public SchedulerBase<DepthFirst<execution, TProfiler>, execut
     using Description = Doc<R""(Depth First Scheduler which traverses the graph starting from the source blocks in a depth-first manner.)"">;
 
     friend class lifecycle::StateMachine<DepthFirst<execution, TProfiler>>;
-    friend class SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>;
+    friend struct SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>;
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
 
 public:
@@ -1031,70 +1049,61 @@ public:
 
 private:
     void init() {
-        std::vector<std::shared_ptr<BlockModel>> blocklist;
-        [[maybe_unused]] const auto              pe = this->_profilerHandler.startCompleteEvent("depth_first.init");
-        using block_t                               = std::shared_ptr<BlockModel>;
+        /**
+         * implements Depth-first search scheduling algorithm (https://en.wikipedia.org/wiki/Depth-first_search)
+         * 1. compute 'adjacencyList'
+         * 2. determine all `sourceBlocks' S (no incoming edges)
+         * 3. initialise visited set
+         * 4. for each source s in S:
+         *   - recursively visit(s)
+         * 5. visit(Block B):
+         *   - if B visited: return
+         *   - mark B visited
+         *   - add B to result
+         *   - for each outgoing edge from B:
+         *     - recursively visit(destination)
+         *
+         * For more details see also:
+         * [1] T. H. Cormen, C. E. Leiserson, R. L. Rivest, and C. Stein, "Introduction to Algorithms", 3rd ed., MIT Press, 2009, ch. 22.2.
+         * [2] P. Morin, "Open Data Structures". [Online]. available at: https://opendatastructures.org/
+         */
+        using block_t                  = std::shared_ptr<BlockModel>;
+        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("depth_first.init");
         base_t::init();
 
-        // adjacency list
-        std::map<block_t, std::vector<block_t>> _adjacency_list{};
-        std::vector<block_t>                    _source_blocks{};
-        std::set<block_t>                       block_reached;
+        gr::Graph                  flatGraph     = gr::graph::flatten(this->_graph);
+        const graph::AdjacencyList adjacencyList = graph::computeAdjacencyList(flatGraph);
+        const std::vector<block_t> sourceBlocks  = graph::findSourceBlocks(adjacencyList);
 
-        const gr::Graph flatGraph = gr::graph::flatten(this->_graph);
-        for (auto& e : flatGraph.edges()) {
-            _adjacency_list[e._sourceBlock].push_back(e._destinationBlock);
-            _source_blocks.push_back(e._sourceBlock);
-            block_reached.insert(e._destinationBlock);
-        }
+        std::vector<block_t> blockList;
+        std::set<block_t>    visited;
 
-        _source_blocks.erase(std::remove_if(_source_blocks.begin(), _source_blocks.end(), [&block_reached](auto currentBlock) { return block_reached.contains(currentBlock); }), _source_blocks.end());
-
-        // depth first traversal — use stack
-        std::set<block_t> visited;
-
-        auto dfs = [&]<typename Self>(Self&& self, block_t node) -> void {
-            if (visited.contains(node)) {
-                return;
+        auto dfs = [&]<typename Self>(Self&& self, const block_t& node) -> void {
+            if (!visited.insert(node).second) {
+                return; // already visited
             }
-            visited.insert(node);
-
-            blocklist.push_back(node);
-
-            if (_adjacency_list.contains(node)) {
-                for (auto& dst : _adjacency_list.at(node)) {
-                    self(self, dst); // recursive call
+            blockList.push_back(node);
+            // recursively visit all outgoing neighbours
+            if (adjacencyList.contains(node)) {
+                for (const auto& edges : adjacencyList.at(node) | std::views::values) {
+                    for (const auto* edge : edges) {
+                        self(self, edge->destinationBlock());
+                    }
                 }
             }
         };
 
-        // launch from all source blocks
-        for (auto sourceBlock : _source_blocks) {
-            dfs(dfs, sourceBlock);
+        for (const auto& src : sourceBlocks) {
+            dfs(dfs, src);
         }
 
-        // batching
-        std::size_t n_batches = 1UZ;
-        switch (base_t::executionPolicy()) {
-        case ExecutionPolicy::singleThreaded:
-        case ExecutionPolicy::singleThreadedBlocking: break;
-        case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blocklist.size()); break;
-        default: assert(false && "ExecutionPolicy case not handled");
-        }
+        const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
+        std::lock_guard guard(base_t::_adoptionBlocksMutex);
+        std::lock_guard lock(base_t::_executionOrderMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
-
-        std::lock_guard lock(base_t::_executionOrderMutex);
-        this->_executionOrder->clear();
-        this->_executionOrder->reserve(n_batches);
-        for (std::size_t i = 0; i < n_batches; i++) {
-            auto& job = this->_executionOrder->emplace_back(std::vector<std::shared_ptr<BlockModel>>());
-            job.reserve(blocklist.size() / n_batches + 1);
-            for (std::size_t j = i; j < blocklist.size(); j += n_batches) {
-                job.push_back(blocklist[j]);
-            }
-        }
+        *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
     }
 
     void reset() {

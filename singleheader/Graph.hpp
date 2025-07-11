@@ -21207,7 +21207,6 @@ struct std::formatter<gr::work::Result, char> {
 #include <charconv>
 
 namespace gr {
-
 class BlockModel;
 
 struct PortDefinition {
@@ -21230,6 +21229,26 @@ struct PortDefinition {
     constexpr PortDefinition(std::string name) : definition(StringBased(std::move(name))) {}
     bool operator==(const PortDefinition& other) const { return (definition == other.definition); }
 };
+} // namespace gr
+
+namespace std { // needs to be defined in std namespace to be used e.g. in std::unordered_map
+template<>
+struct hash<gr::PortDefinition> {
+    std::size_t operator()(const gr::PortDefinition& p) const noexcept {
+        if (std::holds_alternative<gr::PortDefinition::IndexBased>(p.definition)) {
+            const auto& def = std::get<gr::PortDefinition::IndexBased>(p.definition);
+            std::size_t h1  = std::hash<std::size_t>{}(def.topLevel);
+            std::size_t h2  = std::hash<std::size_t>{}(def.subIndex);
+            return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)); // hash_combine
+        } else {                                                   // string-based
+            const auto& def = std::get<gr::PortDefinition::StringBased>(p.definition);
+            return std::hash<std::string>{}(def.name);
+        }
+    }
+};
+} // namespace std
+
+namespace gr {
 
 struct Edge {
     enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts, Unknown };
@@ -21746,6 +21765,28 @@ public:
 } // namespace gr
 
 template<>
+struct std::formatter<gr::PortDefinition> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        return ctx.begin(); // no format-spec yet
+    }
+
+    template<typename FormatContext>
+    auto format(const gr::PortDefinition& port, FormatContext& ctx) const {
+        if (std::holds_alternative<gr::PortDefinition::IndexBased>(port.definition)) {
+            const auto& index = std::get<gr::PortDefinition::IndexBased>(port.definition);
+            if (index.subIndex == gr::meta::invalid_index) {
+                return std::format_to(ctx.out(), "{}", index.topLevel);
+            } else {
+                return std::format_to(ctx.out(), "{}#{}", index.topLevel, index.subIndex);
+            }
+        } else {
+            const auto& str = std::get<gr::PortDefinition::StringBased>(port.definition);
+            return std::format_to(ctx.out(), "{}", str.name);
+        }
+    }
+};
+
+template<>
 struct std::formatter<gr::Edge> {
     char formatSpecifier = 's';
 
@@ -21761,25 +21802,12 @@ struct std::formatter<gr::Edge> {
 
     template<typename FormatContext>
     auto format(const gr::Edge& e, FormatContext& ctx) const {
-        const auto& name = [this](const std::shared_ptr<gr::BlockModel> block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
-
-        const auto portIndex = [](const gr::PortDefinition& port) {
-            return std::visit(gr::meta::overloaded(
-                                  [](const gr::PortDefinition::IndexBased& index) {
-                                      if (index.subIndex == gr::meta::invalid_index) {
-                                          return std::format("{}", index.topLevel);
-                                      } else {
-                                          return std::format("{}#{}", index.topLevel, index.subIndex);
-                                      }
-                                  },
-                                  [](const gr::PortDefinition::StringBased& index) { return index.name; }),
-                port.definition);
-        };
+        auto getName = [this](const std::shared_ptr<gr::BlockModel>& block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
 
         return std::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
-            name(e._sourceBlock), portIndex(e._sourcePortDefinition),                                         //
-            e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            //
-            name(e._destinationBlock), portIndex(e._destinationPortDefinition));
+            getName(e._sourceBlock), e._sourcePortDefinition,                                                 // src
+            e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            // edge
+            getName(e._destinationBlock), e._destinationPortDefinition);                                      // dst
     }
 };
 
@@ -22368,7 +22396,6 @@ inline auto& globalPluginLoader() {
 #endif
 
 namespace gr {
-
 template<typename T>
 concept GraphLike = requires(T t, const T& tc) {
     { tc.blocks() } -> std::same_as<std::span<const std::shared_ptr<BlockModel>>>;
@@ -23224,7 +23251,84 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
     return flattenedGraph;
 }
 
+using AdjacencyList = std::unordered_map<std::shared_ptr<gr::BlockModel>, //
+    std::unordered_map<gr::PortDefinition, std::vector<gr::Edge*>>>;
+
+inline AdjacencyList computeAdjacencyList(GraphLike auto& root) {
+    AdjacencyList result;
+    for (gr::Edge& edge : root.edges()) {
+        std::vector<gr::Edge*>& srcMapPort = result[edge.sourceBlock()][edge.sourcePortDefinition()];
+        srcMapPort.push_back(std::addressof(edge));
+    }
+    return result;
+}
+
+inline std::span<gr::Edge* const> outgoingEdges(const AdjacencyList& adj, const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& port) {
+    if (auto it = adj.find(block); it != adj.end()) {
+        if (auto pit = it->second.find(port); pit != it->second.end()) {
+            return std::span(pit->second);
+        }
+    }
+    return {};
+}
+
+inline std::vector<std::shared_ptr<BlockModel>> findSourceBlocks(const AdjacencyList& adj) {
+    std::vector<std::shared_ptr<BlockModel>> sources;
+    std::set<std::shared_ptr<BlockModel>>    destinations;
+
+    for (const auto& [src, ports] : adj) {
+        sources.push_back(src);
+        for (const auto& [_, edges] : ports) {
+            for (const auto* edge : edges) {
+                destinations.insert(edge->destinationBlock());
+            }
+        }
+    }
+
+    sources.erase(std::remove_if(sources.begin(), sources.end(), [&](const auto& b) { return destinations.contains(b); }), sources.end());
+    std::sort(sources.begin(), sources.end(), [](const auto& a, const auto& b) { return a->name() < b->name(); });
+    return sources;
+}
+
 } // namespace graph
+} // namespace gr
+
+template<>
+struct std::formatter<gr::graph::AdjacencyList> {
+    char formatSpecifier = 's'; // 's' = short name, 'l' = long (unique) name
+
+    constexpr auto parse(std::format_parse_context& ctx) {
+        auto it = ctx.begin();
+        if (it != ctx.end() && (*it == 's' || *it == 'l')) {
+            formatSpecifier = *it++;
+        } else if (it != ctx.end() && *it != '}') {
+            throw std::format_error("invalid format specifier for AdjacencyList: must be 's' or 'l'");
+        }
+        return it;
+    }
+
+    template<typename FormatContext>
+    auto format(const gr::graph::AdjacencyList& adj, FormatContext& ctx) const {
+        auto       out     = ctx.out();
+        const auto getName = [this](const std::shared_ptr<gr::BlockModel>& block) { return (formatSpecifier == 'l') ? block->uniqueName() : block->name(); };
+
+        for (const auto& [srcBlock, portMap] : adj) {
+            for (const auto& [srcPort, edges] : portMap) {
+                out = std::format_to(out, "{}:{}\n", getName(srcBlock), srcPort);
+                for (const gr::Edge* edge : edges) {
+                    if (formatSpecifier == 'l') {
+                        out = std::format_to(out, "    → {:l}\n", *edge);
+                    } else {
+                        out = std::format_to(out, "    → {:s}\n", *edge);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+};
+
+namespace gr {
 
 /*******************************************************************************************************/
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/
