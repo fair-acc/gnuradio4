@@ -327,6 +327,7 @@ std::size_t getTotalThreadCount(); // forward declaration
 class BasicThreadPool {
     using Task      = thread_pool::detail::Task;
     using TaskQueue = thread_pool::detail::TaskQueue;
+    static std::atomic_size_t    _globalThreadCount;
     static std::atomic<uint64_t> _globalPoolId;
     static std::atomic<uint64_t> _taskID;
 
@@ -344,8 +345,6 @@ class BasicThreadPool {
     std::mutex             _threadListMutex;
     std::atomic_size_t     _numThreads = 0U;
     std::list<std::thread> _threads;
-
-    static std::atomic_size_t _globalThreadCount;
 
     std::vector<bool> _affinityMask;
     thread::Policy    _schedulingPolicy   = thread::Policy::OTHER;
@@ -538,14 +537,15 @@ private:
     }
 
     void createWorkerThread(std::source_location location = std::source_location::current()) {
-        std::scoped_lock  lock(_threadListMutex);
-        const std::size_t nThreads      = numThreads();
+        std::scoped_lock lock(_threadListMutex);
+        _globalThreadCount.fetch_add(1UZ, std::memory_order_relaxed);
         const std::size_t nTotalThreads = getTotalThreadCount();
         if (nTotalThreads + 1UZ >= thread::kThreadLimit) {
             throw std::out_of_range(std::format("ThreadPool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::kThreadLimit, location));
         }
-        std::thread& thread = _threads.emplace_back(&BasicThreadPool::worker, this);
-        updateThreadConstraints(nThreads + 1, thread);
+        const std::size_t nThreads = numThreads();
+        std::thread&      thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
+        updateThreadConstraints(nThreads + 1UZ, thread);
     }
 
     template<typename F, typename... A>
@@ -595,11 +595,10 @@ private:
         constexpr uint32_t N_SPIN       = 1 << 8;
         uint32_t           noop_counter = 0;
         const auto         threadID     = _numThreads.fetch_add(1UZ, std::memory_order_relaxed);
-        _globalThreadCount.fetch_add(1UZ, std::memory_order_relaxed);
-        std::mutex       mutex;
-        std::unique_lock lock(mutex);
-        auto             lastUsed              = std::chrono::steady_clock::now();
-        auto             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
+        std::mutex         mutex;
+        std::unique_lock   lock(mutex);
+        auto               lastUsed              = std::chrono::steady_clock::now();
+        auto               timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
         if (numThreads() >= minThreads()) {
             std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
             _initialised.notify_all();
@@ -636,7 +635,7 @@ private:
             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
             if (isShutdown()) {
                 auto nThread = _numThreads.fetch_sub(1);
-                _globalThreadCount.fetch_sub(1);
+                _globalThreadCount.fetch_sub(1UZ);
                 _numThreads.notify_all();
                 if (nThread == 1) { // cleanup last thread
                     _recycledTasks.clear();
@@ -647,7 +646,7 @@ private:
                 std::size_t nThreads = numThreads();
                 while (nThreads > minThreads()) { // compare and swap loop
                     if (_numThreads.compare_exchange_weak(nThreads, nThreads - 1, std::memory_order_acq_rel)) {
-                        _globalThreadCount.fetch_sub(1);
+                        _globalThreadCount.fetch_sub(1UZ);
                         _numThreads.notify_all();
                         if (nThreads == 1) { // cleanup last thread
                             _recycledTasks.clear();
@@ -662,7 +661,7 @@ private:
     }
 };
 
-inline std::atomic_size_t    BasicThreadPool::_globalThreadCount = 0U;
+inline std::atomic_size_t    BasicThreadPool::_globalThreadCount = 0UZ;
 inline std::atomic<uint64_t> BasicThreadPool::_globalPoolId      = 0U;
 inline std::atomic<uint64_t> BasicThreadPool::_taskID            = 0U;
 static_assert(ThreadPool<BasicThreadPool>);
@@ -749,6 +748,30 @@ public:
     [[nodiscard]] BasicThreadPool& impl() noexcept { return *_pool; }
 };
 
+namespace detail {
+struct ThreadSplit {
+    std::size_t cpuThreads;
+    std::size_t ioThreads;
+    std::size_t threadReserve;
+};
+
+inline ThreadSplit computeDefaultThreadSplit(std::size_t threadLimit = gr::thread_pool::thread::kThreadLimit, std::size_t reserve = 4UZ) {
+    const std::size_t usable = (threadLimit > reserve) ? threadLimit - std::clamp(reserve, 0UZ, threadLimit) : 1UZ;
+
+#ifdef __EMSCRIPTEN__
+    // conservative choice: minimise CPU-bound usage for WASM to guarantee IO availability
+    const std::size_t cpu = std::clamp(usable / 4UZ, 1UZ, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+    const std::size_t io  = std::max<std::size_t>(1UZ, usable - cpu);
+#else
+    const std::size_t hardware = std::max(1u, std::thread::hardware_concurrency());
+    const std::size_t cpu      = std::clamp(static_cast<std::size_t>(hardware), 1UZ, std::max(usable / 2UZ, 1UZ));
+    const std::size_t io       = usable > cpu ? std::max<std::size_t>(usable - cpu, 1UZ) : 1UZ;
+#endif
+
+    return ThreadSplit{.cpuThreads = cpu, .ioThreads = io, .threadReserve = reserve};
+}
+} // namespace detail
+
 /**
  * <h2>Global GR runtime-selectable Thread Pool Manager (singleton).</h2>
  *
@@ -812,14 +835,15 @@ class Manager {
     std::unordered_map<std::string, std::shared_ptr<TaskExecutor>> _pools;
 
     Manager() {
-#ifdef __EMSCRIPTEN__
-        const std::size_t maxConcurrency = std::max(4U, std::thread::hardware_concurrency());
-#else
-        const std::size_t maxConcurrency = std::thread::hardware_concurrency();
-#endif
-        const std::size_t maxThread = maxConcurrency <= 2UZ ? 2UZ : maxConcurrency - 2UZ;
-        auto              cpu       = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultCpuPoolId), TaskType::CPU_BOUND, maxThread, maxThread), "CPU");
-        auto              io        = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kDefaultIoPoolId), TaskType::IO_BOUND, 2U, std::numeric_limits<uint32_t>::max()), "CPU");
+        const auto [cpuThreads, ioThreads, _] = detail::computeDefaultThreadSplit();
+        const std::size_t nThreadsTotal       = cpuThreads + ioThreads;
+        if (nThreadsTotal >= gr::thread_pool::thread::kThreadLimit) {
+            throw std::out_of_range(std::format("gr::thread_pool::Manager - config violation #CPU {} + #IO {} >= kThreadLimit: {}", cpuThreads, ioThreads, gr::thread_pool::thread::kThreadLimit));
+        }
+
+        auto cpu = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultCpuPoolId, TaskType::CPU_BOUND, 1U, cpuThreads), "CPU");
+        auto io  = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, 1U, ioThreads), "CPU");
+
         registerPool(std::string(kDefaultCpuPoolId), std::move(cpu));
         registerPool(std::string(kDefaultIoPoolId), std::move(io));
     }
