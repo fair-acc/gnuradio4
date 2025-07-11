@@ -389,9 +389,6 @@ public:
 
     virtual UICategory uiCategory() const { return UICategory::None; }
 
-    virtual property_map uiConstraints() const                           = 0;
-    virtual void         setUiConstraints(property_map newUiConstraints) = 0;
-
     [[nodiscard]] virtual void* raw() = 0;
 };
 
@@ -497,9 +494,6 @@ public:
     [[nodiscard]] block::Category blockCategory() const override { return T::blockCategory; }
 
     UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
-
-    property_map uiConstraints() const override { return blockRef().ui_constraints; }
-    void         setUiConstraints(property_map newUiConstraints) override { blockRef().ui_constraints = std::move(newUiConstraints); }
 
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
 
@@ -626,7 +620,7 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
 
     if (flags & BlockSerializationFlags::Data) {
         result.emplace("name"s, std::string(block->name()));
-        result.emplace("ui_constraints"s, block->uiConstraints());
+        result.emplace("ui_constraints"s, std::get<property_map>(block->settings().get("ui_constraints").value()));
     }
 
     if (flags & BlockSerializationFlags::StaticData) {

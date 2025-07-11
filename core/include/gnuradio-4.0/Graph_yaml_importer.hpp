@@ -80,7 +80,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
             if (auto it = grcBlock.find("ui_constraints"); it != grcBlock.end()) {
                 auto uiConstraints = std::get<property_map>(it->second);
-                currentBlock->setUiConstraints(std::move(uiConstraints));
+                // this cannot fai as ui_constraints exists in Blockl
+                std::ignore = currentBlock->settings().set({{"ui_constraints", std::move(uiConstraints)}});
             }
 
             const auto parametersPmt = grcBlock["parameters"];
@@ -258,7 +259,7 @@ inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::so
     return resultGraph;
 }
 
-inline std::string saveGrc(PluginLoader& loader, gr::Graph& rootGraph) { return pmtv::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
+inline std::string saveGrc(PluginLoader& loader, const gr::Graph& rootGraph) { return pmtv::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
 
 } // namespace gr
 
