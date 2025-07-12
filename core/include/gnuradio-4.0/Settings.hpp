@@ -239,7 +239,7 @@ template<typename T>
 } // namespace settings
 
 struct SettingsBase {
-    struct ContextSettings {
+    struct CtxSettingsPair {
         SettingsCtx  context;
         property_map settings;
     };
@@ -333,7 +333,7 @@ struct SettingsBase {
     /**
      * @brief return _storedParameters
      */
-    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<ContextSettings>, settings::PMTCompare> getStoredAll() const noexcept = 0;
+    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept = 0;
 
     /**
      * @brief returns the staged/not-yet-applied new parameters
@@ -388,7 +388,7 @@ class CtxSettings : public SettingsBase {
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<pmtv::pmt, std::vector<ContextSettings>, settings::PMTCompare> _storedParameters{};
+    mutable std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
     property_map                                                                    _defaultParameters{};
     // Store the initial parameters provided in the Block constructor. These parameters cannot be set directly in the constructor
     // because `_defaultParameters` cannot be initialized using Settings::storeDefaults() within the Block constructor.
@@ -624,7 +624,7 @@ public:
 #endif
         }
 
-        std::vector<ContextSettings>& vec     = it->second;
+        std::vector<CtxSettingsPair>& vec     = it->second;
         auto                          exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.context.time == ctx.time; });
 
         if (exactIt == vec.end()) {
@@ -817,7 +817,7 @@ public:
         return static_cast<gr::Size_t>(_autoUpdateParameters.size());
     }
 
-    [[nodiscard]] std::map<pmtv::pmt, std::vector<ContextSettings>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
+    [[nodiscard]] std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
 
     [[nodiscard]] const property_map& stagedParameters() const noexcept override {
         std::lock_guard lg(_mutex);
@@ -1051,7 +1051,7 @@ private:
             return std::nullopt;
         }
         const auto& vec        = _storedParameters[bestMatchSettingsCtx.value().context];
-        const auto  parameters = std::ranges::find_if(vec, [&](const ContextSettings& contextSettings) { return contextSettings.context == bestMatchSettingsCtx.value(); });
+        const auto  parameters = std::ranges::find_if(vec, [&](const CtxSettingsPair& contextSettings) { return contextSettings.context == bestMatchSettingsCtx.value(); });
 
         return parameters != vec.end() ? std::optional(parameters->settings) : std::nullopt;
     }
@@ -1122,7 +1122,7 @@ private:
             _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(_allWritableMembers);
         }
 
-        std::vector<ContextSettings>& sortedVectorForContext = _storedParameters[ctx.context];
+        std::vector<CtxSettingsPair>& sortedVectorForContext = _storedParameters[ctx.context];
         // binary search and merge-sort
         auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.context.time; });
         sortedVectorForContext.insert(it, {ctx, newParameters});

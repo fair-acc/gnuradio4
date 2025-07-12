@@ -396,7 +396,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::ContextSettings>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 1UZ));
                 expect(allStored.contains(""s));
 
@@ -505,7 +505,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::ContextSettings>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 3UZ));
                 expect(allStored.contains(""s));
                 expect(allStored.contains("new_context"s));
@@ -531,7 +531,7 @@ const boost::ut::suite MessagesTests = [] {
 
             "remove new_context - w/o explicit serviceName"_test = [&] {
                 //  We need internal time since wasm change our time
-                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::ContextSettings>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 3UZ));
                 const std::uint64_t internalTimeForWasm = allStored.at("new_context")[0].context.time;
 

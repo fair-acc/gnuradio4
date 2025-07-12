@@ -1551,7 +1551,7 @@ protected:
         assert(propertyName == block::property::kSettingsContexts);
 
         if (message.cmd == Get) {
-            const std::map<pmtv::pmt, std::vector<SettingsBase::ContextSettings>, settings::PMTCompare>& stored = settings().getStoredAll();
+            const std::map<pmtv::pmt, std::vector<SettingsBase::CtxSettingsPair>, settings::PMTCompare>& stored = settings().getStoredAll();
 
             std::vector<std::string>   contexts;
             std::vector<std::uint64_t> times;
