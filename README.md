@@ -4,8 +4,11 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml)
+
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+
 [![All Contributors](https://img.shields.io/badge/all_contributors-15-orange.svg?style=flat-square)](#contributors-)
+
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 # GNU Radio 4.0 prototype
@@ -114,7 +117,6 @@ For details on how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING
 Copyright (C) The GNU Radio Authors
 Copyright (C) Contributors to the GNU Radio Project
 Copyright (C) FAIR - Facility for Antiproton & Ion Research, Darmstadt, Germany
-
 
 ## Acknowledgements
 
