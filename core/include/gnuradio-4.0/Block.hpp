@@ -421,8 +421,8 @@ public:
         return ret;
     }
 
-    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
-    A<property_map, "ui-constraints", Doc<"store ui related information such as positioning.">>                    ui_constraints;
+    A<property_map, "meta-information", Doc<"store meta information about block member values">> meta_information = initMetaInfo();
+    A<property_map, "ui-constraints", Doc<"store ui related information such as positioning.">>  ui_constraints;
 
     GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, meta_information, ui_constraints);
 
