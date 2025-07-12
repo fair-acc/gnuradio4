@@ -2,11 +2,13 @@
 #define THREADAFFINITY_HPP
 
 #include <algorithm>
+#include <charconv>
 #include <format>
 #include <fstream>
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -19,6 +21,13 @@
 #include <pthread.h>
 #include <sched.h>
 #endif
+#endif
+
+#if defined(__EMSCRIPTEN__)
+#include <cstdlib> // for atoi()
+#include <emscripten.h>
+#else
+#include <sys/resource.h>
 #endif
 
 namespace gr::thread_pool::thread {
@@ -213,7 +222,8 @@ inline std::vector<bool> getProcessAffinity(const int pid = detail::getPid()) {
     }
     cpu_set_t cpuSet;
     if (int rc = sched_getaffinity(pid, sizeof(cpu_set_t), &cpuSet); rc != 0) {
-        throw std::system_error(rc, thread_exception(), std::format("getProcessAffinity(std::bitset<{{}}> = {{}}, thread_type)")); // todo: fix format string
+        const std::vector<bool> mask = detail::getAffinityMask(cpuSet);
+        throw std::system_error(rc, thread_exception(), std::format("getProcessAffinity({}> = {}", pid, mask));
     }
     return detail::getAffinityMask(cpuSet);
 }
@@ -368,6 +378,41 @@ inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_
 }
 #else
 inline void setThreadSchedulingParameter(Policy /*scheduler*/, int /*priority*/, thread_type auto&... /*thread*/) {}
+#endif
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+
+EM_JS(int, get_browser_thread_limit, (), { return navigator.hardwareConcurrency || 2; });
+
+#ifdef GR_MAX_WASM_THREAD_COUNT
+constexpr std::size_t kThreadLimit = GR_MAX_WASM_THREAD_COUNT;
+#else
+const std::size_t kThreadLimit = static_cast<std::size_t>(get_browser_thread_limit());
+#endif
+#else
+namespace detail {
+inline std::size_t getUserProcessLimit() {
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NPROC, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY) {
+        return rl.rlim_cur;
+    }
+    return 50000UZ; // fallback
+}
+
+inline std::size_t getKernelThreadLimit() {
+    std::ifstream file("/proc/sys/kernel/threads-max");
+    std::string   line;
+    if (file && std::getline(file, line)) {
+        std::size_t val = 0;
+        std::from_chars(line.data(), line.data() + line.size(), val);
+        return val;
+    }
+    return 50000UZ; // fallback
+}
+} // namespace detail
+
+const std::size_t kThreadLimit = std::min({detail::getUserProcessLimit(), detail::getKernelThreadLimit(), 50000UZ /* fallback */});
 #endif
 
 } // namespace gr::thread_pool::thread
