@@ -394,10 +394,10 @@ public:
 
     void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
         if (minThreads == 0 || maxThreads == 0) {
-            throw std::invalid_argument("minThreads and maxThreads must be > 0");
+            throw std::invalid_argument(std::format("pool({}): minThreads and maxThreads must be > 0", poolName()));
         }
         if (minThreads > maxThreads) {
-            throw std::invalid_argument("minThreads must be <= maxThreads");
+            throw std::invalid_argument(std::format("pool({}): minThreads must be <= maxThreads", poolName()));
         }
 
         _minThreads.store(minThreads, std::memory_order_release);
@@ -441,7 +441,7 @@ public:
         static thread_local gr::SpinWait spinWait;
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
-                throw std::invalid_argument(std::format("requested cpuID {} incompatible with set affinity mask({}): [{}]", cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
+                throw std::invalid_argument(std::format("pool({}): requested cpuID {} incompatible with set affinity mask({}): [{}]", poolName(), cpuID, _affinityMask.size(), gr::join(_affinityMask, ", ")));
             }
         }
         _numTaskedQueued.fetch_add(1U);
@@ -468,9 +468,9 @@ public:
         if constexpr (cpuID >= 0) {
             if (cpuID >= _affinityMask.size() || (!_affinityMask[cpuID])) {
 #ifdef _LIBCPP_VERSION
-                throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask", cpuID, _affinityMask.size()));
+                throw std::invalid_argument(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask", poolName(), cpuID, _affinityMask.size()));
 #else
-                throw std::invalid_argument(std::format("cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", cpuID, _affinityMask.size(), _affinityMask));
+                throw std::invalid_argument(std::format("pool({}): cpuID {} is out of range [0,{}] or incompatible with set affinity mask [{}]", poolName(), cpuID, _affinityMask.size(), _affinityMask));
 #endif
             }
         }
@@ -538,7 +538,7 @@ private:
         _globalThreadCount.fetch_add(1UZ, std::memory_order_relaxed);
         const std::size_t nTotalThreads = getTotalThreadCount();
         if (nTotalThreads + 1UZ >= thread::getThreadLimit()) {
-            throw std::out_of_range(std::format("ThreadPool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location));
+            throw std::out_of_range(std::format("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location));
         }
         const std::size_t nThreads = numThreads();
         std::thread&      thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
@@ -871,7 +871,7 @@ public:
     void registerPool(std::string name, std::shared_ptr<TaskExecutor> pool) {
         std::scoped_lock lock(_mutex);
         if (!_pools.emplace(std::move(name), std::move(pool)).second) {
-            throw std::invalid_argument(std::format("pool already registered with name: '{}'.", name));
+            throw std::invalid_argument(std::format("pool({}) already registered with that name -> use replacePool(...) instead.", name));
         }
     }
 
