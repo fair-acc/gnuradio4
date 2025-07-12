@@ -110,13 +110,13 @@ describe how to set up a local development environment.
 
 ## License and Copyright
 
-Unless otherwise noted: SPDX-License-Identifier: MIT
+Unless otherwise noted: SPDX-License-Identifier: MIT<br>
 All code contributions to GNU Radio will be integrated into a library under the MIT, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
 For details on how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-Copyright (C) The GNU Radio Authors
-Copyright (C) Contributors to the GNU Radio Project
-Copyright (C) FAIR - Facility for Antiproton & Ion Research, Darmstadt, Germany
+Copyright (C) The GNU Radio Authors<br>
+Copyright (C) Contributors to the GNU Radio Project<br>
+Copyright (C) FAIR - Facility for Antiproton & Ion Research, Darmstadt, Germany<br>
 
 ## Acknowledgements
 
