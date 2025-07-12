@@ -50,9 +50,9 @@ Unless otherwise noted: SPDX-License-Identifier: LGPL-3.0-or-later
 All code contributions to GNU Radio will be integrated into a library under the LGPL, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
 For details on how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-Copyright (C) 2001-September 2020 GNU Radio Project -- managed by Free Software Foundation, Inc.  
-Copyright (C) September 2020-2024 GNU Radio Project -- managed by SETI Institute  
-Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany
+Copyright (C) The GNU Radio Authors
+Copyright (C) Contributors to the GNU Radio Project
+Copyright (C) FAIR - Facility for Antiproton & Ion Research, Darmstadt, Germany
 
 
 ## Acknowledgements
