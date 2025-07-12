@@ -2,8 +2,9 @@
 <img src="docs/logo.png" width="65%" />
 </p>
 
-[![License](https://img.shields.io/badge/License-LGPL%203.0-blue.svg)](https://opensource.org/licenses/LGPL-3.0)
-![CMake](https://github.com/fair-acc/gnuradio4/workflows/CMake/badge.svg) <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fair-acc/gnuradio4/actions/workflows/ci.yml)
+<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
 [![All Contributors](https://img.shields.io/badge/all_contributors-15-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
@@ -106,13 +107,14 @@ describe how to set up a local development environment.
 
 ## License and Copyright
 
-Unless otherwise noted: SPDX-License-Identifier: LGPL-3.0-linking-exception
-All code contributions to GNU Radio will be integrated into a library under the LGPL, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
+Unless otherwise noted: SPDX-License-Identifier: MIT
+All code contributions to GNU Radio will be integrated into a library under the MIT, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.
 For details on how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
 
-Copyright (C) 2001-September 2020 GNU Radio Project -- managed by Free Software Foundation, Inc.
-Copyright (C) September 2020-2024 GNU Radio Project -- managed by SETI Institute
-Copyright (C) 2018-2024 FAIR -- Facility for Antiproton & Ion Research, Darmstadt, Germany
+Copyright (C) The GNU Radio Authors
+Copyright (C) Contributors to the GNU Radio Project
+Copyright (C) FAIR - Facility for Antiproton & Ion Research, Darmstadt, Germany
+
 
 ## Acknowledgements
 
