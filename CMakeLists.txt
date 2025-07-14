@@ -48,6 +48,12 @@ if(NOT MSVC)
   set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${_LD_GC_SECTIONS}")
   set(CMAKE_EXE_LINKER_FLAGS_MINSIZEREL "${_LD_GC_SECTIONS}")
   set(CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL "${_LD_GC_SECTIONS}")
+  if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # we need to set -Wa,-mbig-obj or build fails with gcc
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wa,-mbig-obj")
+    # on windows gcc requires stdc++exp to link for <format> and <print> functions
+    set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} -lstdc++exp")
+  endif()
 elseif(MSVC)
   set(CMAKE_CXX_FLAGS_DEBUG "/Od /Zi /Zf /DDEBUG")
   set(CMAKE_CXX_FLAGS_RELEASE "/O2 /GL /DNDEBUG")
@@ -103,7 +109,10 @@ option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 
-if(ENABLE_TESTING AND (UNIX OR APPLE))
+if(ENABLE_TESTING
+   AND (UNIX
+        OR APPLE
+        OR WIN32))
   include(CTest)
   list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
   enable_testing()
@@ -360,6 +369,13 @@ install(DIRECTORY ${pmt_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDE
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
 
+# the script configure won't run on win32 without asking bash to do it
+if(WIN32)
+  set(BASH "bash.exe")
+else()
+  set(BASH "")
+endif()
+
 # FFTW3 is build 2 times for float and double precisions
 set(FFTW_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/fftw)
 if(EMSCRIPTEN)
@@ -396,6 +412,7 @@ if(EMSCRIPTEN)
 else()
   set(FFTW_CFLAGS "${CFLAGS} -fPIC -w -O2 -g0 -march=native -mtune=native -ffunction-sections -fdata-sections")
   set(FFTW_CONFIG
+      ${BASH}
       ${FFTW_PREFIX}/src/configure
       --enable-silent-rules
       --quiet
@@ -487,7 +504,9 @@ add_subdirectory(algorithm)
 add_subdirectory(blocks)
 
 if(ENABLE_TESTING
-   AND (UNIX OR APPLE)
+   AND (UNIX
+        OR APPLE
+        OR WIN32)
    AND ENABLE_COVERAGE)
   message("Coverage reporting enabled")
   include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake #
