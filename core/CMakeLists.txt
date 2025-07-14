@@ -51,6 +51,10 @@ set_target_properties(gnuradio-blocklib-core
 message(INFO "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
 target_include_directories(gnuradio-blocklib-core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/>)
 target_link_libraries(gnuradio-blocklib-core PUBLIC gnuradio-core)
+if(WIN32)
+  target_compile_definitions(gnuradio-core PUBLIC BUILDING_MYPLUGIN)
+  target_link_libraries(gnuradio-blocklib-core INTERFACE dl)
+endif()
 
 # configure a header file to pass the CMake settings to the source code
 configure_file("${PROJECT_SOURCE_DIR}/cmake/config.hpp.in"
