@@ -651,51 +651,92 @@ const boost::ut::suite StreamTagConcept = [] {
     };
 };
 
-const boost::ut::suite NonPowerTwoTests = [] {
+template<typename T>
+void runWrapAroundTest(std::size_t minBufferSize) {
+    using namespace boost::ut;
+    using namespace gr;
+    BufferLike auto buffer = CircularBuffer<T>(minBufferSize);
+
+    const std::string testInfo = gr::meta::type_name<T>();
+
+    expect(std::has_single_bit(buffer.size())) << testInfo << std::format("buffer size ({}) must be power-of-two", buffer.size());
+    expect(ge(buffer.size(), minBufferSize)) << testInfo;
+
+    BufferWriterLike auto writer = buffer.new_writer();
+    BufferReaderLike auto reader = buffer.new_reader();
+
+    const auto nSamplesToWrite = static_cast<std::size_t>(0.9f * static_cast<float>(buffer.size()));
+    const auto generateSamples = [&] {
+        for (std::size_t i = 0; i < nSamplesToWrite; ++i) {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(1);
+            expect(eq(span.size(), 1uz)) << testInfo;
+            static std::int64_t counter = 0;
+
+            for (auto& elem : span) {
+                if constexpr (std::is_same_v<T, std::vector<std::int64_t>>) {
+                    elem.resize(1);
+                    elem[0] = counter++;
+                } else {
+                    elem.a = counter++;
+                }
+            }
+        }
+    };
+
+    const auto readSamples = [&] {
+        static std::int64_t counter            = 0;
+        std::size_t         wrongValuesCounter = 0;
+        while (reader.available()) {
+            auto span = reader.get(reader.available());
+
+            for (auto& elem : span) {
+                std::int64_t value = [&] {
+                    if constexpr (std::is_same_v<T, std::vector<std::int64_t>>) {
+                        return elem[0];
+                    } else {
+                        return elem.a;
+                    }
+                }();
+                if (value != counter) {
+                    wrongValuesCounter++;
+                }
+                counter++;
+            }
+            expect(eq(wrongValuesCounter, 0uz)) << testInfo << "All read values must be correct, some of them are not correct";
+            expect(span.consume(span.size())) << testInfo;
+        }
+    };
+
+    // many cycles to force several wrap-arounds
+    for (int i = 0; i < 10; i++) {
+        generateSamples();
+        readSamples();
+    }
+};
+
+const boost::ut::suite WraparoundTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
-    "std::vector<T>"_test = [] {
-        using Type                     = std::vector<int>;
-        constexpr std::size_t typeSize = sizeof(std::vector<int>);
-        expect(not std::has_single_bit(typeSize)) << "type is non-power-of-two";
-        BufferLike auto buffer = CircularBuffer<Type>(1024);
-        expect(ge(buffer.size(), 1024u));
+    static_assert(not std::has_single_bit(sizeof(std::vector<std::int64_t>)));
+    static_assert(not std::is_trivially_copyable_v<std::vector<std::int64_t>>);
+    "std::vector<T>"_test = [] { runWrapAroundTest<std::vector<std::int64_t>>(4096); };
 
-        BufferWriterLike auto writer = buffer.new_writer();
-        BufferReaderLike auto reader = buffer.new_reader();
-
-        const auto genSamples = [&buffer, &writer] {
-            for (std::size_t i = 0UZ; i < buffer.size() - 10UZ; i++) { // write-only worker (source) mock-up
-                WriterSpanLike auto pSpan = writer.tryReserve<SpanReleasePolicy::ProcessAll>(1);
-                expect(eq(pSpan.size(), 1UZ));
-                static int offset = 0;
-                for (auto& vector : pSpan) {
-                    vector.resize(1);
-                    vector[0] = offset++;
-                }
-            }
-        };
-
-        const auto readSamples = [&reader] {
-            while (reader.available()) {
-                ReaderSpanLike auto cSpan = reader.get(reader.available());
-                for (auto& vector : cSpan) {
-                    static int offset = -1;
-                    expect(eq(vector.size(), 1u)) << "vector size == 1";
-                    expect(eq(vector[0] - offset, 1)) << "vector offset == 1";
-                    offset = vector[0];
-                }
-                expect(cSpan.consume(cSpan.size()));
-            }
-        };
-
-        // write-read twice to test wrap-around
-        genSamples();
-        readSamples();
-        genSamples();
-        readSamples();
-    };
+    struct NonPowerOfTwoStructSize {
+        std::int64_t a;
+        std::int64_t b;
+        std::int64_t c;
+    }; // sizeof = 24
+    static_assert(!std::has_single_bit(sizeof(NonPowerOfTwoStructSize)));
+    static_assert(std::is_trivially_copyable_v<NonPowerOfTwoStructSize>);
+    "NonPowerOfTwoStructSize"_test = [] { runWrapAroundTest<NonPowerOfTwoStructSize>(4096); };
+    struct PowerOfTwoStructSize {
+        std::int64_t a;
+        std::int64_t b;
+    }; // sizeof = 16
+    static_assert(std::has_single_bit(sizeof(PowerOfTwoStructSize)));
+    static_assert(std::is_trivially_copyable_v<PowerOfTwoStructSize>);
+    "PowerOfTwoStructSize"_test = [] { runWrapAroundTest<PowerOfTwoStructSize>(4096); };
 };
 
 const boost::ut::suite<"Small Buffers"> _smallBufferTests = [] {
