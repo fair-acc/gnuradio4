@@ -108,6 +108,10 @@ option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
+set(GR_MAX_WASM_THREAD_COUNT
+    60
+    CACHE STRING "Max number of threads for WASM pthread pool")
+add_compile_definitions(GR_MAX_WASM_THREAD_COUNT=${GR_MAX_WASM_THREAD_COUNT}) # propagate to C++
 
 if(ENABLE_TESTING
    AND (UNIX
@@ -291,7 +295,8 @@ if(EMSCRIPTEN)
     # for debug "SHELL:--profiling-funcs" # additional for debug "SHELL:--emit-symbol-map" # additional for debug
     -fwasm-exceptions
     -pthread
-    "SHELL:-s PTHREAD_POOL_SIZE=60"
+    "SHELL:-s PTHREAD_POOL_SIZE=${GR_MAX_WASM_THREAD_COUNT}"
+    "SHELL:-s PTHREAD_POOL_SIZE_STRICT=2"
     "SHELL:-s FETCH=1"
     "SHELL:-s WASM=1" # output as web-assembly
   )
@@ -593,6 +598,7 @@ message(STATUS "ENABLE_TBB                   : ${ENABLE_TBB}")
 message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
 message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
+message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
 message(STATUS "------------------------------------------------")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)
