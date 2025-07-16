@@ -684,7 +684,7 @@ inline std::size_t getTotalThreadCount() {
 #else
     return BasicThreadPool::_globalThreadCount.load(std::memory_order_relaxed);
 #endif
-#else
+#elif defined(__linux__)
     std::ifstream status{"/proc/self/status"};
     std::string   line;
     while (std::getline(status, line)) {
@@ -697,6 +697,10 @@ inline std::size_t getTotalThreadCount() {
         }
     }
     throw std::runtime_error("could not get total thread count");
+    return 0UZ;
+#else
+    // TODO Implement this function for Windows, Apple and other platforms
+    throw std::runtime_error("could not get total thread count, platform not supported yet");
     return 0UZ;
 #endif
 }
