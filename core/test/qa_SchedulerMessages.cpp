@@ -404,7 +404,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
             // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
             sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"timeout_ms", 43}} /* data  */);
-            expect(nothrow([&] { scheduler.scheduler().processScheduledMessages(); })) << "manually execute processing of messages";
+            waitForReply(scheduler.fromScheduler);
 
             stagedSettings = scheduler.scheduler().settings().stagedParameters();
             expect(stagedSettings.contains("timeout_ms"));
