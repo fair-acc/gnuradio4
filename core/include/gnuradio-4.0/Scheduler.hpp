@@ -88,6 +88,7 @@ struct SchedulerBase : Block<Derived> {
     using enum block::Category;
 
 protected:
+    std::shared_ptr<std::atomic_bool>   _valid = std::make_shared<std::atomic_bool>(true);
     gr::Graph                           _graph;
     TProfiler                           _profiler;
     decltype(_profiler.forThisThread()) _profilerHandler;
@@ -159,9 +160,16 @@ public:
             }
         }
         waitDone();
+        if (_valid) {
+            _valid->store(false, std::memory_order_release); // Mark as invalid
+            _valid.reset();
+        } else {
+            return; // exit gracefully
+        }
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
 
+    [[nodiscard]] bool             isValid() const noexcept { return _valid && _valid->load(std::memory_order_acquire); }
     [[nodiscard]] const gr::Graph& graph() const noexcept { return _graph; }
     [[nodiscard]] const TProfiler& profiler() const noexcept { return _profiler; }
 
@@ -370,7 +378,10 @@ protected:
 
         // start watchdog
         auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
-        ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
+        ioThreadPool->execute([this] {
+            this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value, //
+                _valid, _graph._progress, _nRunningJobs, gr::meta::shorten_type_name(this->unique_name));
+        });
 
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
             assert(_nRunningJobs->value() == 0UZ);
@@ -480,17 +491,23 @@ protected:
         nRunningJobs->notify_all();
     }
 
-    void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
-        std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
-        std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
-        const std::string             thisName     = this->unique_name;
-        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", gr::meta::shorten_type_name(thisName)));
-
-        if constexpr (execution != ExecutionPolicy::singleThreaded) {
-#ifndef __EMSCRIPTEN__
-            waitUntilChanged(*nRunningJobs, 0UZ, timeout_ms);
-#endif
+    void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count, //
+        std::shared_ptr<std::atomic_bool> valid, std::shared_ptr<gr::Sequence> progress, std::shared_ptr<gr::Sequence> nRunningJobs, const std::string thisName) {
+        if (!valid || !valid->load(std::memory_order_acquire)) {
+            return; // already entered the destructor
         }
+        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", thisName));
+
+        const auto deadline      = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        const auto checkInterval = std::chrono::milliseconds(std::max(timeout_ms / 10UZ, 1UZ));
+        while (valid->load(std::memory_order_acquire) && nRunningJobs->value() == 0UZ && std::chrono::steady_clock::now() < deadline && lifecycle::isActive(this->state())) {
+            std::this_thread::sleep_for(checkInterval);
+        }
+
+        if (!valid->load(std::memory_order_acquire) || nRunningJobs->value() == 0UZ || !lifecycle::isActive(this->state())) {
+            return; // abort watchdog: scheduler inactive or jobs already finished.
+        }
+
         std::size_t lastProgress = progress->value();
         std::size_t nWarnings    = 0;
         do {
