@@ -892,14 +892,18 @@ const boost::ut::suite<"Drawable Annotations"> _drawableAnnotations = [] {
 
     "drawable"_test = [] {
         struct TestBlock0 : gr::Block<TestBlock0> {
-        } testBlock0;
-        expect(!testBlock0.meta_information.value.contains("Drawable")) << "not drawable";
+            void processOne() {}
+        };
+        auto testBlock0 = gr::BlockWrapper<TestBlock0>();
+        expect(!testBlock0.metaInformation().contains("Drawable")) << "not drawable";
 
         struct TestBlock1 : gr::Block<TestBlock1, gr::Drawable<gr::UICategory::Toolbar, "console">> {
             gr::work::Status draw() { return gr::work::Status::OK; }
-        } testBlock1;
-        expect(testBlock1.meta_information.value.contains("Drawable")) << "drawable";
-        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock1.meta_information.value.at("Drawable"s));
+            void             processOne() {}
+        };
+        auto testBlock1 = gr::BlockWrapper<TestBlock1>();
+        expect(testBlock1.metaInformation().contains("Drawable")) << "drawable";
+        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock1.metaInformation().at("Drawable"s));
         expect(drawableConfigMap.contains("Category"));
         expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
