@@ -15,6 +15,7 @@ set(public_headers
     include/gnuradio-4.0/Graph.hpp
     include/gnuradio-4.0/HistoryBuffer.hpp
     include/gnuradio-4.0/LifeCycle.hpp
+    include/gnuradio-4.0/MemoryAllocators.hpp
     include/gnuradio-4.0/Message.hpp
     include/gnuradio-4.0/PluginLoader.hpp
     include/gnuradio-4.0/Port.hpp

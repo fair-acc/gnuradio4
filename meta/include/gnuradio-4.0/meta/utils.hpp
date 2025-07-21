@@ -1,11 +1,14 @@
 #ifndef GNURADIO_GRAPH_UTILS_HPP
 #define GNURADIO_GRAPH_UTILS_HPP
 
+#include <cassert>
 #include <complex>
 #include <cstdint>
 #include <cxxabi.h>
+#include <format>
 #include <map>
 #include <new>
+#include <numeric>
 #include <print>
 #include <ranges>
 #include <string>
@@ -853,12 +856,6 @@ concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detai
 
 } // namespace meta
 
-#if HAVE_SOURCE_LOCATION
-inline auto this_source_location(std::source_location l = std::source_location::current()) { return std::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
-#else
-inline auto this_source_location() { return "not yet implemented"; }
-#endif // HAVE_SOURCE_LOCATION
-
 template<typename Fn>
 struct on_scope_exit {
     Fn function;
@@ -866,6 +863,153 @@ struct on_scope_exit {
     ~on_scope_exit() { function(); }
 };
 
+struct normalise_t {};
+inline constexpr normalise_t normalise{};
+
+struct Ratio {
+    // data first
+    std::int32_t numerator{1};
+    std::int32_t denominator{1};
+
+    static constexpr Ratio invalid() noexcept { return Ratio{0, 0}; }
+
+    constexpr Ratio(std::int32_t n = 1, std::int32_t d = 1) noexcept : numerator(n), denominator(d) {}
+    constexpr Ratio(std::int32_t n, std::int32_t d, normalise_t) noexcept : Ratio(n, d) { normalise(); }
+
+    explicit constexpr Ratio(std::string_view sv) noexcept : Ratio(parse(sv).value_or(invalid())) {}
+    explicit constexpr Ratio(std::string_view sv, normalise_t) noexcept : Ratio(sv) { normalise(); }
+
+    template<class R> // std::ratio<N,D>
+    constexpr static Ratio from() {
+        return Ratio(R::num, R::den);
+    }
+
+    constexpr std::int32_t num() const noexcept { return numerator; }
+    constexpr std::int32_t den() const noexcept { return denominator; }
+
+    template<typename T = double>
+    constexpr T value() const noexcept {
+        return static_cast<T>(numerator) / static_cast<T>(denominator);
+    }
+
+    constexpr Ratio reciprocal() const {
+        assert(numerator != 0);
+        return Ratio(denominator, numerator);
+    }
+
+    friend constexpr Ratio operator+(const Ratio& a, const Ratio& b) {
+        // minimise overflow: a/b + c/d = (a*lcm_den/b)*lcm_den + ...
+        auto g = std::gcd(a.denominator, b.denominator);
+        // a/b + c/d = (a*(d/g) + c*(b/g)) / lcm
+        std::int32_t l = b.denominator / g;
+        std::int32_t r = a.denominator / g;
+        return Ratio(a.numerator * l + b.numerator * r, a.denominator * l);
+    }
+
+    friend constexpr Ratio operator-(const Ratio& a, const Ratio& b) {
+        auto         g = std::gcd(a.denominator, b.denominator);
+        std::int32_t l = b.denominator / g;
+        std::int32_t r = a.denominator / g;
+        return Ratio(a.numerator * l - b.numerator * r, a.denominator * l);
+    }
+
+    friend constexpr Ratio operator*(const Ratio& a, const Ratio& b) {
+        auto g1 = std::gcd(a.numerator, b.denominator);
+        auto g2 = std::gcd(b.numerator, a.denominator);
+        return Ratio((a.numerator / g1) * (b.numerator / g2), (a.denominator / g2) * (b.denominator / g1));
+    }
+
+    friend constexpr Ratio operator/(const Ratio& a, const Ratio& b) {
+        assert(b.numerator != 0);
+        // a/b ÷ c/d = (a*d)/(b*c)
+        auto g1 = std::gcd(a.numerator, b.numerator);
+        auto g2 = std::gcd(a.denominator, b.denominator);
+        return Ratio((a.numerator / g1) * (b.denominator / g2), (a.denominator / g2) * (b.numerator / g1));
+    }
+
+    friend constexpr Ratio operator-(const Ratio& r) { return Ratio(-r.numerator, r.denominator); }
+    friend constexpr auto  operator<=>(const Ratio& a, const Ratio& b) = default;
+    friend constexpr bool  operator==(const Ratio& a, const Ratio& b)  = default;
+
+    constexpr Ratio& operator+=(const Ratio& other) { return *this = *this + other; }
+    constexpr Ratio& operator-=(const Ratio& other) { return *this = *this - other; }
+    constexpr Ratio& operator*=(const Ratio& other) { return *this = *this * other; }
+    constexpr Ratio& operator/=(const Ratio& other) { return *this = *this / other; }
+
+    // helper
+    static constexpr std::optional<Ratio> parse(std::string_view sv) noexcept {
+        constexpr auto parse = [](std::string_view s) -> std::optional<std::int32_t> {
+            if (s.empty()) {
+                return std::nullopt;
+            }
+
+            bool        neg = (s.front() == '-');
+            std::size_t i   = (s.front() == '+' || neg) ? 1 : 0;
+            if (i == s.size()) {
+                return std::nullopt;
+            }
+
+            std::int32_t   v = 0;
+            constexpr auto M = std::numeric_limits<std::int32_t>::max();
+            constexpr auto m = std::numeric_limits<std::int32_t>::min();
+
+            for (; i < s.size(); ++i) {
+                char c = s[i];
+                if (c < '0' || c > '9') {
+                    return std::nullopt;
+                }
+                const std::int32_t d = c - '0';
+
+                if (!neg) {
+                    if (v > (M - d) / 10) {
+                        return std::nullopt;
+                    }
+                    v = v * 10 + d;
+                } else {
+                    if (v < (m + d) / 10) {
+                        return std::nullopt;
+                    }
+                    v = v * 10 - d;
+                }
+            }
+            return v;
+        };
+
+        const auto slash = sv.find('/');
+        const auto lhs   = sv.substr(0, slash);
+        const auto rhs   = (slash == std::string_view::npos) ? std::string_view{"1"} : sv.substr(slash + 1);
+
+        auto n = parse(lhs);
+        auto d = parse(rhs);
+        if (!n || !d || *d == 0) {
+            return std::nullopt;
+        }
+        return Ratio{*n, *d};
+    }
+
+    constexpr void normalise() {
+        if (denominator == 0) {
+            std::unreachable();
+        }
+        if (denominator < 0) {
+            denominator = -denominator;
+            numerator   = -numerator;
+        }
+        if (auto g = std::gcd(numerator, denominator); g > 1) {
+            numerator /= g;
+            denominator /= g;
+        }
+    }
+};
+
 } // namespace gr
+
+template<>
+struct std::formatter<gr::Ratio> : std::formatter<std::string_view> {
+    template<class FormatContext>
+    auto format(const gr::Ratio& r, FormatContext& ctx) const {
+        return std::formatter<std::string_view>::format((r.den() == 1) ? std::format("{}", r.num()) : std::format("{}/{}", r.num(), r.den()), ctx);
+    }
+};
 
 #endif // include guard
