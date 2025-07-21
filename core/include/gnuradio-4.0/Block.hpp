@@ -1371,12 +1371,14 @@ protected:
 
     std::size_t getMergedBlockLimit() {
         if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
-            return 0;
+            return 0UZ;
         } else if constexpr (requires(const Derived& d) {
                                  { available_samples(d) } -> std::same_as<std::size_t>;
                              }) {
             return available_samples(self());
-        } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0 && traits::block::stream_output_port_types<Derived>::size == 0) { // allow blocks that have neither input nor output ports (by merging source to sink block) -> use internal buffer size
+        } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0UZ     // allow blocks that have neither input nor output ports
+                             && traits::block::stream_output_port_types<Derived>::size == 0UZ // (by merging source to sink block) -> use internal buffer size
+                             && requires { Derived::merged_work_chunk_size(); }) {            //
             constexpr gr::Size_t chunkSize = Derived::merged_work_chunk_size();
             static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
                                                                              "friend function `available_samples(const BlockType&)` must be defined.");

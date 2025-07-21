@@ -14,7 +14,7 @@
 #include <typeinfo>
 #include <unordered_map>
 
-#if __has_include(<stdfloat>)
+#if __has_include(<stdfloat>) && !defined(__ADAPTIVECPP__)
 #include <stdfloat>
 #else
 #include <cstdint>

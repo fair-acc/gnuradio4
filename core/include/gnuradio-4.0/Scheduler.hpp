@@ -88,6 +88,8 @@ struct SchedulerBase : Block<Derived> {
     using enum block::Category;
 
 protected:
+    std::atomic_bool                    _valid{true};
+    std::atomic<std::size_t>            _nWatchdogsRunning{0};
     gr::Graph                           _graph;
     TProfiler                           _profiler;
     decltype(_profiler.forThisThread()) _profilerHandler;
@@ -159,6 +161,14 @@ public:
             }
         }
         waitDone();
+
+        _valid.store(false, std::memory_order_release); // Mark as invalid
+
+        // the watchdog dereferences SchedulerBase, wait until it finishes
+        while (_nWatchdogsRunning.load() != 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
 
@@ -370,6 +380,10 @@ protected:
 
         // start watchdog
         auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
+
+        // keep outside of the lambda, as ~SchedulerBase() might finish before watchdog even starts
+        _nWatchdogsRunning.fetch_add(1, std::memory_order_acq_rel);
+
         ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
 
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
@@ -481,27 +495,32 @@ protected:
     }
 
     void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
-        std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
-        std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
-        const std::string             thisName     = this->unique_name;
-        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", gr::meta::shorten_type_name(thisName)));
+        on_scope_exit _ = [this] { _nWatchdogsRunning.fetch_sub(1, std::memory_order_acq_rel); };
 
-        if constexpr (execution != ExecutionPolicy::singleThreaded) {
-#ifndef __EMSCRIPTEN__
-            waitUntilChanged(*nRunningJobs, 0UZ, timeout_ms);
-#endif
+        auto thisName = gr::meta::shorten_type_name(this->unique_name);
+        gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", thisName));
+
+        const auto deadline      = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        const auto checkInterval = std::chrono::milliseconds(std::max(timeout_ms / 10UZ, 1UZ));
+        while (_valid.load(std::memory_order_acquire) && _nRunningJobs->value() == 0UZ && std::chrono::steady_clock::now() < deadline && lifecycle::isActive(this->state())) {
+            std::this_thread::sleep_for(checkInterval);
         }
-        std::size_t lastProgress = progress->value();
+
+        if (!_valid.load(std::memory_order_acquire) || _nRunningJobs->value() == 0UZ || !lifecycle::isActive(this->state())) {
+            return; // abort watchdog: scheduler inactive or jobs already finished.
+        }
+
+        std::size_t lastProgress = _graph._progress->value();
         std::size_t nWarnings    = 0;
         do {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeOut_ms));
             // check and increase progress if there hasn't been none.
 
-            std::size_t currentProgress = progress->value();
-            if ((nRunningJobs->value() > 0UZ) && (currentProgress == lastProgress)) {
+            std::size_t currentProgress = _graph._progress->value();
+            if ((_nRunningJobs->value() > 0UZ) && (currentProgress == lastProgress)) {
                 nWarnings++;
-                lastProgress = progress->incrementAndGet(); // watchdog triggered manual update
-                progress->notify_all();
+                lastProgress = _graph._progress->incrementAndGet(); // watchdog triggered manual update
+                _graph._progress->notify_all();
                 if (nWarnings >= timeOut_count) {
                     std::println(stderr, "trigger watchdog update {} of {} in {}", nWarnings, timeOut_count, thisName);
                     // log or escalate (e.g., throw, abort, notify external watchdog)
@@ -510,7 +529,7 @@ protected:
                 lastProgress = currentProgress;
                 nWarnings    = 0UZ;
             }
-        } while (nRunningJobs->value() > 0UZ);
+        } while (_nRunningJobs->value() > 0UZ);
     }
 
     void stop() {
