@@ -382,11 +382,18 @@ public:
     virtual void setName(std::string name) noexcept = 0;
 
     /**
-     * @brief used to store non-graph-processing information like UI block position etc.
+     * @brief used to store static non-graph-processing information like Annotated<> info etc.
      */
     [[nodiscard]] virtual property_map& metaInformation() noexcept = 0;
 
     [[nodiscard]] virtual const property_map& metaInformation() const = 0;
+
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] virtual property_map& uiConstraints() noexcept = 0;
+
+    [[nodiscard]] virtual const property_map& uiConstraints() const = 0;
 
     /**
      * @brief process-wide unique name
@@ -557,8 +564,10 @@ public:
     [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
     void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
     [[nodiscard]] std::string_view           typeName() const override { return _type_name; }
-    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; }
+    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; } // TODO: to be removed (read-only)
     [[nodiscard]] const property_map&        metaInformation() const override { return blockRef().meta_information; }
+    [[nodiscard]] property_map&              uiConstraints() noexcept override { return blockRef().ui_constraints; }
+    [[nodiscard]] const property_map&        uiConstraints() const override { return blockRef().ui_constraints; }
     [[nodiscard]] std::string_view           uniqueName() const override { return blockRef().unique_name; }
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }

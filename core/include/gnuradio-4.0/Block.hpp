@@ -199,6 +199,9 @@ inline static const char* kSetting        = "Settings";       ///< asynchronous 
                                                               // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
 inline static const char* kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
 
+inline static const char* kMetaInformation = "MetaInformation"; ///< asynchronous message-based retrieval of the static meta-information (i.e. Annotated<> interfaces, constraints, etc...)
+inline static const char* kUiConstraints   = "UiConstraints";   ///< asynchronous message-based retrieval of user-defined UI constraints
+
 inline static const char* kStoreDefaults    = "StoreDefaults";    ///< store present settings as default, for counterpart @see kResetDefaults
 inline static const char* kResetDefaults    = "ResetDefaults";    ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
 inline static const char* kActiveContext    = "ActiveContext";    ///< retrieve and set active context
@@ -299,6 +302,8 @@ enum class Category {
  * - `kActiveContext`: Returns current active context and allows to set a new one
  * - `kSettingsCtx`: Manages Settings Contexts Add/Remove/Get
  * - `kSettingsContexts`: Returns all Contextxs
+ * - `kMetaInformation`: returns static meta-information (i.e. Annotated<> interfaces, constraints, etc...) (N.B. does not affect Block operation)
+ * - `kUiConstraints`: returns user-defined UI constraints (N.B. does not affect Block operation)
  *
  * These properties can be interacted with through messages, supporting operations like setting values, querying states, and subscribing to updates.
  * This model provides a flexible interface for blocks to adapt their processing based on runtime conditions and external inputs.
@@ -421,9 +426,10 @@ public:
         return ret;
     }
 
-    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
+    A<property_map, "ui-constraints", Doc<"store non-graph-processing information like UI block position etc.">>         ui_constraints;
+    A<property_map, "meta-information", Doc<"store static non-graph-processing information like Annotated<> info etc.">> meta_information = initMetaInfo();
 
-    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, meta_information);
+    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, ui_constraints, meta_information);
 
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
@@ -443,6 +449,8 @@ public:
         {block::property::kActiveContext, std::mem_fn(&Block::propertyCallbackActiveContext)},       //
         {block::property::kSettingsCtx, std::mem_fn(&Block::propertyCallbackSettingsCtx)},           //
         {block::property::kSettingsContexts, std::mem_fn(&Block::propertyCallbackSettingsContexts)}, //
+        {block::property::kMetaInformation, std::mem_fn(&Block::propertyCallbackMetaInformation)},   //
+        {block::property::kUiConstraints, std::mem_fn(&Block::propertyCallbackUiConstraints)},       //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
@@ -1200,6 +1208,57 @@ protected:
                 {"times", times},
             };
             return message;
+        }
+
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message> propertyCallbackMetaInformation(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kMetaInformation);
+
+        if (message.cmd == Set) {
+            throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+            return std::nullopt;
+        } else if (message.cmd == Get) {
+            message.data = self().meta_information.value; // get
+            return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            return std::nullopt;
+        }
+
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message> propertyCallbackUiConstraints(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kUiConstraints);
+
+        if (message.cmd == Set) {
+            if (!message.data.has_value()) {
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+            }
+            // delegate to 'propertyCallbackStagedSettings' since we cannot set but only stage new settings due to mandatory real-time/non-real-time decoupling
+            // settings are applied during the next work(...) invocation.
+            propertyCallbackStagedSettings(block::property::kStagedSetting, message);
+            return std::nullopt;
+        } else if (message.cmd == Get) {                // only return ui_constraints
+            message.data = self().ui_constraints.value; // get
+            return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            return std::nullopt;
         }
 
         throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
