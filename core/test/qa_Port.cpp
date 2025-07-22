@@ -36,7 +36,7 @@ bool equalTags(auto tags, auto expected) {
     return true;
 }
 
-const boost::ut::suite PortTests = [] {
+const boost::ut::suite<"Port"> _portTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
@@ -139,6 +139,139 @@ const boost::ut::suite PortTests = [] {
             expect(std::ranges::equal(data, std::views::iota(105) | std::views::take(5)));
             expect(std::ranges::equal(tags, std::vector<gr::Tag>{{5, {{"id", "tag@0"}}}, {6, {{"id", "tag@106"}}}, {9, {{"id", "tag@109"}}}}));
         }
+    };
+};
+
+boost::ut::suite<"port::BitMask"> _bitmask = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::port;
+
+    "bitmask encode/decode"_test = [] {
+        constexpr BitMask m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, false);
+        expect(static_cast<bool>(m & BitMask::Input));
+        expect(static_cast<bool>(m & BitMask::Stream));
+        expect(static_cast<bool>(m & BitMask::Synchronous));
+        expect(not static_cast<bool>(m & BitMask::Optional));
+        expect(not static_cast<bool>(m & BitMask::Connected));
+    };
+
+    "bitmask match - exact sync"_test = [] {
+        const BitMask m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, false);
+        const auto    p = matchBits(PortSync::SYNCHRONOUS);
+        expect(p.matches(m)) << "Expected synchronous bit to match";
+    };
+
+    "bitmask match - async mismatch"_test = [] {
+        const BitMask m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, false);
+        const auto    p = matchBits(PortSync::ASYNCHRONOUS);
+        expect(not p.matches(m)) << "Expected mismatch for ASYNC vs SYNC";
+    };
+
+    "bitmask match - any port direction"_test = [] {
+        const BitMask m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, false);
+        const auto    p = matchBits(PortDirection::ANY);
+        expect(p.matches(m)) << "ANY direction must not filter";
+    };
+
+    "pattern composition with |"_test = [] {
+        const BitPattern p1       = matchBits(PortDirection::INPUT);
+        const BitPattern p2       = matchBits(PortSync::SYNCHRONOUS);
+        const auto       composed = p1 | p2;
+
+        const BitMask m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, false);
+        expect(composed.matches(m)) << "Composed mask should match";
+    };
+
+    "pattern<...> NTTP matcher"_test = [] {
+        constexpr auto pat = pattern<PortDirection::OUTPUT, PortSync::ASYNCHRONOUS>();
+        const BitMask  m1  = encodeMask(PortDirection::OUTPUT, PortType::MESSAGE, false, false, false);
+        const BitMask  m2  = encodeMask(PortDirection::INPUT, PortType::MESSAGE, false, false, false);
+
+        expect(pat.matches(m1));
+        expect(!pat.matches(m2));
+    };
+
+    "encodeMask OUTPUT/MESSAGE/optional/connected"_test = [] {
+        const BitMask m = encodeMask(PortDirection::OUTPUT, PortType::MESSAGE, false, true, true);
+        expect(not any(m, BitMask::Input));
+        expect(not any(m, BitMask::Stream));
+        expect(not any(m, BitMask::Synchronous));
+        expect(any(m, BitMask::Optional));
+        expect(any(m, BitMask::Connected));
+    };
+
+    "predicates & decoders"_test = [] {
+        const BitMask m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, true, true);
+        expect(isInput(m));
+        expect(isStream(m));
+        expect(isSynchronous(m));
+        expect(isConnected(m));
+        expect(decodeDirection(m) == PortDirection::INPUT);
+        expect(decodePortType(m) == PortType::STREAM);
+    };
+
+    "decode from None"_test = [] {
+        constexpr BitMask m = BitMask::None;
+        expect(not isInput(m));
+        expect(not isStream(m));
+        expect(not isSynchronous(m));
+        expect(not isConnected(m));
+        expect(decodeDirection(m) == PortDirection::OUTPUT); // default when Input-bit not set
+        expect(decodePortType(m) == PortType::MESSAGE);      // default when Stream-bit not set
+    };
+
+    "enum comparison operators"_test = [] {
+        const BitMask m = encodeMask(PortDirection::INPUT, PortType::STREAM, false, false, false);
+        expect(m == PortDirection::INPUT);
+        expect(m != PortDirection::OUTPUT);
+        expect(PortType::STREAM == m);
+        expect(PortType::MESSAGE != m);
+    };
+
+    "bitwise ops"_test = [] {
+        using enum BitMask;
+        constexpr BitMask a = Input | Stream;
+        constexpr BitMask b = Stream | Synchronous;
+        expect(any(a & Input, Input));
+        expect(any(b & Stream, Stream));
+        expect(not any(a & Synchronous, Synchronous));
+    };
+
+    "BitPattern::Any matches everything"_test = [] {
+        const auto    anyPat = BitPattern::Any();
+        const BitMask m1     = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, false);
+        const BitMask m2     = encodeMask(PortDirection::OUTPUT, PortType::MESSAGE, false, true, true);
+        expect(anyPat.matches(m1));
+        expect(anyPat.matches(m2));
+        expect(anyPat.matches(BitMask::None));
+    };
+
+    "matchBits don't-care Optional/Connected"_test = [] {
+        const BitPattern p = matchBits(PortDirection::INPUT); // only masks 'Input'
+        const BitMask    m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, true, true);
+        expect(p.matches(m)) << "Extra bits must not invalidate the match";
+    };
+
+    "matchBits OUTPUT/MESSAGE"_test = [] {
+        const BitPattern pd = matchBits(PortDirection::OUTPUT);
+        const BitPattern pt = matchBits(PortType::MESSAGE);
+        const BitMask    m  = encodeMask(PortDirection::OUTPUT, PortType::MESSAGE, false, false, false);
+        expect(pd.matches(m));
+        expect(pt.matches(m));
+    };
+
+    "pattern<> empty pack == Any"_test = [] {
+        constexpr auto pat = pattern<>();
+        const BitMask  m1  = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, true);
+        expect(pat.matches(m1));
+        expect(pat.matches(BitMask::None));
+    };
+
+    "pattern mismatch"_test = [] {
+        const BitPattern p = matchBits(PortDirection::INPUT) | matchBits(PortSync::ASYNCHRONOUS);
+        const BitMask    m = encodeMask(PortDirection::INPUT, PortType::STREAM, true, false, false); // SYNC
+        expect(not p.matches(m));
     };
 };
 

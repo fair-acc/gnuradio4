@@ -771,6 +771,7 @@ public:
             }
             notifyListeners(block::property::kSetting, settings().get());
         });
+        // TODO: reset cache config here -> triggers a potential cached array size adjustment
     }
 
     constexpr static auto prepareStreams(auto ports, std::size_t nSyncSamples) {
@@ -1270,8 +1271,8 @@ protected:
      * @param ports a typelist of input or output ports
      * @return an anonymous struct representing the amount of available data on the ports
      */
-    template<typename P>
-    auto getPortLimits(P&& ports) {
+    template<typename TPorts>
+    auto getPortLimits(TPorts&& ports) {
         struct {
             std::size_t minSync      = 0UL;                                     // the minimum amount of samples that the block needs for processing on the sync ports
             std::size_t maxSync      = std::numeric_limits<std::size_t>::max(); // the maximum amount of that can be consumed on all sync ports
@@ -1296,8 +1297,121 @@ protected:
                 }
             }
         };
-        for_each_port([&adjustForInputPort](PortLike auto& port) { adjustForInputPort(port); }, std::forward<P>(ports));
+        for_each_port([&adjustForInputPort](PortLike auto& port) { adjustForInputPort(port); }, std::forward<TPorts>(ports));
         return result;
+    }
+
+    template<PortDirection portDirection, PortType portType = PortType::STREAM, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+    requires(std::is_same_v<T, port::BitMask>)
+    [[nodiscard]] constexpr std::span<const port::BitMask> getPortTypes(const Derived& self, Range& result) const noexcept {
+        result.clear();
+        auto func = [&result]<gr::PortLike Port>(const Port& port) noexcept {
+            port::BitMask mask = port::encodeMask(Port::kDirection, Port::kPortType, Port::kIsSynch, Port::kIsOptional, port.isConnected());
+            result.push_back(mask);
+        };
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port(std::move(func), inputPorts<portType>(&self));
+        } else if constexpr (portDirection == PortDirection::OUTPUT) {
+            for_each_port(std::move(func), outputPorts<portType>(&self));
+        } else {
+            static_assert(gr::meta::always_false<Derived>, "PortDirection::ANY not supported");
+        }
+
+        return result;
+    }
+
+    template<PortDirection portDirection, PortType portType = PortType::STREAM, std::ranges::range Range, typename Fn>
+    [[nodiscard]] constexpr std::span<const std::size_t> getPortConstraints(const Derived& self, Range& storage, Fn&& function) {
+        if (std::ranges::size(storage) == 0UZ) {
+            return {};
+        }
+#if __has_cpp_attribute(assume)
+        [[assume(std::ranges::size(storage) > 0UZ)]]; // non-empty storage guarantee (has been allocated externally)
+#endif
+        auto&& fn = std::forward<Fn>(function);
+        auto   it = storage.begin();
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, inputPorts<portType>(&self));
+        } else if constexpr (portDirection == PortDirection::OUTPUT) {
+            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, outputPorts<portType>(&self));
+        } else {
+            static_assert(gr::meta::always_false<Range>, "PortDirection::ANY not supported");
+        }
+
+        return {std::data(storage), static_cast<std::size_t>(std::distance(std::begin(storage), it))};
+    }
+
+    template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+    [[nodiscard]] constexpr std::optional<T> min_element(Range&& range) {
+        if (auto it = std::ranges::min_element(range); it != std::ranges::end(range)) {
+            return *it;
+        }
+        return std::nullopt;
+    }
+
+    template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+    [[nodiscard]] constexpr std::optional<T> min_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
+        auto zipped   = std::ranges::views::zip(range, portMaskVec);
+        auto filtered = zipped | std::views::filter([](const auto& pair) {
+            const auto& mask = std::get<1>(pair);
+            return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
+        }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
+
+        return min_element(filtered);
+    }
+
+    template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+    std::optional<T> max_element(Range&& range) {
+        if (auto it = std::ranges::max_element(range); it != std::ranges::end(range)) {
+            return *it;
+        }
+        return std::nullopt;
+    }
+
+    template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+    [[nodiscard]] constexpr std::optional<T> max_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
+        auto zipped   = std::ranges::views::zip(range, portMaskVec);
+        auto filtered = zipped | std::views::filter([](const auto& pair) {
+            const auto& mask = std::get<1>(pair);
+            return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
+        }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
+
+        return max_element(filtered);
+    }
+
+    template<typename T, std::size_t simd_width = stdx::simd_abi::max_fixed_size<T>>
+    [[nodiscard]] constexpr bool compareSpans(const std::span<T>& a, const std::span<T>& b) noexcept {
+        const std::size_t size = std::min(a.size(), b.size());
+        if (size == 0UZ) {
+            return false;
+        }
+
+        // SIMD loop
+        std::size_t i = 0UZ;
+        for (; i + simd_width <= size; i += simd_width) {
+            using TSimd = stdx::fixed_size_simd<T, simd_width>;
+            TSimd a_chunk(&a[i], stdx::vector_aligned);
+            TSimd b_chunk(&b[i], stdx::vector_aligned);
+
+            if (stdx::any_of(a_chunk >= b_chunk)) { // true: any element of a[i] >= b[i]
+                return true;
+            }
+        }
+
+        // SIMD epilogue
+        for (; i < size; ++i) {
+            if (a[i] >= b[i]) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    template<auto... MatchPortEnums, std::ranges::input_range RangeA, std::ranges::input_range RangeB, std::ranges::input_range MaskRange>
+    [[nodiscard]] constexpr bool compareRangesMasked(RangeA&& a, RangeB&& b, MaskRange&& mask) {
+        auto zipped = std::ranges::views::zip(a, b, mask) | std::views::filter([](const auto& tup) { return port::pattern<MatchPortEnums...>().matches(std::get<2>(tup)); });
+        return std::ranges::any_of(zipped, [](const auto& tup) { return std::get<0UZ>(tup) >= std::get<1UZ>(tup); });
     }
 
     /***
@@ -1644,7 +1758,45 @@ protected:
         }
 
         // evaluate number of available and processable samples
-        const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn]     = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+        // N.B. kept here as local variables just for testing the backward compatibility
+        // to be moved into a cache store that is (re-)initialised whenever the port/settings conf has changed.
+        std::vector<port::BitMask>     _portTypes;
+        std::span<const port::BitMask> portTypes = getPortTypes<PortDirection::INPUT, PortType::STREAM>(self(), _portTypes);
+        std::vector<std::size_t>       _availableInputSamples(portTypes.size(), 0UZ);
+        std::vector<std::size_t>       _PortMinSamples(portTypes.size(), 0UZ);
+        std::vector<std::size_t>       _PortMaxSamples(portTypes.size(), gr::undefined_size);
+
+        // following will be wrapped into -- for example -- std::span<std::size_t> BlockModel::availableInputSamples(bool reset = false/true)
+        // to allow pre-calculation by scheduler - false: use the previously calculated result (final semantic to be verified)
+        auto              availSpan           = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _availableInputSamples, [](auto& port) { return port.streamReader().available(); });
+        auto              minsSpan            = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _PortMinSamples, [](auto& port) { return port.min_samples; });
+        auto              maxsSpan            = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _PortMaxSamples, [](auto& port) { return port.max_samples; });
+        const std::size_t maxSyncAvailableIn2 = min_element_masked<PortSync::SYNCHRONOUS>(availSpan, portTypes).value_or(gr::undefined_size);
+        const std::size_t minSyncIn2          = max_element_masked<PortSync::SYNCHRONOUS>(minsSpan, portTypes).value_or(0UZ);
+        const std::size_t maxSyncIn2          = min_element_masked<PortSync::SYNCHRONOUS>(maxsSpan, portTypes).value_or(gr::undefined_size);
+        const std::size_t hasAsyncIn2         = compareRangesMasked<PortSync::ASYNCHRONOUS>(availSpan, minsSpan, portTypes);
+
+        // const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn] = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+
+        auto minSyncIn          = minSyncIn2;
+        auto maxSyncIn          = maxSyncIn2;
+        auto maxSyncAvailableIn = maxSyncAvailableIn2;
+        auto hasAsyncIn         = hasAsyncIn2;
+
+        if (minSyncIn != minSyncIn2 || maxSyncIn != maxSyncIn2 || maxSyncAvailableIn != maxSyncAvailableIn2 || hasAsyncIn != hasAsyncIn2) {
+            std::println("block: {}", unique_name);
+            std::println("   V1: - minSyncIn: {}, maxSyncIn: {}, maxSyncAvailableIn: {}, hasAsyncIn: {}", minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn);
+            std::println("   V2: - minSyncIn: {}, maxSyncIn: {}, maxSyncAvailableIn: {}, hasAsyncIn: {}", minSyncIn2, maxSyncIn2, maxSyncAvailableIn2, hasAsyncIn2);
+            std::println("       availableInputSamples: {}", availSpan);
+            for (std::size_t i = 0; i < portTypes.size(); ++i) {
+                std::println("     [{}] mask={:08b} avail={} min={} max={}", i, static_cast<uint8_t>(portTypes[i]), availSpan[i], minsSpan[i], maxsSpan[i]);
+            }
+        }
+        assert(minSyncIn == minSyncIn2);
+        assert(maxSyncIn == maxSyncIn2);
+        assert(maxSyncAvailableIn == maxSyncAvailableIn2);
+        assert(hasAsyncIn == hasAsyncIn2);
+
         const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
         std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these

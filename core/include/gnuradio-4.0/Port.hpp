@@ -24,13 +24,120 @@ enum class PortDirection { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not
 
 enum class ConnectionResult { SUCCESS, FAILED };
 
-// FIXME: can we still rename this to e.g. PortFlavor? "type" has a very specific meaning in C++ already. And since
-// we're doing a lot of reflection on ports there's ambiguity all over the place.
 enum class PortType {
     STREAM,  /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
     MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
     ANY      // 'ANY' only for querying and not to be used for port declarations
 };
+
+enum class PortSync { SYNCHRONOUS, ASYNCHRONOUS };
+
+namespace port {
+enum class BitMask : uint8_t {
+    None        = 0U,
+    Input       = 1U << 0U,
+    Stream      = 1U << 1U,
+    Synchronous = 1U << 2U,
+    Optional    = 1U << 3U,
+    Connected   = 1U << 4U,
+};
+
+constexpr BitMask operator|(BitMask a, BitMask b) { return static_cast<BitMask>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b)); }
+constexpr BitMask operator&(BitMask a, BitMask b) { return static_cast<BitMask>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b)); }
+constexpr bool    any(BitMask mask, BitMask test) { return static_cast<uint8_t>(mask & test) != 0; }
+
+[[nodiscard]] inline constexpr BitMask encodeMask(PortDirection dir, PortType type, bool synchronous, bool optional, bool connected) noexcept {
+    assert(dir != PortDirection::ANY && "ANY is not encodable");
+    assert(type != PortType::ANY && "ANY is not encodable");
+
+    using enum BitMask;
+    BitMask mask = None;
+    if (dir == PortDirection::INPUT) {
+        mask = mask | Input;
+    }
+    if (type == PortType::STREAM) {
+        mask = mask | Stream;
+    }
+    if (synchronous) {
+        mask = mask | Synchronous;
+    }
+    if (optional) {
+        mask = mask | Optional;
+    }
+    if (connected) {
+        mask = mask | Connected;
+    }
+    return mask;
+}
+
+struct BitPattern {
+    std::uint8_t mask;
+    std::uint8_t value;
+
+    constexpr BitPattern(BitMask m, BitMask v) : mask(static_cast<std::uint8_t>(m)), value(static_cast<std::uint8_t>(v)) {}
+    constexpr BitPattern(BitMask m, std::uint8_t v) : mask(static_cast<std::uint8_t>(m)), value(v) {}
+    constexpr BitPattern(std::uint8_t m, std::uint8_t v) : mask(m), value(v) {}
+
+    [[nodiscard]] constexpr bool matches(std::uint8_t bits) const { return (bits & mask) == value; }
+    [[nodiscard]] constexpr bool matches(BitMask b) const { return matches(static_cast<std::uint8_t>(b)); }
+    constexpr BitPattern         operator|(const BitPattern& other) const { return BitPattern(static_cast<uint8_t>(mask | other.mask), static_cast<uint8_t>(value | other.value)); }
+    static constexpr BitPattern  Any() { return BitPattern{0U, 0U}; }
+};
+
+[[nodiscard]] inline constexpr bool isConnected(BitMask m) { return any(m, BitMask::Connected); }
+[[nodiscard]] inline constexpr bool isInput(BitMask m) { return any(m, BitMask::Input); }
+[[nodiscard]] inline constexpr bool isStream(BitMask m) { return any(m, BitMask::Stream); }
+[[nodiscard]] inline constexpr bool isSynchronous(BitMask m) { return any(m, BitMask::Synchronous); }
+
+[[nodiscard]] inline constexpr PortDirection decodeDirection(BitMask m) { return isInput(m) ? PortDirection::INPUT : PortDirection::OUTPUT; }
+[[nodiscard]] inline constexpr PortType      decodePortType(BitMask m) { return isStream(m) ? PortType::STREAM : PortType::MESSAGE; }
+
+// comparison operators
+[[nodiscard]] inline constexpr bool operator==(BitMask mask, PortDirection dir) { return decodeDirection(mask) == dir; }
+[[nodiscard]] inline constexpr bool operator!=(BitMask mask, PortDirection dir) { return !(mask == dir); }
+[[nodiscard]] inline constexpr bool operator==(BitMask mask, PortType type) { return decodePortType(mask) == type; }
+[[nodiscard]] inline constexpr bool operator!=(BitMask mask, PortType type) { return !(mask == type); }
+[[nodiscard]] inline constexpr bool operator==(PortDirection dir, BitMask mask) { return mask == dir; }
+[[nodiscard]] inline constexpr bool operator!=(PortDirection dir, BitMask mask) { return !(mask == dir); }
+[[nodiscard]] inline constexpr bool operator==(PortType type, BitMask mask) { return mask == type; }
+[[nodiscard]] inline constexpr bool operator!=(PortType type, BitMask mask) { return !(mask == type); }
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortDirection d) {
+    using enum BitMask;
+    switch (d) {
+    case PortDirection::INPUT: return {Input, Input};
+    case PortDirection::OUTPUT: return {Input, 0UZ};
+    case PortDirection::ANY: return BitPattern::Any();
+    }
+    return BitPattern::Any();
+}
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortType t) {
+    using enum BitMask;
+    switch (t) {
+    case PortType::STREAM: return {Stream, Stream};
+    case PortType::MESSAGE: return {Stream, 0UZ};
+    case PortType::ANY: return BitPattern::Any();
+    }
+    return BitPattern::Any();
+}
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortSync s) {
+    using enum BitMask;
+    switch (s) {
+    case PortSync::SYNCHRONOUS: return {Synchronous, Synchronous};
+    case PortSync::ASYNCHRONOUS: return {Synchronous, 0UZ};
+    }
+    return BitPattern::Any();
+}
+
+template<auto... Enums>
+[[nodiscard]] consteval BitPattern pattern() {
+    BitPattern combined = BitPattern::Any();
+    ((combined = combined | matchBits(Enums)), ...);
+    return combined;
+}
+} // namespace port
 
 /**
  * @brief optional port annotation argument to described whether the port can be handled within the same scheduling domain.
