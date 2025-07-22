@@ -9,6 +9,7 @@
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "message_utils.hpp"
+#include "utils.hpp"
 
 namespace gr::subgraph_test {
 
@@ -71,16 +72,13 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
-        std::expected<void, Error> schedulerRet;
-        auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
-
         sendMessage<Set>(toScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort, //
             property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass2_unique_id}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}});
         sendMessage<Set>(toScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort, //
             property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass1_unique_id}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}});
         scheduler.processScheduledMessages();
 
-        std::thread schedulerThread1(runScheduler);
+        auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
@@ -151,7 +149,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
 
         // Stopping scheduler
         scheduler.requestStop();
-        schedulerThread1.join();
+        auto schedulerRet = schedulerThreadHandle.get();
         if (!schedulerRet.has_value()) {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
@@ -190,11 +188,9 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         expect(eq(initGraph.edges().size(), 2UZ));
         expect(eq(subGraphDirect->blockRef().edges().size(), 1UZ));
 
-        gr::scheduler::Simple      scheduler{std::move(initGraph)};
-        std::expected<void, Error> schedulerRet;
-        auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
+        gr::scheduler::Simple scheduler{std::move(initGraph)};
 
-        std::thread schedulerThread1(runScheduler);
+        auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
         expect(awaitCondition(1s, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
@@ -209,7 +205,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         // Stopping scheduler
         scheduler.requestStop();
-        schedulerThread1.join();
+        auto schedulerRet = schedulerThreadHandle.get();
         if (!schedulerRet.has_value()) {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
@@ -249,10 +245,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
-        std::expected<void, Error> schedulerRet;
-        auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
-
-        std::thread schedulerThread1(runScheduler);
+        auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
@@ -264,7 +257,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
 
         // Stopping scheduler
         scheduler.requestStop();
-        schedulerThread1.join();
+        auto schedulerRet = schedulerThreadHandle.get();
         if (!schedulerRet.has_value()) {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }

@@ -10,6 +10,7 @@
 
 #include "magic_enum.hpp"
 #include "message_utils.hpp"
+#include "utils.hpp"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -26,8 +27,7 @@ TestContext* context = new TestContext(paths{}, // plugin paths
 
 class TestScheduler {
     using TScheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>;
-    std::expected<void, gr::Error> schedulerRet_;
-    std::thread                    schedulerThread_;
+    std::future<std::expected<void, gr::Error>> schedulerRet_;
 
     gr::Graph& withTestingSourceAndSink(gr::Graph& graph) const noexcept {
         graph.emplaceBlock<gr::testing::SlowSource<float>>();
@@ -40,15 +40,23 @@ public:
     gr::MsgPortOut toScheduler;
     gr::MsgPortIn  fromScheduler;
 
-    TestScheduler(gr::Graph graph) : scheduler_(std::move(withTestingSourceAndSink(graph))) {
+    TestScheduler(gr::Graph graph, bool addTestSourceAndSink = true) : scheduler_(addTestSourceAndSink ? std::move(withTestingSourceAndSink(graph)) : std::move(graph)) {
         using namespace gr::testing;
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler_.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler_.msgOut.connect(fromScheduler)));
 
-        schedulerThread_ = std::thread([this] {
-            gr::thread_pool::thread::setThreadName("qa_SchMess::scheduler");
-            schedulerRet_ = scheduler_.runAndWait();
-        });
+        run();
+    }
+
+    ~TestScheduler() { stop(); }
+
+    TestScheduler(const TestScheduler&)            = delete;
+    TestScheduler& operator=(const TestScheduler&) = delete;
+    TestScheduler(TestScheduler&&)                 = delete;
+    TestScheduler& operator=(TestScheduler&&)      = delete;
+
+    void run() {
+        schedulerRet_ = gr::testing::thread_pool::executeScheduler("qa_SchMess::scheduler", scheduler_);
 
         using namespace boost::ut;
         // Wait for the scheduler to start running
@@ -56,30 +64,25 @@ public:
         expect(scheduler_.state() == gr::lifecycle::State::RUNNING) << "scheduler thread up and running";
     }
 
-    ~TestScheduler() {
+    void stop() {
         using namespace boost::ut;
         scheduler_.requestStop();
 
-        if (schedulerThread_.joinable()) {
-            schedulerThread_.join();
-        }
-
-        if (!schedulerRet_.has_value()) {
-            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet_.error());
+        auto result = schedulerRet_.get(); // this joins the thread
+        if (!result.has_value()) {
+            expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", result.error());
         }
     }
 
-    TestScheduler(const TestScheduler&)            = delete;
-    TestScheduler& operator=(const TestScheduler&) = delete;
-    TestScheduler(TestScheduler&&)                 = delete;
-    TestScheduler& operator=(TestScheduler&&)      = delete;
-
-    auto& scheduler() { return scheduler_; }
-    auto& scheduler() const { return scheduler_; }
-    auto& msgIn() { return scheduler_.msgIn; }
-    auto& msgOut() { return scheduler_.msgOut; }
-
-    auto& graph() { return scheduler_.graph(); }
+    auto&                          scheduler() { return scheduler_; }
+    auto&                          scheduler() const { return scheduler_; }
+    auto&                          msgIn() { return scheduler_.msgIn; }
+    auto&                          msgOut() { return scheduler_.msgOut; }
+    auto&                          graph() { return scheduler_.graph(); }
+    auto                           state() const { return scheduler_.state(); }
+    const std::string&             unique_name() const { return scheduler_.unique_name; }
+    void                           processScheduledMessages() { scheduler_.processScheduledMessages(); }
+    std::expected<void, gr::Error> changeStateTo(gr::lifecycle::State state) { return scheduler_.changeStateTo(state); }
 };
 
 const boost::ut::suite TopologyGraphTests = [] {
@@ -130,25 +133,18 @@ const boost::ut::suite TopologyGraphTests = [] {
     "add block while scheduler is running"_test = [] {
         using namespace gr;
         using namespace gr::testing;
-        using TScheduler = scheduler::Simple<>;
 
         Graph flow(context->loader);
         auto& source = flow.emplaceBlock<NullSource<float>>();
         auto& sink   = flow.emplaceBlock<NullSink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
 
-        auto scheduler = TScheduler{std::move(flow)};
+        TestScheduler scheduler(std::move(flow));
 
         MsgPortOut toScheduler;
         MsgPortIn  fromScheduler;
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
-
-        std::expected<void, Error> schedulerResult;
-        auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] {
-            gr::thread_pool::thread::setThreadName("qa_SchMess::scheduler");
-            schedulerResult = scheduler.runAndWait();
-        });
+        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn())));
+        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut().connect(fromScheduler)));
 
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
@@ -161,7 +157,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             std::println("Block {}", block);
         }
 
-        sendMessage<message::Command::Set>(toScheduler, scheduler.unique_name, scheduler::property::kEmplaceBlock, property_map{{"type", std::string("builtin_counter<float32>")}, {"properties", property_map{{"disconnect_on_done", false}}}});
+        sendMessage<message::Command::Set>(toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, property_map{{"type", std::string("builtin_counter<float32>")}, {"properties", property_map{{"disconnect_on_done", false}}}});
         gr::testing::waitForReply(fromScheduler);
 
         auto messages = fromScheduler.streamReader().get();
@@ -188,10 +184,6 @@ const boost::ut::suite TopologyGraphTests = [] {
             }
             return false;
         })) << "waiting for new block to reach running state";
-
-        scheduler.requestStop();
-        schedulerThread.join();
-        expect(schedulerResult.has_value()) << "scheduler executed successfully";
     };
 
     "Block removal tests"_test = [] {
@@ -461,16 +453,11 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(source).to<"in">(sink)));
     expect(eq(graph.edges().size(), 1UZ)) << "edge registered with connect";
 
-    gr::scheduler::Simple scheduler(std::move(graph));
-    gr::MsgPortOut        toScheduler;
-    gr::MsgPortIn         fromScheduler;
-    expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
-    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
-
-    std::expected<void, Error> schedulerRet;
-    auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
-
-    std::thread schedulerThread1(runScheduler);
+    TestScheduler  scheduler(std::move(graph), /*addTestSourceAndSink=*/false);
+    gr::MsgPortOut toScheduler;
+    gr::MsgPortIn  fromScheduler;
+    expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn())));
+    expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut().connect(fromScheduler)));
 
     expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
@@ -518,19 +505,14 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     }
     scheduler.processScheduledMessages();
 
-    // Stopping scheduler
-    scheduler.requestStop();
-    schedulerThread1.join();
-    if (!schedulerRet.has_value()) {
-        expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
-    }
+    scheduler.stop();
 
     // return to initial state
     expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
     expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
     expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
 
-    std::thread schedulerThread2(runScheduler);
+    scheduler.run();
     expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
@@ -546,14 +528,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     //        return sink.count >= 10U;
     //    })) << "sink received enough data";
 
-    scheduler.requestStop();
-
     std::print("Counting sink counted to {}\n", sink.count);
-
-    schedulerThread2.join();
-    if (!schedulerRet.has_value()) {
-        expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
-    }
 };
 
 int main() { /* tests are statically executed */ }

@@ -1,5 +1,7 @@
 #include <boost/ut.hpp>
 
+#include "utils.hpp"
+
 #include "gnuradio-4.0/Block.hpp"
 #include "gnuradio-4.0/Message.hpp"
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -694,7 +696,7 @@ const boost::ut::suite MessagesTests = [] {
         std::println("##### starting test for scheduler {}", gr::meta::type_name<decltype(scheduler)>());
         std::fflush(stdout);
 
-        std::thread testWorker([&scheduler, &commands] {
+        auto testWorker = gr::testing::thread_pool::execute("test worker", [&scheduler, &commands] {
             std::println("starting testWorker.");
             std::fflush(stdout);
             while (scheduler.state() != gr::lifecycle::State::RUNNING) { // wait until scheduler is running
@@ -759,9 +761,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(scheduler.runAndWait().has_value());
         std::println("stopped scheduler {}", gr::meta::type_name<decltype(scheduler)>());
 
-        if (testWorker.joinable()) {
-            testWorker.join();
-        }
+        testWorker.wait();
 
         std::println("##### finished test for scheduler {} - produced {} samples", gr::meta::type_name<decltype(scheduler)>(), sink._nSamplesProduced);
     } | schedulingPolicies;
@@ -785,10 +785,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
 
-        auto schedulerThread = std::thread([&scheduler] {
-            gr::thread_pool::thread::setThreadName("qa_Messages::scheduler");
-            scheduler.runAndWait();
-        });
+        auto threadHandle = gr::testing::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
 
         std::vector<std::string> receivedStates;
 
@@ -815,7 +812,7 @@ const boost::ut::suite MessagesTests = [] {
         auto name = [](lifecycle::State s) { return std::string(magic_enum::enum_name(s)); };
         expect(eq(receivedStates, std::vector{name(lifecycle::State::INITIALISED), name(lifecycle::State::RUNNING), name(lifecycle::State::REQUESTED_STOP), name(lifecycle::State::STOPPED)}));
 
-        schedulerThread.join();
+        threadHandle.wait();
     } | schedulingPolicies;
 
     "Settings handling via scheduler"_test = []<typename SchedulerPolicy> {
@@ -840,8 +837,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
 
-        auto client = std::thread([&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
-            gr::thread_pool::thread::setThreadName("qa_Mess::Client");
+        auto client = gr::testing::thread_pool::execute("qa_Mess::Client", [&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
             sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting, {{"factor", 43.0f}});
             bool       seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
@@ -868,16 +864,13 @@ const boost::ut::suite MessagesTests = [] {
             sendMessage<Command::Set>(toScheduler, schedulerName, block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP))}});
         });
 
-        auto schedulerThread = std::thread([&scheduler] {
-            gr::thread_pool::thread::setThreadName("qa_Messages::scheduler");
-            scheduler.runAndWait();
-        });
+        auto threadHandle = gr::testing::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
 
-        client.join();
+        client.wait();
         while (source.state() != lifecycle::State::STOPPED) {
             std::this_thread::sleep_for(10ms);
         }
-        schedulerThread.join();
+        threadHandle.wait();
     } | schedulingPolicies;
 };
 

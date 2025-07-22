@@ -9,9 +9,10 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include "utils.hpp"
 
 #if !DISABLE_SIMD
 namespace gr::test {
@@ -1042,8 +1043,7 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
 
         auto scheduler = scheduler::Simple(std::move(flow));
 
-        auto client = std::thread([&scheduler] {
-            gr::thread_pool::thread::setThreadName("qa_Block::Client");
+        auto client = gr::testing::thread_pool::execute("qa_Block::Client", [&scheduler] {
             const auto startTime = std::chrono::steady_clock::now();
             auto       isExpired = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
             bool       expired   = false;
@@ -1054,17 +1054,14 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
             scheduler.requestStop();
         });
 
-        auto schedulerThread = std::thread([&scheduler] {
-            gr::thread_pool::thread::setThreadName("qa_Block::sched");
-            scheduler.runAndWait();
-        });
-        client.join();
+        auto schedulerThread = gr::testing::thread_pool::executeScheduler("qa_Block::Sched", scheduler);
+        client.wait();
 
         // Additional check to be sure that ClockSource is in STOPPED state.
         while (source.state() != lifecycle::State::STOPPED) {
             std::this_thread::sleep_for(10ms);
         }
-        schedulerThread.join();
+        schedulerThread.wait();
     };
 };
 
