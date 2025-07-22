@@ -103,7 +103,6 @@ const boost::ut::suite TopologyGraphTests = [] {
                 {{"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}} /* data */);
 
             waitForReply(scheduler.fromScheduler);
-            // expect(nothrow([&] { scheduler.scheduler_.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
             const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler, scheduler::property::kBlockEmplaced);
@@ -118,8 +117,6 @@ const boost::ut::suite TopologyGraphTests = [] {
                 {{"type", "doesnt_exist::multiply<float32>"}, {"properties", property_map{}}} /* data */);
 
             waitForReply(scheduler.fromScheduler);
-
-            expect(nothrow([&] { scheduler.scheduler_.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
 
@@ -208,7 +205,6 @@ const boost::ut::suite TopologyGraphTests = [] {
                 {{"uniqueName", std::string(temporaryBlock->uniqueName())}} /* data */);
 
             waitForReply(scheduler.fromScheduler);
-            // expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
             const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
@@ -353,7 +349,6 @@ const boost::ut::suite TopologyGraphTests = [] {
         "get scheduler settings"_test = [&] {
             sendMessage<Get>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {} /* data  */);
             waitForReply(scheduler.fromScheduler);
-            expect(nothrow([&] { scheduler.scheduler().processScheduledMessages(); })) << "manually execute processing of messages";
 
             bool        atLeastOneReplyFromScheduler = false;
             std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
@@ -378,7 +373,6 @@ const boost::ut::suite TopologyGraphTests = [] {
         "set scheduler settings"_test = [&] {
             sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"timeout_ms", 42}} /* data  */);
             waitForReply(scheduler.fromScheduler);
-            expect(nothrow([&] { scheduler.scheduler().processScheduledMessages(); })) << "manually execute processing of messages";
 
             bool        atLeastOneReplyFromScheduler = false;
             std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
@@ -432,7 +426,6 @@ const boost::ut::suite TopologyGraphTests = [] {
 
             // "Set GRC YAML"_test = [&] {
             //     sendMessage<Set>(toGraph, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {{"value", yaml}});
-            //     expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
             //     expect(eq(testGraph.blocks().size(), 2UZ)) << "Expected 2 blocks after reloading GRC";
             // };
         }
