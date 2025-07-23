@@ -99,7 +99,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         TestScheduler scheduler(gr::Graph(context->loader));
 
         "Add a valid block"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kEmplaceBlock /* endpoint */, //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock /* endpoint */, //
                 {{"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}} /* data */);
 
             waitForReply(scheduler.fromScheduler);
@@ -113,7 +113,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "Add an invalid block"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kEmplaceBlock /* endpoint */, //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock /* endpoint */, //
                 {{"type", "doesnt_exist::multiply<float32>"}, {"properties", property_map{}}} /* data */);
 
             waitForReply(scheduler.fromScheduler);
@@ -199,7 +199,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             // expect(eq(getNReplyMessages(fromScheduler), 1UZ)); // emplaceBlock emits message
             consumeAllReplyMessages(scheduler.fromScheduler);
 
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kRemoveBlock /* endpoint */, //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kRemoveBlock /* endpoint */, //
                 {{"uniqueName", std::string(temporaryBlock->uniqueName())}} /* data */);
 
             waitForReply(scheduler.fromScheduler);
@@ -213,7 +213,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "Remove an unknown block"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kRemoveBlock /* endpoint */, //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kRemoveBlock /* endpoint */, //
                 {{"uniqueName", "this_block_is_unknown"}} /* data */);
             waitForReply(scheduler.fromScheduler);
 
@@ -235,8 +235,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         "Replace a known block"_test = [&] {
             expect(eq(scheduler.graph().blocks().size(), 4UZ));
 
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kReplaceBlock /* endpoint */, //
-                {{"uniqueName", std::string(temporaryBlock->uniqueName())},                                                              //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kReplaceBlock /* endpoint */, //
+                {{"uniqueName", std::string(temporaryBlock->uniqueName())},                                                     //
                     {"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}} /* data */);
             waitForReply(scheduler.fromScheduler);
 
@@ -248,8 +248,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "Replace an unknown block"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kReplaceBlock /* endpoint */, //
-                {{"uniqueName", "this_block_is_unknown"},                                                                                //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kReplaceBlock /* endpoint */, //
+                {{"uniqueName", "this_block_is_unknown"},                                                                       //
                     {"type", "gr::testing::Copy<float32>"}, {"properties", property_map{}}} /* data */);
             waitForReply(scheduler.fromScheduler);
 
@@ -260,8 +260,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "Replace with an unknown block"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kReplaceBlock /* endpoint */, //
-                {{"uniqueName", std::string(block->uniqueName())},                                                                       //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kReplaceBlock /* endpoint */, //
+                {{"uniqueName", std::string(block->uniqueName())},                                                              //
                     {"type", "doesnt_exist::multiply<float32>"}, {"properties", property_map{}}} /* data */);
             waitForReply(scheduler.fromScheduler);
 
@@ -286,7 +286,7 @@ const boost::ut::suite TopologyGraphTests = [] {
                 {"destinationBlock", std::string(blockIn->uniqueName())}, {"destinationPort", "in"},          //
                 {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
 
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kEmplaceEdge /* endpoint */, data /* data */);
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge /* endpoint */, data /* data */);
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
@@ -297,8 +297,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "Fail to add an edge because source port is invalid"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kEmplaceEdge /* endpoint */, //
-                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "OUTPUT"},                                        //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge /* endpoint */, //
+                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "OUTPUT"},                               //
                     {"destinationBlock", std::string(blockIn->uniqueName())}, {"destinationPort", "in"}} /* data */);
             waitForReply(scheduler.fromScheduler);
 
@@ -308,8 +308,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "Fail to add an edge because destination port is invalid"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kEmplaceEdge /* endpoint */, //
-                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "in"},                                            //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge /* endpoint */, //
+                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "in"},                                   //
                     {"destinationBlock", std::string(blockIn->uniqueName())}, {"destinationPort", "INPUT"}} /* data */);
             waitForReply(scheduler.fromScheduler);
 
@@ -319,8 +319,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
 
         "Fail to add an edge because ports are not compatible"_test = [&] {
-            sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kEmplaceEdge /* endpoint */, //
-                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "out"},                                           //
+            sendMessage<Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge /* endpoint */, //
+                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "out"},                                  //
                     {"destinationBlock", std::string(blockWrongType->uniqueName())}, {"destinationPort", "in"}} /* data */);
             waitForReply(scheduler.fromScheduler);
 
@@ -397,7 +397,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         TestScheduler scheduler(std::move(testGraph));
 
-        sendMessage<Get>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {});
+        sendMessage<Get>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kGraphGRC, {});
         waitForReply(scheduler.fromScheduler);
 
         expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
@@ -416,7 +416,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             expect(eq(graphFromYaml.blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks", graphFromYaml.blocks().size());
 
             // "Set GRC YAML"_test = [&] {
-            //     sendMessage<Set>(toGraph, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {{"value", yaml}});
+            //     sendMessage<Set>(toGraph, scheduler.unique_name(), scheduler::property::kGraphGRC, {{"value", yaml}});
             //     expect(eq(testGraph.blocks().size(), 2UZ)) << "Expected 2 blocks after reloading GRC";
             // };
         }
