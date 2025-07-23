@@ -138,11 +138,6 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         TestScheduler scheduler(std::move(flow));
 
-        MsgPortOut toScheduler;
-        MsgPortIn  fromScheduler;
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn())));
-        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut().connect(fromScheduler)));
-
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler is running";
@@ -154,10 +149,10 @@ const boost::ut::suite TopologyGraphTests = [] {
             std::println("Block {}", block);
         }
 
-        sendMessage<message::Command::Set>(toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, property_map{{"type", std::string("builtin_counter<float32>")}, {"properties", property_map{{"disconnect_on_done", false}}}});
-        gr::testing::waitForReply(fromScheduler);
+        sendMessage<message::Command::Set>(scheduler.toScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, property_map{{"type", std::string("builtin_counter<float32>")}, {"properties", property_map{{"disconnect_on_done", false}}}});
+        gr::testing::waitForReply(scheduler.fromScheduler);
 
-        auto messages = fromScheduler.streamReader().get();
+        auto messages = scheduler.fromScheduler.streamReader().get();
         expect(gt(messages.size(), 0UZ)) << "received block emplaced message";
         auto message = messages[0];
 
