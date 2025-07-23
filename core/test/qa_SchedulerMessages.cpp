@@ -363,9 +363,9 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         {
             // Setting ui_constraints property for all blocks, universal
-            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7070)}} /* data  */);
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7070)}} /* data  */);
             // Setting ui_constraints property for one block
-            sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName() /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
+            sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName() /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
 
             waitForReply(scheduler.fromScheduler);
         }
@@ -393,21 +393,42 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(eq(42.f, std::get<float>(uiConstraintsFor(copy1)["x"])));
         expect(eq(43.f, std::get<float>(uiConstraintsFor(copy2)["x"])));
 
-        sendMessage<Get>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kGraphGRC, {});
-        waitForReply(scheduler.fromScheduler);
+        // Check if block introspection includes ui_constraints
 
-        expect(ge(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-        const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+        {
+            sendMessage<Get>(scheduler.toScheduler, {}, graph::property::kGraphInspect, {});
+            waitForReply(scheduler.fromScheduler);
 
-        expect(reply.data.has_value()) << "Reply should contain data";
-        if (reply.data.has_value()) {
-            const auto& data = reply.data.value();
-            expect(data.contains("value")) << "Reply should contain 'value' field";
-            const auto& yaml = std::get<std::string>(data.at("value"));
-            expect(!yaml.empty()) << "YAML string should not be empty";
-            std::println("YAML content:\n{}", yaml);
+            expect(ge(getNReplyMessages(scheduler.fromScheduler), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
 
-            expect(yaml.find("7070") != std::string::npos) << "ui_constraints not saved in YAML";
+            expect(reply.data.has_value()) << "Reply should contain data";
+            if (reply.data.has_value()) {
+                const auto& map = reply.data.value();
+                expect(!map.empty()) << "Resulting map should not be empty";
+
+                const auto& children = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(map, "children"s));
+
+                std::set<float> seenUiConstraintsX;
+                std::set<float> seenUiConstraintsY;
+
+                for (const auto& child : children) {
+                    const auto& uiConstraints = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(std::get<gr::property_map>(child.second), "parameters"s, "ui_constraints"s));
+                    seenUiConstraintsX.insert(std::get<float>(uiConstraints.at("x"s)));
+                    seenUiConstraintsY.insert(std::get<float>(uiConstraints.at("y"s)));
+                }
+
+                expect(seenUiConstraintsX == std::set<float>{42, 43});
+                expect(seenUiConstraintsY == std::set<float>{6, 7070});
+            }
+
+            scheduler.scheduler().requestStop();
+
+            auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
+            auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
+
+            expect(eq(42.f, std::get<float>(copy1direct->ui_constraints["x"])));
+            expect(eq(43.f, std::get<float>(copy2direct->ui_constraints["x"])));
         }
 
         scheduler.scheduler().requestStop();

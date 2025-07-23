@@ -1,7 +1,7 @@
 #ifndef GNURADIO_GRAPH_YAML_IMPORTER_H
 #define GNURADIO_GRAPH_YAML_IMPORTER_H
 
-#include <charconv>
+#include <ranges>
 
 #include <gnuradio-4.0/YamlPmt.hpp>
 
@@ -13,6 +13,48 @@ namespace gr {
 
 namespace detail {
 
+template<typename T>
+inline std::expected<T, gr::Error> getProperty(const gr::property_map& map, std::string_view propertyName) {
+    auto it = map.find(propertyName);
+    if (it == map.cend()) {
+        return std::unexpected(gr::Error(std::format("Missing field {} in YAML object", propertyName)));
+    }
+
+    auto* value = std::get_if<T>(&it->second);
+    if (value == nullptr) {
+        return std::unexpected(gr::Error(std::format("Field {} in YAML object has an incorrect type index={} instead of {}", propertyName, it->second.index(), gr::meta::type_name<T>())));
+    }
+
+    return {*value};
+}
+
+template<typename T>
+inline std::expected<T, gr::Error> getProperty(const gr::property_map& map, std::string_view propertyName, const auto&... propertySubNames)
+requires(sizeof...(propertySubNames) > 0)
+{
+    static_assert((std::is_convertible_v<decltype(propertySubNames), std::string_view> && ...));
+    auto it = map.find(propertyName);
+    if (it == map.cend()) {
+        return std::unexpected(gr::Error(std::format("Missing field {} in YAML object", propertyName)));
+    }
+
+    auto* value = std::get_if<gr::property_map>(&it->second);
+    if (value == nullptr) {
+        return std::unexpected(gr::Error(std::format("Field {} in YAML object has an incorrect type index={} instead of gr::property_map", propertyName, it->second.index())));
+    }
+
+    return getProperty<T>(*value, propertySubNames...);
+}
+
+template<typename T>
+T getOrThrow(std::expected<T, gr::Error>&& expectedValue, std::source_location location = std::source_location::current()) {
+    if (!expectedValue) {
+        throw gr::exception(std::format("Got an error {}, caller {}:{}", expectedValue.error().message, location.file_name(), location.line()));
+    } else {
+        return *expectedValue;
+    }
+}
+
 inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::property_map yaml, std::source_location location = std::source_location::current()) {
 
     std::map<std::string, std::shared_ptr<BlockModel>> createdBlocks;
@@ -21,8 +63,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
     for (const auto& blk : blks) {
         auto grcBlock = std::get<property_map>(blk);
 
-        const auto blockName = std::get<std::string>(grcBlock["name"]);
-        const auto blockType = std::get<std::string>(grcBlock["id"]);
+        const auto blockName = getOrThrow(getProperty<std::string>(grcBlock, "parameters"sv, "name"sv));
+        const auto blockType = getOrThrow(getProperty<std::string>(grcBlock, "id"sv));
 
         if (blockType == "SUBGRAPH") {
             const std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
@@ -80,7 +122,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
             if (auto it = grcBlock.find("ui_constraints"); it != grcBlock.end()) {
                 auto uiConstraints = std::get<property_map>(it->second);
-                // this cannot fai as ui_constraints exists in Blockl
+                // this cannot fail as ui_constraints exists in Block
                 std::ignore = currentBlock->settings().set({{"ui_constraints", std::move(uiConstraints)}});
             }
 
@@ -177,8 +219,8 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
             const auto&  fullTypeName = loader.registry().typeName(block);
             if (fullTypeName == "gr::Graph") {
                 map.emplace("id", "SUBGRAPH");
-                map["uniqueName"] = std::string(block->uniqueName());
-                map["name"]       = std::string(block->name());
+                map["unique_name"] = std::string(block->uniqueName());
+                map["name"]        = std::string(block->name());
 
                 auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(block.get());
                 if (subGraphDirect == nullptr) {
