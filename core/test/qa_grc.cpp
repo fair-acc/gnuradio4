@@ -69,14 +69,15 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
 
     for (const auto& block : std::get<std::vector<pmtv::pmt>>(firstYaml.at("blocks"))) {
         const auto&  blockMap = std::get<gr::property_map>(block);
-        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), std::get<std::string>(blockMap.at("name"s))};
+        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         firstBlocks.push_back(data);
         seenBlocks.insert(data);
     }
 
     for (const auto& block : std::get<std::vector<pmtv::pmt>>(secondYaml.at("blocks"))) {
-        const auto&  blockMap = std::get<gr::property_map>(block);
-        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), std::get<std::string>(blockMap.at("name"s))};
+        const auto& blockMap = std::get<gr::property_map>(block);
+        std::println("Current block {}", blockMap);
+        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         secondBlocks.push_back(data);
         seenBlocks.erase(data);
     }
@@ -124,16 +125,13 @@ const boost::ut::suite BasicGrcTests = [] {
 
     constexpr std::string_view testGrc = R"(
 blocks:
-  - name: ArraySinkImpl<float64, true, 42>
-    id: gr::testing::ArraySink<float64>
+  - id: gr::testing::ArraySink<float64>
     parameters:
       name: ArraySinkImpl<float64, true, 42>
-  - name: ArraySourceOne<float64>
-    id: gr::testing::ArraySource<float64>
+  - id: gr::testing::ArraySource<float64>
     parameters:
       name: ArraySourceOne<float64>
-  - name: ArraySource<float64>
-    id: gr::testing::ArraySource<float64>
+  - id: gr::testing::ArraySource<float64>
     ui_constraints:
       x: !!float32 43
       y: !!float32 7070
@@ -199,18 +197,20 @@ const boost::ut::suite PluginsGrcTests = [] {
 
             constexpr std::string_view pluginsTestGrc = R"(
 blocks:
-  - name: main_source
-    id: good::fixed_source<float64>
+  - id: good::fixed_source<float64>
     parameters:
+      name: main_source
       event_count: 100
       unknown_property: 42
-  - name: multiplier
-    id: good::multiply<float64>
-  - name: counter
-    id: builtin_counter<float64>
-  - name: sink
-    id: good::cout_sink<float64>
+  - id: good::multiply<float64>
     parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
       total_count: 100
       unknown_property: 42
 
@@ -247,28 +247,33 @@ connections:
 
             constexpr std::string_view pluginsTestGrc = R"(
 blocks:
-  - name: main_source
-    id: good::fixed_source<float64>
+  - id: good::fixed_source<float64>
     parameters:
+      name: main_source
       event_count: 100
       unknown_property: 42
-  - name: multiplier
-    id: good::multiply<float64>
-  - name: counter
-    id: builtin_counter<float64>
-  - name: sink
-    id: good::cout_sink<float64>
+  - id: good::multiply<float64>
     parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
       total_count: 100
       unknown_property: 42
-  - name: chained_multiplier
-    id: SUBGRAPH
+  - id: SUBGRAPH
+    parameters:
+      name: chained_multiplier
     graph:
       blocks:
-        - name: multiplier1
-          id: good::multiply<float64>
-        - name: multiplier2
-          id: good::multiply<float64>
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier1
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier2
       connections:
         - [multiplier1, 0, multiplier2, 0]
       exported_ports:
@@ -309,18 +314,20 @@ const boost::ut::suite PortTests = [] {
     "Port buffer sizes"_test = [&] {
         constexpr std::string_view testGrc = R"(
 blocks:
-  - name: main_source
-    id: good::fixed_source<float64>
+  - id: good::fixed_source<float64>
     parameters:
+      name: main_source
       event_count: 100
       unknown_property: 42
-  - name: multiplier
-    id: good::multiply<float64>
-  - name: counter
-    id: builtin_counter<float64>
-  - name: sink
-    id: good::cout_sink<float64>
+  - id: good::multiply<float64>
     parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
       total_count: 100
       unknown_property: 42
 
@@ -526,4 +533,4 @@ const boost::ut::suite SettingsTests = [] {
 
 } // namespace gr::qa_grc_test
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<boost::ut::override>.run(); }
