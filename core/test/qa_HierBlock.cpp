@@ -94,7 +94,6 @@ const boost::ut::suite ExportPortsTests_ = [] {
         }
         expect(ge(getNReplyMessages(fromScheduler), 2UZ));
         consumeAllReplyMessages(fromScheduler);
-        expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
         // Make connections
         sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph->uniqueName()), "in", scheduler.unique_name);

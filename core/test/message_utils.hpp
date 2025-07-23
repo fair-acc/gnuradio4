@@ -85,11 +85,13 @@ inline std::vector<Message> getAllReplyMessages(gr::MsgPortIn& port) {
 inline std::size_t getNReplyMessages(gr::MsgPortIn& port) { return port.streamReader().available(); };
 
 inline void consumeAllReplyMessages(gr::MsgPortIn& port, std::source_location sourceLocation = std::source_location::current()) {
-    ReaderSpanLike auto messages   = port.streamReader().get();
-    const bool          isConsumed = messages.consume(messages.size());
-    if (!isConsumed) {
-        expect(false) << std::format("Can not consume reply messages. Requested at:{}\n", sourceLocation);
+    {
+        ReaderSpanLike auto messages   = port.streamReader().get();
+        const bool          isConsumed = messages.consume(messages.size());
+        expect(isConsumed) << std::format("Can not consume reply messages. Requested at:{}\n", sourceLocation);
     }
+
+    expect(eq(getNReplyMessages(port), 0UZ)) << std::format("Unexpected available messages: {}. Requested at:{}\n", getNReplyMessages(port), sourceLocation);
 };
 
 inline bool waitForReply(gr::MsgPortIn& fromGraph, std::size_t nReplies = 1UZ, std::chrono::milliseconds maxWaitTime = 1s) {

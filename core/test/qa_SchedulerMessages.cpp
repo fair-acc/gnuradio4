@@ -193,13 +193,11 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(eq(testGraph.blocks().size(), 4UZ));
         // expect(eq(getNReplyMessages(fromScheduler), 1UZ)); // emplaceBlock emits message
         consumeAllReplyMessages(scheduler.fromScheduler);
-        expect(eq(getNReplyMessages(scheduler.fromScheduler), 0UZ)); // all messages are consumed
 
         "Remove a known block"_test = [&] {
             expect(eq(testGraph.blocks().size(), 4UZ));
             // expect(eq(getNReplyMessages(fromScheduler), 1UZ)); // emplaceBlock emits message
             consumeAllReplyMessages(scheduler.fromScheduler);
-            expect(eq(getNReplyMessages(scheduler.fromScheduler), 0UZ)); // all messages are consumed
 
             sendMessage<Set>(scheduler.toScheduler, scheduler.scheduler_.unique_name, scheduler::property::kRemoveBlock /* endpoint */, //
                 {{"uniqueName", std::string(temporaryBlock->uniqueName())}} /* data */);
