@@ -105,7 +105,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler, scheduler::property::kBlockEmplaced);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             if (!reply.data.has_value()) {
                 expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
             }
@@ -120,7 +120,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
 
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 0UZ));
             expect(!reply.data.has_value());
             expect(eq(scheduler.graph().blocks().size(), 3UZ));
@@ -205,7 +205,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             if (!reply.data.has_value()) {
                 expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
             }
@@ -218,7 +218,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             expect(!reply.data.has_value());
             expect(eq(testGraph.blocks().size(), 3UZ));
         };
@@ -241,7 +241,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             if (!reply.data.has_value()) {
                 expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
             }
@@ -254,7 +254,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
 
             expect(!reply.data.has_value());
         };
@@ -266,7 +266,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
 
             expect(!reply.data.has_value());
         };
@@ -290,7 +290,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             if (!reply.data.has_value()) {
                 expect(false) << std::format("edge not being placed - error: {}", reply.data.error());
             }
@@ -303,7 +303,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             expect(!reply.data.has_value());
         };
 
@@ -314,7 +314,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             expect(!reply.data.has_value());
         };
 
@@ -325,7 +325,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             waitForReply(scheduler.fromScheduler);
 
             expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            const Message reply = consumeReplyMsg(scheduler.fromScheduler);
             expect(!reply.data.has_value());
         };
     };
@@ -344,7 +344,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             bool        atLeastOneReplyFromScheduler = false;
             std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
             expect(ge(availableMessages, 1UZ)) << "didn't receive reply message";
-            for (const auto& reply : returnReplyMsgs(scheduler.fromScheduler)) {
+            for (const auto& reply : consumeAllReplyMessages(scheduler.fromScheduler)) {
                 if (reply.serviceName != scheduler.scheduler().unique_name) {
                     continue;
                 }
@@ -368,7 +368,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             bool        atLeastOneReplyFromScheduler = false;
             std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
             expect(ge(availableMessages, 1UZ)) << "didn't receive reply message";
-            for (const auto& reply : returnReplyMsgs(scheduler.fromScheduler)) {
+            for (const auto& reply : consumeAllReplyMessages(scheduler.fromScheduler)) {
                 if (reply.serviceName != scheduler.scheduler().unique_name) {
                     continue;
                 }
@@ -401,7 +401,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         waitForReply(scheduler.fromScheduler);
 
         expect(eq(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-        const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+        const Message reply = consumeReplyMsg(scheduler.fromScheduler);
 
         expect(reply.data.has_value()) << "Reply should contain data";
         if (reply.data.has_value()) {
@@ -474,7 +474,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
         }
 
         expect(eq(getNReplyMessages(fromScheduler), 1UZ));
-        const Message reply = getAndConsumeFirstReplyMessage(fromScheduler);
+        const Message reply = consumeReplyMsg(fromScheduler);
         expect(eq(getNReplyMessages(fromScheduler), 0UZ));
         if (!reply.data.has_value()) {
             expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());

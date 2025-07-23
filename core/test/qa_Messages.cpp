@@ -109,7 +109,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive heartbeat reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -123,7 +123,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive heartbeat reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, "client#42"s));
@@ -142,7 +142,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should receive heartbeat";
-                const Message heartbeat1 = returnReplyMsg(fromBlock);
+                const Message heartbeat1 = consumeReplyMsg(fromBlock);
                 expect(heartbeat1.cmd == Notify) << std::format("mismatch between heartbeat1.cmd = {} and expected {} command", heartbeat1.cmd, Notify);
                 expect(eq(heartbeat1.endpoint, std::string(block::property::kHeartbeat)));
                 expect(heartbeat1.data.has_value());
@@ -152,7 +152,7 @@ const boost::ut::suite MessagesTests = [] {
                 sendMessage<Unsubscribe>(toBlock, "", block::property::kHeartbeat, {}, "client#42");
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "should receive heartbeat";
-                const Message heartbeat2 = returnReplyMsg(fromBlock);
+                const Message heartbeat2 = consumeReplyMsg(fromBlock);
                 expect(heartbeat2.cmd == Notify) << std::format("mismatch between heartbeat2.cmd = {} and expected {} command", heartbeat2.cmd, Notify);
                 expect(eq(heartbeat2.endpoint, std::string(block::property::kHeartbeat)));
                 expect(heartbeat2.data.has_value());
@@ -177,7 +177,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -191,7 +191,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, "client#42"s));
@@ -205,7 +205,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, "client#42"s));
@@ -233,7 +233,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, "client#42"s));
@@ -255,7 +255,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, "client#42"s));
@@ -312,7 +312,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.endpoint, std::string(block::property::kSetting)));
@@ -327,7 +327,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive staged setting reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.endpoint, std::string(block::property::kStagedSetting)));
@@ -373,7 +373,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(allStored.size(), 1UZ));
                 expect(allStored.contains(""s));
 
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -390,7 +390,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -408,7 +408,7 @@ const boost::ut::suite MessagesTests = [] {
                 const auto allStored = unitTestBlock.settings().getStoredAll();
                 expect(allStored.contains("test_context"s));
 
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -427,7 +427,7 @@ const boost::ut::suite MessagesTests = [] {
                 const auto allStored = unitTestBlock.settings().getStoredAll();
                 expect(allStored.contains("new_context"s));
 
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -446,7 +446,7 @@ const boost::ut::suite MessagesTests = [] {
                 std::string activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
                 expect(eq("new_context"s, activeContext));
 
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -462,7 +462,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -484,7 +484,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(allStored.contains("new_context"s));
                 expect(allStored.contains("test_context"s));
 
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -512,7 +512,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply         = returnReplyMsg(fromBlock);
+                const Message reply         = consumeReplyMsg(fromBlock);
                 std::string   activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
                 expect(eq(""s, activeContext));
             };
@@ -522,7 +522,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const Message reply = returnReplyMsg(fromBlock);
+                const Message reply = consumeReplyMsg(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
                 expect(eq(reply.serviceName, unitTestBlock.unique_name));
                 expect(eq(reply.clientRequestID, ""s));
@@ -574,7 +574,7 @@ const boost::ut::suite MessagesTests = [] {
         processMessage();
 
         expect(eq(fromBlock.streamReader().available(), 2UZ)) << "should receive two heartbeats";
-        const Message heartbeat1 = returnReplyMsg(fromBlock);
+        const Message heartbeat1 = consumeReplyMsg(fromBlock);
         expect(heartbeat1.cmd == Notify) << std::format("mismatch between heartbeat1.cmd = {} and expected {} command", heartbeat1.cmd, Notify);
         expect(eq(heartbeat1.endpoint, std::string(block::property::kHeartbeat)));
         expect(heartbeat1.data.has_value());
@@ -632,7 +632,7 @@ const boost::ut::suite MessagesTests = [] {
             if (nReplyExpected == 0) {
                 return false;
             }
-            const Message reply = returnReplyMsg(fromSchedulerLoc);
+            const Message reply = consumeReplyMsg(fromSchedulerLoc);
             expect(eq(reply.clientRequestID, "uniqueUserID#42"s));
             expect(eq(reply.serviceName, serviceName));
             expect(eq(reply.endpoint, std::string(endPoint)));
@@ -790,7 +790,7 @@ const boost::ut::suite MessagesTests = [] {
                 std::this_thread::sleep_for(10ms);
                 continue;
             }
-            const Message msg = returnReplyMsg(fromScheduler);
+            const Message msg = consumeReplyMsg(fromScheduler);
             expect(msg.cmd == Command::Notify);
             expect(msg.endpoint == block::property::kLifeCycleState);
             expect(msg.data.has_value());
@@ -844,7 +844,7 @@ const boost::ut::suite MessagesTests = [] {
                     std::this_thread::sleep_for(10ms);
                 }
                 if (!expired) {
-                    const auto msg = returnReplyMsg(fromScheduler);
+                    const auto msg = consumeReplyMsg(fromScheduler);
                     if (msg.serviceName == blockName && msg.endpoint == block::property::kStagedSetting) {
                         expect(msg.data.has_value());
                         expect(msg.data.value().contains("factor"));

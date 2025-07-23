@@ -109,7 +109,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
             }
 
             expect(eq(getNReplyMessages(fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(fromScheduler);
+            const Message reply = consumeReplyMsg(fromScheduler);
             expect(eq(getNReplyMessages(fromScheduler), 0UZ));
             if (!reply.data.has_value()) {
                 expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());

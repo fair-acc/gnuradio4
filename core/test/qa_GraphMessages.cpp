@@ -89,7 +89,7 @@ const boost::ut::suite GraphMessageTests = [] {
             expect(nothrow([&] { testGraph.processScheduledMessages(); })) << "manually execute processing of messages";
 
             expect(eq(getNReplyMessages(fromGraph), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
+            const Message reply = consumeReplyMsg(fromGraph);
 
             if (reply.data.has_value()) {
                 const auto& dataMap    = reply.data.value();
