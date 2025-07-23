@@ -103,47 +103,44 @@ const boost::ut::suite ExportPortsTests_ = [] {
 
         // Get the whole graph
         {
-            sendMessage<Set>(toScheduler, graph.unique_name /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */);
-            if (!waitForReply(fromScheduler)) {
-                expect(false) << "Reply message not received for kGraphInspect.";
-            }
+            testing::sendAndWaitMessage<Set>(toScheduler, fromScheduler, graph.unique_name /* serviceName */, //
+                graph::property::kGraphInspect /* endpoint */, property_map{} /* data */, [&](const Message& reply) {
+                    if (reply.endpoint != graph::property::kGraphInspected) {
+                        return false;
+                    }
 
-            expect(eq(getNReplyMessages(fromScheduler), 1UZ));
-            const Message reply = consumeReplyMsg(fromScheduler);
-            expect(eq(getNReplyMessages(fromScheduler), 0UZ));
-            if (!reply.data.has_value()) {
-                expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
-            }
-            const auto& data     = reply.data.value();
-            const auto& children = std::get<property_map>(data.at("children"s));
-            expect(eq(children.size(), 3UZ));
+                    const auto& data     = reply.data.value();
+                    const auto& children = std::get<property_map>(data.at("children"s));
+                    expect(eq(children.size(), 3UZ));
 
-            const auto& edges = std::get<property_map>(data.at("edges"s));
-            expect(eq(edges.size(), 2UZ));
+                    const auto& edges = std::get<property_map>(data.at("edges"s));
+                    expect(eq(edges.size(), 2UZ));
 
-            std::size_t subGraphInConnections  = 0UZ;
-            std::size_t subGraphOutConnections = 0UZ;
+                    std::size_t subGraphInConnections  = 0UZ;
+                    std::size_t subGraphOutConnections = 0UZ;
 
-            // Check that the subgraph is connected properly
+                    // Check that the subgraph is connected properly
 
-            for (const auto& [index, edge_] : edges) {
-                const auto& edge = std::get<property_map>(edge_);
-                if (std::get<std::string>(edge.at("destinationBlock")) == subGraph->uniqueName()) {
-                    subGraphInConnections++;
-                }
-                if (std::get<std::string>(edge.at("sourceBlock")) == subGraph->uniqueName()) {
-                    subGraphOutConnections++;
-                }
-            }
-            expect(eq(subGraphInConnections, 1UZ));
-            expect(eq(subGraphOutConnections, 1UZ));
+                    for (const auto& [index, edge_] : edges) {
+                        const auto& edge = std::get<property_map>(edge_);
+                        if (std::get<std::string>(edge.at("destinationBlock")) == subGraph->uniqueName()) {
+                            subGraphInConnections++;
+                        }
+                        if (std::get<std::string>(edge.at("sourceBlock")) == subGraph->uniqueName()) {
+                            subGraphOutConnections++;
+                        }
+                    }
+                    expect(eq(subGraphInConnections, 1UZ));
+                    expect(eq(subGraphOutConnections, 1UZ));
 
-            // Check subgraph topology
-            const auto& subGraphData     = std::get<property_map>(children.at(std::string(subGraph->uniqueName())));
-            const auto& subGraphChildren = std::get<property_map>(subGraphData.at("children"s));
-            const auto& subGraphEdges    = std::get<property_map>(subGraphData.at("edges"s));
-            expect(eq(subGraphChildren.size(), 2UZ));
-            expect(eq(subGraphEdges.size(), 1UZ));
+                    // Check subgraph topology
+                    const auto& subGraphData     = std::get<property_map>(children.at(std::string(subGraph->uniqueName())));
+                    const auto& subGraphChildren = std::get<property_map>(subGraphData.at("children"s));
+                    const auto& subGraphEdges    = std::get<property_map>(subGraphData.at("edges"s));
+                    expect(eq(subGraphChildren.size(), 2UZ));
+                    expect(eq(subGraphEdges.size(), 1UZ));
+                    return true;
+                });
         }
 
         // Stopping scheduler
