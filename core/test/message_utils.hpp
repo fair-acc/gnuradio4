@@ -92,18 +92,6 @@ inline void consumeAllReplyMessages(gr::MsgPortIn& port, std::source_location so
     }
 };
 
-template<bool processScheduledMessages = true>
-Message awaitReplyMessage(auto& graph, std::chrono::milliseconds timeout, gr::MsgPortIn& port, std::optional<std::string> expectedEndpoint = {}, std::source_location sourceLocation = std::source_location::current()) {
-    awaitCondition(timeout, [&port, &graph] {
-        if constexpr (processScheduledMessages) {
-            graph.processScheduledMessages();
-        }
-        return port.streamReader().available() > 0;
-    });
-
-    return getAndConsumeFirstReplyMessage(port, expectedEndpoint, sourceLocation);
-};
-
 inline bool waitForReply(gr::MsgPortIn& fromGraph, std::size_t nReplies = 1UZ, std::chrono::milliseconds maxWaitTime = 1s) {
     auto startedAt = std::chrono::system_clock::now();
     while (fromGraph.streamReader().available() < nReplies) {
