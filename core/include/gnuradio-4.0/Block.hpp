@@ -14,6 +14,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <gnuradio-4.0/BlockTraits.hpp>
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
 #include <gnuradio-4.0/Tag.hpp>
@@ -86,6 +87,345 @@ template<PortType portType, PortReflectable Self>
 [[nodiscard]] constexpr auto outputPorts(Self* self) noexcept {
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx, portType>(self)...); }(traits::block::output_port_descriptors<Self, portType>::index_sequence);
 }
+
+namespace detail {
+template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+[[nodiscard]] constexpr std::optional<T> min_element(Range&& range) {
+    if (auto it = std::ranges::min_element(range); it != std::ranges::end(range)) {
+        return *it;
+    }
+    return std::nullopt;
+}
+
+template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+[[nodiscard]] constexpr std::optional<T> min_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
+    auto zipped   = std::ranges::views::zip(range, portMaskVec);
+    auto filtered = zipped | std::views::filter([](const auto& pair) {
+        const auto& mask = std::get<1>(pair);
+        return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
+    }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
+
+    return min_element(filtered);
+}
+
+template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+std::optional<T> max_element(Range&& range) {
+    if (auto it = std::ranges::max_element(range); it != std::ranges::end(range)) {
+        return *it;
+    }
+    return std::nullopt;
+}
+
+template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+[[nodiscard]] constexpr std::optional<T> max_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
+    auto zipped   = std::ranges::views::zip(range, portMaskVec);
+    auto filtered = zipped | std::views::filter([](const auto& pair) {
+        const auto& mask = std::get<1>(pair);
+        return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
+    }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
+
+    return max_element(filtered);
+}
+
+template<typename T, std::size_t simd_width = stdx::simd_abi::max_fixed_size<T>>
+[[nodiscard]] constexpr bool compareSpans(const std::span<T>& a, const std::span<T>& b) noexcept {
+    const std::size_t size = std::min(a.size(), b.size());
+    if (size == 0UZ) {
+        return false;
+    }
+
+    // SIMD loop
+    std::size_t i = 0UZ;
+    for (; i + simd_width <= size; i += simd_width) {
+        using TSimd = stdx::fixed_size_simd<T, simd_width>;
+        TSimd a_chunk(&a[i], stdx::vector_aligned);
+        TSimd b_chunk(&b[i], stdx::vector_aligned);
+
+        if (stdx::any_of(a_chunk >= b_chunk)) { // true: any element of a[i] >= b[i]
+            return true;
+        }
+    }
+
+    // SIMD epilogue
+    for (; i < size; ++i) {
+        if (a[i] >= b[i]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template<auto... MatchPortEnums, std::ranges::input_range RangeA, std::ranges::input_range RangeB, std::ranges::input_range MaskRange>
+[[nodiscard]] constexpr bool compareRangesMasked(RangeA&& a, RangeB&& b, MaskRange&& mask) {
+    auto zipped = std::ranges::views::zip(a, b, mask) | std::views::filter([](const auto& tup) { return port::pattern<MatchPortEnums...>().matches(std::get<2>(tup)); });
+    return std::ranges::any_of(zipped, [](const auto& tup) { return std::get<0UZ>(tup) >= std::get<1UZ>(tup); });
+}
+} // namespace detail
+
+template<typename Derived, PortDirection portDirection, PortType portType>
+class PortCache {
+    using AllocatorSize    = gr::allocator::Aligned<std::size_t, gr::meta::kCacheLine>;
+    using AllocatorBitMask = gr::allocator::Aligned<port::BitMask, gr::meta::kCacheLine>;
+
+    // reference to derived class containing the ports
+    Derived& _self;
+
+    // updated on settings/port-config change
+    bool                                         _dirtyConfig = true;
+    std::vector<port::BitMask, AllocatorBitMask> _types;
+    std::vector<std::size_t, AllocatorSize>      _minSamples;
+    std::vector<std::size_t, AllocatorSize>      _maxSamples;
+
+    // updated every work(...) function invokation
+    bool                                    _dirtyAvailable = true;
+    std::vector<std::size_t, AllocatorSize> _available;
+
+    // aggregated values
+    std::size_t _minSyncRequirement = 0UZ;
+    std::size_t _maxSyncRequirement = gr::undefined_size;
+    std::size_t _maxSyncAvailable   = gr::undefined_size;
+    bool        _hasASyncAvailable  = false;
+
+protected:
+    template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+    requires(std::is_same_v<T, port::BitMask>)
+    constexpr void getPortTypes(const Derived& self, Range& result) const noexcept {
+        result.clear();
+        auto func = [&result]<gr::PortLike Port>(const Port& port) noexcept {
+            port::BitMask mask = port::encodeMask(Port::kDirection, Port::kPortType, Port::kIsSynch, Port::kIsOptional, port.isConnected());
+            result.push_back(mask);
+        };
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port(std::move(func), inputPorts<portType>(&self));
+        } else {
+            for_each_port(std::move(func), outputPorts<portType>(&self));
+        }
+    }
+
+    template<std::ranges::range Range, typename Fn>
+    constexpr void getPortConstraints(const Derived& self, Range& storage, Fn&& function) {
+        if (std::ranges::size(storage) == 0UZ) {
+            return;
+        }
+#if __has_cpp_attribute(assume) && !defined(__clang__)
+        [[assume(std::ranges::size(storage) > 0UZ)]]; // non-empty storage guarantee (has been allocated externally)
+#endif
+        auto&& fn = std::forward<Fn>(function);
+        auto   it = storage.begin();
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, inputPorts<portType>(&self));
+        } else {
+            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, outputPorts<portType>(&self));
+        }
+        assert(std::distance(std::begin(storage), it) >= 0);
+        assert(storage.size() == static_cast<std::size_t>(std::distance(std::begin(storage), it)));
+    }
+
+    void updateConfig() {
+        _dirtyAvailable = true;
+        getPortTypes(_self, _types);
+        _available.resize(_types.size(), 0UZ);
+        _minSamples.resize(_types.size(), 0UZ);
+        _maxSamples.resize(_types.size(), gr::undefined_size);
+        getPortConstraints(_self, _minSamples, [](auto& port) { return port.min_samples; });
+        getPortConstraints(_self, _maxSamples, [](auto& port) { return port.max_samples; });
+        _minSyncRequirement = detail::max_element_masked<PortSync::SYNCHRONOUS>(_minSamples, _types).value_or(0UZ);
+        _maxSyncRequirement = detail::min_element_masked<PortSync::SYNCHRONOUS>(_maxSamples, _types).value_or(gr::undefined_size);
+        _dirtyConfig        = false;
+    }
+
+    void updateAvailable() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        if (!_dirtyAvailable) {
+            return; // already updated
+        }
+        getPortConstraints(_self, _available, [](auto& port) {
+            if constexpr (portDirection == PortDirection::INPUT) {
+                return port.streamReader().available();
+            } else {
+                return port.streamWriter().available();
+            }
+        });
+        _maxSyncAvailable  = detail::min_element_masked<PortSync::SYNCHRONOUS>(_available, _types).value_or(gr::undefined_size);
+        _hasASyncAvailable = detail::compareRangesMasked<PortSync::ASYNCHRONOUS>(_available, _minSamples, _types);
+        _dirtyAvailable    = false;
+    }
+
+public:
+    PortCache(Derived& self) : _self(self) {}
+
+    void invalidateConfig() noexcept { _dirtyConfig = true; }
+    void invalidateStatistic() noexcept { _dirtyAvailable = true; }
+
+    std::span<const port::BitMask> types() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        return std::span<const port::BitMask>{_types.data(), _types.size()};
+    }
+
+    std::span<const std::size_t> minSamples() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        return std::span<const std::size_t>{_minSamples.data(), _minSamples.size()};
+    }
+
+    std::span<const std::size_t> maxSamples() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        return std::span<const std::size_t>{_maxSamples.data(), _maxSamples.size()};
+    }
+
+    std::span<const std::size_t> availableSamples(bool reset = false) {
+        if (_dirtyAvailable || reset) {
+            updateAvailable();
+        }
+        assert(!_dirtyAvailable);
+        return std::span<const std::size_t>{_available.data(), _available.size()};
+    }
+
+    std::size_t minSyncRequirement() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        return _minSyncRequirement;
+    }
+    std::size_t maxSyncRequirement() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        return _maxSyncRequirement;
+    }
+    std::size_t maxSyncAvailable() {
+        if (_dirtyAvailable) {
+            updateAvailable();
+        }
+        return _maxSyncAvailable;
+    }
+    bool hasASyncAvailable() {
+        if (_dirtyAvailable) {
+            updateAvailable();
+        }
+        return _hasASyncAvailable;
+    }
+
+    std::expected<std::size_t, gr::Error> primePort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept {
+        if constexpr (requires { _self.state(); }) {
+            if (_self.state() == lifecycle::State::RUNNING) {
+                return std::unexpected(Error(std::format("primePort({}, {}) - block must not be in RUNNING state", portIdx, nSamples), loc));
+            }
+        }
+        if (nSamples == 0UZ) {
+            return nSamples; // explicit NOOP
+        }
+
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        if (portIdx >= _types.size()) {
+            return std::unexpected(Error(std::format("primePort({}, {}) failed: portIdx out of range [0, {}]", portIdx, nSamples, _types.size()), loc));
+        }
+
+        std::expected<std::size_t, gr::Error> result = std::unexpected(Error(std::format("primePort({}, {}) - unexpected failure", portIdx, nSamples), loc));
+
+        std::size_t idx        = 0UZ;
+        auto        primerFunc = [&result, &loc, &idx, &portIdx, &nSamples](PortLike auto& port) {
+            if (idx++ != portIdx) {
+                return;
+            }
+
+            if (!port.isConnected()) {
+                result = std::unexpected(gr::Error(std::format("primePort({}, {}) - port {} ({}) is not connected", portIdx, nSamples, portIdx, port.name), loc));
+                return;
+            }
+
+            // can safely assume that port is either INPUT XOR OUTPUT
+            auto getAvailable = [&port]() -> std::size_t {
+                if constexpr (portDirection == PortDirection::INPUT) {
+                    return port.streamReader().available();
+                } else {
+                    return port.streamWriter().available();
+                }
+            };
+
+            std::size_t availableBefore = getAvailable();
+            // prime port
+            auto publishSamples = [&result, &loc, &portIdx](WriterSpanLike auto& publishSpan, std::size_t nRequested) {
+                if (publishSpan.size() < nRequested) {
+                    result = std::unexpected(gr::Error(std::format("primePort({}, {}) - failed requested {} and got {} samples", portIdx, nRequested, nRequested, publishSpan.size()), loc));
+                    return;
+                }
+                using T = typename std::remove_reference_t<decltype(port)>::value_type;
+                for (std::size_t i = 0UZ; i < nRequested; ++i) {
+                    publishSpan[i] = T{};
+                }
+                publishSpan.publish(nRequested);
+            };
+
+            if constexpr (portDirection == PortDirection::INPUT) {
+                auto writer = port.buffer().streamBuffer.new_writer();
+
+                WriterSpanLike auto publishSpan = writer.template tryReserve<gr::SpanReleasePolicy::ProcessAll>(nSamples);
+                publishSamples(publishSpan, nSamples);
+            } else {
+                WriterSpanLike auto publishSpan = port.streamWriter().template tryReserve<gr::SpanReleasePolicy::ProcessAll>(nSamples);
+                publishSamples(publishSpan, nSamples);
+            }
+            // N.B. actual publish is done when this context finished/publishSpan is destructure
+
+            // check if samples have been actually published
+            std::size_t availableAfter = getAvailable();
+
+            if constexpr (portDirection == PortDirection::INPUT) {
+                if (availableAfter - availableBefore != nSamples) {
+                    result = std::unexpected(gr::Error(std::format("primePort({}, {}) - failed requested {} and got {} samples", portIdx, nSamples, nSamples, availableAfter - availableBefore), loc));
+                    return;
+                }
+            } else { // N.B. available decreases on output ports
+                if (availableBefore - availableAfter != nSamples) {
+                    result = std::unexpected(gr::Error(std::format("primePort({}, {}) - failed requested {} and got {} samples", portIdx, nSamples, nSamples, availableBefore - availableAfter), loc));
+                    return;
+                }
+            }
+
+            result = nSamples;
+        };
+
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port(primerFunc, inputPorts<portType>(&_self));
+        } else {
+            for_each_port(primerFunc, outputPorts<portType>(&_self));
+        }
+
+        _dirtyAvailable = true;
+        return result;
+    }
+
+    std::vector<gr::PortMetaInfo> metaInfos(bool reset = true) {
+        if (_dirtyConfig || reset) {
+            updateConfig();
+        }
+        std::vector<gr::PortMetaInfo> metaInfo;
+        metaInfo.reserve(_types.size());
+
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port([&metaInfo](auto& port) { metaInfo.push_back(port.metaInfo); }, inputPorts<portType>(&_self));
+        } else {
+            for_each_port([&metaInfo](auto& port) { metaInfo.push_back(port.metaInfo); }, outputPorts<portType>(&_self));
+        }
+
+        return metaInfo;
+    }
+};
 
 namespace work {
 
@@ -454,6 +794,9 @@ public:
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
+    PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
+    PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
+
 protected:
     Tag _mergedInputTag{};
 
@@ -463,8 +806,7 @@ protected:
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
 
-    [[nodiscard]] constexpr auto& self() noexcept { return *static_cast<Derived*>(this); }
-
+    [[nodiscard]] constexpr auto&       self() noexcept { return *static_cast<Derived*>(this); }
     [[nodiscard]] constexpr const auto& self() const noexcept { return *static_cast<const Derived*>(this); }
 
     template<typename TFunction, typename... Args>
@@ -487,8 +829,10 @@ protected:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-    Block(property_map initParameters) noexcept(false)                                                        // N.B. throws in case of on contract violations
-        : lifecycle::StateMachine<Derived>(), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameters) noexcept(false)                                                     // N.B. throws in case of on contract violations
+        : lifecycle::StateMachine<Derived>(),                                                              //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) {                                  // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
@@ -498,11 +842,16 @@ public:
         }
     }
 
-    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
+    Block(Block&& other) noexcept
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
+          stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)),                                         //
+          msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)),                                                                //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
+          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
 
-    // There are a few const or conditionally const member variables,
-    // we can not have a move-assignment that is equivalent to
-    // the move constructor
+    // There are a few const or conditionally const member variables, we cannot have a move-assignment that is equivalent to the move constructor
     Block& operator=(Block&& other) = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
@@ -609,8 +958,17 @@ public:
                 return;
             }
         }
-        const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
-        const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
+        // TODO: remove these obsolete lines
+        // const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+        // const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
+        inputStreamCache.invalidateConfig();
+        outputStreamCache.invalidateConfig();
+        const std::size_t minSyncIn  = inputStreamCache.minSyncRequirement();
+        const std::size_t maxSyncIn  = inputStreamCache.maxSyncRequirement();
+        const std::size_t minSyncOut = outputStreamCache.minSyncRequirement();
+        const std::size_t maxSyncOut = outputStreamCache.maxSyncRequirement();
+        inputStreamCache.invalidateConfig();
+        outputStreamCache.invalidateConfig();
         if (minSyncIn > maxSyncIn) {
             emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
             requestStop();
@@ -771,7 +1129,10 @@ public:
             }
             notifyListeners(block::property::kSetting, settings().get());
         });
-        // TODO: reset cache config here -> triggers a potential cached array size adjustment
+
+        // update input/output port caches
+        inputStreamCache.invalidateConfig();
+        outputStreamCache.invalidateConfig();
     }
 
     constexpr static auto prepareStreams(auto ports, std::size_t nSyncSamples) {
@@ -1301,119 +1662,6 @@ protected:
         return result;
     }
 
-    template<PortDirection portDirection, PortType portType = PortType::STREAM, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
-    requires(std::is_same_v<T, port::BitMask>)
-    [[nodiscard]] constexpr std::span<const port::BitMask> getPortTypes(const Derived& self, Range& result) const noexcept {
-        result.clear();
-        auto func = [&result]<gr::PortLike Port>(const Port& port) noexcept {
-            port::BitMask mask = port::encodeMask(Port::kDirection, Port::kPortType, Port::kIsSynch, Port::kIsOptional, port.isConnected());
-            result.push_back(mask);
-        };
-        if constexpr (portDirection == PortDirection::INPUT) {
-            for_each_port(std::move(func), inputPorts<portType>(&self));
-        } else if constexpr (portDirection == PortDirection::OUTPUT) {
-            for_each_port(std::move(func), outputPorts<portType>(&self));
-        } else {
-            static_assert(gr::meta::always_false<Derived>, "PortDirection::ANY not supported");
-        }
-
-        return result;
-    }
-
-    template<PortDirection portDirection, PortType portType = PortType::STREAM, std::ranges::range Range, typename Fn>
-    [[nodiscard]] constexpr std::span<const std::size_t> getPortConstraints(const Derived& self, Range& storage, Fn&& function) {
-        if (std::ranges::size(storage) == 0UZ) {
-            return {};
-        }
-#if __has_cpp_attribute(assume)
-        [[assume(std::ranges::size(storage) > 0UZ)]]; // non-empty storage guarantee (has been allocated externally)
-#endif
-        auto&& fn = std::forward<Fn>(function);
-        auto   it = storage.begin();
-        if constexpr (portDirection == PortDirection::INPUT) {
-            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, inputPorts<portType>(&self));
-        } else if constexpr (portDirection == PortDirection::OUTPUT) {
-            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, outputPorts<portType>(&self));
-        } else {
-            static_assert(gr::meta::always_false<Range>, "PortDirection::ANY not supported");
-        }
-
-        return {std::data(storage), static_cast<std::size_t>(std::distance(std::begin(storage), it))};
-    }
-
-    template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
-    [[nodiscard]] constexpr std::optional<T> min_element(Range&& range) {
-        if (auto it = std::ranges::min_element(range); it != std::ranges::end(range)) {
-            return *it;
-        }
-        return std::nullopt;
-    }
-
-    template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
-    [[nodiscard]] constexpr std::optional<T> min_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
-        auto zipped   = std::ranges::views::zip(range, portMaskVec);
-        auto filtered = zipped | std::views::filter([](const auto& pair) {
-            const auto& mask = std::get<1>(pair);
-            return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
-        }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
-
-        return min_element(filtered);
-    }
-
-    template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
-    std::optional<T> max_element(Range&& range) {
-        if (auto it = std::ranges::max_element(range); it != std::ranges::end(range)) {
-            return *it;
-        }
-        return std::nullopt;
-    }
-
-    template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
-    [[nodiscard]] constexpr std::optional<T> max_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
-        auto zipped   = std::ranges::views::zip(range, portMaskVec);
-        auto filtered = zipped | std::views::filter([](const auto& pair) {
-            const auto& mask = std::get<1>(pair);
-            return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
-        }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
-
-        return max_element(filtered);
-    }
-
-    template<typename T, std::size_t simd_width = stdx::simd_abi::max_fixed_size<T>>
-    [[nodiscard]] constexpr bool compareSpans(const std::span<T>& a, const std::span<T>& b) noexcept {
-        const std::size_t size = std::min(a.size(), b.size());
-        if (size == 0UZ) {
-            return false;
-        }
-
-        // SIMD loop
-        std::size_t i = 0UZ;
-        for (; i + simd_width <= size; i += simd_width) {
-            using TSimd = stdx::fixed_size_simd<T, simd_width>;
-            TSimd a_chunk(&a[i], stdx::vector_aligned);
-            TSimd b_chunk(&b[i], stdx::vector_aligned);
-
-            if (stdx::any_of(a_chunk >= b_chunk)) { // true: any element of a[i] >= b[i]
-                return true;
-            }
-        }
-
-        // SIMD epilogue
-        for (; i < size; ++i) {
-            if (a[i] >= b[i]) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    template<auto... MatchPortEnums, std::ranges::input_range RangeA, std::ranges::input_range RangeB, std::ranges::input_range MaskRange>
-    [[nodiscard]] constexpr bool compareRangesMasked(RangeA&& a, RangeB&& b, MaskRange&& mask) {
-        auto zipped = std::ranges::views::zip(a, b, mask) | std::views::filter([](const auto& tup) { return port::pattern<MatchPortEnums...>().matches(std::get<2>(tup)); });
-        return std::ranges::any_of(zipped, [](const auto& tup) { return std::get<0UZ>(tup) >= std::get<1UZ>(tup); });
-    }
-
     /***
      * Check the input ports for available samples
      */
@@ -1589,7 +1837,7 @@ protected:
     }
 
     work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
-        std::size_t i = 0;
+        std::size_t i = 0UZ;
         for (; i + width <= nSamplesToProcess; i += width) {
             const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(width, input_simds...); });
             meta::tuple_for_each([i](auto& output_range, const auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
@@ -1605,7 +1853,7 @@ protected:
     }
 
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
-        for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
+        for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
         }
@@ -1621,8 +1869,8 @@ protected:
             std::size_t  processedOut;
         };
 
-        std::size_t nOutSamplesBeforeRequestedStop = 0;
-        for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
+        std::size_t nOutSamplesBeforeRequestedStop = 0UZ;
+        for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each(
                 [i]<typename R>(auto& output_range, R&& result) {
@@ -1757,57 +2005,33 @@ protected:
             return {requestedWork, 0UZ, DONE};
         }
 
-        // evaluate number of available and processable samples
-        // N.B. kept here as local variables just for testing the backward compatibility
-        // to be moved into a cache store that is (re-)initialised whenever the port/settings conf has changed.
-        std::vector<port::BitMask>     _portTypes;
-        std::span<const port::BitMask> portTypes = getPortTypes<PortDirection::INPUT, PortType::STREAM>(self(), _portTypes);
-        std::vector<std::size_t>       _availableInputSamples(portTypes.size(), 0UZ);
-        std::vector<std::size_t>       _PortMinSamples(portTypes.size(), 0UZ);
-        std::vector<std::size_t>       _PortMaxSamples(portTypes.size(), gr::undefined_size);
-
-        // following will be wrapped into -- for example -- std::span<std::size_t> BlockModel::availableInputSamples(bool reset = false/true)
-        // to allow pre-calculation by scheduler - false: use the previously calculated result (final semantic to be verified)
-        auto              availSpan           = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _availableInputSamples, [](auto& port) { return port.streamReader().available(); });
-        auto              minsSpan            = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _PortMinSamples, [](auto& port) { return port.min_samples; });
-        auto              maxsSpan            = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _PortMaxSamples, [](auto& port) { return port.max_samples; });
-        const std::size_t maxSyncAvailableIn2 = min_element_masked<PortSync::SYNCHRONOUS>(availSpan, portTypes).value_or(gr::undefined_size);
-        const std::size_t minSyncIn2          = max_element_masked<PortSync::SYNCHRONOUS>(minsSpan, portTypes).value_or(0UZ);
-        const std::size_t maxSyncIn2          = min_element_masked<PortSync::SYNCHRONOUS>(maxsSpan, portTypes).value_or(gr::undefined_size);
-        const std::size_t hasAsyncIn2         = compareRangesMasked<PortSync::ASYNCHRONOUS>(availSpan, minsSpan, portTypes);
-
+        // TODO: finally remove me
         // const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn] = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+        // const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
 
-        auto minSyncIn          = minSyncIn2;
-        auto maxSyncIn          = maxSyncIn2;
-        auto maxSyncAvailableIn = maxSyncAvailableIn2;
-        auto hasAsyncIn         = hasAsyncIn2;
+        on_scope_exit _cacheGuard = [&] {
+            inputStreamCache.invalidateStatistic();
+            outputStreamCache.invalidateStatistic();
+        };
+        std::size_t minSyncIn           = inputStreamCache.minSyncRequirement();
+        std::size_t maxSyncIn           = inputStreamCache.maxSyncRequirement();
+        std::size_t maxSyncAvailableIn  = inputStreamCache.maxSyncAvailable();
+        bool        hasAsyncIn          = inputStreamCache.hasASyncAvailable();
+        std::size_t minSyncOut          = outputStreamCache.minSyncRequirement();
+        std::size_t maxSyncOut          = outputStreamCache.maxSyncRequirement();
+        std::size_t maxSyncAvailableOut = outputStreamCache.maxSyncAvailable();
+        bool        hasAsyncOut         = outputStreamCache.hasASyncAvailable();
 
-        if (minSyncIn != minSyncIn2 || maxSyncIn != maxSyncIn2 || maxSyncAvailableIn != maxSyncAvailableIn2 || hasAsyncIn != hasAsyncIn2) {
-            std::println("block: {}", unique_name);
-            std::println("   V1: - minSyncIn: {}, maxSyncIn: {}, maxSyncAvailableIn: {}, hasAsyncIn: {}", minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn);
-            std::println("   V2: - minSyncIn: {}, maxSyncIn: {}, maxSyncAvailableIn: {}, hasAsyncIn: {}", minSyncIn2, maxSyncIn2, maxSyncAvailableIn2, hasAsyncIn2);
-            std::println("       availableInputSamples: {}", availSpan);
-            for (std::size_t i = 0; i < portTypes.size(); ++i) {
-                std::println("     [{}] mask={:08b} avail={} min={} max={}", i, static_cast<uint8_t>(portTypes[i]), availSpan[i], minsSpan[i], maxsSpan[i]);
-            }
-        }
-        assert(minSyncIn == minSyncIn2);
-        assert(maxSyncIn == maxSyncIn2);
-        assert(maxSyncAvailableIn == maxSyncAvailableIn2);
-        assert(hasAsyncIn == hasAsyncIn2);
-
-        const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
-        auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
-        std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
-        const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
-        const auto  nextTagLimit                                              = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
-        const auto  ensureMinimalDecimation                                   = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
-        const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
-        const auto  availableToPublish                                        = std::min({maxSyncOut, maxSyncAvailableOut});
-        auto [resampledIn, resampledOut, resampledStatus]                     = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
-        const auto nextEosTagSkipBefore                                       = nextEosTag - inputSkipBefore;
-        const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
+        auto [hasTag, nextTag, nextEosTag, asyncEoS]      = getNextTagAndEosPosition();
+        std::size_t maxChunk                              = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
+        const auto  inputSkipBefore                       = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
+        const auto  nextTagLimit                          = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
+        const auto  ensureMinimalDecimation               = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
+        const auto  availableToProcess                    = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
+        const auto  availableToPublish                    = std::min({maxSyncOut, maxSyncAvailableOut});
+        auto [resampledIn, resampledOut, resampledStatus] = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
+        const auto nextEosTagSkipBefore                   = nextEosTag - inputSkipBefore;
+        const bool isEosTagPresent                        = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
         if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
             auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now

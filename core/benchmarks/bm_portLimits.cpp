@@ -31,55 +31,33 @@ struct BenchBlock : Block<BenchBlock> {
 
     GR_MAKE_REFLECTABLE(BenchBlock, in0, in1, in2, in3, out0);
 
-// #define DEFAULT_ALLOCATORS 1
-#ifdef DEFAULT_ALLOCATORS
-    std::vector<port::BitMask> _portTypes;
-    std::vector<std::size_t>   _availableInputSamples;
-    std::vector<std::size_t>   _PortMinSamples;
-    std::vector<std::size_t>   _PortMaxSamples;
-#else
-    std::vector<port::BitMask, gr::allocator::Aligned<port::BitMask>> _portTypes;
-    std::vector<std::size_t, gr::allocator::Aligned<std::size_t>>     _availableInputSamples;
-    std::vector<std::size_t, gr::allocator::Aligned<std::size_t>>     _PortMinSamples;
-    std::vector<std::size_t, gr::allocator::Aligned<std::size_t>>     _PortMaxSamples;
-#endif
-
     float processOne(float in0_, float in1_, float in2_, float in3_) { return in0_ + in1_ + in2_ + in3_; } // dummy
 
-    TestLimits getPortLimitsPublic() {
+    TestLimits getPortLimitsLegacy() {
         auto [minS, maxS, maxA, hasA] = getPortLimits(inputPorts<PortType::STREAM>(&self()));
         return {minS, maxS, maxA, hasA};
     }
 
-    void initBuffer(bool reset = true) {
-        if (!reset) {
-            return;
-        }
-        auto portTypes = getPortTypes<PortDirection::INPUT, PortType::STREAM>(self(), _portTypes);
-        _availableInputSamples.resize(portTypes.size(), 0UZ);
-        _PortMinSamples.resize(portTypes.size(), 0UZ);
-        _PortMaxSamples.resize(portTypes.size(), gr::undefined_size);
-    }
+    // ---- New cache-based helper ----
+    void invalidateConfig() { inputStreamCache.invalidateConfig(); }
 
-    std::span<const std::size_t> minsSpan;
-    std::span<const std::size_t> maxsSpan;
-    std::size_t                  minSync2;
-    std::size_t                  maxSync2;
+    void invalidateStatistic() { inputStreamCache.invalidateStatistic(); }
 
-    TestLimits getPortLimitsPublicNew(bool recompute = true) noexcept {
-        std::span<const std::size_t> availSpan         = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _availableInputSamples, [](auto& port) { return port.streamReader().available(); });
-        const std::size_t            maxSyncAvailable  = min_element_masked<PortSync::SYNCHRONOUS>(availSpan, _portTypes).value_or(gr::undefined_size);
-        const bool                   hasAsyncAvailable = compareRangesMasked<PortSync::ASYNCHRONOUS>(availSpan, minsSpan, _portTypes);
-
-        if (recompute || minsSpan.empty() || maxsSpan.empty()) [[unlikely]] {
-            minsSpan = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _PortMinSamples, [](auto& port) { return port.min_samples; });
-            maxsSpan = getPortConstraints<PortDirection::INPUT, PortType::STREAM>(self(), _PortMaxSamples, [](auto& port) { return port.max_samples; });
-            minSync2 = max_element_masked<PortSync::SYNCHRONOUS>(minsSpan, _portTypes).value_or(0UZ);
-            maxSync2 = min_element_masked<PortSync::SYNCHRONOUS>(maxsSpan, _portTypes).value_or(gr::undefined_size);
+    TestLimits getPortLimitsCache(bool recomputeAvail = true) {
+        if (recomputeAvail) {
+            inputStreamCache.invalidateStatistic(); // only re-read avail, config stays
         }
 
-        return {minSync2, maxSync2, maxSyncAvailable, hasAsyncAvailable};
+        // Ensure numbers are up to date (lazy inside)
+        const std::size_t minSync           = inputStreamCache.minSyncRequirement();
+        const std::size_t maxSync           = inputStreamCache.maxSyncRequirement();
+        const std::size_t maxSyncAvailable  = inputStreamCache.maxSyncAvailable();
+        const bool        hasAsyncAvailable = inputStreamCache.hasASyncAvailable();
+
+        return {minSync, maxSync, maxSyncAvailable, hasAsyncAvailable};
     }
+
+    std::span<const std::size_t> availableSamples(bool reset = true) { return inputStreamCache.availableSamples(reset); }
 };
 
 template<typename T>
@@ -88,39 +66,58 @@ inline void black_box(const T& v) {
 }
 
 // ---- UT + Bench ---------------------------------------------------
-inline constexpr std::size_t N_ITER    = 100UZ;
-inline constexpr std::size_t N_SAMPLES = 1'000'000'000UZ;
+inline constexpr std::size_t N_ITER = 100'000UZ;
 
 [[maybe_unused]] inline const boost::ut::suite port_limits_bench = [] {
     BenchBlock blk;
-    blk.initBuffer();
+    blk.invalidateConfig();    // optional; first access would do it anyway
+    blk.invalidateStatistic(); // optional; first access would do it anyway
 
-    // Snapshot once to feed both impls the same state (deterministic UT)
-    // BUT the benchmark below uses “live” calls (that’s what you asked to time)
-    "test_result"_test = [&] {
-        const auto l = blk.getPortLimitsPublic();
-        const auto n = blk.getPortLimitsPublicNew();
-        expect(eq(l.minSync, n.minSync));
-        expect(eq(l.maxSync, n.maxSync));
-        expect(eq(l.maxAvail, n.maxAvail));
-        expect(eq(l.hasAsync, n.hasAsync));
+    "results match (legacy vs cache)"_test = [&] {
+        const auto legacy = blk.getPortLimitsLegacy();
+        const auto cache  = blk.getPortLimitsCache(true);
+        expect(eq(legacy.minSync, cache.minSync));
+        expect(eq(legacy.maxSync, cache.maxSync));
+        expect(eq(legacy.maxAvail, cache.maxAvail));
+        expect(eq(legacy.hasAsync, cache.hasAsync));
     };
 
     // Benchmark legacy vs new
-    "getPortLimits (legacy)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&] {
-        auto r = blk.getPortLimitsPublic();
+    "getPortLimits (legacy)"_benchmark.repeat<N_ITER>() = [&] {
+        TestLimits r = blk.getPortLimitsLegacy();
         black_box(r);
     };
 
-    "masked path (full compute w/ port limits)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&] {
-        auto r = blk.getPortLimitsPublicNew();
+    "masked path (full compute w/ port limits) - reset all"_benchmark.repeat<N_ITER>() = [&] {
+        blk.invalidateConfig();
+        TestLimits r = blk.getPortLimitsCache(true);
         black_box(r);
     };
 
-    "masked path (only available w/o port limits)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&] {
-        auto r = blk.getPortLimitsPublicNew(false);
+    "masked path (only available w/o port limits) - explicit reset"_benchmark.repeat<N_ITER>() = [&] {
+        blk.invalidateStatistic();
+        TestLimits r = blk.getPortLimitsCache(false);
+        black_box(r);
+    };
+    "masked path (only available w/o port limits) - implicit reset"_benchmark.repeat<N_ITER>() = [&] {
+        TestLimits r = blk.getPortLimitsCache(true);
+        black_box(r);
+    };
+
+    "masked path (only available w/o port limits) - caching"_benchmark.repeat<N_ITER>() = [&] {
+        TestLimits r = blk.getPortLimitsCache(false);
+        black_box(r);
+    };
+
+    "masked path - available samples"_benchmark.repeat<N_ITER>() = [&] {
+        std::span<const std::size_t> r = blk.availableSamples(true);
+        black_box(r);
+    };
+
+    "masked path - available samples (cached)"_benchmark.repeat<N_ITER>() = [&] {
+        std::span<const std::size_t> r = blk.availableSamples(false);
         black_box(r);
     };
 };
 
-int main() { /* tests run statically */ }
+int main() { /* tests/bench run via static init */ }

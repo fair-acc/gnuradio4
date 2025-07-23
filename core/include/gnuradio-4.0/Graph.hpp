@@ -255,8 +255,8 @@ struct Graph : Block<Graph> {
             std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = graph::findBlock(self, sourceBlockRaw, location);
             std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = graph::findBlock(self, destinationBlockRaw, location);
 
-            if (!sourceBlock.has_value() && !destinationBlock.has_value()) {
-                std::print("Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlockRaw.name, destinationBlockRaw.name, location);
+            if (!sourceBlock.has_value() || !destinationBlock.has_value()) {
+                std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlockRaw.name, destinationBlockRaw.name, location);
                 return ConnectionResult::FAILED;
             }
 
