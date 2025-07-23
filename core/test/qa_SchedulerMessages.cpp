@@ -333,13 +333,6 @@ const boost::ut::suite TopologyGraphTests = [] {
     };
 
     "Settings change via messages"_test = [] {
-        static auto returnReplyMsgs = [](gr::MsgPortIn& port) {
-            ReaderSpanLike auto  span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(port.streamReader().available());
-            std::vector<Message> msgs(span.begin(), span.end());
-            expect(span.consume(span.size()));
-            return msgs;
-        };
-
         gr::Graph testGraph(context->loader);
         testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
         testGraph.emplaceBlock("gr::testing::Copy<float32>", {});

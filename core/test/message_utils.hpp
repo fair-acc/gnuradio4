@@ -62,6 +62,20 @@ inline Message getAndConsumeFirstReplyMessage(gr::MsgPortIn& port, std::optional
     return result;
 };
 
+inline Message returnReplyMsg(gr::MsgPortIn& port) {
+    ReaderSpanLike auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
+    Message             msg  = span[0];
+    expect(span.consume(span.size()));
+    return msg;
+};
+
+inline std::vector<Message> returnReplyMsgs(gr::MsgPortIn& port) {
+    ReaderSpanLike auto  span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(port.streamReader().available());
+    std::vector<Message> msgs(span.begin(), span.end());
+    expect(span.consume(span.size()));
+    return msgs;
+};
+
 inline std::vector<Message> getAllReplyMessages(gr::MsgPortIn& port) {
     ReaderSpanLike auto  messages = port.streamReader().get();
     std::vector<Message> result(messages.begin(), messages.end());

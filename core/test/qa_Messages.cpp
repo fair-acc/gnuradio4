@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include "message_utils.hpp"
 #include "utils.hpp"
 
 #include "gnuradio-4.0/Block.hpp"
@@ -90,13 +91,6 @@ const boost::ut::suite MessagesTests = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::test;
-
-    static auto returnReplyMsg = [](gr::MsgPortIn& port) {
-        ReaderSpanLike auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
-        Message             msg  = span[0];
-        expect(span.consume(span.size()));
-        return msg;
-    };
 
     "Block<T>-level message tests"_test = [] {
         using namespace gr::testing;
