@@ -382,6 +382,18 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(std::get<std::string>(wrapped2.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
     };
 
+    "basic ui constraints test"_test = []() {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<Source<float>>({{"ui_constraints", property_map{{"x", 6.f}, {"y", 42.f}}}});
+        auto& sink = testGraph.emplaceBlock<Sink<float>>();
+
+        expect(sink.settings().setStaged(property_map{{"ui_constraints", property_map{{"x", 6.f}, {"y", 42.f}}}}).empty());
+        expect(eq(sink.settings().applyStagedParameters().forwardParameters.size(), 0UZ)); // no autoForwardParameters
+
+        expect(eq(std::get<float>(src.ui_constraints["x"s]), 6.f));
+        expect(eq(src.ui_constraints, sink.ui_constraints));
+    };
+
     "basic decimation test"_test = []() {
         Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
@@ -852,10 +864,10 @@ const boost::ut::suite CtxSettingsTests = [] {
             const auto& stored = block.settings().getStoredAll();
             expect(stored.contains("")) << block.name.value; // empty string is default context
             const auto& vec = stored.at("");
-            expect(eq(vec.size(), 1UZ)) << block.name.value;            // no stored parameters were added via Tag
-            expect(eq(vec[0].second.size(), 14UZ)) << block.name.value; // always store all parameters
+            expect(eq(vec.size(), 1UZ)) << block.name.value;              // no stored parameters were added via Tag
+            expect(eq(vec[0].settings.size(), 14UZ)) << block.name.value; // always store all parameters
 
-            expect(eq(std::get<float>(vec[0].second.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
+            expect(eq(std::get<float>(vec[0].settings.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
 
             const auto& autoUpdate = block.settings().autoUpdateParameters();
             expect(eq(autoUpdate.size(), 7UZ)) << block.name.value;
@@ -897,18 +909,19 @@ const boost::ut::suite CtxSettingsTests = [] {
     "Property auto-forwarding with GRC-loaded graph"_test = [&] {
         constexpr std::string_view grc = R"(
 blocks:
-  - name: source
-    id: gr::setting_test::Source<float64>
+  - id: gr::setting_test::Source<float64>
     parameters:
+      name: source
       n_samples_max: !!uint32 100
       sample_rate: !!float32 123456
-  - name: test_block
-    id: gr::testing::SettingsChangeRecorder<float64>
+  - id: gr::testing::SettingsChangeRecorder<float64>
     parameters:
+      name: test_block
       test_enum_setting: TEST_STATE3 # check setting enum via strings
       annotated_test_enum_setting: TEST_STATE2 # check setting enum via strings
-  - name: sink
-    id: gr::setting_test::Sink<float64>
+  - id: gr::setting_test::Sink<float64>
+    parameters:
+      name: sink
 connections:
   - [source, 0, test_block, 0]
   - [test_block, 0, sink, 0]

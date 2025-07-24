@@ -404,7 +404,9 @@ const boost::ut::suite TopologyGraphTests = [] {
 
             // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
             sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"timeout_ms", 43}} /* data  */);
+
             waitForReply(scheduler.fromScheduler);
+            expect(nothrow([&] { scheduler.scheduler().processScheduledMessages(); })) << "manually execute processing of messages";
 
             stagedSettings = scheduler.scheduler().settings().stagedParameters();
             expect(stagedSettings.contains("timeout_ms"));
@@ -444,6 +446,93 @@ const boost::ut::suite TopologyGraphTests = [] {
             //     expect(eq(testGraph.blocks().size(), 2UZ)) << "Expected 2 blocks after reloading GRC";
             // };
         }
+    };
+
+    "UI constraints setting test"_test = [] {
+        gr::Graph testGraph(context->loader);
+        auto&     copy1 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto&     copy2 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+
+        TestScheduler scheduler(std::move(testGraph));
+        auto          makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", x}, {"y", y}}; };
+
+        {
+            // Setting ui_constraints property for all blocks, universal
+            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7070)}} /* data  */);
+            // Setting ui_constraints property for one block
+            sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName() /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
+
+            waitForReply(scheduler.fromScheduler);
+        }
+
+        const auto replyCount = scheduler.fromScheduler.streamReader().available();
+        for (std::size_t replyIndex = 0UZ; replyIndex < replyCount; replyIndex++) {
+            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+            std::println("Got a reply {}:\n{}", replyIndex, reply);
+        }
+
+        expect(copy1->settings().applyStagedParameters().forwardParameters.empty());
+        expect(copy2->settings().applyStagedParameters().forwardParameters.empty());
+
+        auto uiConstraintsFor = [](const auto& block) {
+            return std::visit(meta::overloaded{
+                                  //
+                                  []<typename... Args>(const std::map<Args...>& map) { return gr::property_map(map); },
+                                  //
+                                  [](const auto& /*v*/) { return gr::property_map{}; }
+                                  //
+                              },
+                block->settings().get("ui_constraints").value());
+        };
+
+        expect(eq(42.f, std::get<float>(uiConstraintsFor(copy1)["x"])));
+        expect(eq(43.f, std::get<float>(uiConstraintsFor(copy2)["x"])));
+
+        // Check if block introspection includes ui_constraints
+
+        {
+            sendMessage<Get>(scheduler.toScheduler, {}, graph::property::kGraphInspect, {});
+            waitForReply(scheduler.fromScheduler);
+
+            expect(ge(getNReplyMessages(scheduler.fromScheduler), 1UZ));
+            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
+
+            expect(reply.data.has_value()) << "Reply should contain data";
+            if (reply.data.has_value()) {
+                const auto& map = reply.data.value();
+                expect(!map.empty()) << "Resulting map should not be empty";
+
+                const auto& children = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(map, "children"s));
+
+                std::set<float> seenUiConstraintsX;
+                std::set<float> seenUiConstraintsY;
+
+                for (const auto& child : children) {
+                    const auto& uiConstraints = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(std::get<gr::property_map>(child.second), "parameters"s, "ui_constraints"s));
+                    seenUiConstraintsX.insert(std::get<float>(uiConstraints.at("x"s)));
+                    seenUiConstraintsY.insert(std::get<float>(uiConstraints.at("y"s)));
+                }
+
+                expect(seenUiConstraintsX == std::set<float>{42, 43});
+                expect(seenUiConstraintsY == std::set<float>{6, 7070});
+            }
+
+            scheduler.scheduler().requestStop();
+
+            auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
+            auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
+
+            expect(eq(42.f, std::get<float>(copy1direct->ui_constraints["x"])));
+            expect(eq(43.f, std::get<float>(copy2direct->ui_constraints["x"])));
+        }
+
+        scheduler.scheduler().requestStop();
+
+        auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
+        auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
+
+        expect(eq(42.f, std::get<float>(copy1direct->ui_constraints["x"])));
+        expect(eq(43.f, std::get<float>(copy2direct->ui_constraints["x"])));
     };
 };
 
