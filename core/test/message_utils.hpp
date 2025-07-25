@@ -55,10 +55,6 @@ inline std::vector<Message> consumeAllReplyMessages(gr::MsgPortIn& port, std::so
     return msgs;
 };
 
-/// Waits for 1 reply that satisfies condition.
-/// You can pass the ReplyChecker() as the condition, to save some typing, example:
-///     ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false}
-/// Returns the reply that satifies the condition.
 template<typename Condition>
 inline std::optional<Message> waitForReply(gr::MsgPortIn& fromGraph, Condition condition, std::chrono::milliseconds maxWaitTime = 1s) {
     auto startedAt = std::chrono::system_clock::now();
