@@ -105,7 +105,7 @@ inline std::optional<Message> waitForReply(gr::MsgPortIn& fromGraph, Condition c
 /// Condition can be a lamdba, such as [] (const Message &reply) { return reply.endpoint == myendpoint; }
 /// or pass a functor for convenience, like:  ReplyChecker{.expectedEndpoint = block::property::kSetting}
 template<message::Command Cmd, typename Condition>
-inline std::optional<Message> sendAndWaitMessage(auto& toPort, auto& fromPort, std::string_view serviceName, std::string_view endpoint, //
+inline std::optional<Message> sendAndWaitForReply(auto& toPort, auto& fromPort, std::string_view serviceName, std::string_view endpoint, //
     property_map data, Condition condition, std::string_view clientRequestID = "", std::source_location sourceLocation = std::source_location::current()) {
     gr::sendMessage<Cmd>(toPort, serviceName, endpoint, std::move(data), clientRequestID);
     auto reply = waitForReply(fromPort, condition);
@@ -128,8 +128,8 @@ struct ReplyChecker {
 
 inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, property_map properties, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
-    auto reply = testing::sendAndWaitMessage<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceBlock, //
-        {{"type", std::move(type)}, {"properties", std::move(properties)}},                                                                      //
+    auto reply = testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceBlock, //
+        {{"type", std::move(type)}, {"properties", std::move(properties)}},                                                                       //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kBlockEmplaced});
 
     return std::get<std::string>(reply.value().data.value().at("uniqueName"s));
@@ -139,7 +139,7 @@ inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
     gr::property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort}, {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort}, //
         {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
-    testing::sendAndWaitMessage<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceEdge, data, //
+    testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceEdge, data, //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kEdgeEmplaced});
 };
 

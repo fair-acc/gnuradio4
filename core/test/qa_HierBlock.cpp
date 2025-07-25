@@ -103,7 +103,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
 
         // Get the whole graph
         {
-            testing::sendAndWaitMessage<Set>(toScheduler, fromScheduler, graph.unique_name /* serviceName */, //
+            testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, graph.unique_name /* serviceName */, //
                 graph::property::kGraphInspect /* endpoint */, property_map{} /* data */, [&](const Message& reply) {
                     if (reply.endpoint != graph::property::kGraphInspected) {
                         return false;
