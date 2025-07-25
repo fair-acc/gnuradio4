@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
 #include <GrBasicBlocks.hpp>
@@ -10,7 +11,6 @@
 
 #include "magic_enum.hpp"
 #include "message_utils.hpp"
-#include "utils.hpp"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -56,7 +56,7 @@ public:
     TestScheduler& operator=(TestScheduler&&)      = delete;
 
     void run() {
-        schedulerRet_ = gr::testing::thread_pool::executeScheduler("qa_SchMess::scheduler", scheduler_);
+        schedulerRet_ = gr::test::thread_pool::executeScheduler("qa_SchMess::scheduler", scheduler_);
 
         using namespace boost::ut;
         // Wait for the scheduler to start running

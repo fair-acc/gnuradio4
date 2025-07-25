@@ -1,12 +1,12 @@
 #include <boost/ut.hpp>
 
 #include "message_utils.hpp"
-#include "utils.hpp"
 
 #include "gnuradio-4.0/Block.hpp"
 #include "gnuradio-4.0/Message.hpp"
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <magic_enum.hpp>
@@ -690,7 +690,7 @@ const boost::ut::suite MessagesTests = [] {
         std::println("##### starting test for scheduler {}", gr::meta::type_name<decltype(scheduler)>());
         std::fflush(stdout);
 
-        auto testWorker = gr::testing::thread_pool::execute("test worker", [&scheduler, &commands] {
+        auto testWorker = gr::test::thread_pool::execute("test worker", [&scheduler, &commands] {
             std::println("starting testWorker.");
             std::fflush(stdout);
             while (scheduler.state() != gr::lifecycle::State::RUNNING) { // wait until scheduler is running
@@ -779,7 +779,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
 
-        auto threadHandle = gr::testing::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
+        auto threadHandle = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
 
         std::vector<std::string> receivedStates;
 
@@ -831,7 +831,7 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
 
-        auto client = gr::testing::thread_pool::execute("qa_Mess::Client", [&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
+        auto client = gr::test::thread_pool::execute("qa_Mess::Client", [&fromScheduler, &toScheduler, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
             sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting, {{"factor", 43.0f}});
             bool       seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
@@ -858,7 +858,7 @@ const boost::ut::suite MessagesTests = [] {
             sendMessage<Command::Set>(toScheduler, schedulerName, block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP))}});
         });
 
-        auto threadHandle = gr::testing::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
+        auto threadHandle = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
 
         client.wait();
         while (source.state() != lifecycle::State::STOPPED) {

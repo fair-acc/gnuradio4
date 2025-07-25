@@ -1,10 +1,10 @@
 #include "message_utils.hpp"
-#include "utils.hpp"
 
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
@@ -560,7 +560,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
         std::atomic_bool shutDownByWatchdog{false};
 
-        auto watchdogThread = gr::testing::thread_pool::execute("watchdog", [&sched, &shutDownByWatchdog]() {
+        auto watchdogThread = gr::test::thread_pool::execute("watchdog", [&sched, &shutDownByWatchdog]() {
             while (sched.state() != gr::lifecycle::State::RUNNING) { // wait until scheduler is running
                 std::this_thread::sleep_for(40ms);
             }
@@ -587,7 +587,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto externalInterventionNeeded = std::make_shared<std::atomic_bool>(false); // unique_ptr because you cannot move atomics
 
         // Create the watchdog thread
-        auto watchdogThread = gr::testing::thread_pool::execute("watchdog", [&sched, &externalInterventionNeeded, timeOut, pollingPeriod]() {
+        auto watchdogThread = gr::test::thread_pool::execute("watchdog", [&sched, &externalInterventionNeeded, timeOut, pollingPeriod]() {
             auto timeout = std::chrono::steady_clock::now() + timeOut;
             while (std::chrono::steady_clock::now() < timeout) {
                 if (sched.state() == gr::lifecycle::State::STOPPED) {
@@ -691,7 +691,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
         expect(eq(0UZ, scheduler.graph().progress().value())) << "initial progress definition (0)";
 
-        auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_Sched", scheduler);
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_Sched", scheduler);
 
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 

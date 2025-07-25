@@ -12,8 +12,6 @@
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-#include "utils.hpp"
-
 #if !DISABLE_SIMD
 namespace gr::test {
 struct copy : public Block<copy> {
@@ -1043,7 +1041,7 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
 
         auto scheduler = scheduler::Simple(std::move(flow));
 
-        auto client = gr::testing::thread_pool::execute("qa_Block::Client", [&scheduler] {
+        auto client = gr::test::thread_pool::execute("qa_Block::Client", [&scheduler] {
             const auto startTime = std::chrono::steady_clock::now();
             auto       isExpired = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
             bool       expired   = false;
@@ -1054,7 +1052,7 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
             scheduler.requestStop();
         });
 
-        auto schedulerThread = gr::testing::thread_pool::executeScheduler("qa_Block::Sched", scheduler);
+        auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_Block::Sched", scheduler);
         client.wait();
 
         // Additional check to be sure that ClockSource is in STOPPED state.

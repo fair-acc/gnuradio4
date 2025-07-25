@@ -4,12 +4,12 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/SettingsChangeRecorder.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "message_utils.hpp"
-#include "utils.hpp"
 
 namespace gr::subgraph_test {
 
@@ -72,7 +72,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
-        auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
@@ -179,7 +179,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         gr::scheduler::Simple scheduler{std::move(initGraph)};
 
-        auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
         expect(awaitCondition(1s, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
@@ -234,7 +234,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
-        auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
