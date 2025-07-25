@@ -272,7 +272,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             // queue, and fails if there's scheduler messages. In the future the scheduler might
             // insert unrelated messages in the queue and this test will fail
             sendMessage<Get>(scheduler.toScheduler, "", block::property::kSetting, {});
-            waitForReply(scheduler.fromScheduler);
+            expect(waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = block::property::kSetting}).has_value()) << "expected reply";
 
             bool        atLeastOneReplyFromScheduler = false;
             std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();
@@ -297,7 +297,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         "set scheduler settings"_test = [&] {
             // See TODO from "get scheduler settings", same case
             sendMessage<Set>(scheduler.toScheduler, "", block::property::kStagedSetting, {{"timeout_ms", 42}});
-            waitForReply(scheduler.fromScheduler);
+            expect(waitForReply(scheduler.fromScheduler, ReplyChecker{.expectedEndpoint = block::property::kStagedSetting, .expectedHasData = false}).has_value()) << "expected reply";
 
             bool        atLeastOneReplyFromScheduler = false;
             std::size_t availableMessages            = scheduler.fromScheduler.streamReader().available();

@@ -72,28 +72,21 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
-        sendMessage<Set>(toScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass2_unique_id}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}});
-        sendMessage<Set>(toScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass1_unique_id}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}});
-        scheduler.processScheduledMessages();
-
         auto schedulerThreadHandle = gr::testing::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
-
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
+
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort,                                      //
+            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass2_unique_id}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort,                                    //
+            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass1_unique_id}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
 
         for (const auto& block : graph.blocks()) {
             std::println("block in list: {} - state() : {}", block->name(), magic_enum::enum_name(block->state()));
         }
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
-
-        // 2 export ports from the sub-graph
-        if (!waitForReply(fromScheduler, 2UZ)) {
-            expect(false) << "Reply messages not received for kSubgraphExportPort.";
-        }
-        expect(ge(getNReplyMessages(fromScheduler), 2UZ));
-        consumeAllReplyMessages(fromScheduler);
 
         // Make connections
         sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph->uniqueName()), "in", scheduler.unique_name);

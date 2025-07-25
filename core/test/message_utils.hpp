@@ -55,21 +55,6 @@ inline std::vector<Message> consumeAllReplyMessages(gr::MsgPortIn& port, std::so
     return msgs;
 };
 
-/// Waits for N replies to be available
-/// DEPRECATED: Do not use, as we shouldn't assume how many replies exist, many replies can be unrelated.
-///             There's 2 callers which can't be ported easily.
-///             Instead, look for the message you want by endpoint/data. See the other waitForReply overload().
-inline bool waitForReply(gr::MsgPortIn& fromGraph, std::size_t nReplies = 1UZ, std::chrono::milliseconds maxWaitTime = 1s) {
-    auto startedAt = std::chrono::system_clock::now();
-    while (fromGraph.streamReader().available() < nReplies) {
-        std::this_thread::sleep_for(100ms);
-        if (std::chrono::system_clock::now() - startedAt > maxWaitTime) {
-            break;
-        }
-    }
-    return fromGraph.streamReader().available() >= nReplies;
-};
-
 /// Waits for 1 reply that satisfies condition.
 /// You can pass the ReplyChecker() as the condition, to save some typing, example:
 ///     ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false}
