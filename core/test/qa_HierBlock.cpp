@@ -4,6 +4,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/SettingsChangeRecorder.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
@@ -71,32 +72,21 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
-        std::expected<void, Error> schedulerRet;
-        auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
-
-        sendMessage<Set>(toScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass2_unique_id}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}});
-        sendMessage<Set>(toScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass1_unique_id}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}});
-        scheduler.processScheduledMessages();
-
-        std::thread schedulerThread1(runScheduler);
-
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
+
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort,                                      //
+            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass2_unique_id}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, subGraph->uniqueName(), graph::property::kSubgraphExportPort,                                    //
+            property_map{{"uniqueBlockName"s, subGraphDirect->blockRef().pass1_unique_id}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}}, //
+            ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
 
         for (const auto& block : graph.blocks()) {
             std::println("block in list: {} - state() : {}", block->name(), magic_enum::enum_name(block->state()));
         }
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
-
-        // 2 export ports from the sub-graph
-        if (!waitForReply(fromScheduler, 2UZ)) {
-            expect(false) << "Reply messages not received for kSubgraphExportPort.";
-        }
-        expect(ge(getNReplyMessages(fromScheduler), 2UZ));
-        consumeAllReplyMessages(fromScheduler);
-        expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
         // Make connections
         sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", std::string(subGraph->uniqueName()), "in", scheduler.unique_name);
@@ -106,52 +96,49 @@ const boost::ut::suite ExportPortsTests_ = [] {
 
         // Get the whole graph
         {
-            sendMessage<Set>(toScheduler, graph.unique_name /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */);
-            if (!waitForReply(fromScheduler)) {
-                expect(false) << "Reply message not received for kGraphInspect.";
-            }
+            testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, graph.unique_name /* serviceName */, //
+                graph::property::kGraphInspect /* endpoint */, property_map{} /* data */, [&](const Message& reply) {
+                    if (reply.endpoint != graph::property::kGraphInspected) {
+                        return false;
+                    }
 
-            expect(eq(getNReplyMessages(fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(fromScheduler);
-            expect(eq(getNReplyMessages(fromScheduler), 0UZ));
-            if (!reply.data.has_value()) {
-                expect(false) << std::format("reply.data has no value:{}\n", reply.data.error());
-            }
-            const auto& data     = reply.data.value();
-            const auto& children = std::get<property_map>(data.at("children"s));
-            expect(eq(children.size(), 3UZ));
+                    const auto& data     = reply.data.value();
+                    const auto& children = std::get<property_map>(data.at("children"s));
+                    expect(eq(children.size(), 3UZ));
 
-            const auto& edges = std::get<property_map>(data.at("edges"s));
-            expect(eq(edges.size(), 2UZ));
+                    const auto& edges = std::get<property_map>(data.at("edges"s));
+                    expect(eq(edges.size(), 2UZ));
 
-            std::size_t subGraphInConnections  = 0UZ;
-            std::size_t subGraphOutConnections = 0UZ;
+                    std::size_t subGraphInConnections  = 0UZ;
+                    std::size_t subGraphOutConnections = 0UZ;
 
-            // Check that the subgraph is connected properly
+                    // Check that the subgraph is connected properly
 
-            for (const auto& [index, edge_] : edges) {
-                const auto& edge = std::get<property_map>(edge_);
-                if (std::get<std::string>(edge.at("destinationBlock")) == subGraph->uniqueName()) {
-                    subGraphInConnections++;
-                }
-                if (std::get<std::string>(edge.at("sourceBlock")) == subGraph->uniqueName()) {
-                    subGraphOutConnections++;
-                }
-            }
-            expect(eq(subGraphInConnections, 1UZ));
-            expect(eq(subGraphOutConnections, 1UZ));
+                    for (const auto& [index, edge_] : edges) {
+                        const auto& edge = std::get<property_map>(edge_);
+                        if (std::get<std::string>(edge.at("destinationBlock")) == subGraph->uniqueName()) {
+                            subGraphInConnections++;
+                        }
+                        if (std::get<std::string>(edge.at("sourceBlock")) == subGraph->uniqueName()) {
+                            subGraphOutConnections++;
+                        }
+                    }
+                    expect(eq(subGraphInConnections, 1UZ));
+                    expect(eq(subGraphOutConnections, 1UZ));
 
-            // Check subgraph topology
-            const auto& subGraphData     = std::get<property_map>(children.at(std::string(subGraph->uniqueName())));
-            const auto& subGraphChildren = std::get<property_map>(subGraphData.at("children"s));
-            const auto& subGraphEdges    = std::get<property_map>(subGraphData.at("edges"s));
-            expect(eq(subGraphChildren.size(), 2UZ));
-            expect(eq(subGraphEdges.size(), 1UZ));
+                    // Check subgraph topology
+                    const auto& subGraphData     = std::get<property_map>(children.at(std::string(subGraph->uniqueName())));
+                    const auto& subGraphChildren = std::get<property_map>(subGraphData.at("children"s));
+                    const auto& subGraphEdges    = std::get<property_map>(subGraphData.at("edges"s));
+                    expect(eq(subGraphChildren.size(), 2UZ));
+                    expect(eq(subGraphEdges.size(), 1UZ));
+                    return true;
+                });
         }
 
         // Stopping scheduler
         scheduler.requestStop();
-        schedulerThread1.join();
+        auto schedulerRet = schedulerThreadHandle.get();
         if (!schedulerRet.has_value()) {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
@@ -190,11 +177,9 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         expect(eq(initGraph.edges().size(), 2UZ));
         expect(eq(subGraphDirect->blockRef().edges().size(), 1UZ));
 
-        gr::scheduler::Simple      scheduler{std::move(initGraph)};
-        std::expected<void, Error> schedulerRet;
-        auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
+        gr::scheduler::Simple scheduler{std::move(initGraph)};
 
-        std::thread schedulerThread1(runScheduler);
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
         expect(awaitCondition(1s, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
@@ -209,7 +194,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         // Stopping scheduler
         scheduler.requestStop();
-        schedulerThread1.join();
+        auto schedulerRet = schedulerThreadHandle.get();
         if (!schedulerRet.has_value()) {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
@@ -249,10 +234,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
-        std::expected<void, Error> schedulerRet;
-        auto                       runScheduler = [&scheduler, &schedulerRet] { schedulerRet = scheduler.runAndWait(); };
-
-        std::thread schedulerThread1(runScheduler);
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
@@ -264,7 +246,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
 
         // Stopping scheduler
         scheduler.requestStop();
-        schedulerThread1.join();
+        auto schedulerRet = schedulerThreadHandle.get();
         if (!schedulerRet.has_value()) {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
