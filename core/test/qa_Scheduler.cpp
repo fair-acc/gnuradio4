@@ -1,8 +1,10 @@
 #include "message_utils.hpp"
+
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
@@ -557,7 +559,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto sched = scheduler{std::move(flow), gr::thread_pool::kDefaultCpuPoolId};
 
         std::atomic_bool shutDownByWatchdog{false};
-        std::thread      watchdogThread([&sched, &shutDownByWatchdog]() {
+
+        auto watchdogThread = gr::test::thread_pool::execute("watchdog", [&sched, &shutDownByWatchdog]() {
             while (sched.state() != gr::lifecycle::State::RUNNING) { // wait until scheduler is running
                 std::this_thread::sleep_for(40ms);
             }
@@ -569,10 +572,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         });
 
         expect(sched.runAndWait().has_value());
-
-        if (watchdogThread.joinable()) {
-            watchdogThread.join();
-        }
+        watchdogThread.wait();
 
         expect(ge(source.count, 0U));
         expect(shutDownByWatchdog.load(std::memory_order_relaxed));
@@ -587,7 +587,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto externalInterventionNeeded = std::make_shared<std::atomic_bool>(false); // unique_ptr because you cannot move atomics
 
         // Create the watchdog thread
-        std::thread watchdogThread([&sched, &externalInterventionNeeded, timeOut, pollingPeriod]() {
+        auto watchdogThread = gr::test::thread_pool::execute("watchdog", [&sched, &externalInterventionNeeded, timeOut, pollingPeriod]() {
             auto timeout = std::chrono::steady_clock::now() + timeOut;
             while (std::chrono::steady_clock::now() < timeout) {
                 if (sched.state() == gr::lifecycle::State::STOPPED) {
@@ -620,9 +620,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value());
 
-        if (watchdogThread.joinable()) {
-            watchdogThread.join();
-        }
+        watchdogThread.wait();
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
         expect(eq(source.count, 1024U));
         expect(eq(sink.count, 1024U));
@@ -645,9 +643,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value());
 
-        if (watchdogThread.joinable()) {
-            watchdogThread.join();
-        }
+        watchdogThread.wait();
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
         expect(eq(monitor.count, 1024U));
         expect(eq(sink.count, 1024U));
@@ -670,9 +666,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value());
 
-        if (watchdogThread.joinable()) {
-            watchdogThread.join();
-        }
+        watchdogThread.wait();
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
         expect(eq(sink.count, 1024U));
 
@@ -696,11 +690,9 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         scheduler.timeout_inactivity_count = 10U;  // also dynamically settable via messages/block interface
 
         expect(eq(0UZ, scheduler.graph().progress().value())) << "initial progress definition (0)";
-        std::expected<void, Error> schedulerResult;
-        auto                       schedulerThread = std::thread([&scheduler, &schedulerResult] {
-            gr::thread_pool::thread::setThreadName("qa_Sched");
-            schedulerResult = scheduler.runAndWait();
-        });
+
+        auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_Sched", scheduler);
+
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
@@ -749,8 +741,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         std::println("request to shut-down");
         scheduler.requestStop();
 
-        schedulerThread.join();
-        std::string errorMsg = schedulerResult.has_value() ? "" : std::format("nested scheduler execution failed:\n{:f}\n", schedulerResult.error());
+        auto        schedulerResult = schedulerThreadHandle.get();
+        std::string errorMsg        = schedulerResult.has_value() ? "" : std::format("nested scheduler execution failed:\n{:f}\n", schedulerResult.error());
         expect(schedulerResult.has_value()) << errorMsg;
     };
 
