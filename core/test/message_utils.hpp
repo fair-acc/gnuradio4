@@ -32,18 +32,15 @@ bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
     return false;
 }
 
-/// returns and consumes the first message
-inline Message consumeReplyMsg(gr::MsgPortIn& port) {
+inline Message consumeFirstReply(gr::MsgPortIn& port) {
     ReaderSpanLike auto span = port.streamReader().get<SpanReleasePolicy::ProcessAll>(1UZ);
     Message             msg  = span[0];
     expect(span.consume(span.size()));
     return msg;
 };
 
-/// returns number of messages available
 inline std::size_t getNReplyMessages(gr::MsgPortIn& port) { return port.streamReader().available(); };
 
-/// Returns and consumes all replies
 inline std::vector<Message> consumeAllReplyMessages(gr::MsgPortIn& port, std::source_location sourceLocation = std::source_location::current()) {
     std::vector<Message> msgs;
 
