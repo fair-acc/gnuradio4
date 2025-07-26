@@ -20,17 +20,122 @@ namespace gr {
 
 using gr::meta::fixed_string;
 
-enum class PortDirection { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
+enum class PortDirection { INPUT, OUTPUT };
 
 enum class ConnectionResult { SUCCESS, FAILED };
 
-// FIXME: can we still rename this to e.g. PortFlavor? "type" has a very specific meaning in C++ already. And since
-// we're doing a lot of reflection on ports there's ambiguity all over the place.
 enum class PortType {
     STREAM,  /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
     MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
     ANY      // 'ANY' only for querying and not to be used for port declarations
 };
+
+enum class PortSync { SYNCHRONOUS, ASYNCHRONOUS };
+
+namespace port {
+enum class BitMask : uint8_t {
+    None        = 0U,
+    Input       = 1U << 0U,
+    Stream      = 1U << 1U,
+    Synchronous = 1U << 2U,
+    Optional    = 1U << 3U,
+    Connected   = 1U << 4U,
+};
+
+constexpr BitMask operator|(BitMask a, BitMask b) { return static_cast<BitMask>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b)); }
+constexpr BitMask operator&(BitMask a, BitMask b) { return static_cast<BitMask>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b)); }
+constexpr bool    any(BitMask mask, BitMask test) { return static_cast<uint8_t>(mask & test) != 0; }
+
+[[nodiscard]] inline constexpr BitMask encodeMask(PortDirection dir, PortType type, bool synchronous, bool optional, bool connected) noexcept {
+    assert(type != PortType::ANY && "ANY is not encodable");
+
+    using enum BitMask;
+    BitMask mask = None;
+    if (dir == PortDirection::INPUT) {
+        mask = mask | Input;
+    }
+    if (type == PortType::STREAM) {
+        mask = mask | Stream;
+    }
+    if (synchronous) {
+        mask = mask | Synchronous;
+    }
+    if (optional) {
+        mask = mask | Optional;
+    }
+    if (connected) {
+        mask = mask | Connected;
+    }
+    return mask;
+}
+
+struct BitPattern {
+    std::uint8_t mask;
+    std::uint8_t value;
+
+    constexpr BitPattern(BitMask m, BitMask v) : mask(static_cast<std::uint8_t>(m)), value(static_cast<std::uint8_t>(v)) {}
+    constexpr BitPattern(BitMask m, std::uint8_t v) : mask(static_cast<std::uint8_t>(m)), value(v) {}
+    constexpr BitPattern(std::uint8_t m, std::uint8_t v) : mask(m), value(v) {}
+
+    [[nodiscard]] constexpr bool matches(std::uint8_t bits) const { return (bits & mask) == value; }
+    [[nodiscard]] constexpr bool matches(BitMask b) const { return matches(static_cast<std::uint8_t>(b)); }
+    constexpr BitPattern         operator|(const BitPattern& other) const { return BitPattern(static_cast<uint8_t>(mask | other.mask), static_cast<uint8_t>(value | other.value)); }
+    static constexpr BitPattern  Any() { return BitPattern{0U, 0U}; }
+};
+
+[[nodiscard]] inline constexpr bool isConnected(BitMask m) { return any(m, BitMask::Connected); }
+[[nodiscard]] inline constexpr bool isInput(BitMask m) { return any(m, BitMask::Input); }
+[[nodiscard]] inline constexpr bool isStream(BitMask m) { return any(m, BitMask::Stream); }
+[[nodiscard]] inline constexpr bool isSynchronous(BitMask m) { return any(m, BitMask::Synchronous); }
+
+[[nodiscard]] inline constexpr PortDirection decodeDirection(BitMask m) { return isInput(m) ? PortDirection::INPUT : PortDirection::OUTPUT; }
+[[nodiscard]] inline constexpr PortType      decodePortType(BitMask m) { return isStream(m) ? PortType::STREAM : PortType::MESSAGE; }
+
+// comparison operators
+[[nodiscard]] inline constexpr bool operator==(BitMask mask, PortDirection dir) { return decodeDirection(mask) == dir; }
+[[nodiscard]] inline constexpr bool operator!=(BitMask mask, PortDirection dir) { return !(mask == dir); }
+[[nodiscard]] inline constexpr bool operator==(BitMask mask, PortType type) { return decodePortType(mask) == type; }
+[[nodiscard]] inline constexpr bool operator!=(BitMask mask, PortType type) { return !(mask == type); }
+[[nodiscard]] inline constexpr bool operator==(PortDirection dir, BitMask mask) { return mask == dir; }
+[[nodiscard]] inline constexpr bool operator!=(PortDirection dir, BitMask mask) { return !(mask == dir); }
+[[nodiscard]] inline constexpr bool operator==(PortType type, BitMask mask) { return mask == type; }
+[[nodiscard]] inline constexpr bool operator!=(PortType type, BitMask mask) { return !(mask == type); }
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortDirection d) {
+    using enum BitMask;
+    switch (d) {
+    case PortDirection::INPUT: return {Input, Input};
+    case PortDirection::OUTPUT: return {Input, 0UZ};
+    default: return BitPattern::Any();
+    }
+}
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortType t) {
+    using enum BitMask;
+    switch (t) {
+    case PortType::STREAM: return {Stream, Stream};
+    case PortType::MESSAGE: return {Stream, 0UZ};
+    case PortType::ANY: return BitPattern::Any();
+    }
+    return BitPattern::Any();
+}
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortSync s) {
+    using enum BitMask;
+    switch (s) {
+    case PortSync::SYNCHRONOUS: return {Synchronous, Synchronous};
+    case PortSync::ASYNCHRONOUS: return {Synchronous, 0UZ};
+    }
+    return BitPattern::Any();
+}
+
+template<auto... Enums>
+[[nodiscard]] consteval BitPattern pattern() {
+    BitPattern combined = BitPattern::Any();
+    ((combined = combined | matchBits(Enums)), ...);
+    return combined;
+}
+} // namespace port
 
 /**
  * @brief optional port annotation argument to described whether the port can be handled within the same scheduling domain.
@@ -56,9 +161,9 @@ static_assert(is_port_domain<CPU>::value);
 static_assert(is_port_domain<GPU>::value);
 static_assert(!is_port_domain<int>::value);
 
-struct PortInfo {
+struct PortInfo { // maybe/should be replaced by gr::port::BitMask
     PortType         portType                  = PortType::ANY;
-    PortDirection    portDirection             = PortDirection::ANY;
+    PortDirection    portDirection             = PortDirection::INPUT;
     std::string_view portDomain                = "unknown";
     ConnectionResult portConnectionResult      = ConnectionResult::FAILED;
     std::string      valueTypeName             = "uninitialised type";
@@ -66,6 +171,93 @@ struct PortInfo {
     std::size_t      valueTypeSize             = 0UZ;
     std::size_t      bufferSize                = 0UZ;
     std::size_t      availableBufferSize       = 0UZ;
+};
+
+struct PortMetaInfo {
+    using description = Doc<R"*(@brief Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
+
+**Some example usages:**
+  * prevents to accidentally connect ports with incompatible sampling rates, quantity- and unit-types.
+  * used to condition graphs/charts (notably the min/max range),
+  * detect saturation/LNA non-linearities,
+  * detect computation errors
+  * ...
+
+Follows the ISO 80000-1:2022 Quantities and Units conventions:
+  * https://www.iso.org/standard/76921.html
+  * https://en.wikipedia.org/wiki/ISO/IEC_80000
+  * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
+)*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
+
+    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">>                           data_type = "<unknown>";
+    Annotated<std::string, "port name", Visible, Doc<"port name">>                                                   name;
+    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
+    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
+    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
+    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
+    Annotated<float, "signal min", Doc<"minimum expected signal value">>                                             signal_min = std::numeric_limits<float>::lowest();
+    Annotated<float, "signal max", Doc<"maximum expected signal value">>                                             signal_max = std::numeric_limits<float>::max();
+
+    GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+
+    // controls automatic (if set) or manual update of above parameters
+    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
+
+    constexpr PortMetaInfo() noexcept = default;
+    explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) //
+        : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
+    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
+
+    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
+
+    template<bool isNoexcept = false>
+    void update(const property_map& metaInfo) noexcept(isNoexcept) {
+        if (metaInfo.empty()) {
+            return;
+        }
+
+        auto updateValue = [&metaInfo](const std::string& key, auto& member) {
+            if (!metaInfo.contains(key)) {
+                return;
+            }
+            const auto& value = metaInfo.at(key);
+            using T           = std::decay_t<decltype(member.value)>;
+            if (std::holds_alternative<T>(value)) {
+                member = std::get<T>(value);
+            } else {
+                throw gr::exception("invalid-argument: incorrect type for " + key);
+            }
+        };
+
+        for (const auto& key : auto_update) {
+            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
+                updateValue(key, sample_rate);
+            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
+                updateValue(key, signal_name);
+            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
+                updateValue(key, signal_quantity);
+            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
+                updateValue(key, signal_unit);
+            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
+                updateValue(key, signal_min);
+            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
+                updateValue(key, signal_max);
+            }
+        }
+    }
+
+    [[nodiscard]] property_map get() const noexcept {
+        property_map metaInfo;
+        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
+        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
+        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
+        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
+        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
+        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
+
+        return metaInfo;
+    }
 };
 
 template<class T>
@@ -77,6 +269,7 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any& newD
     { t.priority } -> std::convertible_to<std::int32_t>;
     { t.min_samples } -> std::convertible_to<std::size_t>;
     { t.max_samples } -> std::convertible_to<std::size_t>;
+    { t.metaInfo } -> std::convertible_to<gr::PortMetaInfo>;
     { t.type() } -> std::same_as<PortType>;
     { t.direction() } -> std::same_as<PortDirection>;
     { t.domain() } -> std::same_as<std::string_view>;
@@ -174,89 +367,6 @@ static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
-
-struct PortMetaInfo {
-    using description = Doc<R"*(@brief Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
-
-**Some example usages:**
-  * prevents to accidentally connect ports with incompatible sampling rates, quantity- and unit-types.
-  * used to condition graphs/charts (notably the min/max range),
-  * detect saturation/LNA non-linearities,
-  * detect computation errors
-  * ...
-
-Follows the ISO 80000-1:2022 Quantities and Units conventions:
-  * https://www.iso.org/standard/76921.html
-  * https://en.wikipedia.org/wiki/ISO/IEC_80000
-  * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
-)*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
-
-    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
-    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
-    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
-    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
-    Annotated<float, "signal min,", Doc<"minimum expected signal value">>                                            signal_min = std::numeric_limits<float>::lowest();
-    Annotated<float, "signal max,", Doc<"maximum expected signal value">>                                            signal_max = std::numeric_limits<float>::max();
-
-    GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
-
-    // controls automatic (if set) or manual update of above parameters
-    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
-
-    constexpr PortMetaInfo() noexcept = default;
-    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
-    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
-
-    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
-
-    template<bool isNoexcept = false>
-    void update(const property_map& metaInfo) noexcept(isNoexcept) {
-        if (metaInfo.empty()) {
-            return;
-        }
-
-        auto updateValue = [&metaInfo](const std::string& key, auto& member) {
-            if (!metaInfo.contains(key)) {
-                return;
-            }
-            const auto& value = metaInfo.at(key);
-            using T           = std::decay_t<decltype(member.value)>;
-            if (std::holds_alternative<T>(value)) {
-                member = std::get<T>(value);
-            } else {
-                throw gr::exception("invalid-argument: incorrect type for " + key);
-            }
-        };
-
-        for (const auto& key : auto_update) {
-            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
-                updateValue(key, sample_rate);
-            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
-                updateValue(key, signal_name);
-            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
-                updateValue(key, signal_quantity);
-            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
-                updateValue(key, signal_unit);
-            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
-                updateValue(key, signal_min);
-            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
-                updateValue(key, signal_max);
-            }
-        }
-    }
-
-    [[nodiscard]] property_map get() const noexcept {
-        property_map metaInfo;
-        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
-        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
-        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
-        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
-        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
-        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
-
-        return metaInfo;
-    }
-};
 
 } // namespace gr
 
@@ -417,12 +527,11 @@ struct Port {
     template<meta::fixed_string newName, detail::PortOrCollectionKind Kind, std::size_t KindExtraData, size_t MemberIdx>
     using make_port_descriptor = detail::PortDescriptor<T, newName, portType, portDirection, Kind, KindExtraData, MemberIdx, Attributes...>;
 
-    static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
     static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");
     static_assert(portType == PortType::STREAM || std::is_same_v<T, gr::Message>, "If a port type is MESSAGE, the value type needs to be gr::Message");
 
     using value_type        = T;
-    using AttributeTypeList = typename gr::meta::typelist<Attributes...>;
+    using AttributeTypeList = gr::meta::typelist<Attributes...>;
     using Domain            = AttributeTypeList::template find_or_default<is_port_domain, CPU>;
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
@@ -448,8 +557,13 @@ struct Port {
     using TagWriterSpanType = decltype(std::declval<TagWriterType>().reserve(0UZ));
 
     // public properties
-    constexpr static bool kIsSynch    = !std::disjunction_v<std::is_same<Async, Attributes>...>;
-    constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>;
+    // kIsSynch:
+    //   true  -> port participates in synchronous scheduling with other sync ports
+    //   false -> port is asynchronous (does not gate scheduling)
+    // Rule: an input marked Optional is implicitly also async (i.e. otherwise it would block the sync block data processing);
+    //       outputs stay synchronous unless explicitly annotated with Async.
+    constexpr static bool kIsSynch    = !(std::disjunction_v<std::is_same<Async, Attributes>...> || (kIsInput && std::disjunction_v<std::is_same<Optional, Attributes>...>));
+    constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
 
     std::string_view name;
 
@@ -461,7 +575,7 @@ struct Port {
     std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> max_samples = Required::kMaxSamples;
 
     // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
-    PortMetaInfo metaInfo{};
+    PortMetaInfo metaInfo{gr::meta::type_name<T>()};
 
     GR_MAKE_REFLECTABLE(Port, kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo);
 
@@ -522,7 +636,7 @@ struct Port {
             std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
-        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 1) const {
+        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 1UZ) const {
             auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                 assert(&sourceMap != &destinationMap);
                 for (const auto& [key, value] : sourceMap) {
@@ -640,7 +754,7 @@ private:
 public:
     constexpr Port() noexcept = default;
     explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
-    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(other.metaInfo), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
     Port(const Port&)                       = delete;
     auto            operator=(const Port&)  = delete;
     constexpr Port& operator=(Port&& other) = delete;
@@ -971,6 +1085,7 @@ public:
     std::int16_t priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     std::size_t  min_samples;
     std::size_t  max_samples;
+    PortMetaInfo metaInfo;
 
 private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition
@@ -978,29 +1093,19 @@ private:
 
         [[nodiscard]] virtual DynamicPort weakRef() const noexcept = 0;
 
-        [[nodiscard]] virtual std::intptr_t internalId() const noexcept = 0;
-
-        [[nodiscard]] virtual std::any defaultValue() const noexcept = 0;
-
-        [[nodiscard]] virtual bool setDefaultValue(const std::any& val) noexcept = 0;
-
-        [[nodiscard]] virtual PortType type() const noexcept = 0;
-
-        [[nodiscard]] virtual PortDirection direction() const noexcept = 0;
-
-        [[nodiscard]] virtual std::string_view domain() const noexcept = 0;
-
-        [[nodiscard]] virtual bool isSynchronous() noexcept = 0;
-
-        [[nodiscard]] virtual bool isOptional() noexcept = 0;
+        [[nodiscard]] virtual std::intptr_t    internalId() const noexcept                   = 0;
+        [[nodiscard]] virtual std::any         defaultValue() const noexcept                 = 0;
+        [[nodiscard]] virtual bool             setDefaultValue(const std::any& val) noexcept = 0;
+        [[nodiscard]] virtual PortType         type() const noexcept                         = 0;
+        [[nodiscard]] virtual PortDirection    direction() const noexcept                    = 0;
+        [[nodiscard]] virtual std::string_view domain() const noexcept                       = 0;
+        [[nodiscard]] virtual bool             isSynchronous() noexcept                      = 0;
+        [[nodiscard]] virtual bool             isOptional() noexcept                         = 0;
 
         [[nodiscard]] virtual ConnectionResult resizeBuffer(std::size_t min_size) noexcept = 0;
-
-        [[nodiscard]] virtual bool isConnected() const noexcept = 0;
-
-        [[nodiscard]] virtual ConnectionResult disconnect() noexcept = 0;
-
-        [[nodiscard]] virtual ConnectionResult connect(DynamicPort& dst_port) = 0;
+        [[nodiscard]] virtual bool             isConnected() const noexcept                = 0;
+        [[nodiscard]] virtual ConnectionResult disconnect() noexcept                       = 0;
+        [[nodiscard]] virtual ConnectionResult connect(DynamicPort& dst_port)              = 0;
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept = 0;
@@ -1011,7 +1116,13 @@ private:
 
         [[nodiscard]] virtual std::string typeName() const = 0;
 
-        [[nodiscard]] virtual PortInfo portInfo() const = 0; // TODO: rename to type() and remove existing type(), direction(), domain(), ... API
+        [[nodiscard]] virtual std::string_view portName() noexcept       = 0; // TODO: rename to 'name()' and eliminate local 'name' field (moved to metaInfo()), and use string&
+        [[nodiscard]] virtual std::string_view portName() const noexcept = 0;
+
+        [[nodiscard]] virtual PortInfo            portInfo() const              = 0; // TODO: rename to type() and remove existing type(), direction(), domain(), ... API
+        [[nodiscard]] virtual PortMetaInfo const& portMetaInfo() const noexcept = 0;
+        [[nodiscard]] virtual PortMetaInfo&       portMetaInfo() noexcept       = 0;
+        [[nodiscard]] virtual port::BitMask       portMaskInfo() const noexcept = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1047,6 +1158,7 @@ private:
             } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
             }
+            arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         explicit constexpr PortWrapper(T&& arg) noexcept : _value{std::move(arg)} {
@@ -1055,6 +1167,7 @@ private:
             } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
             }
+            arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         ~PortWrapper() override = default;
@@ -1064,41 +1177,52 @@ private:
         [[nodiscard]] std::intptr_t internalId() const noexcept override { return reinterpret_cast<std::intptr_t>(std::addressof(_value)); }
 
         [[nodiscard]] std::any defaultValue() const noexcept override { return _value.defaultValue(); }
+        [[nodiscard]] bool     setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
 
-        [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
-
-        [[nodiscard]] constexpr PortType type() const noexcept override { return _value.type(); }
-
-        [[nodiscard]] constexpr PortDirection direction() const noexcept override { return _value.direction(); }
-
+        [[nodiscard]] constexpr PortType         type() const noexcept override { return _value.type(); }
+        [[nodiscard]] constexpr PortDirection    direction() const noexcept override { return _value.direction(); }
         [[nodiscard]] constexpr std::string_view domain() const noexcept override { return _value.domain(); }
-
-        [[nodiscard]] bool isSynchronous() noexcept override { return _value.isSynchronous(); }
-
-        [[nodiscard]] bool isOptional() noexcept override { return _value.isOptional(); }
+        [[nodiscard]] bool                       isSynchronous() noexcept override { return _value.isSynchronous(); }
+        [[nodiscard]] bool                       isOptional() noexcept override { return _value.isOptional(); }
 
         [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
-
-        [[nodiscard]] std::size_t nReaders() const override { return _value.nReaders(); }
-        [[nodiscard]] std::size_t nWriters() const override { return _value.nWriters(); }
-        [[nodiscard]] std::size_t bufferSize() const override { return _value.bufferSize(); }
-
-        [[nodiscard]] bool isConnected() const noexcept override { return _value.isConnected(); }
-
+        [[nodiscard]] std::size_t      nReaders() const override { return _value.nReaders(); }
+        [[nodiscard]] std::size_t      nWriters() const override { return _value.nWriters(); }
+        [[nodiscard]] std::size_t      bufferSize() const override { return _value.bufferSize(); }
+        [[nodiscard]] bool             isConnected() const noexcept override { return _value.isConnected(); }
         [[nodiscard]] ConnectionResult disconnect() noexcept override { return _value.disconnect(); }
 
-        [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) override {
+        [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) override { // TODO: return signature: refactor to non-throwing std::expected<ConnectionResult, Error> return -> follow-up PR
             using enum gr::ConnectionResult;
+            port::BitMask thisMask = portMaskInfo();
+            port::BitMask other    = dst_port.portMaskInfo();
+            if (port::decodePortType(thisMask) != port::decodePortType(other)) {
+#ifdef DEBUG
+                throw std::runtime_error(std::format("port type mismatch: {}::{} != {}::{}", portName(), port::decodePortType(thisMask), dst_port.portName(), port::decodePortType(other)));
+#endif
+                return FAILED;
+            }
+            if (portMetaInfo().data_type != dst_port.portMetaInfo().data_type) {
+#ifdef DEBUG
+                throw std::runtime_error(std::format("port data type mismatch: {}::{} != {}::{}", portName(), _value.metaInfo.data_type, dst_port.portName(), dst_port.metaInfo.data_type));
+#endif
+                return FAILED;
+            }
             if constexpr (T::kIsOutput) {
                 auto src_buffer = _value.writerHandlerInternal();
                 return dst_port.updateReaderInternal(src_buffer) ? SUCCESS : FAILED;
             } else {
-                assert(false && "This works only on input ports");
+#ifdef DEBUG
+                throw std::runtime_error("This works only on input ports");
+#endif
                 return FAILED;
             }
         }
 
         [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
+
+        [[nodiscard]] std::string_view portName() noexcept override { return _value.name; } // TODO: '_value.name' -> '_value.metaInfo.name' and use string&
+        [[nodiscard]] std::string_view portName() const noexcept override { return _value.name; }
 
         [[nodiscard]] PortInfo portInfo() const override {
             return {// snapshot
@@ -1112,6 +1236,10 @@ private:
                 .bufferSize                = _value.bufferSize(),
                 .availableBufferSize       = _value.available()};
         }
+
+        [[nodiscard]] PortMetaInfo const& portMetaInfo() const noexcept override { return _value.metaInfo; }
+        [[nodiscard]] PortMetaInfo&       portMetaInfo() noexcept override { return _value.metaInfo; }
+        [[nodiscard]] port::BitMask       portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -1139,6 +1267,12 @@ public:
         return *this;
     }
 
+    template<class T>
+    explicit constexpr DynamicPort(const T& arg, non_owned_reference_tag) noexcept                            // TODO: remove const-cast (super dangerous, and only a temporary fix) -> Ivan volunteerd to fix in follor-up PR
+    requires PortLike<std::remove_const_t<T>>                                                                 //
+        : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), //
+          _accessor{std::make_unique<PortWrapper<std::remove_const_t<T>, false>>(const_cast<std::remove_const_t<T>&>(arg))} {}
+
     bool operator==(const DynamicPort& other) const noexcept { return _accessor->internalId() == other._accessor->internalId(); }
     bool operator!=(const DynamicPort& other) const noexcept { return _accessor->internalId() != other._accessor->internalId(); }
 
@@ -1150,20 +1284,18 @@ public:
     explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, true>>(std::forward<T>(arg))} {}
 
     [[nodiscard]] DynamicPort weakRef() const noexcept { return _accessor->weakRef(); }
+    [[nodiscard]] std::any    defaultValue() const noexcept { return _accessor->defaultValue(); }
 
-    [[nodiscard]] std::any defaultValue() const noexcept { return _accessor->defaultValue(); }
-
-    [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
-
-    [[nodiscard]] PortType type() const noexcept { return _accessor->type(); }
-
-    [[nodiscard]] PortDirection direction() const noexcept { return _accessor->direction(); }
-
+    [[nodiscard]] bool             setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
+    [[nodiscard]] PortType         type() const noexcept { return _accessor->type(); }
+    [[nodiscard]] PortDirection    direction() const noexcept { return _accessor->direction(); }
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
-
-    [[nodiscard]] std::string typeName() const noexcept { return _accessor->typeName(); }
-
-    [[nodiscard]] PortInfo portInfo() const noexcept { return _accessor->portInfo(); }
+    [[nodiscard]] std::string      typeName() const noexcept { return _accessor->typeName(); }
+    [[nodiscard]] std::string_view portName() noexcept { return _accessor->portName(); }
+    [[nodiscard]] std::string_view portName() const noexcept { return _accessor->portName(); }
+    [[nodiscard]] PortInfo         portInfo() const noexcept { return _accessor->portInfo(); }
+    [[nodiscard]] PortMetaInfo     portMetaInfo() const noexcept { return _accessor->portMetaInfo(); }
+    [[nodiscard]] port::BitMask    portMaskInfo() const noexcept { return _accessor->portMaskInfo(); }
 
     [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 

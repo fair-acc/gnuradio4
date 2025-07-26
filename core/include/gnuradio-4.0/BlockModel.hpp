@@ -187,6 +187,38 @@ protected:
         }
     }
 
+    template<PortDirection direction, typename PortsVec>
+    DynamicPort& dynamicPortByIndexImpl(PortsVec& portsVec, std::size_t topIndex, std::size_t subIndex, std::source_location loc) {
+        using namespace std::string_view_literals;
+        constexpr std::string_view which = (direction == PortDirection::INPUT ? "Input"sv : "Output"sv);
+        initDynamicPorts();
+
+        if (topIndex >= portsVec.size()) {
+            throw gr::exception(std::format("dynamic{}Port(index: {}, subIndex: {}) - specified topIndex {} is out of range [0, {}]", which, topIndex, subIndex, topIndex, portsVec.size()), loc);
+        }
+        auto& entry = portsVec.at(topIndex);
+
+        if (auto* collection = std::get_if<NamedPortCollection>(&entry)) {
+            if (subIndex == meta::invalid_index) {
+                throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", which, topIndex, subIndex, collection->name), loc);
+            }
+            if (subIndex >= collection->ports.size()) {
+                throw gr::exception(std::format("out_of_range: dynamic{}Port(index: {}, subIndex: {}) - sub-index out of range for {} (size={})", which, topIndex, subIndex, collection->name, collection->ports.size()), loc);
+            }
+            return collection->ports[subIndex];
+        }
+
+        auto* single = std::get_if<gr::DynamicPort>(&entry);
+        if (!single) {
+            throw gr::exception("variant construction failed", loc);
+        }
+
+        if (subIndex != meta::invalid_index) {
+            throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - specified sub-index for a normal port {}", which, topIndex, subIndex, single->name), loc);
+        }
+        return *single;
+    }
+
 public:
     BlockModel(const BlockModel&)             = delete;
     BlockModel& operator=(const BlockModel&)  = delete;
@@ -224,48 +256,9 @@ public:
     }
 
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicInputPorts, name, location); }
-
     [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicOutputPorts, name, location); }
-
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
-        initDynamicPorts();
-        if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
-            } else {
-                return portCollection->ports[subIndex];
-            }
-
-        } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                return *port;
-            } else {
-                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
-            }
-        }
-
-        throw std::logic_error("Variant construction failed");
-    }
-
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
-        initDynamicPorts();
-        if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
-            } else {
-                return portCollection->ports[subIndex];
-            }
-
-        } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                return *port;
-            } else {
-                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
-            }
-        }
-
-        throw std::logic_error("Variant construction failed");
-    }
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::INPUT>(_dynamicInputPorts, index, subIndex, std::move(loc)); }
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::OUTPUT>(_dynamicOutputPorts, index, subIndex, std::move(loc)); }
 
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
         return std::visit(meta::overloaded(                                                                                                                                                        //
@@ -382,11 +375,18 @@ public:
     virtual void setName(std::string name) noexcept = 0;
 
     /**
-     * @brief used to store non-graph-processing information like UI block position etc.
+     * @brief used to store static non-graph-processing information like Annotated<> info etc.
      */
     [[nodiscard]] virtual property_map& metaInformation() noexcept = 0;
 
     [[nodiscard]] virtual const property_map& metaInformation() const = 0;
+
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] virtual property_map& uiConstraints() noexcept = 0;
+
+    [[nodiscard]] virtual const property_map& uiConstraints() const = 0;
 
     /**
      * @brief process-wide unique name
@@ -406,7 +406,61 @@ public:
 
     virtual void processScheduledMessages() = 0;
 
-    virtual UICategory uiCategory() const { return UICategory::None; }
+    [[nodiscard]] virtual UICategory uiCategory() const { return UICategory::None; }
+
+    // port and sample information
+    /**
+     * @brief returns the input_chunk_size to output_chunk_size ratio for the block
+     */
+    [[nodiscard]] virtual gr::Ratio resamplingRatio() const noexcept = 0;
+
+    /**
+     * @brief returns the input stride
+     */
+    [[nodiscard]] virtual gr::Size_t stride() const noexcept = 0;
+
+    /**
+     * @brief Bit-mask description of each *input* stream port.
+     * @see gr::port::BitMask -> enum class : uint8_t { None = 0U, Input = 1, Stream = 2, Synchronous = 4, Optional = 8, Connected = 16 };
+     */
+    [[nodiscard]] virtual std::span<const gr::port::BitMask> blockInputTypes() noexcept = 0;
+
+    /**
+     * @brief Bit-mask description of each *output* stream port.
+     * @see gr::port::BitMask -> enum class : uint8_t { None = 0U, Input = 1, Stream = 2, Synchronous = 4, Optional = 8, Connected = 16 };
+     */
+    [[nodiscard]] virtual std::span<const gr::port::BitMask> blockOutputTypes() noexcept = 0;
+
+    /**
+     * @brief currently available/readable samples per input port.
+     * @param reset  if true, forces a fresh read from the ports.
+     */
+    [[nodiscard]] virtual std::span<const std::size_t> availableInputSamples(bool reset = false) noexcept = 0;
+
+    /**
+     * @brief currently available/writeable samples per output port.
+     * @param reset  if true, forces a fresh read from the ports.
+     */
+    [[nodiscard]] virtual std::span<const std::size_t> availableOutputSamples(bool reset = false) noexcept = 0;
+
+    [[nodiscard]] virtual std::span<const std::size_t> minInputRequirements() noexcept  = 0;
+    [[nodiscard]] virtual std::span<const std::size_t> maxInputRequirements() noexcept  = 0;
+    [[nodiscard]] virtual std::span<const std::size_t> minOutputRequirements() noexcept = 0;
+    [[nodiscard]] virtual std::span<const std::size_t> maxOutputRequirements() noexcept = 0;
+
+    [[nodiscard]] virtual bool hasAsyncInputPorts() noexcept  = 0;
+    [[nodiscard]] virtual bool hasAsyncOutputPorts() noexcept = 0;
+
+    [[nodiscard]] virtual std::vector<gr::PortMetaInfo> inputMetaInfos(bool reset = true) noexcept  = 0;
+    [[nodiscard]] virtual std::vector<gr::PortMetaInfo> outputMetaInfos(bool reset = true) noexcept = 0;
+
+    /**
+     * @brief primes/injects dedicated number of samples into input port
+     * @param portIdx port index [0, blockInputTypes().size()[
+     * @param nSamples number of samples to be primed/injected
+     * @return number of samples actually primed (may be < count) or an Error.
+     */
+    [[nodiscard]] virtual std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept = 0;
 
     [[nodiscard]] virtual void* raw() = 0;
 };
@@ -512,7 +566,25 @@ public:
 
     [[nodiscard]] block::Category blockCategory() const override { return T::blockCategory; }
 
-    UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
+    [[nodiscard]] UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
+
+    [[nodiscard]] gr::Ratio  resamplingRatio() const noexcept override { return {static_cast<std::int32_t>(blockRef().input_chunk_size), static_cast<std::int32_t>(blockRef().output_chunk_size)}; }
+    [[nodiscard]] gr::Size_t stride() const noexcept override { return blockRef().stride; }
+
+    [[nodiscard]] std::span<const port::BitMask> blockInputTypes() noexcept override { return blockRef().inputStreamCache.types(); }
+    [[nodiscard]] std::span<const port::BitMask> blockOutputTypes() noexcept override { return blockRef().outputStreamCache.types(); }
+    [[nodiscard]] std::span<const std::size_t>   availableInputSamples(bool reset = false) noexcept override { return blockRef().inputStreamCache.availableSamples(reset); }
+    [[nodiscard]] std::span<const std::size_t>   availableOutputSamples(bool reset = false) noexcept override { return blockRef().outputStreamCache.availableSamples(reset); }
+    [[nodiscard]] std::span<const std::size_t>   minInputRequirements() noexcept override { return blockRef().inputStreamCache.minSamples(); }
+    [[nodiscard]] std::span<const std::size_t>   maxInputRequirements() noexcept override { return blockRef().inputStreamCache.maxSamples(); }
+    [[nodiscard]] std::span<const std::size_t>   minOutputRequirements() noexcept override { return blockRef().outputStreamCache.minSamples(); }
+    [[nodiscard]] std::span<const std::size_t>   maxOutputRequirements() noexcept override { return blockRef().outputStreamCache.maxSamples(); }
+    [[nodiscard]] bool                           hasAsyncInputPorts() noexcept override { return blockRef().inputStreamCache.hasASyncAvailable(); }
+    [[nodiscard]] bool                           hasAsyncOutputPorts() noexcept override { return blockRef().outputStreamCache.hasASyncAvailable(); }
+    [[nodiscard]] std::vector<gr::PortMetaInfo>  inputMetaInfos(bool reset = true) noexcept override { return blockRef().inputStreamCache.metaInfos(reset); }
+    [[nodiscard]] std::vector<gr::PortMetaInfo>  outputMetaInfos(bool reset = true) noexcept override { return blockRef().outputStreamCache.metaInfos(reset); }
+
+    [[nodiscard]] std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept override { return blockRef().inputStreamCache.primePort(portIdx, nSamples, loc); }
 
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
 
@@ -557,8 +629,10 @@ public:
     [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
     void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
     [[nodiscard]] std::string_view           typeName() const override { return _type_name; }
-    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; }
+    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; } // TODO: to be removed (read-only)
     [[nodiscard]] const property_map&        metaInformation() const override { return blockRef().meta_information; }
+    [[nodiscard]] property_map&              uiConstraints() noexcept override { return blockRef().ui_constraints; }
+    [[nodiscard]] const property_map&        uiConstraints() const override { return blockRef().ui_constraints; }
     [[nodiscard]] std::string_view           uniqueName() const override { return blockRef().unique_name; }
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }

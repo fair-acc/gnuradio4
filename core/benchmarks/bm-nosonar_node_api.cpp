@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <source_location>
 
 #include <vir/simd.h>
 
@@ -456,7 +457,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         using copy = ::copy<float, 1, N_MAX, true, true>;
         std::vector<copy*> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
-            cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({{"name", std::format("copy {} at {}", i, gr::this_source_location())}}));
+            cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({{"name", std::format("copy {} at {}", i, std::source_location::current())}}));
 
             if (i == 0) {
                 expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*cpy[i])));

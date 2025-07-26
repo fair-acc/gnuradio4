@@ -885,28 +885,47 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
     };
 };
 
-const boost::ut::suite<"Drawable Annotations"> _drawableAnnotations = [] {
+const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
 
-    "drawable"_test = [] {
-        struct TestBlock0 : gr::Block<TestBlock0> {
+    "non-drawable"_test = [] {
+        struct LocalTestBlock : gr::Block<LocalTestBlock> {
             void processOne() {}
         };
-        auto testBlock0 = gr::BlockWrapper<TestBlock0>();
-        expect(!testBlock0.metaInformation().contains("Drawable")) << "not drawable";
+        auto testBlock = gr::BlockWrapper<LocalTestBlock>();
+        expect(!testBlock.metaInformation().contains("Drawable")) << "not drawable";
+    };
 
-        struct TestBlock1 : gr::Block<TestBlock1, gr::Drawable<gr::UICategory::Toolbar, "console">> {
+    "drawable"_test = [] {
+        struct LocalTestBlock : gr::Block<LocalTestBlock, gr::Drawable<gr::UICategory::Toolbar, "console">> {
             gr::work::Status draw() { return gr::work::Status::OK; }
             void             processOne() {}
         };
-        auto testBlock1 = gr::BlockWrapper<TestBlock1>();
-        expect(testBlock1.metaInformation().contains("Drawable")) << "drawable";
-        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock1.metaInformation().at("Drawable"s));
+        auto testBlock = gr::BlockWrapper<LocalTestBlock>();
+        expect(testBlock.metaInformation().contains("Drawable")) << "drawable";
+        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock.metaInformation().at("Drawable"s));
         expect(drawableConfigMap.contains("Category"));
         expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
         expect(eq(std::get<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+    };
+
+    "ui_constraints"_test = [] {
+        struct LocalTestBlock : gr::Block<LocalTestBlock, gr::Drawable<gr::UICategory::Toolbar, "console">> {
+            gr::work::Status draw() { return gr::work::Status::OK; }
+            void             processOne() {}
+        };
+        auto testBlock = gr::BlockWrapper<LocalTestBlock>();
+        expect(testBlock.uiConstraints().empty());
+        testBlock.uiConstraints()["x-position"] = 3.f;
+        testBlock.uiConstraints()["y-position"] = 4.f;
+        expect(!testBlock.uiConstraints().empty());
+        expect(eq(testBlock.uiConstraints().size(), 2UZ));
+        expect(testBlock.uiConstraints().contains("x-position"));
+        expect(testBlock.uiConstraints().contains("y-position"));
+        expect(eq(std::get<float>(testBlock.uiConstraints().at("x-position"s)), 3.f));
+        expect(eq(std::get<float>(testBlock.uiConstraints().at("y-position"s)), 4.f));
     };
 };
 
