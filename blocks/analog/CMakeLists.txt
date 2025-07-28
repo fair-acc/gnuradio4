@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
 
-# ──────────────────────────────────────────────────────────
-# 1) Interface target that exposes the public headers
-# ──────────────────────────────────────────────────────────
 add_library(gr-analog INTERFACE)
 target_link_libraries(gr-analog INTERFACE gnuradio-core)
 target_include_directories(
@@ -11,20 +8,19 @@ target_include_directories(
     $<INSTALL_INTERFACE:include/>
 )
 
-# ──────────────────────────────────────────────────────────
-# 2) Main block library – parsed by the header-parser
-# ──────────────────────────────────────────────────────────
 gr_add_block_library(
     GrAnalogBlocks
     MAKE_SHARED_LIBRARY
-    HEADERS         include/gnuradio-4.0/analog/Analog.hpp
-    LINK_LIBRARIES  gr-basic          # helpers from gr-basic
-                    gr-analog         # header-only interface we just made
-)
+    HEADERS
+        include/gnuradio-4.0/analog/FrequencyMod.hpp
+        include/gnuradio-4.0/analog/QuadratureDemod.hpp
+        include/gnuradio-4.0/analog/FmDet.hpp     
+        include/gnuradio-4.0/analog/AmDemod.hpp
+        include/gnuradio-4.0/analog/PhaseModulator.hpp
+    LINK_LIBRARIES
+        gr-basic
+        gr-analog)
 
-# ──────────────────────────────────────────────────────────
-# 3) Drive the unit-tests only when the shared lib exists
-# ──────────────────────────────────────────────────────────
 if (TARGET GrAnalogBlocksShared AND ENABLE_TESTING)
     add_subdirectory(test)
 endif()
