@@ -72,7 +72,7 @@ struct Edge {
     std::int32_t _weight = 0;
     std::string  _name   = "unnamed edge"; // custom edge name
 
-    property_map _uiConstraints{};
+    std::shared_ptr<property_map> _uiConstraints{std::make_shared<property_map>()}; // used to store UI and other non-dsp related meta-information
 
     Edge() = delete;
 
@@ -101,8 +101,8 @@ struct Edge {
     constexpr std::size_t             nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
     constexpr std::size_t             nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
     constexpr PortType                edgeType() const { return _edgeType; }
-    [[nodiscard]] property_map&       uiConstraints() noexcept { return _uiConstraints; }
-    [[nodiscard]] const property_map& uiConstraints() const { return _uiConstraints; }
+    [[nodiscard]] property_map&       uiConstraints() noexcept { return *_uiConstraints; }
+    [[nodiscard]] const property_map& uiConstraints() const { return *_uiConstraints; }
 
     constexpr bool hasSameSourcePort(const Edge& other) const noexcept { return sourceBlock() == other.sourceBlock() && sourcePortDefinition().definition == other.sourcePortDefinition().definition; }
 
@@ -943,7 +943,7 @@ template<gr::PortDirection direction>
     constexpr static auto countPortsPrior = [](const std::shared_ptr<gr::BlockModel>& b, std::size_t idx) -> std::size_t {
         const std::size_t nTopLevel = portCollectionSize(b);
         if (idx >= nTopLevel) {
-            throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", b->uniqueName(), idx, nTopLevel));
+            throw gr::exception(std::format("Block '{}'({}) has no input port at index {} [0, {}]", b->name(), b->uniqueName(), idx, nTopLevel));
         }
         std::size_t nPortsPrior = 0UZ;
         for (std::size_t i = 0UZ; i < idx; ++i) { // count all ports in collections before idx
@@ -962,7 +962,7 @@ template<gr::PortDirection direction>
     if (const auto* idx = std::get_if<gr::PortDefinition::IndexBased>(&portDefinition.definition)) {
         if (idx->subIndex != gr::meta::invalid_index) {
             if (idx->subIndex >= portCollectionSize(block, idx->topLevel)) {
-                throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", block->uniqueName(), idx->subIndex, portCollectionSize(block)), loc);
+                throw gr::exception(std::format("Block '{}'({}) has no input port at index {} [0, {}]", block->name(), block->uniqueName(), idx->subIndex, portCollectionSize(block, idx->topLevel)), loc);
             }
             return countPortsPrior(block, idx->topLevel) + idx->subIndex;
         }
