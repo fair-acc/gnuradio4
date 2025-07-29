@@ -53,7 +53,7 @@ struct CountSource : public gr::Block<CountSource<T>> {
             this->requestStop();
         }
         tracer->trace(this->name);
-        return static_cast<int>(count);
+        return static_cast<T>(count);
     }
 };
 
@@ -82,9 +82,9 @@ struct ExpectSink : public gr::Block<ExpectSink<T>> {
 
     [[nodiscard]] gr::work::Status processBulk(std::span<const T>& input) noexcept {
         tracer->trace(this->name);
-        for (auto data : input) {
+        for (T data : input) {
             count++;
-            if (!checker(count, data)) {
+            if (!checker(static_cast<std::int64_t>(count), static_cast<std::int64_t>(data))) {
                 false_count++;
             };
         }
@@ -232,6 +232,37 @@ gr::Graph getGraphScaledSum(std::shared_ptr<Tracer> tracer, std::source_location
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock).to<"addend0">(addBlock)), loc);
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source2).to<"addend1">(addBlock)), loc);
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(addBlock).to<"in">(sink)), loc);
+
+    return flow;
+}
+
+gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location()) {
+    using gr::PortDirection::INPUT;
+    using gr::PortDirection::OUTPUT;
+    using namespace boost::ut;
+
+    gr::Size_t nMaxSamples{2};
+
+    gr::Graph flow;
+    auto&     source1 = flow.emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
+    source1.tracer    = tracer;
+    auto& scale1      = flow.emplaceBlock<Scale<float>>({{"name", "alpha"}, {"scale_factor", 0.9f}});
+    scale1.tracer     = tracer;
+    auto& scale2      = flow.emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}});
+    scale2.tracer     = tracer;
+    auto& sum         = flow.emplaceBlock<Adder<float>>({{"name", "sum"}});
+    sum.tracer        = tracer;
+    auto& sink        = flow.emplaceBlock<ExpectSink<float>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
+    sink.tracer       = tracer;
+    sink.checker      = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
+
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale1).to<"addend0">(sum)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(sum).to<"in">(sink)), loc);
+
+    // feedback path
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(sum).to<"original">(scale2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale2).to<"addend1">(sum)), loc);
 
     return flow;
 }
@@ -548,6 +579,25 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(boost::ut::that % t.size() >= 10u);
     };
 
+    "Basic Feedback"_test = [] {
+        std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
+        Graph                            graph         = getBasicFeedBackLoop(trace);
+        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
+        expect(eq(feedbackLoops.size(), 1UZ));
+        expect(eq(gr::graph::calculateLoopPrimingSize(feedbackLoops.at(0UZ)), 1UZ));
+
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
+        std::println("start feedback scheduler");
+        expect(sched.runAndWait().has_value());
+        std::println("finished feedback scheduler");
+        auto t = trace->getVector();
+        expect(eq(t.size(), 8UZ));
+        expect(eq(t, TraceVectorType{"s1", "alpha", "sum", "out", "1-alpha", "sum", "out", "1-alpha"}));
+    };
+
     "LifecycleBlock"_test = [] {
         gr::Graph flow;
 
@@ -803,7 +853,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(sources[0UZ]->name(), "A"sv));
 
         std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
-        std::span<Edge* const>          edges    = gr::graph::outgoingEdges(acencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
+        std::span<const Edge* const>    edges    = gr::graph::outgoingEdges(acencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
         expect(eq(edges.size(), 1UZ)) << fatal;
         expect(eq(edges[0UZ]->_destinationBlock->name(), "B"sv));
     };
@@ -827,8 +877,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(srcs.size(), 1UZ));
         expect(eq(srcs[0UZ]->name(), "A"sv));
 
-        std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
-        std::span<gr::Edge* const>      edges    = gr::graph::outgoingEdges(adjacencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
+        std::shared_ptr<gr::BlockModel>  srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
+        std::span<const gr::Edge* const> edges    = gr::graph::outgoingEdges(adjacencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
         expect(eq(edges.size(), 2UZ)) << fatal;
         std::set<std::string_view> targets{edges[0UZ]->_destinationBlock->name(), edges[1UZ]->_destinationBlock->name()};
         expect(targets.contains("B"sv) && targets.contains("C"sv));
