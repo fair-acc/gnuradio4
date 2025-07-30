@@ -15,3 +15,11 @@ target_compile_options(qa_AmDemod PRIVATE -Wno-conversion -Wno-error=conversion)
 
 add_ut_test(qa_PhaseModulator)
 target_link_libraries(qa_PhaseModulator PRIVATE gr-analog)
+
+add_ut_test(qa_Agc)
+target_link_libraries(qa_Agc PRIVATE gr-analog)
+target_compile_options(qa_Agc PRIVATE -Wno-conversion -Wno-error=conversion)
+
+add_ut_test(qa_Agc2)
+target_link_libraries(qa_Agc2 PRIVATE gr-analog)
+target_compile_options(qa_Agc2 PRIVATE -Wno-conversion -Wno-error=conversion)

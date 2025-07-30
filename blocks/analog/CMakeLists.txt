@@ -17,6 +17,8 @@ gr_add_block_library(
         include/gnuradio-4.0/analog/FmDet.hpp     
         include/gnuradio-4.0/analog/AmDemod.hpp
         include/gnuradio-4.0/analog/PhaseModulator.hpp
+        include/gnuradio-4.0/analog/Agc.hpp
+        include/gnuradio-4.0/analog/Agc2.hpp
     LINK_LIBRARIES
         gr-basic
         gr-analog)
