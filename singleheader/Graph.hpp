@@ -2568,11 +2568,14 @@ using transform_to_typelist = typename detail::transform_to_typelist_impl<Collec
 #ifndef GNURADIO_GRAPH_UTILS_HPP
 #define GNURADIO_GRAPH_UTILS_HPP
 
+#include <cassert>
 #include <complex>
 #include <cstdint>
 #include <cxxabi.h>
+#include <format>
 #include <map>
 #include <new>
+#include <numeric>
 #include <print>
 #include <ranges>
 #include <string>
@@ -6110,12 +6113,6 @@ concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detai
 
 } // namespace meta
 
-#if HAVE_SOURCE_LOCATION
-inline auto this_source_location(std::source_location l = std::source_location::current()) { return std::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
-#else
-inline auto this_source_location() { return "not yet implemented"; }
-#endif // HAVE_SOURCE_LOCATION
-
 template<typename Fn>
 struct on_scope_exit {
     Fn function;
@@ -6123,7 +6120,154 @@ struct on_scope_exit {
     ~on_scope_exit() { function(); }
 };
 
+struct normalise_t {};
+inline constexpr normalise_t normalise{};
+
+struct Ratio {
+    // data first
+    std::int32_t numerator{1};
+    std::int32_t denominator{1};
+
+    static constexpr Ratio invalid() noexcept { return Ratio{0, 0}; }
+
+    constexpr Ratio(std::int32_t n = 1, std::int32_t d = 1) noexcept : numerator(n), denominator(d) {}
+    constexpr Ratio(std::int32_t n, std::int32_t d, normalise_t) noexcept : Ratio(n, d) { normalise(); }
+
+    explicit constexpr Ratio(std::string_view sv) noexcept : Ratio(parse(sv).value_or(invalid())) {}
+    explicit constexpr Ratio(std::string_view sv, normalise_t) noexcept : Ratio(sv) { normalise(); }
+
+    template<class R> // std::ratio<N,D>
+    constexpr static Ratio from() {
+        return Ratio(R::num, R::den);
+    }
+
+    constexpr std::int32_t num() const noexcept { return numerator; }
+    constexpr std::int32_t den() const noexcept { return denominator; }
+
+    template<typename T = double>
+    constexpr T value() const noexcept {
+        return static_cast<T>(numerator) / static_cast<T>(denominator);
+    }
+
+    constexpr Ratio reciprocal() const {
+        assert(numerator != 0);
+        return Ratio(denominator, numerator);
+    }
+
+    friend constexpr Ratio operator+(const Ratio& a, const Ratio& b) {
+        // minimise overflow: a/b + c/d = (a*lcm_den/b)*lcm_den + ...
+        auto g = std::gcd(a.denominator, b.denominator);
+        // a/b + c/d = (a*(d/g) + c*(b/g)) / lcm
+        std::int32_t l = b.denominator / g;
+        std::int32_t r = a.denominator / g;
+        return Ratio(a.numerator * l + b.numerator * r, a.denominator * l);
+    }
+
+    friend constexpr Ratio operator-(const Ratio& a, const Ratio& b) {
+        auto         g = std::gcd(a.denominator, b.denominator);
+        std::int32_t l = b.denominator / g;
+        std::int32_t r = a.denominator / g;
+        return Ratio(a.numerator * l - b.numerator * r, a.denominator * l);
+    }
+
+    friend constexpr Ratio operator*(const Ratio& a, const Ratio& b) {
+        auto g1 = std::gcd(a.numerator, b.denominator);
+        auto g2 = std::gcd(b.numerator, a.denominator);
+        return Ratio((a.numerator / g1) * (b.numerator / g2), (a.denominator / g2) * (b.denominator / g1));
+    }
+
+    friend constexpr Ratio operator/(const Ratio& a, const Ratio& b) {
+        assert(b.numerator != 0);
+        // a/b ÷ c/d = (a*d)/(b*c)
+        auto g1 = std::gcd(a.numerator, b.numerator);
+        auto g2 = std::gcd(a.denominator, b.denominator);
+        return Ratio((a.numerator / g1) * (b.denominator / g2), (a.denominator / g2) * (b.numerator / g1));
+    }
+
+    friend constexpr Ratio operator-(const Ratio& r) { return Ratio(-r.numerator, r.denominator); }
+    friend constexpr auto  operator<=>(const Ratio& a, const Ratio& b) = default;
+    friend constexpr bool  operator==(const Ratio& a, const Ratio& b)  = default;
+
+    constexpr Ratio& operator+=(const Ratio& other) { return *this = *this + other; }
+    constexpr Ratio& operator-=(const Ratio& other) { return *this = *this - other; }
+    constexpr Ratio& operator*=(const Ratio& other) { return *this = *this * other; }
+    constexpr Ratio& operator/=(const Ratio& other) { return *this = *this / other; }
+
+    // helper
+    static constexpr std::optional<Ratio> parse(std::string_view sv) noexcept {
+        constexpr auto parse = [](std::string_view s) -> std::optional<std::int32_t> {
+            if (s.empty()) {
+                return std::nullopt;
+            }
+
+            bool        neg = (s.front() == '-');
+            std::size_t i   = (s.front() == '+' || neg) ? 1 : 0;
+            if (i == s.size()) {
+                return std::nullopt;
+            }
+
+            std::int32_t   v = 0;
+            constexpr auto M = std::numeric_limits<std::int32_t>::max();
+            constexpr auto m = std::numeric_limits<std::int32_t>::min();
+
+            for (; i < s.size(); ++i) {
+                char c = s[i];
+                if (c < '0' || c > '9') {
+                    return std::nullopt;
+                }
+                const std::int32_t d = c - '0';
+
+                if (!neg) {
+                    if (v > (M - d) / 10) {
+                        return std::nullopt;
+                    }
+                    v = v * 10 + d;
+                } else {
+                    if (v < (m + d) / 10) {
+                        return std::nullopt;
+                    }
+                    v = v * 10 - d;
+                }
+            }
+            return v;
+        };
+
+        const auto slash = sv.find('/');
+        const auto lhs   = sv.substr(0, slash);
+        const auto rhs   = (slash == std::string_view::npos) ? std::string_view{"1"} : sv.substr(slash + 1);
+
+        auto n = parse(lhs);
+        auto d = parse(rhs);
+        if (!n || !d || *d == 0) {
+            return std::nullopt;
+        }
+        return Ratio{*n, *d};
+    }
+
+    constexpr void normalise() {
+        if (denominator == 0) {
+            std::unreachable();
+        }
+        if (denominator < 0) {
+            denominator = -denominator;
+            numerator   = -numerator;
+        }
+        if (auto g = std::gcd(numerator, denominator); g > 1) {
+            numerator /= g;
+            denominator /= g;
+        }
+    }
+};
+
 } // namespace gr
+
+template<>
+struct std::formatter<gr::Ratio> : std::formatter<std::string_view> {
+    template<class FormatContext>
+    auto format(const gr::Ratio& r, FormatContext& ctx) const {
+        return std::formatter<std::string_view>::format((r.den() == 1) ? std::format("{}", r.num()) : std::format("{}/{}", r.num(), r.den()), ctx);
+    }
+};
 
 #endif // include guard
 
@@ -10584,17 +10728,122 @@ namespace gr {
 
 using gr::meta::fixed_string;
 
-enum class PortDirection { INPUT, OUTPUT, ANY }; // 'ANY' only for query and not to be used for port declarations
+enum class PortDirection { INPUT, OUTPUT };
 
 enum class ConnectionResult { SUCCESS, FAILED };
 
-// FIXME: can we still rename this to e.g. PortFlavor? "type" has a very specific meaning in C++ already. And since
-// we're doing a lot of reflection on ports there's ambiguity all over the place.
 enum class PortType {
     STREAM,  /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
     MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
     ANY      // 'ANY' only for querying and not to be used for port declarations
 };
+
+enum class PortSync { SYNCHRONOUS, ASYNCHRONOUS };
+
+namespace port {
+enum class BitMask : uint8_t {
+    None        = 0U,
+    Input       = 1U << 0U,
+    Stream      = 1U << 1U,
+    Synchronous = 1U << 2U,
+    Optional    = 1U << 3U,
+    Connected   = 1U << 4U,
+};
+
+constexpr BitMask operator|(BitMask a, BitMask b) { return static_cast<BitMask>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b)); }
+constexpr BitMask operator&(BitMask a, BitMask b) { return static_cast<BitMask>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b)); }
+constexpr bool    any(BitMask mask, BitMask test) { return static_cast<uint8_t>(mask & test) != 0; }
+
+[[nodiscard]] inline constexpr BitMask encodeMask(PortDirection dir, PortType type, bool synchronous, bool optional, bool connected) noexcept {
+    assert(type != PortType::ANY && "ANY is not encodable");
+
+    using enum BitMask;
+    BitMask mask = None;
+    if (dir == PortDirection::INPUT) {
+        mask = mask | Input;
+    }
+    if (type == PortType::STREAM) {
+        mask = mask | Stream;
+    }
+    if (synchronous) {
+        mask = mask | Synchronous;
+    }
+    if (optional) {
+        mask = mask | Optional;
+    }
+    if (connected) {
+        mask = mask | Connected;
+    }
+    return mask;
+}
+
+struct BitPattern {
+    std::uint8_t mask;
+    std::uint8_t value;
+
+    constexpr BitPattern(BitMask m, BitMask v) : mask(static_cast<std::uint8_t>(m)), value(static_cast<std::uint8_t>(v)) {}
+    constexpr BitPattern(BitMask m, std::uint8_t v) : mask(static_cast<std::uint8_t>(m)), value(v) {}
+    constexpr BitPattern(std::uint8_t m, std::uint8_t v) : mask(m), value(v) {}
+
+    [[nodiscard]] constexpr bool matches(std::uint8_t bits) const { return (bits & mask) == value; }
+    [[nodiscard]] constexpr bool matches(BitMask b) const { return matches(static_cast<std::uint8_t>(b)); }
+    constexpr BitPattern         operator|(const BitPattern& other) const { return BitPattern(static_cast<uint8_t>(mask | other.mask), static_cast<uint8_t>(value | other.value)); }
+    static constexpr BitPattern  Any() { return BitPattern{0U, 0U}; }
+};
+
+[[nodiscard]] inline constexpr bool isConnected(BitMask m) { return any(m, BitMask::Connected); }
+[[nodiscard]] inline constexpr bool isInput(BitMask m) { return any(m, BitMask::Input); }
+[[nodiscard]] inline constexpr bool isStream(BitMask m) { return any(m, BitMask::Stream); }
+[[nodiscard]] inline constexpr bool isSynchronous(BitMask m) { return any(m, BitMask::Synchronous); }
+
+[[nodiscard]] inline constexpr PortDirection decodeDirection(BitMask m) { return isInput(m) ? PortDirection::INPUT : PortDirection::OUTPUT; }
+[[nodiscard]] inline constexpr PortType      decodePortType(BitMask m) { return isStream(m) ? PortType::STREAM : PortType::MESSAGE; }
+
+// comparison operators
+[[nodiscard]] inline constexpr bool operator==(BitMask mask, PortDirection dir) { return decodeDirection(mask) == dir; }
+[[nodiscard]] inline constexpr bool operator!=(BitMask mask, PortDirection dir) { return !(mask == dir); }
+[[nodiscard]] inline constexpr bool operator==(BitMask mask, PortType type) { return decodePortType(mask) == type; }
+[[nodiscard]] inline constexpr bool operator!=(BitMask mask, PortType type) { return !(mask == type); }
+[[nodiscard]] inline constexpr bool operator==(PortDirection dir, BitMask mask) { return mask == dir; }
+[[nodiscard]] inline constexpr bool operator!=(PortDirection dir, BitMask mask) { return !(mask == dir); }
+[[nodiscard]] inline constexpr bool operator==(PortType type, BitMask mask) { return mask == type; }
+[[nodiscard]] inline constexpr bool operator!=(PortType type, BitMask mask) { return !(mask == type); }
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortDirection d) {
+    using enum BitMask;
+    switch (d) {
+    case PortDirection::INPUT: return {Input, Input};
+    case PortDirection::OUTPUT: return {Input, 0UZ};
+    default: return BitPattern::Any();
+    }
+}
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortType t) {
+    using enum BitMask;
+    switch (t) {
+    case PortType::STREAM: return {Stream, Stream};
+    case PortType::MESSAGE: return {Stream, 0UZ};
+    case PortType::ANY: return BitPattern::Any();
+    }
+    return BitPattern::Any();
+}
+
+[[nodiscard]] inline constexpr BitPattern matchBits(PortSync s) {
+    using enum BitMask;
+    switch (s) {
+    case PortSync::SYNCHRONOUS: return {Synchronous, Synchronous};
+    case PortSync::ASYNCHRONOUS: return {Synchronous, 0UZ};
+    }
+    return BitPattern::Any();
+}
+
+template<auto... Enums>
+[[nodiscard]] consteval BitPattern pattern() {
+    BitPattern combined = BitPattern::Any();
+    ((combined = combined | matchBits(Enums)), ...);
+    return combined;
+}
+} // namespace port
 
 /**
  * @brief optional port annotation argument to described whether the port can be handled within the same scheduling domain.
@@ -10620,9 +10869,9 @@ static_assert(is_port_domain<CPU>::value);
 static_assert(is_port_domain<GPU>::value);
 static_assert(!is_port_domain<int>::value);
 
-struct PortInfo {
+struct PortInfo { // maybe/should be replaced by gr::port::BitMask
     PortType         portType                  = PortType::ANY;
-    PortDirection    portDirection             = PortDirection::ANY;
+    PortDirection    portDirection             = PortDirection::INPUT;
     std::string_view portDomain                = "unknown";
     ConnectionResult portConnectionResult      = ConnectionResult::FAILED;
     std::string      valueTypeName             = "uninitialised type";
@@ -10630,6 +10879,93 @@ struct PortInfo {
     std::size_t      valueTypeSize             = 0UZ;
     std::size_t      bufferSize                = 0UZ;
     std::size_t      availableBufferSize       = 0UZ;
+};
+
+struct PortMetaInfo {
+    using description = Doc<R"*(@brief Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
+
+**Some example usages:**
+  * prevents to accidentally connect ports with incompatible sampling rates, quantity- and unit-types.
+  * used to condition graphs/charts (notably the min/max range),
+  * detect saturation/LNA non-linearities,
+  * detect computation errors
+  * ...
+
+Follows the ISO 80000-1:2022 Quantities and Units conventions:
+  * https://www.iso.org/standard/76921.html
+  * https://en.wikipedia.org/wiki/ISO/IEC_80000
+  * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
+)*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
+
+    Annotated<std::string, "data type name", Visible, Doc<"portable port data type name">>                           data_type = "<unknown>";
+    Annotated<std::string, "port name", Visible, Doc<"port name">>                                                   name;
+    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
+    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
+    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
+    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
+    Annotated<float, "signal min", Doc<"minimum expected signal value">>                                             signal_min = std::numeric_limits<float>::lowest();
+    Annotated<float, "signal max", Doc<"maximum expected signal value">>                                             signal_max = std::numeric_limits<float>::max();
+
+    GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+
+    // controls automatic (if set) or manual update of above parameters
+    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
+
+    constexpr PortMetaInfo() noexcept = default;
+    explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) //
+        : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
+    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
+
+    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
+
+    template<bool isNoexcept = false>
+    void update(const property_map& metaInfo) noexcept(isNoexcept) {
+        if (metaInfo.empty()) {
+            return;
+        }
+
+        auto updateValue = [&metaInfo](const std::string& key, auto& member) {
+            if (!metaInfo.contains(key)) {
+                return;
+            }
+            const auto& value = metaInfo.at(key);
+            using T           = std::decay_t<decltype(member.value)>;
+            if (std::holds_alternative<T>(value)) {
+                member = std::get<T>(value);
+            } else {
+                throw gr::exception("invalid-argument: incorrect type for " + key);
+            }
+        };
+
+        for (const auto& key : auto_update) {
+            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
+                updateValue(key, sample_rate);
+            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
+                updateValue(key, signal_name);
+            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
+                updateValue(key, signal_quantity);
+            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
+                updateValue(key, signal_unit);
+            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
+                updateValue(key, signal_min);
+            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
+                updateValue(key, signal_max);
+            }
+        }
+    }
+
+    [[nodiscard]] property_map get() const noexcept {
+        property_map metaInfo;
+        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
+        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
+        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
+        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
+        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
+        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
+
+        return metaInfo;
+    }
 };
 
 template<class T>
@@ -10641,6 +10977,7 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any& newD
     { t.priority } -> std::convertible_to<std::int32_t>;
     { t.min_samples } -> std::convertible_to<std::size_t>;
     { t.max_samples } -> std::convertible_to<std::size_t>;
+    { t.metaInfo } -> std::convertible_to<gr::PortMetaInfo>;
     { t.type() } -> std::same_as<PortType>;
     { t.direction() } -> std::same_as<PortDirection>;
     { t.domain() } -> std::same_as<std::string_view>;
@@ -10738,89 +11075,6 @@ static_assert(is_stream_buffer_attribute<DefaultMessageBuffer>::value);
 static_assert(!is_stream_buffer_attribute<DefaultTagBuffer>::value);
 static_assert(!is_tag_buffer_attribute<DefaultStreamBuffer<int>>::value);
 static_assert(is_tag_buffer_attribute<DefaultTagBuffer>::value);
-
-struct PortMetaInfo {
-    using description = Doc<R"*(@brief Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
-
-**Some example usages:**
-  * prevents to accidentally connect ports with incompatible sampling rates, quantity- and unit-types.
-  * used to condition graphs/charts (notably the min/max range),
-  * detect saturation/LNA non-linearities,
-  * detect computation errors
-  * ...
-
-Follows the ISO 80000-1:2022 Quantities and Units conventions:
-  * https://www.iso.org/standard/76921.html
-  * https://en.wikipedia.org/wiki/ISO/IEC_80000
-  * https://blog.ansi.org/iso-80000-1-2022-quantities-and-units/
-)*">; // long-term goal: enable compile-time checks based on https://github.com/mpusz/mp-units (N.B. will become part of C++26)
-
-    Annotated<float, "sample rate", Visible, Doc<"sampling rate in samples per second (Hz)">>                        sample_rate = 1.f;
-    Annotated<std::string, "signal name", Doc<"name of the signal">>                                                 signal_name = "<unnamed>";
-    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
-    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{};
-    Annotated<float, "signal min,", Doc<"minimum expected signal value">>                                            signal_min = std::numeric_limits<float>::lowest();
-    Annotated<float, "signal max,", Doc<"maximum expected signal value">>                                            signal_max = std::numeric_limits<float>::max();
-
-    GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
-
-    // controls automatic (if set) or manual update of above parameters
-    std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
-
-    constexpr PortMetaInfo() noexcept = default;
-    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
-    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
-
-    void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
-
-    template<bool isNoexcept = false>
-    void update(const property_map& metaInfo) noexcept(isNoexcept) {
-        if (metaInfo.empty()) {
-            return;
-        }
-
-        auto updateValue = [&metaInfo](const std::string& key, auto& member) {
-            if (!metaInfo.contains(key)) {
-                return;
-            }
-            const auto& value = metaInfo.at(key);
-            using T           = std::decay_t<decltype(member.value)>;
-            if (std::holds_alternative<T>(value)) {
-                member = std::get<T>(value);
-            } else {
-                throw gr::exception("invalid-argument: incorrect type for " + key);
-            }
-        };
-
-        for (const auto& key : auto_update) {
-            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
-                updateValue(key, sample_rate);
-            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
-                updateValue(key, signal_name);
-            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
-                updateValue(key, signal_quantity);
-            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
-                updateValue(key, signal_unit);
-            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
-                updateValue(key, signal_min);
-            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
-                updateValue(key, signal_max);
-            }
-        }
-    }
-
-    [[nodiscard]] property_map get() const noexcept {
-        property_map metaInfo;
-        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
-        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
-        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
-        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
-        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
-        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
-
-        return metaInfo;
-    }
-};
 
 } // namespace gr
 
@@ -10981,12 +11235,11 @@ struct Port {
     template<meta::fixed_string newName, detail::PortOrCollectionKind Kind, std::size_t KindExtraData, size_t MemberIdx>
     using make_port_descriptor = detail::PortDescriptor<T, newName, portType, portDirection, Kind, KindExtraData, MemberIdx, Attributes...>;
 
-    static_assert(portDirection != PortDirection::ANY, "ANY reserved for queries and not port direction declarations");
     static_assert(portType != PortType::ANY, "ANY reserved for queries and not port type declarations");
     static_assert(portType == PortType::STREAM || std::is_same_v<T, gr::Message>, "If a port type is MESSAGE, the value type needs to be gr::Message");
 
     using value_type        = T;
-    using AttributeTypeList = typename gr::meta::typelist<Attributes...>;
+    using AttributeTypeList = gr::meta::typelist<Attributes...>;
     using Domain            = AttributeTypeList::template find_or_default<is_port_domain, CPU>;
     using Required          = AttributeTypeList::template find_or_default<is_required_samples, RequiredSamples<std::dynamic_extent, std::dynamic_extent>>;
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
@@ -11012,8 +11265,13 @@ struct Port {
     using TagWriterSpanType = decltype(std::declval<TagWriterType>().reserve(0UZ));
 
     // public properties
-    constexpr static bool kIsSynch    = !std::disjunction_v<std::is_same<Async, Attributes>...>;
-    constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>;
+    // kIsSynch:
+    //   true  -> port participates in synchronous scheduling with other sync ports
+    //   false -> port is asynchronous (does not gate scheduling)
+    // Rule: an input marked Optional is implicitly also async (i.e. otherwise it would block the sync block data processing);
+    //       outputs stay synchronous unless explicitly annotated with Async.
+    constexpr static bool kIsSynch    = !(std::disjunction_v<std::is_same<Async, Attributes>...> || (kIsInput && std::disjunction_v<std::is_same<Optional, Attributes>...>));
+    constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
 
     std::string_view name;
 
@@ -11025,7 +11283,7 @@ struct Port {
     std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> max_samples = Required::kMaxSamples;
 
     // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
-    PortMetaInfo metaInfo{};
+    PortMetaInfo metaInfo{gr::meta::type_name<T>()};
 
     GR_MAKE_REFLECTABLE(Port, kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo);
 
@@ -11086,7 +11344,7 @@ struct Port {
             std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
-        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 1) const {
+        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 1UZ) const {
             auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
                 assert(&sourceMap != &destinationMap);
                 for (const auto& [key, value] : sourceMap) {
@@ -11204,7 +11462,7 @@ private:
 public:
     constexpr Port() noexcept = default;
     explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
-    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(other.metaInfo), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
     Port(const Port&)                       = delete;
     auto            operator=(const Port&)  = delete;
     constexpr Port& operator=(Port&& other) = delete;
@@ -11535,6 +11793,7 @@ public:
     std::int16_t priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     std::size_t  min_samples;
     std::size_t  max_samples;
+    PortMetaInfo metaInfo;
 
 private:
     struct model { // intentionally class-private definition to limit interface exposure and enhance composition
@@ -11542,29 +11801,19 @@ private:
 
         [[nodiscard]] virtual DynamicPort weakRef() const noexcept = 0;
 
-        [[nodiscard]] virtual std::intptr_t internalId() const noexcept = 0;
-
-        [[nodiscard]] virtual std::any defaultValue() const noexcept = 0;
-
-        [[nodiscard]] virtual bool setDefaultValue(const std::any& val) noexcept = 0;
-
-        [[nodiscard]] virtual PortType type() const noexcept = 0;
-
-        [[nodiscard]] virtual PortDirection direction() const noexcept = 0;
-
-        [[nodiscard]] virtual std::string_view domain() const noexcept = 0;
-
-        [[nodiscard]] virtual bool isSynchronous() noexcept = 0;
-
-        [[nodiscard]] virtual bool isOptional() noexcept = 0;
+        [[nodiscard]] virtual std::intptr_t    internalId() const noexcept                   = 0;
+        [[nodiscard]] virtual std::any         defaultValue() const noexcept                 = 0;
+        [[nodiscard]] virtual bool             setDefaultValue(const std::any& val) noexcept = 0;
+        [[nodiscard]] virtual PortType         type() const noexcept                         = 0;
+        [[nodiscard]] virtual PortDirection    direction() const noexcept                    = 0;
+        [[nodiscard]] virtual std::string_view domain() const noexcept                       = 0;
+        [[nodiscard]] virtual bool             isSynchronous() noexcept                      = 0;
+        [[nodiscard]] virtual bool             isOptional() noexcept                         = 0;
 
         [[nodiscard]] virtual ConnectionResult resizeBuffer(std::size_t min_size) noexcept = 0;
-
-        [[nodiscard]] virtual bool isConnected() const noexcept = 0;
-
-        [[nodiscard]] virtual ConnectionResult disconnect() noexcept = 0;
-
-        [[nodiscard]] virtual ConnectionResult connect(DynamicPort& dst_port) = 0;
+        [[nodiscard]] virtual bool             isConnected() const noexcept                = 0;
+        [[nodiscard]] virtual ConnectionResult disconnect() noexcept                       = 0;
+        [[nodiscard]] virtual ConnectionResult connect(DynamicPort& dst_port)              = 0;
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept = 0;
@@ -11575,7 +11824,13 @@ private:
 
         [[nodiscard]] virtual std::string typeName() const = 0;
 
-        [[nodiscard]] virtual PortInfo portInfo() const = 0; // TODO: rename to type() and remove existing type(), direction(), domain(), ... API
+        [[nodiscard]] virtual std::string_view portName() noexcept       = 0; // TODO: rename to 'name()' and eliminate local 'name' field (moved to metaInfo()), and use string&
+        [[nodiscard]] virtual std::string_view portName() const noexcept = 0;
+
+        [[nodiscard]] virtual PortInfo            portInfo() const              = 0; // TODO: rename to type() and remove existing type(), direction(), domain(), ... API
+        [[nodiscard]] virtual PortMetaInfo const& portMetaInfo() const noexcept = 0;
+        [[nodiscard]] virtual PortMetaInfo&       portMetaInfo() noexcept       = 0;
+        [[nodiscard]] virtual port::BitMask       portMaskInfo() const noexcept = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -11611,6 +11866,7 @@ private:
             } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
             }
+            arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         explicit constexpr PortWrapper(T&& arg) noexcept : _value{std::move(arg)} {
@@ -11619,6 +11875,7 @@ private:
             } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
             }
+            arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         ~PortWrapper() override = default;
@@ -11628,41 +11885,52 @@ private:
         [[nodiscard]] std::intptr_t internalId() const noexcept override { return reinterpret_cast<std::intptr_t>(std::addressof(_value)); }
 
         [[nodiscard]] std::any defaultValue() const noexcept override { return _value.defaultValue(); }
+        [[nodiscard]] bool     setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
 
-        [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
-
-        [[nodiscard]] constexpr PortType type() const noexcept override { return _value.type(); }
-
-        [[nodiscard]] constexpr PortDirection direction() const noexcept override { return _value.direction(); }
-
+        [[nodiscard]] constexpr PortType         type() const noexcept override { return _value.type(); }
+        [[nodiscard]] constexpr PortDirection    direction() const noexcept override { return _value.direction(); }
         [[nodiscard]] constexpr std::string_view domain() const noexcept override { return _value.domain(); }
-
-        [[nodiscard]] bool isSynchronous() noexcept override { return _value.isSynchronous(); }
-
-        [[nodiscard]] bool isOptional() noexcept override { return _value.isOptional(); }
+        [[nodiscard]] bool                       isSynchronous() noexcept override { return _value.isSynchronous(); }
+        [[nodiscard]] bool                       isOptional() noexcept override { return _value.isOptional(); }
 
         [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
-
-        [[nodiscard]] std::size_t nReaders() const override { return _value.nReaders(); }
-        [[nodiscard]] std::size_t nWriters() const override { return _value.nWriters(); }
-        [[nodiscard]] std::size_t bufferSize() const override { return _value.bufferSize(); }
-
-        [[nodiscard]] bool isConnected() const noexcept override { return _value.isConnected(); }
-
+        [[nodiscard]] std::size_t      nReaders() const override { return _value.nReaders(); }
+        [[nodiscard]] std::size_t      nWriters() const override { return _value.nWriters(); }
+        [[nodiscard]] std::size_t      bufferSize() const override { return _value.bufferSize(); }
+        [[nodiscard]] bool             isConnected() const noexcept override { return _value.isConnected(); }
         [[nodiscard]] ConnectionResult disconnect() noexcept override { return _value.disconnect(); }
 
-        [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) override {
+        [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) override { // TODO: return signature: refactor to non-throwing std::expected<ConnectionResult, Error> return -> follow-up PR
             using enum gr::ConnectionResult;
+            port::BitMask thisMask = portMaskInfo();
+            port::BitMask other    = dst_port.portMaskInfo();
+            if (port::decodePortType(thisMask) != port::decodePortType(other)) {
+#ifdef DEBUG
+                throw std::runtime_error(std::format("port type mismatch: {}::{} != {}::{}", portName(), port::decodePortType(thisMask), dst_port.portName(), port::decodePortType(other)));
+#endif
+                return FAILED;
+            }
+            if (portMetaInfo().data_type != dst_port.portMetaInfo().data_type) {
+#ifdef DEBUG
+                throw std::runtime_error(std::format("port data type mismatch: {}::{} != {}::{}", portName(), _value.metaInfo.data_type, dst_port.portName(), dst_port.metaInfo.data_type));
+#endif
+                return FAILED;
+            }
             if constexpr (T::kIsOutput) {
                 auto src_buffer = _value.writerHandlerInternal();
                 return dst_port.updateReaderInternal(src_buffer) ? SUCCESS : FAILED;
             } else {
-                assert(false && "This works only on input ports");
+#ifdef DEBUG
+                throw std::runtime_error("This works only on input ports");
+#endif
                 return FAILED;
             }
         }
 
         [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
+
+        [[nodiscard]] std::string_view portName() noexcept override { return _value.name; } // TODO: '_value.name' -> '_value.metaInfo.name' and use string&
+        [[nodiscard]] std::string_view portName() const noexcept override { return _value.name; }
 
         [[nodiscard]] PortInfo portInfo() const override {
             return {// snapshot
@@ -11676,6 +11944,10 @@ private:
                 .bufferSize                = _value.bufferSize(),
                 .availableBufferSize       = _value.available()};
         }
+
+        [[nodiscard]] PortMetaInfo const& portMetaInfo() const noexcept override { return _value.metaInfo; }
+        [[nodiscard]] PortMetaInfo&       portMetaInfo() noexcept override { return _value.metaInfo; }
+        [[nodiscard]] port::BitMask       portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -11703,6 +11975,12 @@ public:
         return *this;
     }
 
+    template<class T>
+    explicit constexpr DynamicPort(const T& arg, non_owned_reference_tag) noexcept                            // TODO: remove const-cast (super dangerous, and only a temporary fix) -> Ivan volunteerd to fix in follor-up PR
+    requires PortLike<std::remove_const_t<T>>                                                                 //
+        : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), //
+          _accessor{std::make_unique<PortWrapper<std::remove_const_t<T>, false>>(const_cast<std::remove_const_t<T>&>(arg))} {}
+
     bool operator==(const DynamicPort& other) const noexcept { return _accessor->internalId() == other._accessor->internalId(); }
     bool operator!=(const DynamicPort& other) const noexcept { return _accessor->internalId() != other._accessor->internalId(); }
 
@@ -11714,20 +11992,18 @@ public:
     explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, true>>(std::forward<T>(arg))} {}
 
     [[nodiscard]] DynamicPort weakRef() const noexcept { return _accessor->weakRef(); }
+    [[nodiscard]] std::any    defaultValue() const noexcept { return _accessor->defaultValue(); }
 
-    [[nodiscard]] std::any defaultValue() const noexcept { return _accessor->defaultValue(); }
-
-    [[nodiscard]] bool setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
-
-    [[nodiscard]] PortType type() const noexcept { return _accessor->type(); }
-
-    [[nodiscard]] PortDirection direction() const noexcept { return _accessor->direction(); }
-
+    [[nodiscard]] bool             setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
+    [[nodiscard]] PortType         type() const noexcept { return _accessor->type(); }
+    [[nodiscard]] PortDirection    direction() const noexcept { return _accessor->direction(); }
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
-
-    [[nodiscard]] std::string typeName() const noexcept { return _accessor->typeName(); }
-
-    [[nodiscard]] PortInfo portInfo() const noexcept { return _accessor->portInfo(); }
+    [[nodiscard]] std::string      typeName() const noexcept { return _accessor->typeName(); }
+    [[nodiscard]] std::string_view portName() noexcept { return _accessor->portName(); }
+    [[nodiscard]] std::string_view portName() const noexcept { return _accessor->portName(); }
+    [[nodiscard]] PortInfo         portInfo() const noexcept { return _accessor->portInfo(); }
+    [[nodiscard]] PortMetaInfo     portMetaInfo() const noexcept { return _accessor->portMetaInfo(); }
+    [[nodiscard]] port::BitMask    portMaskInfo() const noexcept { return _accessor->portMaskInfo(); }
 
     [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 
@@ -14899,6 +15175,151 @@ concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (
 } // namespace gr::traits::block
 
 #endif // include guard
+
+// #include <gnuradio-4.0/MemoryAllocators.hpp>
+#ifndef MEMORYALLOCATORS_HPP
+#define MEMORYALLOCATORS_HPP
+
+#include <bit>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <new>
+#include <print>
+#include <source_location>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+// #include <gnuradio-4.0/meta/formatter.hpp>
+
+
+namespace gr::allocator {
+
+/** @brief STL allocator guaranteeing `alignment` byte alignment. */
+template<typename T, std::size_t alignment = 64UZ>
+requires(std::has_single_bit(alignment) && alignment >= alignof(T))
+struct Aligned {
+    using value_type = T;
+
+    constexpr Aligned() noexcept = default;
+
+    template<typename U>
+    constexpr Aligned(const Aligned<U, alignment>&) noexcept {}
+
+    [[nodiscard]] T* allocate(std::size_t n) {
+        const std::size_t bytes = n * sizeof(T);
+        if (bytes == 0) {
+            return nullptr; // fine per standard
+        }
+        if (void* p = ::operator new(bytes, std::align_val_t{alignment})) {
+            return static_cast<T*>(p);
+        }
+        throw std::bad_alloc();
+    }
+
+    void deallocate(T* p, std::size_t /*n*/) noexcept { ::operator delete(p, std::align_val_t{alignment}); }
+
+    template<typename U>
+    struct rebind {
+        using other = Aligned<U, alignment>;
+    };
+
+    friend constexpr bool operator==(const Aligned&, const Aligned&) noexcept = default;
+};
+
+template<typename T>
+using Default = Aligned<T, 64UZ>;
+
+namespace detail {
+enum class Event { allocate, deallocate, allocate_at_least };
+
+struct DefaultLogger {
+    void operator()(Event ev, std::size_t count, std::size_t bytes, std::source_location loc, std::string_view type_name) const noexcept { //
+        std::println("[{:10}] type={} count={:3} bytes={:3} @ {}:{}:{}", ev, type_name, count, bytes, loc.file_name(), loc.line(), loc.column());
+    }
+};
+
+template<class Ptr>
+struct allocation_result {
+    Ptr         ptr;
+    std::size_t count;
+};
+
+template<class Alloc>
+concept has_allocate_at_least = requires(Alloc a, std::size_t n) {
+    { std::allocator_traits<Alloc>::allocate_at_least(a, n) };
+};
+
+} // namespace detail
+
+template<typename T, typename Underlying = Default<T>, typename Logger = detail::DefaultLogger>
+struct Logging {
+    using value_type      = T;
+    using underlying_type = Underlying;
+    using logger_type     = Logger;
+
+    static_assert(std::is_same_v<typename underlying_type::value_type, T>, "Underlying allocator must use same value_type");
+
+    underlying_type      _underlying{};
+    logger_type          _logger{};
+    std::string          _type_name = gr::meta::type_name<T>();
+    std::source_location _origin    = std::source_location::current();
+
+    explicit Logging(underlying_type underlying = {}, logger_type logger = {}, std::source_location loc = std::source_location::current()) noexcept : _underlying(std::move(underlying)), _logger(std::move(logger)), _origin(loc) {}
+
+    template<typename U, typename OU, typename L>
+    Logging(const Logging<U, OU, L>& rhs) noexcept : _underlying(rhs.underlying()), _logger(rhs.logger()), _origin(rhs.origin()) {}
+
+    [[nodiscard]] T* allocate(std::size_t n) {
+        const std::size_t bytes = n * sizeof(T);
+        _logger(detail::Event::allocate, n, bytes, _origin, _type_name);
+        return _underlying.allocate(n);
+    }
+
+    void deallocate(T* p, std::size_t n) noexcept {
+        const std::size_t bytes = n * sizeof(T);
+        _logger(detail::Event::deallocate, n, bytes, _origin, _type_name);
+        _underlying.deallocate(p, n);
+    }
+
+    [[nodiscard]] auto allocate_at_least(std::size_t n) {
+        if constexpr (gr::allocator::detail::has_allocate_at_least<underlying_type>) {
+            auto r = std::allocator_traits<underlying_type>::allocate_at_least(_underlying, n);
+            _logger(detail::Event::allocate_at_least, r.count, r.count * sizeof(T), _origin, _type_name);
+            return r;
+        } else {
+            T*   p = allocate(n);
+            auto r = gr::allocator::detail::allocation_result<T*>{p, n};
+            _logger(detail::Event::allocate_at_least, r.count, r.count * sizeof(T), _origin, _type_name);
+            return r;
+        }
+    }
+
+    [[nodiscard]] underlying_type&       underlying() noexcept { return _underlying; }
+    [[nodiscard]] const underlying_type& underlying() const noexcept { return _underlying; }
+    [[nodiscard]] logger_type&           logger() noexcept { return _logger; }
+    [[nodiscard]] const logger_type&     logger() const noexcept { return _logger; }
+    [[nodiscard]] std::source_location   origin() const noexcept { return _origin; }
+
+    template<typename U>
+    struct rebind {
+        using other = Logging<U, typename std::allocator_traits<underlying_type>::template rebind_alloc<U>, logger_type>;
+    };
+
+    friend bool operator==(const Logging& a, const Logging& b) noexcept {
+        if constexpr (std::allocator_traits<underlying_type>::is_always_equal::value) {
+            return &a == &b || (a._origin.file_name() == b._origin.file_name() && a._origin.line() == b._origin.line());
+        } else {
+            return a._underlying == b._underlying && a._origin.file_name() == b._origin.file_name() && a._origin.line() == b._origin.line();
+        }
+    }
+};
+
+} // namespace gr::allocator
+
+#endif // MEMORYALLOCATORS_HPP
 
 // #include <gnuradio-4.0/Port.hpp>
 
@@ -19121,6 +19542,344 @@ template<PortType portType, PortReflectable Self>
     return [self]<std::size_t... Idx>(std::index_sequence<Idx...>) { return std::tie(outputPort<Idx, portType>(self)...); }(traits::block::output_port_descriptors<Self, portType>::index_sequence);
 }
 
+namespace detail {
+template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+[[nodiscard]] constexpr std::optional<T> min_element(Range&& range) {
+    if (auto it = std::ranges::min_element(range); it != std::ranges::end(range)) {
+        return *it;
+    }
+    return std::nullopt;
+}
+
+template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+[[nodiscard]] constexpr std::optional<T> min_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
+    auto filtered = std::ranges::views::zip(range, portMaskVec) | std::views::filter([](const auto& pair) {
+        const auto& mask = std::get<1>(pair);
+        return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
+    }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
+
+    return min_element(filtered);
+}
+
+template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+std::optional<T> max_element(Range&& range) {
+    if (auto it = std::ranges::max_element(range); it != std::ranges::end(range)) {
+        return *it;
+    }
+    return std::nullopt;
+}
+
+template<auto... MatchPortEnums, std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+[[nodiscard]] constexpr std::optional<T> max_element_masked(Range&& range, const std::span<const port::BitMask>& portMaskVec) {
+    auto zipped   = std::ranges::views::zip(range, portMaskVec);
+    auto filtered = zipped | std::views::filter([](const auto& pair) {
+        const auto& mask = std::get<1>(pair);
+        return port::pattern<MatchPortEnums...>().matches(mask); // actual & pattern.mask == pattern.value
+    }) | std::views::transform([](const auto& pair) { return std::get<0>(pair); });
+
+    return max_element(filtered);
+}
+
+template<typename T, std::size_t simd_width = stdx::simd_abi::max_fixed_size<T>>
+[[nodiscard]] constexpr bool compareSpans(const std::span<T>& a, const std::span<T>& b) noexcept {
+    const std::size_t size = std::min(a.size(), b.size());
+    if (size == 0UZ) {
+        return false;
+    }
+
+    // SIMD loop
+    std::size_t i = 0UZ;
+    for (; i + simd_width <= size; i += simd_width) {
+        using TSimd = stdx::fixed_size_simd<T, simd_width>;
+        TSimd a_chunk(&a[i], stdx::vector_aligned);
+        TSimd b_chunk(&b[i], stdx::vector_aligned);
+
+        if (stdx::any_of(a_chunk >= b_chunk)) { // true: any element of a[i] >= b[i]
+            return true;
+        }
+    }
+
+    // SIMD epilogue
+    for (; i < size; ++i) {
+        if (a[i] >= b[i]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template<auto... MatchPortEnums, std::ranges::input_range RangeA, std::ranges::input_range RangeB, std::ranges::input_range MaskRange>
+[[nodiscard]] constexpr bool compareRangesMasked(RangeA&& a, RangeB&& b, MaskRange&& mask) {
+    auto zipped = std::ranges::views::zip(a, b, mask) | std::views::filter([](const auto& tup) { return port::pattern<MatchPortEnums...>().matches(std::get<2>(tup)); });
+    return std::ranges::any_of(zipped, [](const auto& tup) { return std::get<0UZ>(tup) >= std::get<1UZ>(tup); });
+}
+} // namespace detail
+
+template<typename Derived, PortDirection portDirection, PortType portType>
+class PortCache {
+    using AllocatorSize    = gr::allocator::Aligned<std::size_t, gr::meta::kCacheLine>;
+    using AllocatorBitMask = gr::allocator::Aligned<port::BitMask, gr::meta::kCacheLine>;
+
+    // reference to derived class containing the ports
+    Derived& _self;
+
+    // updated on settings/port-config change
+    bool                                         _dirtyConfig = true;
+    std::vector<port::BitMask, AllocatorBitMask> _types;
+    std::vector<std::size_t, AllocatorSize>      _minSamples;
+    std::vector<std::size_t, AllocatorSize>      _maxSamples;
+
+    // updated every work(...) function invokation
+    bool                                    _dirtyAvailable = true;
+    std::vector<std::size_t, AllocatorSize> _available;
+
+    // aggregated values
+    std::size_t _minSyncRequirement = 0UZ;
+    std::size_t _maxSyncRequirement = gr::undefined_size;
+    std::size_t _maxSyncAvailable   = gr::undefined_size;
+    bool        _hasASyncAvailable  = false;
+
+protected:
+    template<std::ranges::range Range, typename T = std::ranges::range_value_t<Range>>
+    requires(std::is_same_v<T, port::BitMask>)
+    constexpr void getPortTypes(const Derived& self, Range& result) const noexcept {
+        result.clear();
+        auto func = [&result]<gr::PortLike Port>(const Port& port) noexcept {
+            port::BitMask mask = port::encodeMask(Port::kDirection, Port::kPortType, Port::kIsSynch, Port::kIsOptional, port.isConnected());
+            result.push_back(mask);
+        };
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port(std::move(func), inputPorts<portType>(&self));
+        } else {
+            for_each_port(std::move(func), outputPorts<portType>(&self));
+        }
+    }
+
+    template<std::ranges::range Range, typename Fn>
+    constexpr void getPortConstraints(const Derived& self, Range& storage, Fn&& function) {
+        if (std::ranges::size(storage) == 0UZ) {
+            return;
+        }
+#if __has_cpp_attribute(assume) && !defined(__clang__)
+        [[assume(std::ranges::size(storage) > 0UZ)]]; // non-empty storage guarantee (has been allocated externally)
+#endif
+        auto&& fn = std::forward<Fn>(function);
+        auto   it = storage.begin();
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, inputPorts<portType>(&self));
+        } else {
+            for_each_port([&it, &fn](auto& port) { *it++ = std::invoke(fn, port); }, outputPorts<portType>(&self));
+        }
+        assert(std::distance(std::begin(storage), it) >= 0);
+        assert(storage.size() == static_cast<std::size_t>(std::distance(std::begin(storage), it)));
+    }
+
+    void updateConfig() {
+        _dirtyAvailable = true;
+        getPortTypes(_self, _types);
+        _available.resize(_types.size(), 0UZ);
+        _minSamples.resize(_types.size(), 0UZ);
+        _maxSamples.resize(_types.size(), gr::undefined_size);
+        getPortConstraints(_self, _minSamples, [](auto& port) { return port.min_samples; });
+        getPortConstraints(_self, _maxSamples, [](auto& port) { return port.max_samples; });
+        _minSyncRequirement = detail::max_element_masked<PortSync::SYNCHRONOUS>(_minSamples, _types).value_or(0UZ);
+        _maxSyncRequirement = detail::min_element_masked<PortSync::SYNCHRONOUS>(_maxSamples, _types).value_or(gr::undefined_size);
+        _dirtyConfig        = false;
+    }
+
+    void updateAvailable() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        if (!_dirtyAvailable) {
+            return; // already updated
+        }
+        getPortConstraints(_self, _available, [](auto& port) {
+            if constexpr (portDirection == PortDirection::INPUT) {
+                return port.streamReader().available();
+            } else {
+                return port.streamWriter().available();
+            }
+        });
+        _maxSyncAvailable  = detail::min_element_masked<PortSync::SYNCHRONOUS>(_available, _types).value_or(gr::undefined_size);
+        _hasASyncAvailable = detail::compareRangesMasked<PortSync::ASYNCHRONOUS>(_available, _minSamples, _types);
+        _dirtyAvailable    = false;
+    }
+
+public:
+    PortCache(Derived& self) : _self(self) {}
+
+    void invalidateConfig() noexcept { _dirtyConfig = true; }
+    void invalidateStatistic() noexcept { _dirtyAvailable = true; }
+
+    std::span<const port::BitMask> types() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        return std::span<const port::BitMask>{_types.data(), _types.size()};
+    }
+
+    std::span<const std::size_t> minSamples() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        return std::span<const std::size_t>{_minSamples.data(), _minSamples.size()};
+    }
+
+    std::span<const std::size_t> maxSamples() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        assert(!_dirtyConfig);
+        return std::span<const std::size_t>{_maxSamples.data(), _maxSamples.size()};
+    }
+
+    std::span<const std::size_t> availableSamples(bool reset = false) {
+        if (_dirtyAvailable || reset) {
+            updateAvailable();
+        }
+        assert(!_dirtyAvailable);
+        return std::span<const std::size_t>{_available.data(), _available.size()};
+    }
+
+    std::size_t minSyncRequirement() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        return _minSyncRequirement;
+    }
+    std::size_t maxSyncRequirement() {
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        return _maxSyncRequirement;
+    }
+    std::size_t maxSyncAvailable() {
+        if (_dirtyAvailable) {
+            updateAvailable();
+        }
+        return _maxSyncAvailable;
+    }
+    bool hasASyncAvailable() {
+        if (_dirtyAvailable) {
+            updateAvailable();
+        }
+        return _hasASyncAvailable;
+    }
+
+    std::expected<std::size_t, gr::Error> primePort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept {
+        if constexpr (requires { _self.state(); }) {
+            if (_self.state() == lifecycle::State::RUNNING) {
+                return std::unexpected(Error(std::format("primePort({}, {}) - block must not be in RUNNING state", portIdx, nSamples), loc));
+            }
+        }
+        if (nSamples == 0UZ) {
+            return nSamples; // explicit NOOP
+        }
+
+        if (_dirtyConfig) {
+            updateConfig();
+        }
+        if (portIdx >= _types.size()) {
+            return std::unexpected(Error(std::format("primePort({}, {}) failed: portIdx out of range [0, {}]", portIdx, nSamples, _types.size()), loc));
+        }
+
+        std::expected<std::size_t, gr::Error> result = std::unexpected(Error(std::format("primePort({}, {}) - unexpected failure", portIdx, nSamples), loc));
+
+        std::size_t idx        = 0UZ;
+        auto        primerFunc = [&result, &loc, &idx, &portIdx, &nSamples](PortLike auto& port) {
+            if (idx++ != portIdx) {
+                return;
+            }
+
+            if (!port.isConnected()) {
+                result = std::unexpected(gr::Error(std::format("primePort({}, {}) - port {} ({}) is not connected", portIdx, nSamples, portIdx, port.name), loc));
+                return;
+            }
+
+            // can safely assume that port is either INPUT XOR OUTPUT
+            auto getAvailable = [&port]() -> std::size_t {
+                if constexpr (portDirection == PortDirection::INPUT) {
+                    return port.streamReader().available();
+                } else {
+                    return port.streamWriter().available();
+                }
+            };
+
+            std::size_t availableBefore = getAvailable();
+            // prime port
+            auto publishSamples = [&result, &loc, &portIdx](WriterSpanLike auto& publishSpan, std::size_t nRequested) {
+                if (publishSpan.size() < nRequested) {
+                    result = std::unexpected(gr::Error(std::format("primePort({}, {}) - failed requested {} and got {} samples", portIdx, nRequested, nRequested, publishSpan.size()), loc));
+                    return;
+                }
+                using T = typename std::remove_reference_t<decltype(port)>::value_type;
+                for (std::size_t i = 0UZ; i < nRequested; ++i) {
+                    publishSpan[i] = T{};
+                }
+                publishSpan.publish(nRequested);
+            };
+
+            if constexpr (portDirection == PortDirection::INPUT) {
+                auto writer = port.buffer().streamBuffer.new_writer();
+
+                WriterSpanLike auto publishSpan = writer.template tryReserve<gr::SpanReleasePolicy::ProcessAll>(nSamples);
+                publishSamples(publishSpan, nSamples);
+            } else {
+                WriterSpanLike auto publishSpan = port.streamWriter().template tryReserve<gr::SpanReleasePolicy::ProcessAll>(nSamples);
+                publishSamples(publishSpan, nSamples);
+            }
+            // N.B. actual publish is done when this context finished/publishSpan is destructure
+
+            // check if samples have been actually published
+            std::size_t availableAfter = getAvailable();
+
+            if constexpr (portDirection == PortDirection::INPUT) {
+                if (availableAfter - availableBefore != nSamples) {
+                    result = std::unexpected(gr::Error(std::format("primePort({}, {}) - failed requested {} and got {} samples", portIdx, nSamples, nSamples, availableAfter - availableBefore), loc));
+                    return;
+                }
+            } else { // N.B. available decreases on output ports
+                if (availableBefore - availableAfter != nSamples) {
+                    result = std::unexpected(gr::Error(std::format("primePort({}, {}) - failed requested {} and got {} samples", portIdx, nSamples, nSamples, availableBefore - availableAfter), loc));
+                    return;
+                }
+            }
+
+            result = nSamples;
+        };
+
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port(primerFunc, inputPorts<portType>(&_self));
+        } else {
+            for_each_port(primerFunc, outputPorts<portType>(&_self));
+        }
+
+        _dirtyAvailable = true;
+        return result;
+    }
+
+    std::vector<gr::PortMetaInfo> metaInfos(bool reset = true) {
+        if (_dirtyConfig || reset) {
+            updateConfig();
+        }
+        std::vector<gr::PortMetaInfo> metaInfo;
+        metaInfo.reserve(_types.size());
+
+        if constexpr (portDirection == PortDirection::INPUT) {
+            for_each_port([&metaInfo](auto& port) { metaInfo.push_back(port.metaInfo); }, inputPorts<portType>(&_self));
+        } else {
+            for_each_port([&metaInfo](auto& port) { metaInfo.push_back(port.metaInfo); }, outputPorts<portType>(&_self));
+        }
+
+        return metaInfo;
+    }
+};
+
 namespace work {
 
 class Counter {
@@ -19233,6 +19992,9 @@ inline static const char* kSetting        = "Settings";       ///< asynchronous 
                                                               // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
 inline static const char* kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
 
+inline static const char* kMetaInformation = "MetaInformation"; ///< asynchronous message-based retrieval of the static meta-information (i.e. Annotated<> interfaces, constraints, etc...)
+inline static const char* kUiConstraints   = "UiConstraints";   ///< asynchronous message-based retrieval of user-defined UI constraints
+
 inline static const char* kStoreDefaults    = "StoreDefaults";    ///< store present settings as default, for counterpart @see kResetDefaults
 inline static const char* kResetDefaults    = "ResetDefaults";    ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
 inline static const char* kActiveContext    = "ActiveContext";    ///< retrieve and set active context
@@ -19333,6 +20095,8 @@ enum class Category {
  * - `kActiveContext`: Returns current active context and allows to set a new one
  * - `kSettingsCtx`: Manages Settings Contexts Add/Remove/Get
  * - `kSettingsContexts`: Returns all Contextxs
+ * - `kMetaInformation`: returns static meta-information (i.e. Annotated<> interfaces, constraints, etc...) (N.B. does not affect Block operation)
+ * - `kUiConstraints`: returns user-defined UI constraints (N.B. does not affect Block operation)
  *
  * These properties can be interacted with through messages, supporting operations like setting values, querying states, and subscribing to updates.
  * This model provides a flexible interface for blocks to adapt their processing based on runtime conditions and external inputs.
@@ -19455,9 +20219,10 @@ public:
         return ret;
     }
 
-    A<property_map, "meta-information", Doc<"store non-graph-processing information like UI block position etc.">> meta_information = initMetaInfo();
+    A<property_map, "ui-constraints", Doc<"store non-graph-processing information like UI block position etc.">>         ui_constraints;
+    A<property_map, "meta-information", Doc<"store static non-graph-processing information like Annotated<> info etc.">> meta_information = initMetaInfo();
 
-    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, meta_information);
+    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, ui_constraints, meta_information);
 
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
@@ -19477,8 +20242,13 @@ public:
         {block::property::kActiveContext, std::mem_fn(&Block::propertyCallbackActiveContext)},       //
         {block::property::kSettingsCtx, std::mem_fn(&Block::propertyCallbackSettingsCtx)},           //
         {block::property::kSettingsContexts, std::mem_fn(&Block::propertyCallbackSettingsContexts)}, //
+        {block::property::kMetaInformation, std::mem_fn(&Block::propertyCallbackMetaInformation)},   //
+        {block::property::kUiConstraints, std::mem_fn(&Block::propertyCallbackUiConstraints)},       //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
+
+    PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
+    PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
 protected:
     Tag _mergedInputTag{};
@@ -19489,8 +20259,7 @@ protected:
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
 
-    [[nodiscard]] constexpr auto& self() noexcept { return *static_cast<Derived*>(this); }
-
+    [[nodiscard]] constexpr auto&       self() noexcept { return *static_cast<Derived*>(this); }
     [[nodiscard]] constexpr const auto& self() const noexcept { return *static_cast<const Derived*>(this); }
 
     template<typename TFunction, typename... Args>
@@ -19513,8 +20282,10 @@ protected:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-    Block(property_map initParameters) noexcept(false)                                                        // N.B. throws in case of on contract violations
-        : lifecycle::StateMachine<Derived>(), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) { // N.B. safe delegated use of this (i.e. not used during construction)
+    Block(property_map initParameters) noexcept(false)                                                     // N.B. throws in case of on contract violations
+        : lifecycle::StateMachine<Derived>(),                                                              //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) {                                  // N.B. safe delegated use of this (i.e. not used during construction)
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
@@ -19524,11 +20295,16 @@ public:
         }
     }
 
-    Block(Block&& other) noexcept : lifecycle::StateMachine<Derived>(std::move(other)), input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)), stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)), _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
+    Block(Block&& other) noexcept
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
+          stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)),                                         //
+          msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)),                                                                //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
+          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
 
-    // There are a few const or conditionally const member variables,
-    // we can not have a move-assignment that is equivalent to
-    // the move constructor
+    // There are a few const or conditionally const member variables, we cannot have a move-assignment that is equivalent to the move constructor
     Block& operator=(Block&& other) = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
@@ -19635,8 +20411,17 @@ public:
                 return;
             }
         }
-        const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
-        const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
+        // TODO: remove these obsolete lines
+        // const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+        // const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
+        inputStreamCache.invalidateConfig();
+        outputStreamCache.invalidateConfig();
+        const std::size_t minSyncIn  = inputStreamCache.minSyncRequirement();
+        const std::size_t maxSyncIn  = inputStreamCache.maxSyncRequirement();
+        const std::size_t minSyncOut = outputStreamCache.minSyncRequirement();
+        const std::size_t maxSyncOut = outputStreamCache.maxSyncRequirement();
+        inputStreamCache.invalidateConfig();
+        outputStreamCache.invalidateConfig();
         if (minSyncIn > maxSyncIn) {
             emitErrorMessage("Block::checkParametersAndThrowIfNeeded:", std::format("Min samples for input ports ({}) is larger then max samples for input ports ({})", minSyncIn, maxSyncIn));
             requestStop();
@@ -19797,6 +20582,10 @@ public:
             }
             notifyListeners(block::property::kSetting, settings().get());
         });
+
+        // update input/output port caches
+        inputStreamCache.invalidateConfig();
+        outputStreamCache.invalidateConfig();
     }
 
     constexpr static auto prepareStreams(auto ports, std::size_t nSyncSamples) {
@@ -20239,14 +21028,65 @@ protected:
         throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
+    std::optional<Message> propertyCallbackMetaInformation(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kMetaInformation);
+
+        if (message.cmd == Set) {
+            throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+            return std::nullopt;
+        } else if (message.cmd == Get) {
+            message.data = self().meta_information.value; // get
+            return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            return std::nullopt;
+        }
+
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
+    std::optional<Message> propertyCallbackUiConstraints(std::string_view propertyName, Message message) {
+        using enum gr::message::Command;
+        assert(propertyName == block::property::kUiConstraints);
+
+        if (message.cmd == Set) {
+            if (!message.data.has_value()) {
+                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
+            }
+            // delegate to 'propertyCallbackStagedSettings' since we cannot set but only stage new settings due to mandatory real-time/non-real-time decoupling
+            // settings are applied during the next work(...) invocation.
+            propertyCallbackStagedSettings(block::property::kStagedSetting, message);
+            return std::nullopt;
+        } else if (message.cmd == Get) {                // only return ui_constraints
+            message.data = self().ui_constraints.value; // get
+            return message;
+        } else if (message.cmd == Subscribe) {
+            if (!message.clientRequestID.empty()) {
+                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
+            }
+            return std::nullopt;
+        } else if (message.cmd == Unsubscribe) {
+            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
+            return std::nullopt;
+        }
+
+        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
+    }
+
 protected:
     /***
      * Aggregate the amount of samples that can be consumed/produced from a range of ports.
      * @param ports a typelist of input or output ports
      * @return an anonymous struct representing the amount of available data on the ports
      */
-    template<typename P>
-    auto getPortLimits(P&& ports) {
+    template<typename TPorts>
+    auto getPortLimits(TPorts&& ports) {
         struct {
             std::size_t minSync      = 0UL;                                     // the minimum amount of samples that the block needs for processing on the sync ports
             std::size_t maxSync      = std::numeric_limits<std::size_t>::max(); // the maximum amount of that can be consumed on all sync ports
@@ -20271,7 +21111,7 @@ protected:
                 }
             }
         };
-        for_each_port([&adjustForInputPort](PortLike auto& port) { adjustForInputPort(port); }, std::forward<P>(ports));
+        for_each_port([&adjustForInputPort](PortLike auto& port) { adjustForInputPort(port); }, std::forward<TPorts>(ports));
         return result;
     }
 
@@ -20450,7 +21290,7 @@ protected:
     }
 
     work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
-        std::size_t i = 0;
+        std::size_t i = 0UZ;
         for (; i + width <= nSamplesToProcess; i += width) {
             const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(width, input_simds...); });
             meta::tuple_for_each([i](auto& output_range, const auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
@@ -20466,7 +21306,7 @@ protected:
     }
 
     work::Status invokeProcessOnePure(auto& inputSpans, auto& outputSpans, std::size_t nSamplesToProcess) {
-        for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
+        for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each([i]<typename R>(auto& output_range, R&& result) { output_range[i] = std::forward<R>(result); }, outputSpans, results);
         }
@@ -20482,8 +21322,8 @@ protected:
             std::size_t  processedOut;
         };
 
-        std::size_t nOutSamplesBeforeRequestedStop = 0;
-        for (std::size_t i = 0; i < nSamplesToProcess; ++i) {
+        std::size_t nOutSamplesBeforeRequestedStop = 0UZ;
+        for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
             meta::tuple_for_each(
                 [i]<typename R>(auto& output_range, R&& result) {
@@ -20618,19 +21458,33 @@ protected:
             return {requestedWork, 0UZ, DONE};
         }
 
-        // evaluate number of available and processable samples
-        const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn]     = getPortLimits(inputPorts<PortType::STREAM>(&self()));
-        const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
-        auto [hasTag, nextTag, nextEosTag, asyncEoS]                          = getNextTagAndEosPosition();
-        std::size_t maxChunk                                                  = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
-        const auto  inputSkipBefore                                           = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
-        const auto  nextTagLimit                                              = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
-        const auto  ensureMinimalDecimation                                   = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
-        const auto  availableToProcess                                        = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
-        const auto  availableToPublish                                        = std::min({maxSyncOut, maxSyncAvailableOut});
-        auto [resampledIn, resampledOut, resampledStatus]                     = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
-        const auto nextEosTagSkipBefore                                       = nextEosTag - inputSkipBefore;
-        const bool isEosTagPresent                                            = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
+        // TODO: finally remove me
+        // const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn] = getPortLimits(inputPorts<PortType::STREAM>(&self()));
+        // const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
+
+        on_scope_exit _cacheGuard = [&] {
+            inputStreamCache.invalidateStatistic();
+            outputStreamCache.invalidateStatistic();
+        };
+        std::size_t minSyncIn           = inputStreamCache.minSyncRequirement();
+        std::size_t maxSyncIn           = inputStreamCache.maxSyncRequirement();
+        std::size_t maxSyncAvailableIn  = inputStreamCache.maxSyncAvailable();
+        bool        hasAsyncIn          = inputStreamCache.hasASyncAvailable();
+        std::size_t minSyncOut          = outputStreamCache.minSyncRequirement();
+        std::size_t maxSyncOut          = outputStreamCache.maxSyncRequirement();
+        std::size_t maxSyncAvailableOut = outputStreamCache.maxSyncAvailable();
+        bool        hasAsyncOut         = outputStreamCache.hasASyncAvailable();
+
+        auto [hasTag, nextTag, nextEosTag, asyncEoS]      = getNextTagAndEosPosition();
+        std::size_t maxChunk                              = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
+        const auto  inputSkipBefore                       = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
+        const auto  nextTagLimit                          = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
+        const auto  ensureMinimalDecimation               = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
+        const auto  availableToProcess                    = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
+        const auto  availableToPublish                    = std::min({maxSyncOut, maxSyncAvailableOut});
+        auto [resampledIn, resampledOut, resampledStatus] = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
+        const auto nextEosTagSkipBefore                   = nextEosTag - inputSkipBefore;
+        const bool isEosTagPresent                        = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
         if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
             auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
@@ -21532,6 +22386,38 @@ protected:
         }
     }
 
+    template<PortDirection direction, typename PortsVec>
+    DynamicPort& dynamicPortByIndexImpl(PortsVec& portsVec, std::size_t topIndex, std::size_t subIndex, std::source_location loc) {
+        using namespace std::string_view_literals;
+        constexpr std::string_view which = (direction == PortDirection::INPUT ? "Input"sv : "Output"sv);
+        initDynamicPorts();
+
+        if (topIndex >= portsVec.size()) {
+            throw gr::exception(std::format("dynamic{}Port(index: {}, subIndex: {}) - specified topIndex {} is out of range [0, {}]", which, topIndex, subIndex, topIndex, portsVec.size()), loc);
+        }
+        auto& entry = portsVec.at(topIndex);
+
+        if (auto* collection = std::get_if<NamedPortCollection>(&entry)) {
+            if (subIndex == meta::invalid_index) {
+                throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", which, topIndex, subIndex, collection->name), loc);
+            }
+            if (subIndex >= collection->ports.size()) {
+                throw gr::exception(std::format("out_of_range: dynamic{}Port(index: {}, subIndex: {}) - sub-index out of range for {} (size={})", which, topIndex, subIndex, collection->name, collection->ports.size()), loc);
+            }
+            return collection->ports[subIndex];
+        }
+
+        auto* single = std::get_if<gr::DynamicPort>(&entry);
+        if (!single) {
+            throw gr::exception("variant construction failed", loc);
+        }
+
+        if (subIndex != meta::invalid_index) {
+            throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - specified sub-index for a normal port {}", which, topIndex, subIndex, single->name), loc);
+        }
+        return *single;
+    }
+
 public:
     BlockModel(const BlockModel&)             = delete;
     BlockModel& operator=(const BlockModel&)  = delete;
@@ -21569,48 +22455,9 @@ public:
     }
 
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicInputPorts, name, location); }
-
     [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicOutputPorts, name, location); }
-
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
-        initDynamicPorts();
-        if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
-            } else {
-                return portCollection->ports[subIndex];
-            }
-
-        } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                return *port;
-            } else {
-                throw gr::exception(std::format("invalid_argument: dynamicInputPort(index: {}, subIndex: {} - specified sub-index for a normal port {}", index, subIndex, port->name), location);
-            }
-        }
-
-        throw std::logic_error("Variant construction failed");
-    }
-
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location location = std::source_location::current()) {
-        initDynamicPorts();
-        if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", index, subIndex, portCollection->name), location);
-            } else {
-                return portCollection->ports[subIndex];
-            }
-
-        } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(index))) {
-            if (subIndex == meta::invalid_index) {
-                return *port;
-            } else {
-                throw gr::exception(std::format("invalid_argument: dynamicOutputPort(index: {}, subIndex: {}) - specified sub-index for a normal port {}", index, subIndex, port->name), location);
-            }
-        }
-
-        throw std::logic_error("Variant construction failed");
-    }
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::INPUT>(_dynamicInputPorts, index, subIndex, std::move(loc)); }
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::OUTPUT>(_dynamicOutputPorts, index, subIndex, std::move(loc)); }
 
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
         return std::visit(meta::overloaded(                                                                                                                                                        //
@@ -21727,11 +22574,18 @@ public:
     virtual void setName(std::string name) noexcept = 0;
 
     /**
-     * @brief used to store non-graph-processing information like UI block position etc.
+     * @brief used to store static non-graph-processing information like Annotated<> info etc.
      */
     [[nodiscard]] virtual property_map& metaInformation() noexcept = 0;
 
     [[nodiscard]] virtual const property_map& metaInformation() const = 0;
+
+    /**
+     * @brief used to store non-graph-processing information like UI block position etc.
+     */
+    [[nodiscard]] virtual property_map& uiConstraints() noexcept = 0;
+
+    [[nodiscard]] virtual const property_map& uiConstraints() const = 0;
 
     /**
      * @brief process-wide unique name
@@ -21751,7 +22605,61 @@ public:
 
     virtual void processScheduledMessages() = 0;
 
-    virtual UICategory uiCategory() const { return UICategory::None; }
+    [[nodiscard]] virtual UICategory uiCategory() const { return UICategory::None; }
+
+    // port and sample information
+    /**
+     * @brief returns the input_chunk_size to output_chunk_size ratio for the block
+     */
+    [[nodiscard]] virtual gr::Ratio resamplingRatio() const noexcept = 0;
+
+    /**
+     * @brief returns the input stride
+     */
+    [[nodiscard]] virtual gr::Size_t stride() const noexcept = 0;
+
+    /**
+     * @brief Bit-mask description of each *input* stream port.
+     * @see gr::port::BitMask -> enum class : uint8_t { None = 0U, Input = 1, Stream = 2, Synchronous = 4, Optional = 8, Connected = 16 };
+     */
+    [[nodiscard]] virtual std::span<const gr::port::BitMask> blockInputTypes() noexcept = 0;
+
+    /**
+     * @brief Bit-mask description of each *output* stream port.
+     * @see gr::port::BitMask -> enum class : uint8_t { None = 0U, Input = 1, Stream = 2, Synchronous = 4, Optional = 8, Connected = 16 };
+     */
+    [[nodiscard]] virtual std::span<const gr::port::BitMask> blockOutputTypes() noexcept = 0;
+
+    /**
+     * @brief currently available/readable samples per input port.
+     * @param reset  if true, forces a fresh read from the ports.
+     */
+    [[nodiscard]] virtual std::span<const std::size_t> availableInputSamples(bool reset = false) noexcept = 0;
+
+    /**
+     * @brief currently available/writeable samples per output port.
+     * @param reset  if true, forces a fresh read from the ports.
+     */
+    [[nodiscard]] virtual std::span<const std::size_t> availableOutputSamples(bool reset = false) noexcept = 0;
+
+    [[nodiscard]] virtual std::span<const std::size_t> minInputRequirements() noexcept  = 0;
+    [[nodiscard]] virtual std::span<const std::size_t> maxInputRequirements() noexcept  = 0;
+    [[nodiscard]] virtual std::span<const std::size_t> minOutputRequirements() noexcept = 0;
+    [[nodiscard]] virtual std::span<const std::size_t> maxOutputRequirements() noexcept = 0;
+
+    [[nodiscard]] virtual bool hasAsyncInputPorts() noexcept  = 0;
+    [[nodiscard]] virtual bool hasAsyncOutputPorts() noexcept = 0;
+
+    [[nodiscard]] virtual std::vector<gr::PortMetaInfo> inputMetaInfos(bool reset = true) noexcept  = 0;
+    [[nodiscard]] virtual std::vector<gr::PortMetaInfo> outputMetaInfos(bool reset = true) noexcept = 0;
+
+    /**
+     * @brief primes/injects dedicated number of samples into input port
+     * @param portIdx port index [0, blockInputTypes().size()[
+     * @param nSamples number of samples to be primed/injected
+     * @return number of samples actually primed (may be < count) or an Error.
+     */
+    [[nodiscard]] virtual std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept = 0;
 
     [[nodiscard]] virtual void* raw() = 0;
 };
@@ -21857,7 +22765,25 @@ public:
 
     [[nodiscard]] block::Category blockCategory() const override { return T::blockCategory; }
 
-    UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
+    [[nodiscard]] UICategory uiCategory() const override { return T::DrawableControl::kCategory; }
+
+    [[nodiscard]] gr::Ratio  resamplingRatio() const noexcept override { return {static_cast<std::int32_t>(blockRef().input_chunk_size), static_cast<std::int32_t>(blockRef().output_chunk_size)}; }
+    [[nodiscard]] gr::Size_t stride() const noexcept override { return blockRef().stride; }
+
+    [[nodiscard]] std::span<const port::BitMask> blockInputTypes() noexcept override { return blockRef().inputStreamCache.types(); }
+    [[nodiscard]] std::span<const port::BitMask> blockOutputTypes() noexcept override { return blockRef().outputStreamCache.types(); }
+    [[nodiscard]] std::span<const std::size_t>   availableInputSamples(bool reset = false) noexcept override { return blockRef().inputStreamCache.availableSamples(reset); }
+    [[nodiscard]] std::span<const std::size_t>   availableOutputSamples(bool reset = false) noexcept override { return blockRef().outputStreamCache.availableSamples(reset); }
+    [[nodiscard]] std::span<const std::size_t>   minInputRequirements() noexcept override { return blockRef().inputStreamCache.minSamples(); }
+    [[nodiscard]] std::span<const std::size_t>   maxInputRequirements() noexcept override { return blockRef().inputStreamCache.maxSamples(); }
+    [[nodiscard]] std::span<const std::size_t>   minOutputRequirements() noexcept override { return blockRef().outputStreamCache.minSamples(); }
+    [[nodiscard]] std::span<const std::size_t>   maxOutputRequirements() noexcept override { return blockRef().outputStreamCache.maxSamples(); }
+    [[nodiscard]] bool                           hasAsyncInputPorts() noexcept override { return blockRef().inputStreamCache.hasASyncAvailable(); }
+    [[nodiscard]] bool                           hasAsyncOutputPorts() noexcept override { return blockRef().outputStreamCache.hasASyncAvailable(); }
+    [[nodiscard]] std::vector<gr::PortMetaInfo>  inputMetaInfos(bool reset = true) noexcept override { return blockRef().inputStreamCache.metaInfos(reset); }
+    [[nodiscard]] std::vector<gr::PortMetaInfo>  outputMetaInfos(bool reset = true) noexcept override { return blockRef().outputStreamCache.metaInfos(reset); }
+
+    [[nodiscard]] std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept override { return blockRef().inputStreamCache.primePort(portIdx, nSamples, loc); }
 
     void processScheduledMessages() override { return blockRef().processScheduledMessages(); }
 
@@ -21902,8 +22828,10 @@ public:
     [[nodiscard]] std::string_view           name() const override { return blockRef().name; }
     void                                     setName(std::string name) noexcept override { blockRef().name = std::move(name); }
     [[nodiscard]] std::string_view           typeName() const override { return _type_name; }
-    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; }
+    [[nodiscard]] property_map&              metaInformation() noexcept override { return blockRef().meta_information; } // TODO: to be removed (read-only)
     [[nodiscard]] const property_map&        metaInformation() const override { return blockRef().meta_information; }
+    [[nodiscard]] property_map&              uiConstraints() noexcept override { return blockRef().ui_constraints; }
+    [[nodiscard]] const property_map&        uiConstraints() const override { return blockRef().ui_constraints; }
     [[nodiscard]] std::string_view           uniqueName() const override { return blockRef().unique_name; }
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
@@ -22768,8 +23696,8 @@ struct Graph : Block<Graph> {
             std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = graph::findBlock(self, sourceBlockRaw, location);
             std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = graph::findBlock(self, destinationBlockRaw, location);
 
-            if (!sourceBlock.has_value() && !destinationBlock.has_value()) {
-                std::print("Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlockRaw.name, destinationBlockRaw.name, location);
+            if (!sourceBlock.has_value() || !destinationBlock.has_value()) {
+                std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlockRaw.name, destinationBlockRaw.name, location);
                 return ConnectionResult::FAILED;
             }
 
