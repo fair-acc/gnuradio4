@@ -132,11 +132,11 @@ blocks:
     parameters:
       name: ArraySourceOne<float64>
   - id: gr::testing::ArraySource<float64>
-    ui_constraints:
-      x: !!float32 43
-      y: !!float32 7070
     parameters:
       name: ArraySource<float64>
+      ui_constraints:
+        x: !!float32 43
+        y: !!float32 7070
 
 connections:
   - [ArraySourceOne<float64>, [0, 0], 'ArraySinkImpl<float64, true, 42>', [1, 1]]
@@ -157,6 +157,7 @@ connections:
 
             for (const auto& block : graph.blocks()) {
                 if (block->name() == "ArraySource<float64>") {
+                    expect(block->settings().applyStagedParameters().forwardParameters.empty());
                     expect(std::get<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
                 }
             }

@@ -48,10 +48,10 @@ inline std::vector<Message> consumeAllReplyMessages(gr::MsgPortIn& port, std::so
         ReaderSpanLike auto messages = port.streamReader().get();
         msgs                         = std::vector<Message>(messages.begin(), messages.end());
         const bool isConsumed        = messages.consume(messages.size());
-        expect(isConsumed) << std::format("Can not consume reply messages. Requested at:{}\n", sourceLocation);
+        expect(isConsumed) << std::format("Can not consume reply messages. Requested at:{}:{}\n", sourceLocation.file_name(), sourceLocation.line());
     }
 
-    expect(eq(getNReplyMessages(port), 0UZ)) << std::format("Unexpected available messages: {}. Requested at:{}\n", getNReplyMessages(port), sourceLocation);
+    expect(eq(getNReplyMessages(port), 0UZ)) << std::format("Unexpected available messages: {}. Requested at:{}:{}\n", getNReplyMessages(port), sourceLocation.file_name(), sourceLocation.line());
     return msgs;
 };
 
@@ -67,7 +67,7 @@ inline std::optional<Message> waitForReply(gr::MsgPortIn& fromGraph, Condition c
 
         std::this_thread::sleep_for(100ms);
         if (std::chrono::system_clock::now() - startedAt > maxWaitTime) {
-            std::println("msg dump for failed test:");
+            std::println("msg dump for failed test (message count {}):", messages.size());
             for (auto& msg : messages) {
                 std::println("msg: .endpoint={} .hasData={}", msg.endpoint, msg.data.has_value());
             }
@@ -87,7 +87,7 @@ inline std::optional<Message> sendAndWaitForReply(auto& toPort, auto& fromPort, 
     property_map data, Condition condition, std::string_view clientRequestID = "", std::source_location sourceLocation = std::source_location::current()) {
     gr::sendMessage<Cmd>(toPort, serviceName, endpoint, std::move(data), clientRequestID);
     auto reply = waitForReply(fromPort, condition);
-    expect(reply.has_value()) << std::format("Reply message not received. at {}\n", sourceLocation);
+    expect(reply.has_value()) << std::format("Reply message not received. at {}:{}\n", sourceLocation.file_name(), sourceLocation.line());
 
     // consume every message so they dont' leak into the next test. The next test is resilient
     // but it makes debugging harder if we have old messages
@@ -105,22 +105,16 @@ struct ReplyChecker {
 };
 
 inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, property_map properties, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
-    expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
+    expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}:{}\n", sourceLocation.file_name(), sourceLocation.line());
     auto reply = testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceBlock, //
         {{"type", std::move(type)}, {"properties", std::move(properties)}},                                                                       //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kBlockEmplaced});
 
-    expect(waitForReply(fromGraph)) << std::format("Reply message not received. Requested at: {}\n", sourceLocation);
-
-    const Message reply = getAndConsumeFirstReplyMessage(fromGraph);
-    if (!reply.data.has_value()) {
-        expect(false) << std::format("Emplace block failed and returned an error. Requested at: {}. Error: {}\n", sourceLocation, reply.data.error());
-    }
-    return std::get<std::string>(reply.data.value().at("unique_name"s));
+    return std::get<std::string>(reply.value().data.value().at("unique_name"s));
 };
 
 inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
-    expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}\n", sourceLocation);
+    expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}:{}\n", sourceLocation.file_name(), sourceLocation.line());
     gr::property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort}, {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort}, //
         {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
     testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceEdge, data, //

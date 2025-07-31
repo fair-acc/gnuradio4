@@ -361,23 +361,15 @@ const boost::ut::suite TopologyGraphTests = [] {
         TestScheduler scheduler(std::move(testGraph));
         auto          makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", x}, {"y", y}}; };
 
-        {
-            // Setting ui_constraints property for all blocks, universal
-            sendMessage<Set>(scheduler.toScheduler, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7070)}} /* data  */);
-            // Setting ui_constraints property for one block
-            sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName() /* serviceName */, block::property::kSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(42, 6)}} /* data  */);
+        // Setting ui_constraints property for all blocks, universal
+        sendMessage<Set>(scheduler.toScheduler, "", block::property::kSetting, //
+            {{"ui_constraints", makeUiConstraints(43, 7070)}}                  // data
+        );
 
-            waitForReply(scheduler.fromScheduler);
-        }
-
-        const auto replyCount = scheduler.fromScheduler.streamReader().available();
-        for (std::size_t replyIndex = 0UZ; replyIndex < replyCount; replyIndex++) {
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
-            std::println("Got a reply {}:\n{}", replyIndex, reply);
-        }
-
-        expect(copy1->settings().applyStagedParameters().forwardParameters.empty());
-        expect(copy2->settings().applyStagedParameters().forwardParameters.empty());
+        // Setting ui_constraints property for one block
+        sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName(), block::property::kSetting, //
+            {{"ui_constraints", makeUiConstraints(42, 6)}}                                      // data
+        );
 
         auto uiConstraintsFor = [](const auto& block) {
             return std::visit(meta::overloaded{
@@ -390,21 +382,27 @@ const boost::ut::suite TopologyGraphTests = [] {
                 block->settings().get("ui_constraints").value());
         };
 
+        awaitCondition(200ms, [&] {
+            return copy1->settings().applyStagedParameters().forwardParameters.empty() && //
+                   copy2->settings().applyStagedParameters().forwardParameters.empty() && //
+                   !uiConstraintsFor(copy1).empty();
+        });
+
         expect(eq(42.f, std::get<float>(uiConstraintsFor(copy1)["x"])));
         expect(eq(43.f, std::get<float>(uiConstraintsFor(copy2)["x"])));
 
         // Check if block introspection includes ui_constraints
 
         {
-            sendMessage<Get>(scheduler.toScheduler, {}, graph::property::kGraphInspect, {});
-            waitForReply(scheduler.fromScheduler);
+            auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, {}, // serviceName
+                graph::property::kGraphInspect,                                                                // endpoint
+                {},                                                                                            // data
+                [](const Message& _reply) { return _reply.data.has_value(); });
 
-            expect(ge(getNReplyMessages(scheduler.fromScheduler), 1UZ));
-            const Message reply = getAndConsumeFirstReplyMessage(scheduler.fromScheduler);
-
-            expect(reply.data.has_value()) << "Reply should contain data";
-            if (reply.data.has_value()) {
-                const auto& map = reply.data.value();
+            expect(reply.has_value()) << "Reply should contain data";
+            expect(reply->data.has_value()) << "Reply should contain data";
+            if (reply->data.has_value()) {
+                const auto& map = reply->data.value();
                 expect(!map.empty()) << "Resulting map should not be empty";
 
                 const auto& children = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(map, "children"s));

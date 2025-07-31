@@ -109,23 +109,6 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
             // This sets the previously read "name" field for the block
             currentBlock->setName(blockName);
 
-            // These fields might be serialized (see serializeBlock function)
-            // but can not be set as they are either automatically assigned
-            // or a property of the specific block type
-            // - id
-            // - type_name
-            // - unique_name
-            // - is_blocking
-            // - block_category
-            // - ui_category
-            // - meta_information
-
-            if (auto it = grcBlock.find("ui_constraints"); it != grcBlock.end()) {
-                auto uiConstraints = std::get<property_map>(it->second);
-                // this cannot fail as ui_constraints exists in Block
-                std::ignore = currentBlock->settings().set({{"ui_constraints", std::move(uiConstraints)}});
-            }
-
             const auto parametersPmt = grcBlock["parameters"];
             if (const auto parameters = std::get_if<property_map>(&parametersPmt)) {
                 currentBlock->settings().loadParametersFromPropertyMap(*parameters);

@@ -955,10 +955,8 @@ public:
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {
                     const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
                     if (!isSet && fieldName == key) {
-                        if constexpr (!std::is_same_v<property_map, Type>) {
-                            newProperties[key] = value;
-                            isSet              = true;
-                        }
+                        newProperties[key] = value;
+                        isSet              = true;
                     }
                 }
             });
