@@ -80,11 +80,30 @@ void test_block_process_bulk(const TestParameters<T>& p) {
     expect(std::ranges::equal(out, p.output));
 }
 
+template<typename T, typename BlockUnderTest>
+void test_block_process_one(const TestParameters<T>& p) {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::blocks::math;
+
+    auto blk = BlockUnderTest();
+
+    std::vector<T> out;
+    out.reserve(out.size());
+    for (auto& v : p.input) {
+        out.push_back(blk.processOne(v));
+    }
+
+    expect(std::ranges::equal(out, p.output));
+}
+
 const boost::ut::suite<"core math blocks"> suite_core = [] {
     using namespace boost::ut;
     using namespace gr::blocks::math;
 
     constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>();
+    constexpr auto kLogicTypes      = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t>();
 
     // Only test with a full graph for a limited number of types
     constexpr auto kLimitedTypes = std::tuple<float>();
@@ -159,6 +178,110 @@ const boost::ut::suite<"core math blocks"> suite_core = [] {
         blk.init(blk.progress);
         expect(eq(blk.processOne(T(4)), T(2)));
     } | kArithmeticTypes;
+
+    /* ---------- Max / Min ----------------------------------------- */
+    "Max"_test = []<typename T>(const T&) {
+        using namespace gr; // for property_map
+        test_block_process_bulk<T, Max<T>>({.inputs = {{1, 5, 2}, {3, 4, 7}}, .output = {3, 5, 7}});
+    } | kArithmeticTypes;
+
+    "Min"_test = []<typename T>(const T&) {
+        using namespace gr;
+        test_block_process_bulk<T, Min<T>>({.inputs = {{1, 5, 2}, {3, 4, 7}}, .output = {1, 4, 2}});
+    } | kArithmeticTypes;
+
+    /* ---------- bit-wise ops -------------------------------------- */
+    "And"_test = []<typename T>(const T&) {
+        using namespace gr;
+        test_block_process_bulk<T, And<T>>({.inputs = {{0b1010}, {0b1100}}, .output = {0b1000}});
+    } | kLogicTypes;
+
+    "Or"_test = []<typename T>(const T&) {
+        using namespace gr;
+        test_block_process_bulk<T, Or<T>>({.inputs = {{0b1010}, {0b1100}}, .output = {0b1110}});
+    } | kLogicTypes;
+
+    "Xor"_test = []<typename T>(const T&) {
+        using namespace gr;
+        test_block_process_bulk<T, Xor<T>>({.inputs = {{0b1010}, {0b1100}}, .output = {0b0110}});
+    } | kLogicTypes;
+
+    /* ---------- unary ops ----------------------------------------- */
+    "Negate"_test = []<typename T>(const T&) {
+        using namespace gr;
+        test_block_process_one<T, Negate<T>>({.input = {T(5), T(-3)}, .output = {T(-5), T(3)}});
+    } | kArithmeticTypes;
+
+    "Not"_test = []<typename T>(const T&) {
+        using namespace gr;
+        test_block_process_one<T, Not<T>>({.input = {T(0b0101)}, .output = {T(~0b0101)}});
+    } | kLogicTypes;
+
+    "Abs"_test = []<typename T>(const T&) {
+        using namespace gr;
+        TestParameters<T> p;
+        if constexpr (std::is_signed_v<T>) {
+            p.input  = {T(-4), T(3)};
+            p.output = {T(4), T(3)};
+        } else {
+            p.input = p.output = {T(4), T(3)};
+        }
+        test_block_process_one<T, Abs<T>>(p);
+    } | kArithmeticTypes;
+
+    /* ---------- Integrate ----------------------------------------- */
+    "Integrate"_test = []<typename T>(const T&) {
+        using namespace gr;
+        using namespace gr::testing;
+        using gr::blocks::math::Integrate;
+
+        auto run_case = [](std::vector<T> in, Size_t decim, std::vector<T> expected) {
+            Graph g;
+            auto& integ = g.emplaceBlock<Integrate<T>>(property_map{{"decim", decim}});
+            auto& src   = g.emplaceBlock<TagSource<T>>(property_map{{"values", in}, {"n_samples_max", static_cast<Size_t>(in.size())}});
+            auto& sink  = g.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_ONE>>();
+
+            expect(eq(g.connect(src, "out"s, integ, "in"s), ConnectionResult::SUCCESS));
+            expect(eq(g.connect<"out">(integ).template to<"in">(sink), ConnectionResult::SUCCESS));
+
+            scheduler::Simple sch{std::move(g)};
+            expect(sch.runAndWait().has_value());
+            expect(std::ranges::equal(sink._samples, expected));
+        };
+
+        run_case({T(1), T(2), T(3), T(4)}, 4, {T(10)});
+        run_case({T(1), T(2), T(3), T(4), T(5)}, 2, {T(3), T(7)});
+    } | kLimitedTypes;
+
+    /* ---------- Argmax -------------------------------------------- */
+    "Argmax"_test = []<typename T>(const T&) {
+        using namespace gr;
+        using namespace gr::testing;
+        using gr::blocks::math::Argmax;
+
+        Graph g;
+        auto& arg  = g.emplaceBlock<Argmax<T>>(property_map{{"vlen", static_cast<Size_t>(3)}});
+        auto& src  = g.emplaceBlock<TagSource<T>>(property_map{{"values", std::vector<T>{T(1), T(9), T(3), T(4), T(5), T(6)}}, {"n_samples_max", static_cast<Size_t>(6)}});
+        auto& sink = g.emplaceBlock<TagSink<Size_t, ProcessFunction::USE_PROCESS_ONE>>();
+
+        expect(eq(g.connect(src, "out"s, arg, "in"s), ConnectionResult::SUCCESS));
+        expect(eq(g.connect<"out">(arg).template to<"in">(sink), ConnectionResult::SUCCESS));
+
+        scheduler::Simple sch{std::move(g)};
+        expect(sch.runAndWait().has_value());
+        expect(std::ranges::equal(sink._samples, std::vector<Size_t>{1U, 2U}));
+    } | kLimitedTypes;
+
+    /* ---------- Log10 --------------------------------------------- */
+    "Log10"_test = []<typename FP>(const FP&) {
+        using namespace gr;
+        using gr::blocks::math::Log10;
+
+        test_block_process_one<FP, Log10<FP>>({.input = {FP(1.0), FP(10.0)}, .output = {FP(0.0), FP(10.0)}});
+
+        auto blk = Log10<FP>(property_map{{"n", FP(20)}, {"k", FP(-10)}});
+        expect(eq(blk.processOne(FP(10)), FP(10)));
+    } | std::tuple<float, double>();
 };
 
 int main() {} // not used by Boost.UT
