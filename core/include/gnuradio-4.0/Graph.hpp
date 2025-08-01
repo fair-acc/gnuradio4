@@ -419,99 +419,6 @@ public:
         return std::erase_if(_edges, [&](const Edge& e) { return e == edge; });
     }
 
-    static property_map serializeEdge(const auto& edge) {
-        property_map result;
-        auto         serializePortDefinition = [&](const std::string& key, const PortDefinition& portDefinition) {
-            std::visit(meta::overloaded( //
-                           [&](const PortDefinition::IndexBased& definition) {
-                               result[key + ".topLevel"] = definition.topLevel;
-                               result[key + ".subIndex"] = definition.subIndex;
-                           }, //
-                           [&](const PortDefinition::StringBased& definition) { result[key] = definition.name; }),
-                        portDefinition.definition);
-        };
-
-        result["sourceBlock"s] = std::string(edge.sourceBlock()->uniqueName());
-        serializePortDefinition("sourcePort"s, edge.sourcePortDefinition());
-        result["destinationBlock"s] = std::string(edge.destinationBlock()->uniqueName());
-        serializePortDefinition("destinationPort"s, edge.destinationPortDefinition());
-
-        result["weight"s]        = edge.weight();
-        result["minBufferSize"s] = edge.minBufferSize();
-        result["edgeName"s]      = std::string(edge.name());
-
-        result["bufferSize"s] = edge.bufferSize();
-        result["edgeState"s]  = std::string(magic_enum::enum_name(edge.state()));
-        result["nReaders"s]   = edge.nReaders();
-        result["nWriters"s]   = edge.nWriters();
-        result["type"s]       = std::string(magic_enum::enum_name(edge.edgeType()));
-
-        return result;
-    };
-
-    static property_map serializeBlock(std::shared_ptr<BlockModel> block) {
-        auto serializePortOrCollection = [](const auto& portOrCollection) {
-            // clang-format off
-            // TODO: Type names can be mangled. We need proper type names...
-            return std::visit(meta::overloaded{
-                    [](const gr::DynamicPort& port) {
-                        return property_map{
-                            {"name"s, std::string(port.name)},
-                            {"type"s, port.typeName()}
-                        };
-                    },
-                    [](const BlockModel::NamedPortCollection& namedCollection) {
-                        return property_map{
-                            {"name"s, std::string(namedCollection.name)},
-                            {"size"s, namedCollection.ports.size()},
-                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()) }
-                        };
-                    }},
-                portOrCollection);
-            // clang-format on
-        };
-
-        property_map result;
-        result["name"s]            = std::string(block->name());
-        result["uniqueName"s]      = std::string(block->uniqueName());
-        result["typeName"s]        = std::string(block->typeName());
-        result["isBlocking"s]      = block->isBlocking();
-        result["metaInformation"s] = block->metaInformation();
-        result["blockCategory"s]   = std::string(magic_enum::enum_name(block->blockCategory()));
-        result["uiCategory"s]      = std::string(magic_enum::enum_name(block->uiCategory()));
-        result["settings"s]        = block->settings().getStored().value_or(property_map());
-
-        property_map inputPorts;
-        for (auto& portOrCollection : block->dynamicInputPorts()) {
-            inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
-        }
-        result["inputPorts"] = std::move(inputPorts);
-
-        property_map outputPorts;
-        for (auto& portOrCollection : block->dynamicOutputPorts()) {
-            outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
-        }
-        result["outputPorts"] = std::move(outputPorts);
-
-        if (block->blockCategory() != block::Category::NormalBlock) {
-            property_map serializedChildren;
-            for (const auto& child : block->blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child);
-            }
-            result["children"] = std::move(serializedChildren);
-        }
-
-        property_map serializedEdges;
-        std::size_t  index = 0UZ;
-        for (const auto& edge : block->edges()) {
-            serializedEdges[std::to_string(index)] = serializeEdge(edge);
-            index++;
-        }
-        result["edges"] = std::move(serializedEdges);
-
-        return result;
-    }
-
     std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kInspectBlock);
         using namespace std::string_literals;
@@ -526,7 +433,7 @@ public:
 
         gr::Message reply;
         reply.endpoint = graph::property::kBlockInspected;
-        reply.data     = serializeBlock(*it);
+        reply.data     = serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All);
         return {reply};
     }
 
@@ -629,7 +536,7 @@ public:
 
             property_map serializedChildren;
             for (const auto& child : blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child);
+                serializedChildren[std::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
             }
             result["children"] = std::move(serializedChildren);
 

@@ -18223,6 +18223,10 @@ template<typename T>
 } // namespace settings
 
 struct SettingsBase {
+    struct CtxSettingsPair {
+        SettingsCtx  context;
+        property_map settings;
+    };
     virtual ~SettingsBase() = default;
 
     /**
@@ -18313,7 +18317,7 @@ struct SettingsBase {
     /**
      * @brief return _storedParameters
      */
-    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept = 0;
+    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept = 0;
 
     /**
      * @brief returns the staged/not-yet-applied new parameters
@@ -18368,8 +18372,8 @@ class CtxSettings : public SettingsBase {
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> _storedParameters{};
-    property_map                                                                                         _defaultParameters{};
+    mutable std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
+    property_map                                                                    _defaultParameters{};
     // Store the initial parameters provided in the Block constructor. These parameters cannot be set directly in the constructor
     // because `_defaultParameters` cannot be initialized using Settings::storeDefaults() within the Block constructor.
     // Instead, we store them now and set them later in the Block::init method.
@@ -18604,8 +18608,8 @@ public:
 #endif
         }
 
-        std::vector<std::pair<SettingsCtx, property_map>>& vec     = it->second;
-        auto                                               exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.first.time == ctx.time; });
+        std::vector<CtxSettingsPair>& vec     = it->second;
+        auto                          exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.context.time == ctx.time; });
 
         if (exactIt == vec.end()) {
             return false;
@@ -18797,7 +18801,7 @@ public:
         return static_cast<gr::Size_t>(_autoUpdateParameters.size());
     }
 
-    [[nodiscard]] std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
+    [[nodiscard]] std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
 
     [[nodiscard]] const property_map& stagedParameters() const noexcept override {
         std::lock_guard lg(_mutex);
@@ -18854,6 +18858,7 @@ public:
 
                         if constexpr (is_annotated<RawType>()) {
                             if (maybe_value && member.validate_and_set(*maybe_value)) {
+                                result.appliedParameters.insert_or_assign(key, stagedValue);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, stagedValue);
                                 }
@@ -18934,10 +18939,8 @@ public:
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {
                     const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
                     if (!isSet && fieldName == key) {
-                        if constexpr (!std::is_same_v<property_map, Type>) {
-                            newProperties[key] = value;
-                            isSet              = true;
-                        }
+                        newProperties[key] = value;
+                        isSet              = true;
                     }
                 }
             });
@@ -19006,18 +19009,18 @@ private:
         if (vec.empty()) {
             return std::nullopt;
         }
-        if (ctx.time == 0ULL || vec.back().first.time <= ctx.time) {
-            return vec.back().first;
+        if (ctx.time == 0ULL || vec.back().context.time <= ctx.time) {
+            return vec.back().context;
         } else {
-            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.first.time; });
+            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.context.time; });
             if (lower == vec.end()) {
-                return vec.back().first;
+                return vec.back().context;
             } else {
-                if (lower->first.time == ctx.time) {
-                    return lower->first;
+                if (lower->context.time == ctx.time) {
+                    return lower->context;
                 } else if (lower != vec.begin()) {
                     --lower;
-                    return lower->first;
+                    return lower->context;
                 }
             }
         }
@@ -19030,9 +19033,9 @@ private:
             return std::nullopt;
         }
         const auto& vec        = _storedParameters[bestMatchSettingsCtx.value().context];
-        const auto  parameters = std::ranges::find_if(vec, [&](const auto& pair) { return pair.first == bestMatchSettingsCtx.value(); });
+        const auto  parameters = std::ranges::find_if(vec, [&](const CtxSettingsPair& contextSettings) { return contextSettings.context == bestMatchSettingsCtx.value(); });
 
-        return parameters != vec.end() ? std::optional(parameters->second) : std::nullopt;
+        return parameters != vec.end() ? std::optional(parameters->settings) : std::nullopt;
     }
 
     [[nodiscard]] inline std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
@@ -19052,10 +19055,10 @@ private:
         const auto&       vec       = vecIt->second;
         const std::size_t tolerance = 1000; // ns
         // find the last context in sorted vector such that `ctx.time <= ctxToFind <= ctx.time + tolerance`
-        const auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& elem) { return elem.first.time; });
-        const auto upper = std::ranges::upper_bound(vec, ctx.time + tolerance, {}, [](const auto& elem) { return elem.first.time; });
+        const auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& elem) { return elem.context.time; });
+        const auto upper = std::ranges::upper_bound(vec, ctx.time + tolerance, {}, [](const auto& elem) { return elem.context.time; });
         if (lower != upper && lower != vec.end()) {
-            ctx.time = (*(upper - 1)).first.time + 1;
+            ctx.time = (*(upper - 1)).context.time + 1;
         }
     }
 
@@ -19101,16 +19104,16 @@ private:
             _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(_allWritableMembers);
         }
 
-        std::vector<std::pair<SettingsCtx, property_map>>& sortedVectorForContext = _storedParameters[ctx.context];
+        std::vector<CtxSettingsPair>& sortedVectorForContext = _storedParameters[ctx.context];
         // binary search and merge-sort
-        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.first.time; });
+        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.context.time; });
         sortedVectorForContext.insert(it, {ctx, newParameters});
     }
 
     NO_INLINE void removeExpiredStoredParameters() {
         const auto removeFromAutoUpdateParameters = [this](const auto& begin, const auto& end) {
             for (auto it = begin; it != end; it++) {
-                _autoUpdateParameters.erase(it->first);
+                _autoUpdateParameters.erase(it->context);
             }
         };
         std::uint64_t now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
@@ -19120,7 +19123,7 @@ private:
         for (auto& [ctx, vec] : _storedParameters) {
             // remove all expired parameters
             if (expiry_time != std::numeric_limits<std::uint64_t>::max()) {
-                const auto [first, last] = std::ranges::remove_if(vec, [&](const auto& elem) { return elem.first.time + expiry_time <= now; });
+                const auto [first, last] = std::ranges::remove_if(vec, [&](const auto& elem) { return elem.context.time + expiry_time <= now; });
                 removeFromAutoUpdateParameters(first, last);
                 vec.erase(first, last);
             }
@@ -19129,12 +19132,12 @@ private:
                 continue;
             }
             // always keep at least one past parameter set
-            auto lower = std::ranges::lower_bound(vec, now, {}, [](const auto& elem) { return elem.first.time; });
+            auto lower = std::ranges::lower_bound(vec, now, {}, [](const auto& elem) { return elem.context.time; });
             if (lower == vec.end()) {
                 removeFromAutoUpdateParameters(vec.begin(), vec.end() - 1);
                 vec.erase(vec.begin(), vec.end() - 1);
             } else {
-                if (lower->first.time == now) {
+                if (lower->context.time == now) {
                     removeFromAutoUpdateParameters(vec.begin(), lower);
                     vec.erase(vec.begin(), lower);
                 } else if (lower != vec.begin() && lower - 1 != vec.begin()) {
@@ -20222,7 +20225,7 @@ public:
     A<property_map, "ui-constraints", Doc<"store non-graph-processing information like UI block position etc.">>         ui_constraints;
     A<property_map, "meta-information", Doc<"store static non-graph-processing information like Annotated<> info etc.">> meta_information = initMetaInfo();
 
-    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, ui_constraints, meta_information);
+    GR_MAKE_REFLECTABLE(Block, input_chunk_size, output_chunk_size, stride, disconnect_on_done, compute_domain, unique_name, name, ui_constraints);
 
     // TODO: C++26 make sure these are not reflected
     // We support ports that are template parameters or reflected member variables,
@@ -21005,7 +21008,7 @@ protected:
         assert(propertyName == block::property::kSettingsContexts);
 
         if (message.cmd == Get) {
-            const std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare>& stored = settings().getStoredAll();
+            const std::map<pmtv::pmt, std::vector<SettingsBase::CtxSettingsPair>, settings::PMTCompare>& stored = settings().getStoredAll();
 
             std::vector<std::string>   contexts;
             std::vector<std::uint64_t> times;
@@ -22664,6 +22667,206 @@ public:
     [[nodiscard]] virtual void* raw() = 0;
 };
 
+namespace serialization_fields {
+using namespace std::string_view_literals;
+using namespace std::string_literals;
+
+// Serialization block fields for which we don't use reflection
+constexpr auto BLOCK_ID               = "id"sv;
+constexpr auto BLOCK_UNIQUE_NAME      = "unique_name"sv;
+constexpr auto BLOCK_META_INFORMATION = "meta_information"sv;
+constexpr auto BLOCK_PARAMETERS       = "parameters"sv;
+constexpr auto BLOCK_CTX_PARAMETERS   = "ctx_parameters"sv;
+
+constexpr auto BLOCK_INPUT_PORTS  = "input_ports"sv;
+constexpr auto BLOCK_OUTPUT_PORTS = "output_ports"sv;
+constexpr auto BLOCK_CHILDREN     = "children"sv;
+constexpr auto BLOCK_EDGES        = "edges"sv;
+
+// Edges are not simple reflectable structures
+constexpr auto EDGE_PORT_TOP_LEVEL = ".top_level"sv;
+constexpr auto EDGE_PORT_SUB_INDEX = ".sub_index"sv;
+
+constexpr auto EDGE_SOURCE_BLOCK      = "source_block"sv;
+constexpr auto EDGE_SOURCE_PORT       = "source_port"sv;
+constexpr auto EDGE_DESTINATION_BLOCK = "destination_block"sv;
+constexpr auto EDGE_DESTINATION_PORT  = "destination_port"sv;
+
+constexpr auto EDGE_WEIGHT          = "weight"sv;
+constexpr auto EDGE_MIN_BUFFER_SIZE = "min_buffer_size"sv;
+constexpr auto EDGE_NAME            = "edge_name"sv;
+
+constexpr auto EDGE_BUFFER_SIZE = "buffer_size"sv;
+constexpr auto EDGE_EDGE_STATE  = "edge_state"sv;
+constexpr auto EDGE_N_READERS   = "n_readers"sv;
+constexpr auto EDGE_N_WRITERS   = "n_writers"sv;
+constexpr auto EDGE_TYPE        = "type"sv;
+} // namespace serialization_fields
+
+property_map serializeEdge(const auto& edge) {
+    using namespace std::string_literals;
+    property_map result;
+    auto         serializePortDefinition = [&](std::string_view key, const PortDefinition& portDefinition) {
+        if (const auto* _definition = std::get_if<PortDefinition::IndexBased>(&portDefinition.definition)) {
+            const auto& definition = *_definition;
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_TOP_LEVEL), definition.topLevel);
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_SUB_INDEX), definition.subIndex);
+
+        } else {
+            const auto& definition = std::get<PortDefinition::StringBased>(portDefinition.definition);
+            result.emplace(key, definition.name);
+        }
+    };
+
+    result.emplace(serialization_fields::EDGE_SOURCE_BLOCK, std::string(edge.sourceBlock()->uniqueName()));
+    serializePortDefinition(serialization_fields::EDGE_SOURCE_PORT, edge.sourcePortDefinition());
+    result.emplace(serialization_fields::EDGE_DESTINATION_BLOCK, std::string(edge.destinationBlock()->uniqueName()));
+    serializePortDefinition(serialization_fields::EDGE_DESTINATION_PORT, edge.destinationPortDefinition());
+
+    result.emplace(serialization_fields::EDGE_WEIGHT, edge.weight());
+    result.emplace(serialization_fields::EDGE_MIN_BUFFER_SIZE, edge.minBufferSize());
+    result.emplace(serialization_fields::EDGE_NAME, std::string(edge.name()));
+
+    result.emplace(serialization_fields::EDGE_BUFFER_SIZE, edge.bufferSize());
+    result.emplace(serialization_fields::EDGE_EDGE_STATE, std::string(magic_enum::enum_name(edge.state())));
+    result.emplace(serialization_fields::EDGE_N_READERS, edge.nReaders());
+    result.emplace(serialization_fields::EDGE_N_WRITERS, edge.nWriters());
+    result.emplace(serialization_fields::EDGE_TYPE, std::string(magic_enum::enum_name(edge.edgeType())));
+
+    return result;
+}
+
+namespace BlockSerializationFlags {
+enum Flags : int {
+    Data       = 1,  //
+    StaticData = 2,  //
+    Ports      = 4,  //
+    Settings   = 8,  //
+    Children   = 16, //
+    All        = 0xFF
+};
+}
+
+template<typename PluginLoader>
+requires(not std::is_pointer_v<std::remove_cvref_t<PluginLoader>>)
+inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<BlockModel>& block, int flags) {
+    using namespace std::string_literals;
+
+    property_map result;
+    result.emplace(serialization_fields::BLOCK_ID, pluginLoader.registry().typeName(block));
+    result.emplace(serialization_fields::BLOCK_UNIQUE_NAME, std::string(block->uniqueName()));
+
+    if (!block->metaInformation().empty()) {
+        result.emplace(serialization_fields::BLOCK_META_INFORMATION, block->metaInformation());
+    }
+
+    if (flags & BlockSerializationFlags::Settings) {
+        // Helper function to write parameters
+        auto writeParameters = [&](const property_map& settingsMap) {
+            pmtv::map_t parameters;
+            auto        writeMap = [&](const auto& localMap) {
+                for (const auto& [settingsKey, settingsValue] : localMap) {
+                    std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
+                }
+            };
+            writeMap(settingsMap);
+            return parameters;
+        };
+
+        // We don't have a use for info which parameters weren't applied here
+        const auto& applyResult = block->settings().applyStagedParameters();
+        const auto& stored      = block->settings().getStoredAll();
+
+        result.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(block->settings().get()));
+
+        using namespace std::string_literals;
+        std::vector<pmtv::pmt> ctxParamsSeq;
+        for (const auto& [ctx, ctxParameters] : stored) {
+            if (std::holds_alternative<std::string>(ctx) && std::get<std::string>(ctx) == ""s) {
+                continue;
+            }
+
+            for (const auto& [ctxTime, settingsMap] : ctxParameters) {
+                pmtv::map_t ctxParam;
+
+                // Convert ctxTime.context to a string, regardless of its actual type
+                std::string contextStr = std::visit(
+                    [](const auto& arg) -> std::string {
+                        using T = std::decay_t<decltype(arg)>;
+                        if constexpr (std::is_same_v<T, std::string>) {
+                            return arg;
+                        } else if constexpr (std::is_arithmetic_v<T>) {
+                            return std::to_string(arg);
+                        }
+                        return ""s;
+                    },
+                    ctxTime.context);
+
+                ctxParam.emplace(gr::tag::CONTEXT.shortKey(), contextStr);
+                ctxParam.emplace(gr::tag::CONTEXT_TIME.shortKey(), ctxTime.time);
+                ctxParam.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(settingsMap));
+                ctxParamsSeq.emplace_back(std::move(ctxParam));
+            }
+        }
+        result.emplace(serialization_fields::BLOCK_CTX_PARAMETERS, std::move(ctxParamsSeq));
+    }
+
+    if (flags & BlockSerializationFlags::Ports) {
+        auto serializePortOrCollection = [](const auto& portOrCollection) {
+            // clang-format off
+            // TODO: Type names can be mangled. We need proper type names...
+            return std::visit(meta::overloaded{
+                    [](const gr::DynamicPort& port) {
+                        return property_map{
+                            {"name"s, std::string(port.name)},
+                            {"type"s, port.typeName()}
+                        };
+                    },
+                    [](const BlockModel::NamedPortCollection& namedCollection) {
+                        return property_map{
+                            {"name"s, std::string(namedCollection.name)},
+                            {"size"s, namedCollection.ports.size()},
+                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()) }
+                        };
+                    }},
+                portOrCollection);
+            // clang-format on
+        };
+
+        property_map inputPorts;
+        for (auto& portOrCollection : block->dynamicInputPorts()) {
+            inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+        }
+        result.emplace(serialization_fields::BLOCK_INPUT_PORTS, std::move(inputPorts));
+
+        property_map outputPorts;
+        for (auto& portOrCollection : block->dynamicOutputPorts()) {
+            outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+        }
+        result.emplace(serialization_fields::BLOCK_OUTPUT_PORTS, std::move(outputPorts));
+    }
+
+    if (flags & BlockSerializationFlags::Children) {
+        if (block->blockCategory() != block::Category::NormalBlock) {
+            property_map serializedChildren;
+            for (const auto& child : block->blocks()) {
+                serializedChildren[std::string(child->uniqueName())] = serializeBlock(pluginLoader, child, flags);
+            }
+            result.emplace(serialization_fields::BLOCK_CHILDREN, std::move(serializedChildren));
+        }
+
+        property_map serializedEdges;
+        std::size_t  index = 0UZ;
+        for (const auto& edge : block->edges()) {
+            serializedEdges[std::to_string(index)] = serializeEdge(edge);
+            index++;
+        }
+        result.emplace(serialization_fields::BLOCK_EDGES, std::move(serializedEdges));
+    }
+
+    return result;
+}
+
 namespace detail {
 template<typename T, typename... Ts>
 constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);
@@ -23057,9 +23260,8 @@ public:
 
     [[nodiscard]] bool contains(std::string_view blockName) const { return _blockTypeHandlers.contains(blockName); }
 
-    template<typename TBlock>
-    std::string typeName(const TBlock& block) {
-        auto name = block.typeName();
+    std::string typeName(const std::shared_ptr<BlockModel>& block) {
+        auto name = block->typeName();
         auto it   = _blockTypeHandlers.find(name);
         if (it != _blockTypeHandlers.end() && !it->second.alias.empty()) {
             return it->second.alias;
@@ -23860,99 +24062,6 @@ public:
         return std::erase_if(_edges, [&](const Edge& e) { return e == edge; });
     }
 
-    static property_map serializeEdge(const auto& edge) {
-        property_map result;
-        auto         serializePortDefinition = [&](const std::string& key, const PortDefinition& portDefinition) {
-            std::visit(meta::overloaded( //
-                           [&](const PortDefinition::IndexBased& definition) {
-                               result[key + ".topLevel"] = definition.topLevel;
-                               result[key + ".subIndex"] = definition.subIndex;
-                           }, //
-                           [&](const PortDefinition::StringBased& definition) { result[key] = definition.name; }),
-                        portDefinition.definition);
-        };
-
-        result["sourceBlock"s] = std::string(edge.sourceBlock()->uniqueName());
-        serializePortDefinition("sourcePort"s, edge.sourcePortDefinition());
-        result["destinationBlock"s] = std::string(edge.destinationBlock()->uniqueName());
-        serializePortDefinition("destinationPort"s, edge.destinationPortDefinition());
-
-        result["weight"s]        = edge.weight();
-        result["minBufferSize"s] = edge.minBufferSize();
-        result["edgeName"s]      = std::string(edge.name());
-
-        result["bufferSize"s] = edge.bufferSize();
-        result["edgeState"s]  = std::string(magic_enum::enum_name(edge.state()));
-        result["nReaders"s]   = edge.nReaders();
-        result["nWriters"s]   = edge.nWriters();
-        result["type"s]       = std::string(magic_enum::enum_name(edge.edgeType()));
-
-        return result;
-    };
-
-    static property_map serializeBlock(std::shared_ptr<BlockModel> block) {
-        auto serializePortOrCollection = [](const auto& portOrCollection) {
-            // clang-format off
-            // TODO: Type names can be mangled. We need proper type names...
-            return std::visit(meta::overloaded{
-                    [](const gr::DynamicPort& port) {
-                        return property_map{
-                            {"name"s, std::string(port.name)},
-                            {"type"s, port.typeName()}
-                        };
-                    },
-                    [](const BlockModel::NamedPortCollection& namedCollection) {
-                        return property_map{
-                            {"name"s, std::string(namedCollection.name)},
-                            {"size"s, namedCollection.ports.size()},
-                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()) }
-                        };
-                    }},
-                portOrCollection);
-            // clang-format on
-        };
-
-        property_map result;
-        result["name"s]            = std::string(block->name());
-        result["uniqueName"s]      = std::string(block->uniqueName());
-        result["typeName"s]        = std::string(block->typeName());
-        result["isBlocking"s]      = block->isBlocking();
-        result["metaInformation"s] = block->metaInformation();
-        result["blockCategory"s]   = std::string(magic_enum::enum_name(block->blockCategory()));
-        result["uiCategory"s]      = std::string(magic_enum::enum_name(block->uiCategory()));
-        result["settings"s]        = block->settings().getStored().value_or(property_map());
-
-        property_map inputPorts;
-        for (auto& portOrCollection : block->dynamicInputPorts()) {
-            inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
-        }
-        result["inputPorts"] = std::move(inputPorts);
-
-        property_map outputPorts;
-        for (auto& portOrCollection : block->dynamicOutputPorts()) {
-            outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
-        }
-        result["outputPorts"] = std::move(outputPorts);
-
-        if (block->blockCategory() != block::Category::NormalBlock) {
-            property_map serializedChildren;
-            for (const auto& child : block->blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child);
-            }
-            result["children"] = std::move(serializedChildren);
-        }
-
-        property_map serializedEdges;
-        std::size_t  index = 0UZ;
-        for (const auto& edge : block->edges()) {
-            serializedEdges[std::to_string(index)] = serializeEdge(edge);
-            index++;
-        }
-        result["edges"] = std::move(serializedEdges);
-
-        return result;
-    }
-
     std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == graph::property::kInspectBlock);
         using namespace std::string_literals;
@@ -23967,7 +24076,7 @@ public:
 
         gr::Message reply;
         reply.endpoint = graph::property::kBlockInspected;
-        reply.data     = serializeBlock(*it);
+        reply.data     = serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All);
         return {reply};
     }
 
@@ -24070,7 +24179,7 @@ public:
 
             property_map serializedChildren;
             for (const auto& child : blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(child);
+                serializedChildren[std::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
             }
             result["children"] = std::move(serializedChildren);
 
