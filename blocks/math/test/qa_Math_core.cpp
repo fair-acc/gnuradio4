@@ -22,8 +22,7 @@ struct TestParameters {
 };
 
 template<typename T, typename BlockUnderTest>
-void test_block_with_graph(const TestParameters<T>& p)
-{
+void test_block_with_graph(const TestParameters<T>& p) {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
@@ -35,145 +34,131 @@ void test_block_with_graph(const TestParameters<T>& p)
     if (!p.input.empty()) {
         /* unary path --------------------------------------------------- */
         auto& blk = g.emplaceBlock<BlockUnderTest>();
-        auto& src = g.emplaceBlock<TagSource<T>>(
-            property_map{{"values",        p.input},
-                         {"n_samples_max", static_cast<Size_t>(p.input.size())}});
-        expect(eq(g.connect(src,"out"s,blk,"in"s), ConnectionResult::SUCCESS));
-        expect(eq(g.connect<"out">(blk).template to<"in">(sink),
-           ConnectionResult::SUCCESS));
+        auto& src = g.emplaceBlock<TagSource<T>>(property_map{{"values", p.input}, {"n_samples_max", static_cast<Size_t>(p.input.size())}});
+        expect(eq(g.connect(src, "out"s, blk, "in"s), ConnectionResult::SUCCESS));
+        expect(eq(g.connect<"out">(blk).template to<"in">(sink), ConnectionResult::SUCCESS));
 
     } else {
         /* n-input path -------------------------------------------------- */
         const Size_t n_in = static_cast<Size_t>(p.inputs.size());
-        auto& blk = g.emplaceBlock<BlockUnderTest>(property_map{{"n_inputs",n_in}});
-        for (Size_t i=0;i<n_in;++i) {
-            auto& src = g.emplaceBlock<TagSource<T>>(
-                property_map{{"values",        p.inputs[i]},
-                             {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
-            expect(eq(g.connect(src,"out"s,blk,"in#"s+std::to_string(i)),
-                      ConnectionResult::SUCCESS));
+        auto&        blk  = g.emplaceBlock<BlockUnderTest>(property_map{{"n_inputs", n_in}});
+        for (Size_t i = 0; i < n_in; ++i) {
+            auto& src = g.emplaceBlock<TagSource<T>>(property_map{{"values", p.inputs[i]}, {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
+            expect(eq(g.connect(src, "out"s, blk, "in#"s + std::to_string(i)), ConnectionResult::SUCCESS));
         }
-        expect(eq(g.connect<"out">(blk).template to<"in">(sink),
-           ConnectionResult::SUCCESS));
+        expect(eq(g.connect<"out">(blk).template to<"in">(sink), ConnectionResult::SUCCESS));
     }
 
     scheduler::Simple sch{std::move(g)};
-    expect( sch.runAndWait().has_value() );
-    expect( std::ranges::equal(sink._samples, p.output) );
+    expect(sch.runAndWait().has_value());
+    expect(std::ranges::equal(sink._samples, p.output));
 }
 
-
 template<typename T, typename BlockUnderTest>
-void test_block_process_bulk(const TestParameters<T>& p)
-{
+void test_block_process_bulk(const TestParameters<T>& p) {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::testing;
     using namespace gr::blocks::math;
 
     size_t n_inputs = p.inputs.size();
-    auto blk = BlockUnderTest(gr::property_map{{"n_inputs",n_inputs}});
-    
-    size_t num_samples = p.inputs[0].size();
+    auto   blk      = BlockUnderTest(gr::property_map{{"n_inputs", n_inputs}});
+
+    size_t         num_samples = p.inputs[0].size();
     std::vector<T> out(num_samples);
 
     std::vector<std::span<const T>> vec_spans;
     vec_spans.reserve(p.inputs.size());
-    for (const auto& v : p.inputs)
+    for (const auto& v : p.inputs) {
         vec_spans.emplace_back(v);
+    }
 
     std::span<const std::span<const T>> input_spans(vec_spans);
 
     blk.processBulk(input_spans, out);
-    
 
-    expect( std::ranges::equal(out, p.output) );
+    expect(std::ranges::equal(out, p.output));
 }
 
-const boost::ut::suite<"core math blocks"> suite_core = []{
+const boost::ut::suite<"core math blocks"> suite_core = [] {
     using namespace boost::ut;
     using namespace gr::blocks::math;
 
-    constexpr auto kArithmeticTypes =
-        std::tuple<uint8_t,uint16_t,uint32_t,uint64_t,
-                   int8_t,int16_t,int32_t,int64_t,
-                   float,double>();
+    constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>();
 
     // Only test with a full graph for a limited number of types
-    constexpr auto kLimitedTypes =
-        std::tuple<float>();
+    constexpr auto kLimitedTypes = std::tuple<float>();
 
     /* ---------------------------------------------------------------- */
-    "Add"_test = []<typename T>(const T&){
-        test_block_with_graph<T,Add<T>>({ .inputs={{1,2,3}}, .output={1,2,3} });
-        test_block_with_graph<T,Add<T>>({ .inputs={{1,2},{3,4}}, .output={4,6} });
+    "Add"_test = []<typename T>(const T&) {
+        test_block_with_graph<T, Add<T>>({.inputs = {{1, 2, 3}}, .output = {1, 2, 3}});
+        test_block_with_graph<T, Add<T>>({.inputs = {{1, 2}, {3, 4}}, .output = {4, 6}});
     } | kLimitedTypes;
 
-    "Subtract"_test = []<typename T>(const T&){
-        test_block_with_graph<T,Subtract<T>>({ .inputs={{5,4}}, .output={5,4} });
-        test_block_with_graph<T,Subtract<T>>({ .inputs={{5,4},{3,1}}, .output={2,3} });
+    "Subtract"_test = []<typename T>(const T&) {
+        test_block_with_graph<T, Subtract<T>>({.inputs = {{5, 4}}, .output = {5, 4}});
+        test_block_with_graph<T, Subtract<T>>({.inputs = {{5, 4}, {3, 1}}, .output = {2, 3}});
     } | kLimitedTypes;
 
-    "Multiply"_test = []<typename T>(const T&){
-        test_block_with_graph<T,Multiply<T>>({ .inputs={{2,3}}, .output={2,3} });
-        test_block_with_graph<T,Multiply<T>>({ .inputs={{2,3},{4,5}}, .output={8,15} });
+    "Multiply"_test = []<typename T>(const T&) {
+        test_block_with_graph<T, Multiply<T>>({.inputs = {{2, 3}}, .output = {2, 3}});
+        test_block_with_graph<T, Multiply<T>>({.inputs = {{2, 3}, {4, 5}}, .output = {8, 15}});
     } | kLimitedTypes;
 
-    "Divide"_test = []<typename T>(const T&){
-        test_block_with_graph<T,Divide<T>>({ .inputs={{8,6}}, .output={8,6} });
-        test_block_with_graph<T,Divide<T>>({ .inputs={{8,6},{2,3}}, .output={4,2} });
+    "Divide"_test = []<typename T>(const T&) {
+        test_block_with_graph<T, Divide<T>>({.inputs = {{8, 6}}, .output = {8, 6}});
+        test_block_with_graph<T, Divide<T>>({.inputs = {{8, 6}, {2, 3}}, .output = {4, 2}});
     } | kLimitedTypes;
 
-
-    "Add"_test = []<typename T>(const T&){
-        Add<T> blk(gr::property_map{{"n_inputs",2}});
-        test_block_process_bulk<T,Add<T>>({ .inputs={{1,2,3}}, .output={1,2,3} });
-        test_block_process_bulk<T,Add<T>>({ .inputs={{1,2},{3,4}}, .output={4,6} });
+    "Add"_test = []<typename T>(const T&) {
+        Add<T> blk(gr::property_map{{"n_inputs", 2}});
+        test_block_process_bulk<T, Add<T>>({.inputs = {{1, 2, 3}}, .output = {1, 2, 3}});
+        test_block_process_bulk<T, Add<T>>({.inputs = {{1, 2}, {3, 4}}, .output = {4, 6}});
     } | kArithmeticTypes;
 
-    "Subtract"_test = []<typename T>(const T&){
-        test_block_process_bulk<T,Subtract<T>>({ .inputs={{5,4}}, .output={5,4} });
-        test_block_process_bulk<T,Subtract<T>>({ .inputs={{5,4},{3,1}}, .output={2,3} });
+    "Subtract"_test = []<typename T>(const T&) {
+        test_block_process_bulk<T, Subtract<T>>({.inputs = {{5, 4}}, .output = {5, 4}});
+        test_block_process_bulk<T, Subtract<T>>({.inputs = {{5, 4}, {3, 1}}, .output = {2, 3}});
     } | kArithmeticTypes;
 
-    "Multiply"_test = []<typename T>(const T&){
-        test_block_process_bulk<T,Multiply<T>>({ .inputs={{2,3}}, .output={2,3} });
-        test_block_process_bulk<T,Multiply<T>>({ .inputs={{2,3},{4,5}}, .output={8,15} });
+    "Multiply"_test = []<typename T>(const T&) {
+        test_block_process_bulk<T, Multiply<T>>({.inputs = {{2, 3}}, .output = {2, 3}});
+        test_block_process_bulk<T, Multiply<T>>({.inputs = {{2, 3}, {4, 5}}, .output = {8, 15}});
     } | kArithmeticTypes;
 
-    "Divide"_test = []<typename T>(const T&){
-        test_block_process_bulk<T,Divide<T>>({ .inputs={{8,6}}, .output={8,6} });
-        test_block_process_bulk<T,Divide<T>>({ .inputs={{8,6},{2,3}}, .output={4,2} });
+    "Divide"_test = []<typename T>(const T&) {
+        test_block_process_bulk<T, Divide<T>>({.inputs = {{8, 6}}, .output = {8, 6}});
+        test_block_process_bulk<T, Divide<T>>({.inputs = {{8, 6}, {2, 3}}, .output = {4, 2}});
     } | kArithmeticTypes;
 
     /* ----- *Const variants ------------------------------------------ */
-    "AddConst"_test = []<typename T>(const T&){
+    "AddConst"_test = []<typename T>(const T&) {
         expect(eq(AddConst<T>().processOne(T(4)), T(5)));
-        auto blk = AddConst<T>(gr::property_map{{"value",T(3)}});
+        auto blk = AddConst<T>(gr::property_map{{"value", T(3)}});
         blk.init(blk.progress);
         expect(eq(blk.processOne(T(4)), T(7)));
     } | kArithmeticTypes;
 
-    "SubtractConst"_test = []<typename T>(const T&){
+    "SubtractConst"_test = []<typename T>(const T&) {
         expect(eq(SubtractConst<T>().processOne(T(4)), T(3)));
-        auto blk = SubtractConst<T>(gr::property_map{{"value",T(3)}});
+        auto blk = SubtractConst<T>(gr::property_map{{"value", T(3)}});
         blk.init(blk.progress);
         expect(eq(blk.processOne(T(4)), T(1)));
     } | kArithmeticTypes;
 
-    "MultiplyConst"_test = []<typename T>(const T&){
+    "MultiplyConst"_test = []<typename T>(const T&) {
         expect(eq(MultiplyConst<T>().processOne(T(4)), T(4)));
-        auto blk = MultiplyConst<T>(gr::property_map{{"value",T(3)}});
+        auto blk = MultiplyConst<T>(gr::property_map{{"value", T(3)}});
         blk.init(blk.progress);
         expect(eq(blk.processOne(T(4)), T(12)));
     } | kArithmeticTypes;
 
-    "DivideConst"_test = []<typename T>(const T&){
+    "DivideConst"_test = []<typename T>(const T&) {
         expect(eq(DivideConst<T>().processOne(T(4)), T(4)));
-        auto blk = DivideConst<T>(gr::property_map{{"value",T(2)}});
+        auto blk = DivideConst<T>(gr::property_map{{"value", T(2)}});
         blk.init(blk.progress);
         expect(eq(blk.processOne(T(4)), T(2)));
     } | kArithmeticTypes;
 };
 
-int main() {}   // not used by Boost.UT
+int main() {} // not used by Boost.UT
