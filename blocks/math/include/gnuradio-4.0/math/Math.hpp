@@ -253,7 +253,7 @@ using nlog10 = Log10<T>;
  *  Integrate : running sum over N samples, output 1 value, decimate   *
  * ------------------------------------------------------------------ */
 
-GR_REGISTER_BLOCK("gr::blocks::math::Integrate", gr::blocks::math::Integrate, ([T]), [ float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Integrate", gr::blocks::math::Integrate, ([T]), [ float, double ])
 
 template<typename T>
 requires std::is_arithmetic_v<T>
@@ -308,7 +308,7 @@ using integrate = Integrate<T>;
  *            vector and output that index (0 … vlen-1)                *
  * ------------------------------------------------------------------ */
 
-GR_REGISTER_BLOCK("gr::blocks::math::Argmax", gr::blocks::math::Argmax, ([T]), [ float, double, std::complex<float>, std::complex<double> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Argmax", gr::blocks::math::Argmax, ([T]), [ float, double ])
 
 template<typename T>
 requires std::is_arithmetic_v<T>
