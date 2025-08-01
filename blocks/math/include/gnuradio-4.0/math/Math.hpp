@@ -94,7 +94,6 @@ GR_REGISTER_BLOCK("gr::blocks::math::Xor", gr::blocks::math::MathOpImpl, ([T], s
 // ---------------- Multi‑port implementation -------------------
 
 template<typename T, typename op>
-requires(std::is_arithmetic_v<T>)
 struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
     using Description = Doc<R""(@brief Math block combining multiple inputs into a single output with a given operation
 
@@ -173,7 +172,6 @@ GR_REGISTER_BLOCK("gr::blocks::math::Not", gr::blocks::math::MathOpSinglePortImp
 GR_REGISTER_BLOCK("gr::blocks::math::Abs", gr::blocks::math::MathOpSinglePortImpl, ([T], gr::blocks::math::abs_op<[T]>), [ float, double, std::complex<float>, std::complex<double> ])
 
 template<typename T, typename op>
-requires(std::is_arithmetic_v<T>)
 struct MathOpSinglePortImpl : public gr::Block<MathOpSinglePortImpl<T, op>> {
     using Description = Doc<R""(@brief Math block transforming a single input to a single output with a given operation
 

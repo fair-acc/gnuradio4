@@ -98,11 +98,12 @@ void test_block_process_one(const TestParameters<T>& p) {
     expect(std::ranges::equal(out, p.output));
 }
 
-const boost::ut::suite<"core math blocks"> suite_core = [] {
+const boost::ut::suite<"Math blocks"> suite_core = [] {
     using namespace boost::ut;
     using namespace gr::blocks::math;
 
     constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double>();
+    constexpr auto kComplexTypes    = std::tuple<std::complex<float>>();
     constexpr auto kLogicTypes      = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t>();
 
     // Only test with a full graph for a limited number of types
@@ -130,7 +131,6 @@ const boost::ut::suite<"core math blocks"> suite_core = [] {
     } | kLimitedTypes;
 
     "Add"_test = []<typename T>(const T&) {
-        Add<T> blk(gr::property_map{{"n_inputs", 2}});
         test_block_process_bulk<T, Add<T>>({.inputs = {{1, 2, 3}}, .output = {1, 2, 3}});
         test_block_process_bulk<T, Add<T>>({.inputs = {{1, 2}, {3, 4}}, .output = {4, 6}});
     } | kArithmeticTypes;
@@ -149,6 +149,26 @@ const boost::ut::suite<"core math blocks"> suite_core = [] {
         test_block_process_bulk<T, Divide<T>>({.inputs = {{8, 6}}, .output = {8, 6}});
         test_block_process_bulk<T, Divide<T>>({.inputs = {{8, 6}, {2, 3}}, .output = {4, 2}});
     } | kArithmeticTypes;
+
+    "ComplexAdd"_test = []<typename T>(const T&) {
+        test_block_process_bulk<T, Add<T>>({.inputs = {{{1, 2}, {3, 4}, {5, 6}}}, .output = {{1, 2}, {3, 4}, {5, 6}}});
+        test_block_process_bulk<T, Add<T>>({.inputs = {{{1, 2}, {3, 4}}, {{-5, 6}, {7, -8}}}, .output = {{-4, 8}, {10, -4}}});
+    } | kComplexTypes;
+
+    "ComplexSubtract"_test = []<typename T>(const T&) {
+        test_block_process_bulk<T, Subtract<T>>({.inputs = {{{1, 2}, {3, 4}, {5, 6}}}, .output = {{1, 2}, {3, 4}, {5, 6}}});
+        test_block_process_bulk<T, Subtract<T>>({.inputs = {{{1, 2}, {3, 4}}, {{-5, 6}, {7, -8}}}, .output = {{6, -4}, {-4, 12}}});
+    } | kComplexTypes;
+
+    "ComplexMultiply"_test = []<typename T>(const T&) {
+        test_block_process_bulk<T, Multiply<T>>({.inputs = {{{1, 2}, {3, 4}, {5, 6}}}, .output = {{1, 2}, {3, 4}, {5, 6}}});
+        test_block_process_bulk<T, Multiply<T>>({.inputs = {{{1, 2}, {3, 4}}, {{-5, 6}, {7, -8}}}, .output = {{-17, -4}, {53, 4}}});
+    } | kComplexTypes;
+
+    "ComplexDivide"_test = []<typename T>(const T&) {
+        test_block_process_bulk<T, Divide<T>>({.inputs = {{{1, 2}, {3, 4}, {5, 6}}}, .output = {{1, 2}, {3, 4}, {5, 6}}});
+        test_block_process_bulk<T, Divide<T>>({.inputs = {{{-5, 10}, {10, -5}}, {{3, 4}, {3, -4}}}, .output = {{1, 2}, {2, 1}}});
+    } | kComplexTypes;
 
     /* ----- *Const variants ------------------------------------------ */
     "AddConst"_test = []<typename T>(const T&) {
