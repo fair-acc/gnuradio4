@@ -465,6 +465,206 @@ public:
     [[nodiscard]] virtual void* raw() = 0;
 };
 
+namespace serialization_fields {
+using namespace std::string_view_literals;
+using namespace std::string_literals;
+
+// Serialization block fields for which we don't use reflection
+constexpr auto BLOCK_ID               = "id"sv;
+constexpr auto BLOCK_UNIQUE_NAME      = "unique_name"sv;
+constexpr auto BLOCK_META_INFORMATION = "meta_information"sv;
+constexpr auto BLOCK_PARAMETERS       = "parameters"sv;
+constexpr auto BLOCK_CTX_PARAMETERS   = "ctx_parameters"sv;
+
+constexpr auto BLOCK_INPUT_PORTS  = "input_ports"sv;
+constexpr auto BLOCK_OUTPUT_PORTS = "output_ports"sv;
+constexpr auto BLOCK_CHILDREN     = "children"sv;
+constexpr auto BLOCK_EDGES        = "edges"sv;
+
+// Edges are not simple reflectable structures
+constexpr auto EDGE_PORT_TOP_LEVEL = ".top_level"sv;
+constexpr auto EDGE_PORT_SUB_INDEX = ".sub_index"sv;
+
+constexpr auto EDGE_SOURCE_BLOCK      = "source_block"sv;
+constexpr auto EDGE_SOURCE_PORT       = "source_port"sv;
+constexpr auto EDGE_DESTINATION_BLOCK = "destination_block"sv;
+constexpr auto EDGE_DESTINATION_PORT  = "destination_port"sv;
+
+constexpr auto EDGE_WEIGHT          = "weight"sv;
+constexpr auto EDGE_MIN_BUFFER_SIZE = "min_buffer_size"sv;
+constexpr auto EDGE_NAME            = "edge_name"sv;
+
+constexpr auto EDGE_BUFFER_SIZE = "buffer_size"sv;
+constexpr auto EDGE_EDGE_STATE  = "edge_state"sv;
+constexpr auto EDGE_N_READERS   = "n_readers"sv;
+constexpr auto EDGE_N_WRITERS   = "n_writers"sv;
+constexpr auto EDGE_TYPE        = "type"sv;
+} // namespace serialization_fields
+
+property_map serializeEdge(const auto& edge) {
+    using namespace std::string_literals;
+    property_map result;
+    auto         serializePortDefinition = [&](std::string_view key, const PortDefinition& portDefinition) {
+        if (const auto* _definition = std::get_if<PortDefinition::IndexBased>(&portDefinition.definition)) {
+            const auto& definition = *_definition;
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_TOP_LEVEL), definition.topLevel);
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_SUB_INDEX), definition.subIndex);
+
+        } else {
+            const auto& definition = std::get<PortDefinition::StringBased>(portDefinition.definition);
+            result.emplace(key, definition.name);
+        }
+    };
+
+    result.emplace(serialization_fields::EDGE_SOURCE_BLOCK, std::string(edge.sourceBlock()->uniqueName()));
+    serializePortDefinition(serialization_fields::EDGE_SOURCE_PORT, edge.sourcePortDefinition());
+    result.emplace(serialization_fields::EDGE_DESTINATION_BLOCK, std::string(edge.destinationBlock()->uniqueName()));
+    serializePortDefinition(serialization_fields::EDGE_DESTINATION_PORT, edge.destinationPortDefinition());
+
+    result.emplace(serialization_fields::EDGE_WEIGHT, edge.weight());
+    result.emplace(serialization_fields::EDGE_MIN_BUFFER_SIZE, edge.minBufferSize());
+    result.emplace(serialization_fields::EDGE_NAME, std::string(edge.name()));
+
+    result.emplace(serialization_fields::EDGE_BUFFER_SIZE, edge.bufferSize());
+    result.emplace(serialization_fields::EDGE_EDGE_STATE, std::string(magic_enum::enum_name(edge.state())));
+    result.emplace(serialization_fields::EDGE_N_READERS, edge.nReaders());
+    result.emplace(serialization_fields::EDGE_N_WRITERS, edge.nWriters());
+    result.emplace(serialization_fields::EDGE_TYPE, std::string(magic_enum::enum_name(edge.edgeType())));
+
+    return result;
+}
+
+namespace BlockSerializationFlags {
+enum Flags : int {
+    Data       = 1,  //
+    StaticData = 2,  //
+    Ports      = 4,  //
+    Settings   = 8,  //
+    Children   = 16, //
+    All        = 0xFF
+};
+}
+
+template<typename PluginLoader>
+requires(not std::is_pointer_v<std::remove_cvref_t<PluginLoader>>)
+inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<BlockModel>& block, int flags) {
+    using namespace std::string_literals;
+
+    property_map result;
+    result.emplace(serialization_fields::BLOCK_ID, pluginLoader.registry().typeName(block));
+    result.emplace(serialization_fields::BLOCK_UNIQUE_NAME, std::string(block->uniqueName()));
+
+    if (!block->metaInformation().empty()) {
+        result.emplace(serialization_fields::BLOCK_META_INFORMATION, block->metaInformation());
+    }
+
+    if (flags & BlockSerializationFlags::Settings) {
+        // Helper function to write parameters
+        auto writeParameters = [&](const property_map& settingsMap) {
+            pmtv::map_t parameters;
+            auto        writeMap = [&](const auto& localMap) {
+                for (const auto& [settingsKey, settingsValue] : localMap) {
+                    std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
+                }
+            };
+            writeMap(settingsMap);
+            return parameters;
+        };
+
+        // We don't have a use for info which parameters weren't applied here
+        const auto& applyResult = block->settings().applyStagedParameters();
+        const auto& stored      = block->settings().getStoredAll();
+
+        result.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(block->settings().get()));
+
+        using namespace std::string_literals;
+        std::vector<pmtv::pmt> ctxParamsSeq;
+        for (const auto& [ctx, ctxParameters] : stored) {
+            if (std::holds_alternative<std::string>(ctx) && std::get<std::string>(ctx) == ""s) {
+                continue;
+            }
+
+            for (const auto& [ctxTime, settingsMap] : ctxParameters) {
+                pmtv::map_t ctxParam;
+
+                // Convert ctxTime.context to a string, regardless of its actual type
+                std::string contextStr = std::visit(
+                    [](const auto& arg) -> std::string {
+                        using T = std::decay_t<decltype(arg)>;
+                        if constexpr (std::is_same_v<T, std::string>) {
+                            return arg;
+                        } else if constexpr (std::is_arithmetic_v<T>) {
+                            return std::to_string(arg);
+                        }
+                        return ""s;
+                    },
+                    ctxTime.context);
+
+                ctxParam.emplace(gr::tag::CONTEXT.shortKey(), contextStr);
+                ctxParam.emplace(gr::tag::CONTEXT_TIME.shortKey(), ctxTime.time);
+                ctxParam.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(settingsMap));
+                ctxParamsSeq.emplace_back(std::move(ctxParam));
+            }
+        }
+        result.emplace(serialization_fields::BLOCK_CTX_PARAMETERS, std::move(ctxParamsSeq));
+    }
+
+    if (flags & BlockSerializationFlags::Ports) {
+        auto serializePortOrCollection = [](const auto& portOrCollection) {
+            // clang-format off
+            // TODO: Type names can be mangled. We need proper type names...
+            return std::visit(meta::overloaded{
+                    [](const gr::DynamicPort& port) {
+                        return property_map{
+                            {"name"s, std::string(port.name)},
+                            {"type"s, port.typeName()}
+                        };
+                    },
+                    [](const BlockModel::NamedPortCollection& namedCollection) {
+                        return property_map{
+                            {"name"s, std::string(namedCollection.name)},
+                            {"size"s, namedCollection.ports.size()},
+                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()) }
+                        };
+                    }},
+                portOrCollection);
+            // clang-format on
+        };
+
+        property_map inputPorts;
+        for (auto& portOrCollection : block->dynamicInputPorts()) {
+            inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+        }
+        result.emplace(serialization_fields::BLOCK_INPUT_PORTS, std::move(inputPorts));
+
+        property_map outputPorts;
+        for (auto& portOrCollection : block->dynamicOutputPorts()) {
+            outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+        }
+        result.emplace(serialization_fields::BLOCK_OUTPUT_PORTS, std::move(outputPorts));
+    }
+
+    if (flags & BlockSerializationFlags::Children) {
+        if (block->blockCategory() != block::Category::NormalBlock) {
+            property_map serializedChildren;
+            for (const auto& child : block->blocks()) {
+                serializedChildren[std::string(child->uniqueName())] = serializeBlock(pluginLoader, child, flags);
+            }
+            result.emplace(serialization_fields::BLOCK_CHILDREN, std::move(serializedChildren));
+        }
+
+        property_map serializedEdges;
+        std::size_t  index = 0UZ;
+        for (const auto& edge : block->edges()) {
+            serializedEdges[std::to_string(index)] = serializeEdge(edge);
+            index++;
+        }
+        result.emplace(serialization_fields::BLOCK_EDGES, std::move(serializedEdges));
+    }
+
+    return result;
+}
+
 namespace detail {
 template<typename T, typename... Ts>
 constexpr bool contains_type = (std::is_same_v<T, Ts> || ...);

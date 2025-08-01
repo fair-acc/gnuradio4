@@ -127,9 +127,8 @@ public:
 
     [[nodiscard]] bool contains(std::string_view blockName) const { return _blockTypeHandlers.contains(blockName); }
 
-    template<typename TBlock>
-    std::string typeName(const TBlock& block) {
-        auto name = block.typeName();
+    std::string typeName(const std::shared_ptr<BlockModel>& block) {
+        auto name = block->typeName();
         auto it   = _blockTypeHandlers.find(name);
         if (it != _blockTypeHandlers.end() && !it->second.alias.empty()) {
             return it->second.alias;
