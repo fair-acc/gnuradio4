@@ -117,8 +117,8 @@ struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>> {
         }
     }
 
-    template<gr::InputSpanLike TInSpan>
-    gr::work::Status processBulk(const std::span<TInSpan>& ins, gr::OutputSpanLike auto& sout) const {
+    template<typename InputSpan, typename OutputSpan>
+    gr::work::Status processBulk(std::span<InputSpan>& ins, OutputSpan& sout) const {
         std::copy(ins[0].begin(), ins[0].end(), sout.begin());
         for (std::size_t n = 1; n < ins.size(); n++) {
             std::transform(sout.begin(), sout.end(), ins[n].begin(), sout.begin(), op{});
