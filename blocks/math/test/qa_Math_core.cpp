@@ -22,7 +22,7 @@ struct TestParameters {
 };
 
 template<typename T, typename BlockUnderTest>
-void test_block(const TestParameters<T>& p)
+void test_block_with_graph(const TestParameters<T>& p)
 {
     using namespace boost::ut;
     using namespace gr;
@@ -62,6 +62,34 @@ void test_block(const TestParameters<T>& p)
     expect( std::ranges::equal(sink._samples, p.output) );
 }
 
+
+template<typename T, typename BlockUnderTest>
+void test_block_process_bulk(const TestParameters<T>& p)
+{
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::blocks::math;
+
+    size_t n_inputs = p.inputs.size();
+    auto blk = BlockUnderTest(gr::property_map{{"n_inputs",n_inputs}});
+    
+    size_t num_samples = p.inputs[0].size();
+    std::vector<T> out(num_samples);
+
+    std::vector<std::span<const T>> vec_spans;
+    vec_spans.reserve(p.inputs.size());
+    for (const auto& v : p.inputs)
+        vec_spans.emplace_back(v);
+
+    std::span<const std::span<const T>> input_spans(vec_spans);
+
+    blk.processBulk(input_spans, out);
+    
+
+    expect( std::ranges::equal(out, p.output) );
+}
+
 const boost::ut::suite<"core math blocks"> suite_core = []{
     using namespace boost::ut;
     using namespace gr::blocks::math;
@@ -71,25 +99,51 @@ const boost::ut::suite<"core math blocks"> suite_core = []{
                    int8_t,int16_t,int32_t,int64_t,
                    float,double>();
 
+    // Only test with a full graph for a limited number of types
+    constexpr auto kLimitedTypes =
+        std::tuple<float>();
+
     /* ---------------------------------------------------------------- */
     "Add"_test = []<typename T>(const T&){
-        test_block<T,Add<T>>({ .inputs={{1,2,3}}, .output={1,2,3} });
-        test_block<T,Add<T>>({ .inputs={{1,2},{3,4}}, .output={4,6} });
+        test_block_with_graph<T,Add<T>>({ .inputs={{1,2,3}}, .output={1,2,3} });
+        test_block_with_graph<T,Add<T>>({ .inputs={{1,2},{3,4}}, .output={4,6} });
+    } | kLimitedTypes;
+
+    "Subtract"_test = []<typename T>(const T&){
+        test_block_with_graph<T,Subtract<T>>({ .inputs={{5,4}}, .output={5,4} });
+        test_block_with_graph<T,Subtract<T>>({ .inputs={{5,4},{3,1}}, .output={2,3} });
+    } | kLimitedTypes;
+
+    "Multiply"_test = []<typename T>(const T&){
+        test_block_with_graph<T,Multiply<T>>({ .inputs={{2,3}}, .output={2,3} });
+        test_block_with_graph<T,Multiply<T>>({ .inputs={{2,3},{4,5}}, .output={8,15} });
+    } | kLimitedTypes;
+
+    "Divide"_test = []<typename T>(const T&){
+        test_block_with_graph<T,Divide<T>>({ .inputs={{8,6}}, .output={8,6} });
+        test_block_with_graph<T,Divide<T>>({ .inputs={{8,6},{2,3}}, .output={4,2} });
+    } | kLimitedTypes;
+
+
+    "Add"_test = []<typename T>(const T&){
+        Add<T> blk(gr::property_map{{"n_inputs",2}});
+        test_block_process_bulk<T,Add<T>>({ .inputs={{1,2,3}}, .output={1,2,3} });
+        test_block_process_bulk<T,Add<T>>({ .inputs={{1,2},{3,4}}, .output={4,6} });
     } | kArithmeticTypes;
 
     "Subtract"_test = []<typename T>(const T&){
-        test_block<T,Subtract<T>>({ .inputs={{5,4}}, .output={5,4} });
-        test_block<T,Subtract<T>>({ .inputs={{5,4},{3,1}}, .output={2,3} });
+        test_block_process_bulk<T,Subtract<T>>({ .inputs={{5,4}}, .output={5,4} });
+        test_block_process_bulk<T,Subtract<T>>({ .inputs={{5,4},{3,1}}, .output={2,3} });
     } | kArithmeticTypes;
 
     "Multiply"_test = []<typename T>(const T&){
-        test_block<T,Multiply<T>>({ .inputs={{2,3}}, .output={2,3} });
-        test_block<T,Multiply<T>>({ .inputs={{2,3},{4,5}}, .output={8,15} });
+        test_block_process_bulk<T,Multiply<T>>({ .inputs={{2,3}}, .output={2,3} });
+        test_block_process_bulk<T,Multiply<T>>({ .inputs={{2,3},{4,5}}, .output={8,15} });
     } | kArithmeticTypes;
 
     "Divide"_test = []<typename T>(const T&){
-        test_block<T,Divide<T>>({ .inputs={{8,6}}, .output={8,6} });
-        test_block<T,Divide<T>>({ .inputs={{8,6},{2,3}}, .output={4,2} });
+        test_block_process_bulk<T,Divide<T>>({ .inputs={{8,6}}, .output={8,6} });
+        test_block_process_bulk<T,Divide<T>>({ .inputs={{8,6},{2,3}}, .output={4,2} });
     } | kArithmeticTypes;
 
     /* ----- *Const variants ------------------------------------------ */
