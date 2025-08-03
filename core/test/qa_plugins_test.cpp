@@ -41,7 +41,11 @@ const boost::ut::suite PluginLoaderTests = [] {
     "BadPlugins"_test = [&] {
         expect(!context->loader.failedPlugins().empty());
         for (const auto& plugin : context->loader.failedPlugins()) {
+#if defined(_WIN32)
+            expect(plugin.first.ends_with("bad_plugin.dll"));
+#else
             expect(plugin.first.ends_with("bad_plugin.so"));
+#endif
         }
     };
 

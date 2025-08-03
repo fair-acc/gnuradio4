@@ -27,7 +27,9 @@
 #include <cstdlib> // for atoi()
 #include <emscripten.h>
 #else
+#if !defined(_WIN32)
 #include <sys/resource.h>
+#endif
 #endif
 
 namespace gr::thread_pool::thread {

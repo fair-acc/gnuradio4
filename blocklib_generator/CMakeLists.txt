@@ -51,7 +51,11 @@ if(NOT
    0)
   message(FATAL_ERROR "Failed to build gnuradio_4_0_parse_registrations tool: ${build_error}")
 else()
-  set(PARSER_EXECUTABLE "${TOOLS_BUILD_DIR}/gnuradio_4_0_parse_registrations")
+  if(WIN32)
+    set(PARSER_EXECUTABLE "${TOOLS_BUILD_DIR}/gnuradio_4_0_parse_registrations.exe")
+  else()
+    set(PARSER_EXECUTABLE "${TOOLS_BUILD_DIR}/gnuradio_4_0_parse_registrations")
+  endif()
   message(STATUS "Parser tool built: ${PARSER_EXECUTABLE}")
 endif()
 
