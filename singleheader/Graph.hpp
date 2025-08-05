@@ -15940,7 +15940,9 @@ public:
 #include <cstdlib> // for atoi()
 #include <emscripten.h>
 #else
+#if !defined(_WIN32)
 #include <sys/resource.h>
+#endif
 #endif
 
 namespace gr::thread_pool::thread {
@@ -23512,7 +23514,11 @@ public:
             }
 
             for (const auto& file : std::filesystem::directory_iterator{directory}) {
+#if defined(_WIN32)
+                if (file.is_regular_file() && file.path().extension() == ".dll") {
+#else
                 if (file.is_regular_file() && file.path().extension() == ".so") {
+#endif
                     auto fileString = file.path().string();
                     if (_loadedPluginFiles.contains(fileString)) {
                         continue;
