@@ -1237,7 +1237,7 @@ private:
                 .portType                  = T::kPortType,
                 .portDirection             = T::kDirection,
                 .portDomain                = T::Domain::Name,
-                .portConnectionResult      = (_value.nReaders() + _value.nWriters() > 0UZ) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED,
+                .portConnectionResult      = _value.isConnected() ? ConnectionResult::SUCCESS : ConnectionResult::FAILED,
                 .valueTypeName             = meta::type_name<typename T::value_type>(),
                 .isValueTypeArithmeticLike = T::kIsArithmeticLikeValueType,
                 .valueTypeSize             = sizeof(typename T::value_type),
