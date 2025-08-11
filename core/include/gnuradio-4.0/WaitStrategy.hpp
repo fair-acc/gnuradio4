@@ -245,13 +245,18 @@ class SpinWait {
             yieldProcessor();
         }
     }
-#if defined( __EMSCRIPTEN__) || defined(__APPLE__)
-    static void yieldProcessor() noexcept { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-#elif defined(DISRUPTOR_CPU_ARM)
-    static void yieldProcessor() noexcept {  asm volatile("yield"); }
+
+static inline void yieldProcessor() noexcept {
+#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#elif defined(__aarch64__) || defined(__arm__) || defined(_M_ARM) || defined(_M_ARM64)
+    asm volatile("yield" ::: "memory");      // ARM/AArch64
+#elif defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+    asm volatile("pause" ::: "memory");      // x86/x64 (rep; nop)
 #else
-    static void yieldProcessor() noexcept { asm volatile("rep\nnop"); }
+    std::this_thread::yield();               // generic fallback
 #endif
+}
 
 public:
     SpinWait() = default;
