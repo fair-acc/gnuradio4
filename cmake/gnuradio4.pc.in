@@ -10,4 +10,4 @@ Description: Next-generation GNU Radio framework
 Version: @PROJECT_VERSION@
 
 Cflags: -I${includedir}
-Libs: -L${libdir} -lgnuradio-core
+Libs: -L${libdir} -lgnuradio-core -lgnuradio-blocklib-core -lgnuradio-plugin
