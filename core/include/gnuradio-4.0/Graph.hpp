@@ -765,6 +765,13 @@ void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category fil
     });
 }
 
+template<block::Category traverseCategory>
+[[nodiscard]] std::size_t countBlocks(GraphLike auto const& root, block::Category filter = block::Category::All) {
+    std::size_t n = 0;
+    forEachBlock<traverseCategory>(root, [&](auto const&) { n++; }, filter);
+    return n;
+}
+
 template<block::Category traverseCategory, typename Fn>
 void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
     using enum Edge::EdgeState;
@@ -776,6 +783,13 @@ void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filt
             }
         }
     });
+}
+
+template<block::Category traverseCategory>
+[[nodiscard]] std::size_t countEdges(GraphLike auto const& root, Edge::EdgeState filter = Edge::EdgeState::Unknown) {
+    std::size_t n = 0;
+    forEachEdge<traverseCategory>(root, [&](auto const&) { n++; }, filter);
+    return n;
 }
 
 template<gr::block::Category traverseCategory = gr::block::Category::TransparentBlockGroup>

@@ -196,14 +196,16 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
     property_map result;
 
     {
+        const std::size_t      nBlocks = gr::graph::countBlocks<gr::block::Category::NormalBlock>(rootGraph);
         std::vector<pmtv::pmt> serializedBlocks;
+        serializedBlocks.reserve(nBlocks);
         gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel>& block) {
             property_map map;
             const auto&  fullTypeName = loader.registry().typeName(block);
             if (fullTypeName == "gr::Graph") {
-                map.emplace("id", "SUBGRAPH");
-                map["unique_name"] = std::string(block->uniqueName());
-                map["name"]        = std::string(block->name());
+                map.emplace("id"s, "SUBGRAPH"s);
+                map["unique_name"s] = std::string(block->uniqueName());
+                map["name"s]        = std::string(block->name());
 
                 auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(block.get());
                 if (subGraphDirect == nullptr) {
@@ -211,7 +213,9 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                 }
                 property_map graphYaml = detail::saveGraphToMap(loader, subGraphDirect->blockRef());
 
+                const std::size_t      nExportedPorts = subGraphDirect->exportedInputPortsForBlock().size() + subGraphDirect->exportedOutputPortsForBlock().size();
                 std::vector<pmtv::pmt> exportedPortsData;
+                exportedPortsData.reserve(nExportedPorts);
                 for (const auto& [blockName, portName] : subGraphDirect->exportedInputPortsForBlock()) {
                     exportedPortsData.push_back(std::vector<pmtv::pmt>{blockName, "INPUT"s, portName});
                 }
@@ -219,8 +223,8 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                     exportedPortsData.push_back(std::vector<pmtv::pmt>{blockName, "OUTPUT"s, portName});
                 }
 
-                graphYaml["exported_ports"] = std::move(exportedPortsData);
-                map.emplace("graph", std::move(graphYaml));
+                graphYaml["exported_ports"s] = std::move(exportedPortsData);
+                map.emplace("graph"s, std::move(graphYaml));
 
             } else {
                 map = serializeBlock(loader, block, BlockSerializationFlags::All & (~BlockSerializationFlags::Ports));
@@ -228,23 +232,26 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
             serializedBlocks.emplace_back(std::move(map));
         });
-        result["blocks"] = std::move(serializedBlocks);
+        result["blocks"s] = std::move(serializedBlocks);
     }
 
     {
+        const std::size_t      nEdges = gr::graph::countEdges<block::Category::NormalBlock>(rootGraph);
         std::vector<pmtv::pmt> serializedConnections;
+        serializedConnections.reserve(nEdges);
         graph::forEachEdge<block::Category::NormalBlock>(rootGraph, [&](const Edge& edge) { // NormalBlock -> perhaps can be modelled to 'ALL' for a cleaner sub-graph handling
             std::vector<pmtv::pmt> seq;
+            seq.reserve(7);
 
             auto writePortDefinition = [&](const auto& definition) { //
                 std::visit(meta::overloaded(                         //
                                [&](const PortDefinition::IndexBased& _definition) {
                                    if (_definition.subIndex != meta::invalid_index) {
                                        std::vector<pmtv::pmt> seqPort;
-
+                                       seqPort.reserve(2);
                                        seqPort.push_back(std::int64_t(_definition.topLevel));
                                        seqPort.push_back(std::int64_t(_definition.subIndex));
-                                       seq.push_back(seqPort);
+                                       seq.push_back(std::move(seqPort));
                                    } else {
                                        seq.push_back(std::int64_t(_definition.topLevel));
                                    }
@@ -253,17 +260,17 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                     definition.definition);
             };
 
-            seq.push_back(edge.sourceBlock()->name().data());
+            seq.push_back(std::string(edge.sourceBlock()->name()));
             writePortDefinition(edge.sourcePortDefinition());
 
-            seq.push_back(edge.destinationBlock()->name().data());
+            seq.push_back(std::string(edge.destinationBlock()->name()));
             writePortDefinition(edge.destinationPortDefinition());
 
             if (edge.minBufferSize() != std::numeric_limits<std::size_t>::max()) {
                 seq.push_back(edge.minBufferSize());
             }
 
-            serializedConnections.emplace_back(seq);
+            serializedConnections.emplace_back(std::move(seq));
         });
         result["connections"] = std::move(serializedConnections);
     }
