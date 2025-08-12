@@ -579,6 +579,7 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
 
         using namespace std::string_literals;
         std::vector<pmtv::pmt> ctxParamsSeq;
+        ctxParamsSeq.reserve(stored.size());
         for (const auto& [ctx, ctxParameters] : stored) {
             if (std::holds_alternative<std::string>(ctx) && std::get<std::string>(ctx) == ""s) {
                 continue;
