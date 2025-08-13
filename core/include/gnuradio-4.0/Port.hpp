@@ -704,6 +704,14 @@ struct Port {
             if (!isConnected) {
                 return;
             }
+
+            if (tagsPublished + 1 >= tags.size()) {
+                // TODO(error handling): Decide how to surface failures.
+                // Option A: throw an exception, but this function is marked noexcept—either remove noexcept or avoid throwing.
+                // Option B: return an error (or set a port-status flag) that the Scheduler can observe and handle accordingly.
+                // std::println(stderr, "Tags buffer is full (published:{}, size:{}), can not process tag publishing", tagsPublished, tags.size());
+                return;
+            }
             const auto index = streamIndex + tagOffset;
 
             if (tagsPublished > 0) {
@@ -754,7 +762,7 @@ private:
 public:
     constexpr Port() noexcept = default;
     explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
-    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(other.metaInfo), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
     Port(const Port&)                       = delete;
     auto            operator=(const Port&)  = delete;
     constexpr Port& operator=(Port&& other) = delete;
@@ -768,14 +776,15 @@ public:
         return true;
     }
 
-    [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept {
-        static_assert(kIsOutput, "only to be used with output ports");
+    [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept
+    requires(kIsOutput)
+    {
         return {static_cast<void*>(std::addressof(_ioHandler)), static_cast<void*>(std::addressof(_tagIoHandler))};
     }
 
-    [[nodiscard]] bool updateReaderInternal(InternalPortBuffers buffer_writer_handler_other) noexcept {
-        static_assert(kIsInput, "only to be used with input ports");
-
+    [[nodiscard]] bool updateReaderInternal(InternalPortBuffers buffer_writer_handler_other) noexcept
+    requires(kIsInput)
+    {
         if (buffer_writer_handler_other.streamHandler == nullptr) {
             return false;
         }
@@ -839,7 +848,13 @@ public:
         return false;
     }
 
-    [[nodiscard]] constexpr static std::size_t available() noexcept { return 0; } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
+    [[nodiscard]] constexpr std::size_t available() const noexcept {
+        if constexpr (kIsInput) {
+            return streamReader().available();
+        } else {
+            return streamWriter().available();
+        }
+    }
 
     [[nodiscard]] constexpr std::size_t min_buffer_size() const noexcept {
         if constexpr (Required::kIsConst) {
@@ -1154,18 +1169,18 @@ private:
 
         explicit constexpr PortWrapper(T& arg) noexcept : _value{arg} {
             if constexpr (T::kIsInput) {
-                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
-            } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
+            } else {
+                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             }
             arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         explicit constexpr PortWrapper(T&& arg) noexcept : _value{std::move(arg)} {
             if constexpr (T::kIsInput) {
-                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
-            } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
+            } else {
+                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             }
             arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
@@ -1229,7 +1244,7 @@ private:
                 .portType                  = T::kPortType,
                 .portDirection             = T::kDirection,
                 .portDomain                = T::Domain::Name,
-                .portConnectionResult      = (_value.nReaders() + _value.nWriters() > 0UZ) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED,
+                .portConnectionResult      = _value.isConnected() ? ConnectionResult::SUCCESS : ConnectionResult::FAILED,
                 .valueTypeName             = meta::type_name<typename T::value_type>(),
                 .isValueTypeArithmeticLike = T::kIsArithmeticLikeValueType,
                 .valueTypeSize             = sizeof(typename T::value_type),
