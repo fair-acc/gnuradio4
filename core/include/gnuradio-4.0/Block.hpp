@@ -242,13 +242,7 @@ protected:
         if (!_dirtyAvailable) {
             return; // already updated
         }
-        getPortConstraints(_self, _available, [](auto& port) {
-            if constexpr (portDirection == PortDirection::INPUT) {
-                return port.streamReader().available();
-            } else {
-                return port.streamWriter().available();
-            }
-        });
+        getPortConstraints(_self, _available, [](auto& port) { return port.available(); });
         _maxSyncAvailable  = detail::min_element_masked<PortSync::SYNCHRONOUS>(_available, _types).value_or(gr::undefined_size);
         _hasASyncAvailable = detail::compareRangesMasked<PortSync::ASYNCHRONOUS>(_available, _minSamples, _types);
         _dirtyAvailable    = false;
@@ -348,13 +342,7 @@ public:
             }
 
             // can safely assume that port is either INPUT XOR OUTPUT
-            auto getAvailable = [&port]() -> std::size_t {
-                if constexpr (portDirection == PortDirection::INPUT) {
-                    return port.streamReader().available();
-                } else {
-                    return port.streamWriter().available();
-                }
-            };
+            auto getAvailable = [&port]() -> std::size_t { return port.available(); };
 
             std::size_t availableBefore = getAvailable();
             // prime port
@@ -1640,13 +1628,7 @@ protected:
             bool        hasAsync     = false;                                   // true if there is at least one async input/output that has available samples/remaining capacity
         } result;
         auto adjustForInputPort = [&result]<PortLike Port>(Port& port) {
-            const std::size_t available = [&port]() {
-                if constexpr (gr::traits::port::is_input_v<Port>) {
-                    return port.streamReader().available();
-                } else {
-                    return port.streamWriter().available();
-                }
-            }();
+            const std::size_t available = port.available();
             if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                 result.minSync      = std::max(result.minSync, port.min_samples);
                 result.maxSync      = std::min(result.maxSync, port.max_samples);
