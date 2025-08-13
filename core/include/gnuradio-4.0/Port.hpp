@@ -776,14 +776,15 @@ public:
         return true;
     }
 
-    [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept {
-        static_assert(kIsOutput, "only to be used with output ports");
+    [[nodiscard]] InternalPortBuffers writerHandlerInternal() noexcept
+    requires(kIsOutput)
+    {
         return {static_cast<void*>(std::addressof(_ioHandler)), static_cast<void*>(std::addressof(_tagIoHandler))};
     }
 
-    [[nodiscard]] bool updateReaderInternal(InternalPortBuffers buffer_writer_handler_other) noexcept {
-        static_assert(kIsInput, "only to be used with input ports");
-
+    [[nodiscard]] bool updateReaderInternal(InternalPortBuffers buffer_writer_handler_other) noexcept
+    requires(kIsInput)
+    {
         if (buffer_writer_handler_other.streamHandler == nullptr) {
             return false;
         }
@@ -1168,18 +1169,18 @@ private:
 
         explicit constexpr PortWrapper(T& arg) noexcept : _value{arg} {
             if constexpr (T::kIsInput) {
-                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
-            } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
+            } else {
+                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             }
             arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         explicit constexpr PortWrapper(T&& arg) noexcept : _value{std::move(arg)} {
             if constexpr (T::kIsInput) {
-                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
-            } else {
                 static_assert(requires { arg.updateReaderInternal(std::declval<InternalPortBuffers>()); }, "'private bool updateReaderInternal(void* buffer)' not implemented");
+            } else {
+                static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             }
             arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
