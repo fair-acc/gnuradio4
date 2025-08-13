@@ -326,6 +326,20 @@ const boost::ut::suite TopologyGraphTests = [] {
         };
     };
 
+    "std::vector<pmtv::pmt> segfault test"_test = [] {
+        // Regression test kept because a now-fixed bug in pmtv::pmt’s trivial relocation caused a segfault
+        // with Clang 18/19 when std::vector<pmtv::pmt> reallocated (first seen in “Get GRC Yaml tests”);
+        // this ensures it doesn’t regress.
+
+        std::vector<pmtv::pmt> vec;
+        for (int i = 0; i < 2000; ++i) {
+            vec.push_back(property_map{{std::string("key"), std::string("value")}});
+        }
+        std::println("std::vector<pmtv::pmt> segfault test before");
+        [[maybe_unused]] auto p0 = vec[0]; // Segfault happens here
+        std::println("std::vector<pmtv::pmt> segfault test after");
+    };
+
     "Get GRC Yaml tests"_test = [] {
         gr::Graph testGraph(context->loader);
         testGraph.emplaceBlock("gr::testing::Copy<float32>", {});

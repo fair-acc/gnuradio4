@@ -457,6 +457,47 @@ concept PmtVector =
 
 } // namespace pmtv
 
+// On Clang 18/19 we encounter a reproducible crash when growing a std::vector<pmtv::pmt>
+// whose elements contain non-trivial alternatives (e.g., std::map).
+// During reallocation, the standard library takes the fast “trivial relocation” path
+// instead of invoking each element’s move constructor and destructor.
+// This causes the relocated object to retain pointers to resources that were freed
+// when destroying the original object, leading to a later segfault.
+//
+// libc++ uses an internal trait (__libcpp_is_trivially_relocatable) to decide whether
+// containers may relocate elements via memmove. If the trait evaluates to true,
+// std::vector will use byte-wise relocation.
+// Our rva::variant<T...> inherits from std::variant<...>, and on affected toolchains
+// the vendor trait incorrectly classifies it as trivially relocatable, even when it
+// contains types such as std::map that cannot be safely relocated this way.
+//
+// The specialization below, enabled when PMTV_DISABLE_TRIVIAL_RELOC is defined,
+// forces the vendor trait to report false for rva::variant<T...>, ensuring that
+// the safe move-constructor/destructor path is used instead of byte-wise relocation.
+
+#define PMTV_DISABLE_TRIVIAL_RELOC
+
+#if defined(PMTV_DISABLE_TRIVIAL_RELOC) && defined(_LIBCPP_VERSION)
+namespace std {
+   template<class... T>
+   struct __libcpp_is_trivially_relocatable<rva::variant<T...>> : false_type {};
+} // namespace std
+
+// Always false for rva::variant
+static_assert(!std::__libcpp_is_trivially_relocatable<rva::variant<int, double>>::value);
+static_assert(!std::__libcpp_is_trivially_relocatable<rva::variant<int, double, std::string>>::value);
+static_assert(!std::__libcpp_is_trivially_relocatable<rva::variant<int, double, std::vector<int>>>::value);
+static_assert(!std::__libcpp_is_trivially_relocatable<rva::variant<int, double, std::map<std::map<int, int>, int>>>::value);
+// This fails to compile with an "incomplete type" error due to the recursive nature of rva::variant: std::__libcpp_is_trivially_relocatable</*...*/, rva::self_t>.
+// static_assert(!std::__libcpp_is_trivially_relocatable<pmtv::pmt_var_t>::value);
+
+// Just for comparison with std::variant
+static_assert(std::__libcpp_is_trivially_relocatable<std::variant<int, double, std::string>>::value);
+static_assert(std::__libcpp_is_trivially_relocatable<std::variant<int, double, std::vector<int>>>::value);
+static_assert(!std::__libcpp_is_trivially_relocatable<std::variant<int, double, std::map<int, int>>>::value);
+#endif
+
+
 // #include <pmtv/version.hpp>
 
 
@@ -486,7 +527,7 @@ namespace pmtv {
 //     return std::get<std::vector<T>>(value);
 // }
     template<class T, class V>
-    std::vector<T> &get_vector(V value) {
+    std::vector<T> &get_vector(V &value) {
         return std::get<std::vector<T>>(value);
     }
 
@@ -22793,6 +22834,7 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
 
         using namespace std::string_literals;
         std::vector<pmtv::pmt> ctxParamsSeq;
+        ctxParamsSeq.reserve(stored.size());
         for (const auto& [ctx, ctxParameters] : stored) {
             if (std::holds_alternative<std::string>(ctx) && std::get<std::string>(ctx) == ""s) {
                 continue;
@@ -24424,6 +24466,13 @@ void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category fil
     });
 }
 
+template<block::Category traverseCategory>
+[[nodiscard]] std::size_t countBlocks(GraphLike auto const& root, block::Category filter = block::Category::All) {
+    std::size_t n = 0;
+    forEachBlock<traverseCategory>(root, [&](auto const&) { n++; }, filter);
+    return n;
+}
+
 template<block::Category traverseCategory, typename Fn>
 void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
     using enum Edge::EdgeState;
@@ -24435,6 +24484,13 @@ void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filt
             }
         }
     });
+}
+
+template<block::Category traverseCategory>
+[[nodiscard]] std::size_t countEdges(GraphLike auto const& root, Edge::EdgeState filter = Edge::EdgeState::Unknown) {
+    std::size_t n = 0;
+    forEachEdge<traverseCategory>(root, [&](auto const&) { n++; }, filter);
+    return n;
 }
 
 template<gr::block::Category traverseCategory = gr::block::Category::TransparentBlockGroup>

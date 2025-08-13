@@ -332,7 +332,7 @@ include(FetchContent)
 FetchContent_Declare(
   pmt
   GIT_REPOSITORY https://github.com/gnuradio/pmt.git
-  GIT_TAG e1a46cb61decb044f6ab0a58a77211beb3630340 # latest as of 2023-12-06
+  GIT_TAG 5960738cd35827acceb5a4de9e1c4005d2d02305 # latest as of 2025-08-13
 )
 
 set(BOOST_UT_DISABLE_MODULE
@@ -578,7 +578,7 @@ endif()
 configure_file(cmake/gnuradio4.pc.in ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc @ONLY)
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig # Standard location
-                                                                                                     # for .pc files
+        # for .pc files
 )
 
 # print effective options
