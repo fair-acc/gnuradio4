@@ -847,7 +847,13 @@ public:
         return false;
     }
 
-    [[nodiscard]] constexpr static std::size_t available() noexcept { return 0; } //  ↔ maps to Buffer::Buffer[Reader, Writer].available()
+    [[nodiscard]] constexpr std::size_t available() const noexcept {
+        if constexpr (kIsInput) {
+            return streamReader().available();
+        } else {
+            return streamWriter().available();
+        }
+    }
 
     [[nodiscard]] constexpr std::size_t min_buffer_size() const noexcept {
         if constexpr (Required::kIsConst) {
