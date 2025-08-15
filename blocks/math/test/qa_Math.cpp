@@ -61,19 +61,15 @@ void test_block_process_bulk(const TestParameters<T>& p) {
     using namespace gr::testing;
     using namespace gr::blocks::math;
 
-    size_t n_inputs = p.inputs.size();
-    auto   blk      = BlockUnderTest(gr::property_map{{"n_inputs", n_inputs}});
+    const std::size_t n_inputs = p.inputs.size();
+    auto              blk      = BlockUnderTest(gr::property_map{{"n_inputs", n_inputs}});
 
-    size_t         num_samples = p.inputs[0].size();
-    std::vector<T> out(num_samples);
+    const std::size_t num_samples = p.inputs.empty() ? 0 : p.inputs[0].size();
+    std::vector<T>    out(num_samples);
 
-    std::vector<std::span<const T>> vec_spans;
-    vec_spans.reserve(p.inputs.size());
-    for (const auto& v : p.inputs) {
-        vec_spans.emplace_back(v);
-    }
-
-    std::span<const std::span<const T>> input_spans(vec_spans);
+    // Use a span of vectors (avoid span-of-spans, which triggers GCC-15
+    // -Wnull-dereference inside libstdc++'s std::span::end()).
+    std::span<const std::vector<T>> input_spans{p.inputs};
 
     blk.processBulk(input_spans, out);
 
@@ -90,7 +86,7 @@ void test_block_process_one(const TestParameters<T>& p) {
     auto blk = BlockUnderTest();
 
     std::vector<T> out;
-    out.reserve(out.size());
+    out.reserve(p.input.size());
     for (auto& v : p.input) {
         out.push_back(blk.processOne(v));
     }
@@ -130,22 +126,22 @@ const boost::ut::suite<"Math blocks"> suite_core = [] {
         test_block_with_graph<T, Divide<T>>({.inputs = {{8, 6}, {2, 3}}, .output = {4, 2}});
     } | kLimitedTypes;
 
-    "Add"_test = []<typename T>(const T&) {
+    "AddBulk"_test = []<typename T>(const T&) {
         test_block_process_bulk<T, Add<T>>({.inputs = {{1, 2, 3}}, .output = {1, 2, 3}});
         test_block_process_bulk<T, Add<T>>({.inputs = {{1, 2}, {3, 4}}, .output = {4, 6}});
     } | kArithmeticTypes;
 
-    "Subtract"_test = []<typename T>(const T&) {
+    "SubtractBulk"_test = []<typename T>(const T&) {
         test_block_process_bulk<T, Subtract<T>>({.inputs = {{5, 4}}, .output = {5, 4}});
         test_block_process_bulk<T, Subtract<T>>({.inputs = {{5, 4}, {3, 1}}, .output = {2, 3}});
     } | kArithmeticTypes;
 
-    "Multiply"_test = []<typename T>(const T&) {
+    "MultiplyBulk"_test = []<typename T>(const T&) {
         test_block_process_bulk<T, Multiply<T>>({.inputs = {{2, 3}}, .output = {2, 3}});
         test_block_process_bulk<T, Multiply<T>>({.inputs = {{2, 3}, {4, 5}}, .output = {8, 15}});
     } | kArithmeticTypes;
 
-    "Divide"_test = []<typename T>(const T&) {
+    "DivideBulk"_test = []<typename T>(const T&) {
         test_block_process_bulk<T, Divide<T>>({.inputs = {{8, 6}}, .output = {8, 6}});
         test_block_process_bulk<T, Divide<T>>({.inputs = {{8, 6}, {2, 3}}, .output = {4, 2}});
     } | kArithmeticTypes;
