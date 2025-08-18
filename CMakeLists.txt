@@ -237,6 +237,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's lib
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-DVIR_DISABLE_STDX_SIMD=1)
   if(ENABLE_TBB)
     find_package(TBB REQUIRED)
     target_link_libraries(gnuradio-options INTERFACE TBB::tbb)

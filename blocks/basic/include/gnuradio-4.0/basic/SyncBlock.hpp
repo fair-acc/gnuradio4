@@ -2,6 +2,7 @@
 #define GNURADIO_SYNC_BLOCK_HPP
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 
 namespace gr::basic {
 

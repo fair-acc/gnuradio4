@@ -9,6 +9,7 @@
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Settings.hpp>
 #include <gnuradio-4.0/Tag.hpp>
@@ -342,16 +343,20 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "unique ID"_test = [] {
-        Graph       testGraph;
-        const auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
-        const auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
-        expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
-        expect(not eq(block1.unique_name, block2.unique_name)) << "unique per-type block id (string)";
+        {
+            Graph       testGraph;
+            const auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
+            const auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
+            expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
+            expect(not eq(block1.unique_name, block2.unique_name)) << "unique per-type block id (string)";
+        }
 
-        auto merged1 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
-        auto merged2 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
-        expect(not eq(merged1.unique_id, merged2.unique_id)) << "unique per-type block id (size_t) ";
-        expect(not eq(merged1.unique_name, merged2.unique_name)) << "unique per-type block id (string) ";
+        {
+            auto merged1 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
+            auto merged2 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
+            expect(not eq(merged1.unique_id, merged2.unique_id)) << "unique per-type block id (size_t) ";
+            expect(not eq(merged1.unique_name, merged2.unique_name)) << "unique per-type block id (string) ";
+        }
     };
 
     "run-time type-erased node setter/getter"_test = [] {

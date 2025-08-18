@@ -679,22 +679,6 @@ protected:
     T           _block;
     std::string _type_name = gr::meta::type_name<T>();
 
-    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
-    [[nodiscard]] constexpr auto& blockRef() noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
     void initMessagePorts() {
         msgIn  = std::addressof(_block.msgIn);
         msgOut = std::addressof(_block.msgOut);
@@ -742,7 +726,16 @@ protected:
 
 public:
     BlockWrapper() : BlockWrapper(gr::property_map()) {}
+
     explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
+        initMessagePorts();
+        _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
+        _dynamicPortsLoader.instance = this;
+    }
+
+    template<typename Arg, typename... Args>
+    requires(not std::is_same_v<std::remove_cvref_t<Arg>, gr::property_map> or sizeof...(Args) > 0)
+    explicit BlockWrapper(Arg&& arg, Args&&... args) : _block(std::forward<Arg>(arg), std::forward<Args>(args)...) {
         initMessagePorts();
         _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
         _dynamicPortsLoader.instance = this;
@@ -754,7 +747,27 @@ public:
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
     ~BlockWrapper() override                           = default;
 
-    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override { return blockRef().init(progress, ioThreadPool); }
+    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override {
+        if constexpr (requires { blockRef().init(progress, ioThreadPool); }) {
+            return blockRef().init(progress, ioThreadPool);
+        }
+    }
+
+    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
+
+    [[nodiscard]] constexpr auto& blockRef() noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 

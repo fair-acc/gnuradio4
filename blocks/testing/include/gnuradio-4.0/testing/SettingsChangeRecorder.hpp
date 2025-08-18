@@ -2,6 +2,7 @@
 #define GNURADIO_TESTING_SETTINGS_CHANGE_RECORDER_H
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
 
 namespace gr::testing {

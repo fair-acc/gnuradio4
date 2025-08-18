@@ -17,10 +17,9 @@
 
 #include <GrBasicBlocks.hpp>
 #include <GrTestingBlocks.hpp>
-#include <qa_grc.hpp>
+#include <QaGrcBlocks.hpp>
 
 #include "TestBlockRegistryContext.hpp"
-#include "gnuradio-4.0/BlockModel.hpp"
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
@@ -31,7 +30,7 @@ auto makeTestContext() {
         paths{"core/test/plugins", "test/plugins", "plugins"}, // plugin paths
         gr::blocklib::initGrBasicBlocks,                       //
         gr::blocklib::initGrTestingBlocks,                     //
-        gr::blocklib::initqa_grc);
+        gr::blocklib::initQaGrcBlocks);
 }
 
 namespace {

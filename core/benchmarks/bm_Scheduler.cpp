@@ -9,6 +9,8 @@
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+using namespace std::string_literals;
+
 using T          = float;
 using TestMarker = benchmark::MarkerMap<"first-out", "last-out", "first-in", "last-in">;
 

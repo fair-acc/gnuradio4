@@ -4,7 +4,10 @@
 #include <functional>
 #include <source_location>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <vir/simd.h>
+#pragma GCC diagnostic pop
 
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/Graph.hpp>
