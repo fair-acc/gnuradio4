@@ -59,7 +59,13 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
     std::map<std::string, std::shared_ptr<BlockModel>> createdBlocks;
 
-    auto blks = std::get<std::vector<pmtv::pmt>>(yaml.at("blocks"));
+    std::vector<pmtv::pmt> blks;
+    if (auto it = yaml.find("blocks"); it != yaml.end()) {
+        if (const auto* blkRef = std::get_if<std::vector<pmtv::pmt>>(&it->second)) {
+            blks = *blkRef;
+        }
+    }
+
     for (const auto& blk : blks) {
         auto grcBlock = std::get<property_map>(blk);
 
@@ -136,7 +142,13 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         }
     } // for blocks
 
-    auto connections = std::get<std::vector<pmtv::pmt>>(yaml.at("connections"));
+    std::vector<pmtv::pmt> connections;
+    if (auto it = yaml.find("connections"); it != yaml.end()) {
+        if (const auto* connRef = std::get_if<std::vector<pmtv::pmt>>(&it->second)) {
+            connections = *connRef;
+        }
+    }
+
     for (const auto& conn : connections) {
         auto connection = std::get<std::vector<pmtv::pmt>>(conn);
         if (connection.size() < 4) {
