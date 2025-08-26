@@ -53,15 +53,10 @@ By submitting a contribution to the GNU Radio project, you agree that your contr
 
 ### License Terms
 
-GNU Radio intends to maintain the existing license terms under which contributions are made. We do not intend to change the licensing terms of any contributions after submission. Any potential changes to the license, such as re-licensing, would require an explicit, agreed-upon process involving the contributor and the project maintainers. Initial license terms are specified in the LICENSE file of the submodule, or in the SPDX header of the individual file if not consistent with the overall submodule.
+GNU Radio intends to maintain the existing license terms under which contributions are made. We do not intend to change the licensing terms of any contributions after submission. Any potential changes to the license, such as re-licensing, would require an explicit, agreed-upon process involving the contributor and the project maintainers. Initial license terms are specified in the LICENSE file of the subdirectory under which licensing differs from the top level license, or in the SPDX header of the individual file if not consistent with the overall subdirectory.
 
 By submitting a contribution, you agree to the terms of the Developer Certificate of Origin (DCO), which certifies that your contribution is your original work and that you have the right to submit it under the license terms of the specific module.
 
-We accept contributions for in-tree code with the following license preference:
-
-Core: MIT required
-
-Block Library: MIT preferred, with GPLv3 as an alternative
 
 ### DCO Signing
 
@@ -90,6 +85,13 @@ GNU Radio 4 uses the MIT License for the core runtime and libraries, with the op
 - Empower Submodule Authors: We recognize that some contributors may wish to enforce stronger copyleft guarantees. By allowing submodules to choose GPLv3 (and out of tree authors to choose any other license), we provide flexibility for authors to assert more control over how their code is reused.
 
 - Stay Compliant with Evolving Legal Landscapes: A modular, permissive licensing approach ensures GNU Radio can remain compliant under changing national and international laws - particularly around cybersecurity, product liability, AI governance, and data protection regulations like GDPR.
+
+
+We accept contributions for in-tree code with the following license preference:
+
+Core: MIT required
+
+Block Library: MIT preferred, with GPLv3 as an alternative
 
 ## Code of Conduct
 
