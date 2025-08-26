@@ -21,7 +21,7 @@ We welcome all forms of contributions from the community. Please read the follow
 
 ### Communication
 
-- Before starting work on a feature, check if there isn't already an examples in the 'samples' sub-module.
+- Before starting work on a feature, check if there isn't already an example in the block library.
   If not, then please open an issue on GitHub describing the proposed feature. We want to make sure any feature work goes smoothly.
   We're happy to work with you to determine if it fits the current project direction and make sure no one else is already working on it.
 
