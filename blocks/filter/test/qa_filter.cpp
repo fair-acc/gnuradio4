@@ -274,7 +274,11 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(decimator)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(sink)));
 
-        auto sched = gr::scheduler::Simple<>(std::move(flow));
+        gr::scheduler::Simple<> sched;
+        ;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(decimator.decim, decimationFactor));

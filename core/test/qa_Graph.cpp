@@ -103,7 +103,10 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         // only the first port is connected
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", 0>(src, customBufferSize).to<"in">(sink1)));
 
-        scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched{std::move(graph)};
+        scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src.out[0].bufferSize(), customBufferSize));

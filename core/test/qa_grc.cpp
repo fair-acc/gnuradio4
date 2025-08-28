@@ -234,8 +234,11 @@ connections:
 
             expect(checkAndPrintMissingBlocks(graphSrc2, graphSavedSrc));
 
-            gr::scheduler::Simple scheduler(std::move(graph));
-            expect(scheduler.runAndWait().has_value());
+            gr::scheduler::Simple sched;
+            if (auto ret = sched.exchange(std::move(graph)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
+            expect(sched.runAndWait().has_value());
         } catch (const std::string& e) {
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);

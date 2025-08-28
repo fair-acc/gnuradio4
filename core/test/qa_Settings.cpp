@@ -207,7 +207,10 @@ const boost::ut::suite SettingsTests = [] {
         expect(src.settings().activateContext() != std::nullopt);  // activateContext() fills staged parameters
         expect(eq(src.settings().stagedParameters().size(), 2UZ)); // "n_samples_max", sample_rate
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
@@ -411,7 +414,10 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, n_samples)) << "did not produce enough output samples";
@@ -832,7 +838,10 @@ const boost::ut::suite CtxSettingsTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkBulk)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, n_samples)) << src.name.value;
@@ -932,7 +941,10 @@ connections:
         gr::registerBlock<Sink, double>(registry);
         PluginLoader loader(registry, {});
         try {
-            scheduler::Simple sched{loadGrc(loader, std::string(grc))};
+            gr::scheduler::Simple<> sched;
+            if (auto ret = sched.exchange(loadGrc(loader, std::string(grc))); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
             expect(sched.runAndWait().has_value());
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(sched.graph(), [](std::shared_ptr<BlockModel> block) { expect(eq(std::get<float>(*block->settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << std::format("sample_rate forwarded to {}", block->name()); });
         } catch (const std::string& e) {

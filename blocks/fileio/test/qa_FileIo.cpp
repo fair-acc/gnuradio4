@@ -51,7 +51,10 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         auto& fileSink = flow.emplaceBlock<BasicFileSink<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"max_bytes_per_file", maxFileSize}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(source).template to<"in">(fileSink)));
 
-        auto sched                                        = scheduler{std::move(flow)};
+        scheduler sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value()) << testCaseName;
 
@@ -89,7 +92,10 @@ void runTest(const gr::blocks::fileio::Mode mode) {
 
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));
 
-        auto schedRead                                            = scheduler{std::move(flow)};
+        scheduler schedRead;
+        if (auto ret = schedRead.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
         expect(schedRead.runAndWait().has_value()) << testCaseName;
 
@@ -112,7 +118,10 @@ void runTest(const gr::blocks::fileio::Mode mode) {
 
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));
 
-        auto schedRead                                            = scheduler{std::move(flow)};
+        scheduler schedRead;
+        if (auto ret = schedRead.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
         expect(schedRead.runAndWait().has_value()) << testCaseName;
 

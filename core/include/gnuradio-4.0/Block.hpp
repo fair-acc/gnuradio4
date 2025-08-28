@@ -833,7 +833,7 @@ public:
         : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
           input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
           stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)),                                         //
-          msgOut(std::move(other.msgOut)), propertyCallbacks(std::move(other.propertyCallbacks)),                                                                //
+          msgOut(std::move(other.msgOut)), propertySubscriptions(std::move(other.propertySubscriptions)),                                                                //
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
           _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
           _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}

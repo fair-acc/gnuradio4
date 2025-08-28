@@ -65,10 +65,13 @@ const boost::ut::suite ExportPortsTests_ = [] {
         std::shared_ptr<BlockModel> subGraph       = initGraph.addBlock(subGraphDirect);
 
         // Connecting the message ports
-        gr::scheduler::Simple scheduler{std::move(initGraph)};
-        const auto&           graph = scheduler.graph();
-        gr::MsgPortOut        toScheduler;
-        gr::MsgPortIn         fromScheduler;
+        gr::scheduler::Simple scheduler;
+        if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        const auto&    graph = scheduler.graph();
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
@@ -177,7 +180,10 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         expect(eq(initGraph.edges().size(), 2UZ));
         expect(eq(subGraphDirect->blockRef().edges().size(), 1UZ));
 
-        gr::scheduler::Simple scheduler{std::move(initGraph)};
+        gr::scheduler::Simple scheduler;
+        if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
@@ -227,10 +233,13 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         std::shared_ptr<BlockModel> subGraph       = initGraph.addBlock(subGraphDirect);
 
         // Connecting the message ports
-        gr::scheduler::Simple scheduler{std::move(initGraph)};
-        const auto&           graph = scheduler.graph();
-        gr::MsgPortOut        toScheduler;
-        gr::MsgPortIn         fromScheduler;
+        gr::scheduler::Simple scheduler;
+        if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        const auto&    graph = scheduler.graph();
+        gr::MsgPortOut toScheduler;
+        gr::MsgPortIn  fromScheduler;
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
 
