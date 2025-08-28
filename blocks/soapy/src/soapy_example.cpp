@@ -94,7 +94,10 @@ Default:
 
     Graph flow = createGraph(fileName1, fileName2, maxFileSize, sampleRate, rxCenterFrequency, bandwidth, rxGains);
 
-    auto sched  = gr::scheduler::Simple<>{std::move(flow)};
+    gr::scheduler::Simple<> sched;
+    if (auto ret = sched.exchange(std::move(flow)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     auto retVal = sched.runAndWait();
     expect(retVal.has_value()) << std::format("scheduler execution error: {}", retVal.error());
 

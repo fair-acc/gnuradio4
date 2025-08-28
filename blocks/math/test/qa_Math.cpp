@@ -32,8 +32,11 @@ void test_block(const TestParameters<T> p) {
     expect(eq(graph.connect<"out">(block).template to<"in">(sink), ConnectionResult::SUCCESS)) << "Failed to connect output port 'out' of block to input port of sink";
 
     // execute and confirm result
-    gr::scheduler::Simple scheduler{std::move(graph)};
-    expect(scheduler.runAndWait().has_value()) << "Failed to run graph: No value";
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(graph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
+    expect(sched.runAndWait().has_value()) << "Failed to run graph: No value";
     expect(std::ranges::equal(sink._samples, p.output)) << std::format("Failed to validate block output: Expected {} but got {} for input {}", p.output, sink._samples, p.inputs);
 };
 

@@ -192,7 +192,10 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
 
-        gr::scheduler::Simple sched{std::move(flow)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
     };
 

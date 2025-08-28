@@ -50,7 +50,10 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink1)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink2)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
         if (verbose) {
             std::println("finished ClockSource sched.runAndWait() w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
@@ -121,7 +124,10 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(signalGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(signalGen).to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(n_samples, static_cast<std::uint32_t>(sink._nSamplesProduced))) << "Number of samples does not match";
@@ -201,7 +207,10 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(funcGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
         expect(eq(sink._tags.size(), clockSrc.tags.size())) << [&]() {
@@ -266,7 +275,10 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(funcGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
         expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "Number of samples does not match";
         expect(eq(sink._tags.size(), 9UZ)) << [&]() {

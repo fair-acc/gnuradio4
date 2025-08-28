@@ -31,7 +31,10 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(source).template to<"in">(exprBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(exprBlock).template to<"in">(tagSink)));
 
-        auto sched = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(approx(source.default_value, T(21), T(1e-3f)));
@@ -51,7 +54,10 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(source2).template to<"in1">(exprBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(exprBlock).template to<"in">(tagSink)));
 
-        auto sched = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(approx(source1.default_value, T(7), T(1e-3f)));
@@ -72,7 +78,10 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(source).template to<"in">(exprBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(exprBlock).template to<"in">(tagSink)));
 
-        auto sched = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(tagSink._samples.size(), source.n_samples_max));
@@ -97,7 +106,10 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(source).template to<"in">(exprBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(exprBlock).template to<"in">(tagSink)));
 
-        auto sched = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
 
         try {
             expect(sched.runAndWait().has_value());

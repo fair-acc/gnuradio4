@@ -76,7 +76,10 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(uiSink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
 
         std::thread uiLoop([&uiSink]() {
             std::println("start UI thread");
@@ -110,8 +113,10 @@ const boost::ut::suite TagTests = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(funcGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(uiSink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
-
+        scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
     };
 };

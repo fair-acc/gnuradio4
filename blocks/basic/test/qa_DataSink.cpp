@@ -352,7 +352,10 @@ const boost::ut::suite DataSinkTests = [] {
             })) << boost::ut::fatal;
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
         registerThread.join();
 
@@ -427,7 +430,10 @@ const boost::ut::suite DataSinkTests = [] {
         });
 
         {
-            Scheduler sched{std::move(testGraph)};
+            Scheduler sched;
+            if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
             expect(sched.runAndWait().has_value());
 
             const auto pollerAfterStop = globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"));
@@ -512,7 +518,10 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(poller, receivedData, receivedTags);
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         const auto& [poller, receivedData, receivedTags] = polling.get();
@@ -580,7 +589,10 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(poller, receivedData, receivedTags);
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         const auto& [_, receivedData, receivedTags] = polling.get();
@@ -647,7 +659,10 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(poller, receivedData);
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         registerThread.join();
@@ -741,7 +756,10 @@ const boost::ut::suite DataSinkTests = [] {
             results.push_back(std::move(f));
         }
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
         registerThread.join();
 
@@ -805,7 +823,10 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(poller, receivedData, receivedTags);
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         const auto& [poller, receivedData, receivedTags] = polling.get();
@@ -851,7 +872,10 @@ const boost::ut::suite DataSinkTests = [] {
             expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerTriggerCallback<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, 3000, 2000, callback); })) << boost::ut::fatal;
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
         registerThread.join();
 
@@ -896,7 +920,10 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(poller, samplesSeen);
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         const auto& [poller, samplesSeen] = polling.get();
@@ -938,7 +965,10 @@ const boost::ut::suite DataSinkTests = [] {
             return std::pair(poller, receivedDataSets);
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         const auto& [poller, receivedDataSets] = polling.get();
@@ -986,7 +1016,10 @@ const boost::ut::suite DataSinkTests = [] {
             expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerDataSetCallback<float>(DataSinkQuery::sinkName("test_sink"), callback); })) << boost::ut::fatal;
         });
 
-        Scheduler sched{std::move(testGraph)};
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
         registerThread.join();
 

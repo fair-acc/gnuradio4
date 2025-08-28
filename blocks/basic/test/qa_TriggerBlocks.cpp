@@ -92,7 +92,10 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                 });
             }
 
-            gr::scheduler::Simple sched{std::move(graph)}; // declared here to ensure life-time of graph and blocks inside.
+            gr::scheduler::Simple sched;
+            if (auto ret = sched.exchange(std::move(graph)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
             expect(sched.runAndWait().has_value()) << "runAndWait";
 
             if (uiLoop.joinable()) {

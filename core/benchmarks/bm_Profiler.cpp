@@ -26,12 +26,12 @@ inline void run_without_profiler() {
 template<ProfilerLike TProfiler>
 inline void run_with_profiler(TProfiler& p) {
     const auto start   = detail::clock::now();
-    auto&      handler = p.forThisThread();
+    auto       handler = p.forThisThread();
 
-    [[maybe_unused]] auto whole_calculation_event = handler.startCompleteEvent("whole_calculation");
+    [[maybe_unused]] auto whole_calculation_event = handler->startCompleteEvent("whole_calculation");
     long long             r                       = 0;
     for (std::size_t i = 0; i < 1000; ++i) {
-        auto async_event = handler.startAsyncEvent("iteration", {}, {{"arg1", 2}, {"arg2", "hello"}});
+        auto async_event = handler->startAsyncEvent("iteration", {}, {{"arg1", 2}, {"arg2", "hello"}});
         for (std::size_t j = 0; j < 1000; ++j) {
             std::vector<int> v(10000);
             std::iota(v.begin(), v.end(), 1);

@@ -256,7 +256,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(autoForwardBlock).to<"in">(monitor)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor).to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, nSamples));
@@ -327,7 +330,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk2).to<"in">(sinkOne)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk2).to<"in">(sinkBulk)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, nSamples));
@@ -404,7 +410,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"inPort">(realign)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outPort">(realign).to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
@@ -436,7 +445,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(decimator)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(decimator).template to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, nSamples));
@@ -485,7 +497,10 @@ const boost::ut::suite RepeatedTags = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(monitorOne)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._tags.size(), 4UZ));

@@ -617,9 +617,12 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
 
-        gr::MsgPortOut toScheduler;
-        gr::MsgPortIn  fromScheduler;
-        auto           scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
+        gr::MsgPortOut                                toScheduler;
+        gr::MsgPortIn                                 fromScheduler;
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
 
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
@@ -795,9 +798,12 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
 
-        gr::MsgPortIn  fromScheduler;
-        gr::MsgPortOut toScheduler;
-        auto           scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
+        gr::MsgPortIn                                 fromScheduler;
+        gr::MsgPortOut                                toScheduler;
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
@@ -846,7 +852,10 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(testBlock)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(testBlock).to<"in">(sink)));
 
-        auto scheduler = scheduler::Simple<SchedulerPolicy::value>(std::move(flow));
+        gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
+        if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
 
         gr::MsgPortIn  fromScheduler;
         gr::MsgPortOut toScheduler;

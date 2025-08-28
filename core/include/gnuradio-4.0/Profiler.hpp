@@ -108,10 +108,10 @@ concept StepEvent = requires(T e) {
 
 template<typename T>
 concept ProfilerHandlerLike = requires(T h, std::string_view name, std::string_view categories, std::initializer_list<arg_value> args) {
-    { h.startCompleteEvent(name, categories, args) } -> SimpleEvent;
-    { h.startAsyncEvent(name, categories, args) } -> StepEvent;
-    { h.instantEvent(name, categories, args) } -> std::same_as<void>;
-    { h.counterEvent(name, categories, args) } -> std::same_as<void>;
+    { h->startCompleteEvent(name, categories, args) } -> SimpleEvent;
+    { h->startAsyncEvent(name, categories, args) } -> StepEvent;
+    { h->instantEvent(name, categories, args) } -> std::same_as<void>;
+    { h->counterEvent(name, categories, args) } -> std::same_as<void>;
 };
 
 template<typename T>
@@ -123,8 +123,10 @@ concept ProfilerLike = requires(T p) {
 enum class OutputMode { StdOut, File };
 
 struct Options {
-    std::string output_file;
+    std::string output_file{};
     OutputMode  output_mode = OutputMode::File;
+
+    auto operator<=>(const Options&) const = default;
 };
 
 namespace null {
@@ -151,7 +153,7 @@ class Profiler {
 public:
     constexpr explicit Profiler(const Options& = {}) {}
     constexpr void     reset() const {}
-    constexpr Handler& forThisThread() { return _handler; }
+    constexpr Handler* forThisThread() { return &_handler; }
 };
 
 } // namespace null
@@ -347,7 +349,7 @@ public:
 
     void reset() noexcept { _start = detail::clock::now(); }
 
-    Handler<Profiler, WriterType>& forThisThread() {
+    Handler<Profiler, WriterType>* forThisThread() {
         const auto            this_id = std::this_thread::get_id();
         const std::lock_guard lock{_handlers_lock};
         auto                  it = _handlers.find(this_id);
@@ -355,7 +357,7 @@ public:
             it = _handlers.try_emplace(this_id, *this, _buffer.new_writer()).first;
         }
 
-        return it->second;
+        return &it->second;
     }
 };
 

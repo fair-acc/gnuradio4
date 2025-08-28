@@ -81,7 +81,10 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
-        auto sched    = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         // make a request
         source.trigger();
@@ -112,7 +115,10 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
-        auto sched    = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         expect(sched.runAndWait().has_value());
@@ -141,7 +147,10 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
-        auto sched    = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         expect(sched.runAndWait().has_value());
@@ -183,7 +192,10 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
 
-        auto sched    = gr::scheduler::Simple<>(std::move(graph));
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         expect(sched.runAndWait().has_value());
         expect(eq(std::get<std::string>(sink.value.at("raw-data")), "event"sv));

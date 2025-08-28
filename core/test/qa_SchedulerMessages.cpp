@@ -36,11 +36,14 @@ class TestScheduler {
     }
 
 public:
-    TScheduler     scheduler_;
+    TScheduler     scheduler_{};
     gr::MsgPortOut toScheduler;
     gr::MsgPortIn  fromScheduler;
 
-    TestScheduler(gr::Graph graph, bool addTestSourceAndSink = true) : scheduler_(addTestSourceAndSink ? std::move(withTestingSourceAndSink(graph)) : std::move(graph)) {
+    TestScheduler(gr::Graph graph, bool addTestSourceAndSink = true) {
+        if (auto ret = scheduler_.exchange(addTestSourceAndSink ? std::move(withTestingSourceAndSink(graph)) : std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         using namespace gr::testing;
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler_.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, scheduler_.msgOut.connect(fromScheduler)));

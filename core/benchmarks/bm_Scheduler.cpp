@@ -92,31 +92,58 @@ void exec_bm(auto& scheduler, const std::string& test_case, [[maybe_unused]] Tes
     std::println("INFO: std::thread::hardware_concurrency() = {} - CPU thread bounds = [{}, {}]", std::thread::hardware_concurrency(), minThreads, maxThreads);
     TestMarker marker;
 
-    gr::scheduler::Simple sched1(test_graph_linear<T>(2 * N_NODES));
+    gr::scheduler::Simple<> sched1;
+    if (auto ret = sched1.exchange(test_graph_linear<T>(2 * N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "linear graph - simple scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched1, &marker]() { exec_bm(sched1, "linear-graph simple-sched", marker); };
 
-    gr::scheduler::BreadthFirst sched2(test_graph_linear<T>(2 * N_NODES));
+    gr::scheduler::BreadthFirst<> sched2;
+    if (auto ret = sched2.exchange(test_graph_linear<T>(2 * N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "linear graph - BFS scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched2, &marker]() { exec_bm(sched2, "linear-graph BFS-sched", marker); };
 
-    gr::scheduler::Simple sched3(test_graph_bifurcated<T>(N_NODES));
+    gr::scheduler::Simple<> sched3;
+    if (auto ret = sched3.exchange(test_graph_bifurcated<T>(N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "bifurcated graph - simple scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched3, &marker]() { exec_bm(sched3, "bifurcated-graph simple-sched", marker); };
 
-    gr::scheduler::BreadthFirst sched4(test_graph_bifurcated<T>(N_NODES));
+    gr::scheduler::BreadthFirst<> sched4;
+    if (auto ret = sched4.exchange(test_graph_bifurcated<T>(N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "bifurcated graph - BFS scheduler"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4, &marker]() { exec_bm(sched4, "bifurcated-graph BFS-sched", marker); };
 
-    gr::scheduler::Simple<multiThreaded> sched1_mt(test_graph_linear<T>(2 * N_NODES));
+    gr::scheduler::Simple<multiThreaded> sched1_mt;
+    if (auto ret = sched1_mt.exchange(test_graph_linear<T>(2 * N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "linear graph - simple scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched1_mt, &marker]() { exec_bm(sched1_mt, "linear-graph simple-sched (multi-threaded)", marker); };
 
-    gr::scheduler::BreadthFirst<multiThreaded> sched2_mt(test_graph_linear<T>(2 * N_NODES));
+    gr::scheduler::BreadthFirst<multiThreaded> sched2_mt;
+    if (auto ret = sched2_mt.exchange(test_graph_linear<T>(2 * N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "linear graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched2_mt, &marker]() { exec_bm(sched2_mt, "linear-graph BFS-sched (multi-threaded)", marker); };
 
-    gr::scheduler::Simple<multiThreaded> sched3_mt(test_graph_bifurcated<T>(N_NODES));
+    gr::scheduler::Simple<multiThreaded> sched3_mt;
+    if (auto ret = sched3_mt.exchange(test_graph_bifurcated<T>(N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "bifurcated graph - simple scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched3_mt, &marker]() { exec_bm(sched3_mt, "bifurcated-graph simple-sched (multi-threaded)", marker); };
 
-    gr::scheduler::BreadthFirst<multiThreaded> sched4_mt(test_graph_bifurcated<T>(N_NODES));
+    gr::scheduler::BreadthFirst<multiThreaded> sched4_mt;
+    if (auto ret = sched4_mt.exchange(test_graph_bifurcated<T>(N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "bifurcated graph - BFS scheduler (multi-threaded)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt, &marker]() { exec_bm(sched4_mt, "bifurcated-graph BFS-sched (multi-threaded)", marker); };
 
-    gr::scheduler::BreadthFirst<multiThreaded, Profiler> sched4_mt_prof(test_graph_bifurcated<T>(N_NODES));
+    gr::scheduler::BreadthFirst<multiThreaded, Profiler> sched4_mt_prof;
+    if (auto ret = sched4_mt_prof.exchange(test_graph_bifurcated<T>(N_NODES)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     "bifurcated graph - BFS scheduler (multi-threaded) with profiling"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched4_mt_prof, &marker]() { exec_bm(sched4_mt_prof, "bifurcated-graph BFS-sched (multi-threaded) with profiling", marker); };
 
     ::benchmark::results::add_separator();
@@ -260,20 +287,35 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
     "scheduler topology loop"_test = [](GraphTopology topology) {
         const std::string topologyName(magic_enum::enum_name(topology));
 
-        gr::scheduler::Simple simple(createInstrumentalisedGraph<T>(topology));
+        gr::scheduler::Simple simple;
+        if (auto ret = simple.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         printGraphTopology(simple.graph(), topology);
         ::benchmark::benchmark(std::format("Simple scheduler - unlimited work - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&simple](TestMarker& marker) { exec_bm(simple, "test case #1", marker); };
 
-        gr::scheduler::DepthFirst depthFirstSched1(createInstrumentalisedGraph<T>(topology));
+        gr::scheduler::DepthFirst depthFirstSched1;
+        if (auto ret = depthFirstSched1.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         ::benchmark::benchmark(std::format("DFS scheduler - unlimited work - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&depthFirstSched1](TestMarker& marker) { exec_bm(depthFirstSched1, "test case #1", marker); };
 
-        gr::scheduler::BreadthFirst breathFirstSched1(createInstrumentalisedGraph<T>(topology));
+        gr::scheduler::BreadthFirst breathFirstSched1;
+        if (auto ret = breathFirstSched1.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         ::benchmark::benchmark(std::format("BFS scheduler - unlimited work - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&breathFirstSched1](TestMarker& marker) { exec_bm(breathFirstSched1, "test case #2", marker); };
 
-        gr::scheduler::DepthFirst depthFirstSched2(createInstrumentalisedGraph<T>(topology), {{"max_work_items", 1024UZ}});
+        gr::scheduler::DepthFirst depthFirstSched2({{"max_work_items", 1024UZ}});
+        if (auto ret = depthFirstSched2.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         ::benchmark::benchmark(std::format("DFS scheduler - work limited to 1024 - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&depthFirstSched2](TestMarker& marker) { exec_bm(depthFirstSched2, "test case #2", marker); };
 
-        gr::scheduler::BreadthFirst breathFirstSched2(createInstrumentalisedGraph<T>(topology), {{"max_work_items", 1024UZ}});
+        gr::scheduler::BreadthFirst breathFirstSched2({{"max_work_items", 1024UZ}});
+        if (auto ret = breathFirstSched2.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         ::benchmark::benchmark(std::format("BFS scheduler - work limited to 1024 - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&breathFirstSched2](TestMarker& marker) { exec_bm(breathFirstSched2, "test case #2", marker); };
 
         ::benchmark::results::add_separator();
