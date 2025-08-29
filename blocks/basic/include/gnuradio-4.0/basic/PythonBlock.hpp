@@ -4,6 +4,7 @@
 #include "PythonInterpreter.hpp"
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
 // Forward declaration of PythonBlock method definition, needed for CPython's C-API wrapping
