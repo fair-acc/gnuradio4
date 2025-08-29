@@ -75,39 +75,70 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         const auto blockType = getOrThrow(getProperty<std::string>(grcBlock, "id"sv));
 
         if (blockType == "SUBGRAPH") {
-            const std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
-            createdBlocks[blockName]                    = subGraph;
-            subGraph->setName(blockName);
+            auto loadGraph = [&grcBlock, &loader, &location](auto graphWrapper) {
+                const auto& graphData = std::get<property_map>(grcBlock["graph"]);
+                gr::Graph&  graph     = *graphWrapper->graph();
+                loadGraphFromMap(loader, graph, graphData);
 
-            auto* subGraphDirect = static_cast<GraphWrapper<gr::Graph>*>(subGraph.get());
-            subGraphDirect->setName(blockName);
+                const auto& exportedPorts = std::get<std::vector<pmtv::pmt>>(graphData.at("exported_ports"));
+                for (const auto& exportedPort_ : exportedPorts) {
+                    auto exportedPort = std::get<std::vector<pmtv::pmt>>(exportedPort_);
+                    if (exportedPort.size() != 3) {
+                        throw std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
+                    }
 
-            const auto& graphData = std::get<property_map>(grcBlock["graph"]);
-            loadGraphFromMap(loader, subGraphDirect->blockRef(), graphData);
+                    std::string requiredBlockName = std::get<std::string>(exportedPort[0]);
+                    std::string blockUniqueName;
+                    for (auto& b : graph.blocks()) {
+                        if (b->name() == requiredBlockName) {
+                            blockUniqueName = b->uniqueName();
+                        }
+                    }
+                    if (blockUniqueName.empty()) {
+                        throw gr::exception(std::format("Required Block {} not found in:\n{}", requiredBlockName, gr::graph::format(graph)), location);
+                    }
 
-            const auto& exportedPorts = std::get<std::vector<pmtv::pmt>>(graphData.at("exported_ports"));
-            for (const auto& exportedPort_ : exportedPorts) {
-                auto exportedPort = std::get<std::vector<pmtv::pmt>>(exportedPort_);
-                if (exportedPort.size() != 3) {
-                    throw std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
+                    graphWrapper->exportPort(true,
+                        /* block's unique name */ blockUniqueName,
+                        /* port direction */ std::get<std::string>(exportedPort[1]) == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT,
+                        /* port name */ std::get<std::string>(exportedPort[2]));
                 }
+            };
 
-                std::string requiredBlockName = std::get<std::string>(exportedPort[0]);
-                std::string blockUniqueName;
-                for (auto& b : subGraphDirect->blockRef().blocks()) {
-                    if (b->name() == requiredBlockName) {
-                        blockUniqueName = b->uniqueName();
+            auto       schedulerIt = grcBlock.find("scheduler");
+            const bool isManaged   = schedulerIt != grcBlock.end();
+
+            if (isManaged) {
+                auto schedulerPmt = std::get<property_map>(schedulerIt->second);
+                auto schedulerId  = getOrThrow(getProperty<std::string>(schedulerPmt, "id"sv));
+
+                property_map schedulerParams;
+                if (auto paramsIt = schedulerPmt.find("parameters"); paramsIt != schedulerPmt.end()) {
+                    if (auto* params = std::get_if<property_map>(&paramsIt->second)) {
+                        schedulerParams = *params;
                     }
                 }
-                if (blockUniqueName.empty()) {
-                    throw gr::exception(std::format("Required Block {} not found in:\n{}", requiredBlockName, gr::graph::format(subGraphDirect->blockRef())), location);
+
+                auto scheduler = loader.instantiateScheduler(schedulerId, schedulerParams);
+                if (!scheduler) {
+                    throw std::format("Unable to create scheduler of type '{}'", schedulerId);
                 }
 
-                subGraphDirect->exportPort(true,
-                    /* block's unique name */ blockUniqueName,
-                    /* port direction */ std::get<std::string>(exportedPort[1]) == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT,
-                    /* port name */ std::get<std::string>(exportedPort[2]));
+                auto schedulerBlock = SchedulerModel::asBlockModelPtr(scheduler);
+                resultGraph.addBlock(schedulerBlock);
+                createdBlocks[blockName] = schedulerBlock;
+                schedulerBlock->setName(blockName);
+
+                loadGraph(schedulerBlock);
+
+            } else {
+                const std::shared_ptr<BlockModel>& subGraph = resultGraph.addBlock(std::make_shared<GraphWrapper<gr::Graph>>());
+                createdBlocks[blockName]                    = subGraph;
+                subGraph->setName(blockName);
+
+                loadGraph(static_cast<GraphWrapper<gr::Graph>*>(subGraph.get()));
             }
+
         } else {
             auto currentBlock = loader.instantiate(blockType);
             if (!currentBlock) {
@@ -215,30 +246,36 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
         serializedBlocks.reserve(nBlocks);
         gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel>& block) {
             property_map map;
-            const auto&  fullTypeName = loader.registry().typeName(block);
-            if (fullTypeName == "gr::Graph") {
+
+            if (gr::Graph* subgraph = block->graph()) {
                 map.emplace("id"s, "SUBGRAPH"s);
                 map["unique_name"s] = std::string(block->uniqueName());
                 map["name"s]        = std::string(block->name());
 
-                auto* subGraphDirect = dynamic_cast<const GraphWrapper<gr::Graph>*>(block.get());
-                if (subGraphDirect == nullptr) {
-                    throw gr::Error(std::format("Can not serialize gr::Graph-based subgraph {} which is not added to the parent graph {} via GraphWrapper", block->uniqueName(), rootGraph.unique_name));
-                }
-                property_map graphYaml = detail::saveGraphToMap(loader, subGraphDirect->blockRef());
+                property_map graphYaml = detail::saveGraphToMap(loader, *subgraph);
 
-                const std::size_t      nExportedPorts = subGraphDirect->exportedInputPortsForBlock().size() + subGraphDirect->exportedOutputPortsForBlock().size();
+                const std::size_t      nExportedPorts = block->exportedInputPorts().size() + block->exportedOutputPorts().size();
                 std::vector<pmtv::pmt> exportedPortsData;
                 exportedPortsData.reserve(nExportedPorts);
-                for (const auto& [blockName, portName] : subGraphDirect->exportedInputPortsForBlock()) {
+                for (const auto& [blockName, portName] : block->exportedInputPorts()) {
                     exportedPortsData.push_back(std::vector<pmtv::pmt>{blockName, "INPUT"s, portName});
                 }
-                for (const auto& [blockName, portName] : subGraphDirect->exportedOutputPortsForBlock()) {
+                for (const auto& [blockName, portName] : block->exportedOutputPorts()) {
                     exportedPortsData.push_back(std::vector<pmtv::pmt>{blockName, "OUTPUT"s, portName});
                 }
 
                 graphYaml["exported_ports"s] = std::move(exportedPortsData);
                 map.emplace("graph"s, std::move(graphYaml));
+
+                // TODO: a unit-test that this is working
+                auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get());
+
+                if (schedulerModel != nullptr) {
+                    property_map schedulerMap;
+                    schedulerMap["id"s] = loader.schedulerRegistry().typeName(block);
+                    // TODO: schedulerMap["parameters"s] =
+                    map["scheduler"s] = std::move(schedulerMap);
+                }
 
             } else {
                 map = serializeBlock(loader, block, BlockSerializationFlags::All & (~BlockSerializationFlags::Ports));

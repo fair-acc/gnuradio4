@@ -252,6 +252,8 @@ public:
     }
 
     [[nodiscard]] const gr::Graph& graph() const noexcept { return *_graph; }
+    [[nodiscard]] gr::Graph&       graph() noexcept { return *_graph; }
+
     [[nodiscard]] const TProfiler& profiler() const noexcept { return _profiler; }
 
     [[nodiscard]] bool isProcessing() const
@@ -261,6 +263,11 @@ public:
     }
 
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
+
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _graph->blocks(); }
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _graph->blocks(); }
+    [[nodiscard]] std::span<Edge>                              edges() noexcept { return _graph->edges(); }
+    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return _graph->edges(); }
 
     void connectBlockMessagePorts() {
         const auto available = _graph->msgIn.streamReader().available();
@@ -1002,6 +1009,8 @@ protected:
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
 struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Simple loop based Scheduler, which iterates over all blocks in the order they have beein defined and emplaced definition in the graph.)"">;
+
+    using SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>::SchedulerBase;
 
     void customInit() {
         [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("scheduler_simple.init");
