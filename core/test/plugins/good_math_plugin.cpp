@@ -1,7 +1,10 @@
 #include <charconv>
+#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/Plugin.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/SchedulerModel.hpp>
 
 GR_PLUGIN("Good Math Plugin", "Unknown", "MIT", "v1")
 
@@ -80,3 +83,17 @@ static_assert(bts::stream_output_ports<good::multiply<float>>::size == 1);
 static_assert(std::is_same_v<bts::stream_output_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
 
 auto registerDivide = gr::registerBlock<good::divide, float, double>(static_cast<gr::BlockRegistry&>(grPluginInstance()));
+
+namespace good {
+
+class GoodMathScheduler : public gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> {
+public:
+    explicit GoodMathScheduler(const gr::property_map& = {}) : gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>({}) {}
+};
+
+} // namespace good
+
+auto registerGoodMathScheduler = [](auto& registry) {
+    registry.template insert<good::GoodMathScheduler>();
+    return true;
+}(static_cast<gr::SchedulerRegistry&>(grPluginInstance()));

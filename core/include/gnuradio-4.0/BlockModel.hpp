@@ -11,6 +11,7 @@
 
 namespace gr {
 class BlockModel;
+struct Graph;
 
 struct PortDefinition {
     struct IndexBased {
@@ -504,6 +505,12 @@ public:
     [[nodiscard]] virtual std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept = 0;
 
     [[nodiscard]] virtual void* raw() = 0;
+
+    // Common interface between managed and unmanaged graphs
+    [[nodiscard]] virtual gr::Graph*                                        graph()                                                                                                                                                                                    = 0;
+    [[nodiscard]] virtual std::unordered_multimap<std::string, std::string> exportedInputPorts()                                                                                                                                                                       = 0;
+    [[nodiscard]] virtual std::unordered_multimap<std::string, std::string> exportedOutputPorts()                                                                                                                                                                      = 0;
+    virtual void                                                            exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) = 0;
 };
 
 namespace serialization_fields {
@@ -720,22 +727,6 @@ protected:
     T           _block;
     std::string _type_name = gr::meta::type_name<T>();
 
-    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
-    [[nodiscard]] constexpr auto& blockRef() noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
     void initMessagePorts() {
         msgIn  = std::addressof(_block.msgIn);
         msgOut = std::addressof(_block.msgOut);
@@ -789,13 +780,41 @@ public:
         _dynamicPortsLoader.instance = this;
     }
 
+    template<typename Arg, typename... Args>
+    requires(not std::is_same_v<std::remove_cvref_t<Arg>, gr::property_map> or sizeof...(Args) > 0)
+    explicit BlockWrapper(Arg&& arg, Args&&... args) : _block(std::forward<Arg>(arg), std::forward<Args>(args)...) {
+        initMessagePorts();
+        _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
+        _dynamicPortsLoader.instance = this;
+    }
+
     BlockWrapper(const BlockWrapper& other)            = delete;
     BlockWrapper(BlockWrapper&& other)                 = delete;
     BlockWrapper& operator=(const BlockWrapper& other) = delete;
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
     ~BlockWrapper() override                           = default;
 
-    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override { return blockRef().init(progress, ioThreadPool); }
+    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override {
+        if constexpr (requires { blockRef().init(progress, ioThreadPool); }) {
+            return blockRef().init(progress, ioThreadPool);
+        }
+    }
+
+    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
+
+    [[nodiscard]] constexpr auto& blockRef() noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 
@@ -879,6 +898,12 @@ public:
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
+
+    // Common interface between managed and unmanaged graphs
+    [[nodiscard]] gr::Graph*                                        graph() override { return nullptr; }
+    [[nodiscard]] std::unordered_multimap<std::string, std::string> exportedInputPorts() override { return {}; }
+    [[nodiscard]] std::unordered_multimap<std::string, std::string> exportedOutputPorts() override { return {}; }
+    void                                                            exportPort(bool, const std::string&, PortDirection, const std::string&, std::source_location = std::source_location::current()) override {}
 };
 
 namespace detail {

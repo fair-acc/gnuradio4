@@ -33,24 +33,31 @@ public:
 
     virtual std::vector<std::string>        availableBlocks() const                                            = 0;
     virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const gr::property_map& params) = 0;
+
+    virtual std::vector<std::string>            availableSchedulers() const                                           = 0;
+    virtual std::unique_ptr<gr::SchedulerModel> createScheduler(std::string_view name, const gr::property_map& param) = 0;
 };
 
 namespace gr {
 template<std::uint8_t ABI_VERSION = GR_PLUGIN_CURRENT_ABI_VERSION>
 class plugin : public gr_plugin_base {
 private:
-    gr::BlockRegistry registry;
+    gr::BlockRegistry     registry;
+    gr::SchedulerRegistry schedulerRegistry;
 
 public:
     plugin() {}
 
     std::uint8_t abiVersion() const override { return ABI_VERSION; }
 
-    std::vector<std::string> availableBlocks() const override { return registry.keys(); }
-
+    std::vector<std::string>        availableBlocks() const override { return registry.keys(); }
     std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const property_map& params) override { return registry.create(name, params); }
 
+    std::vector<std::string>            availableSchedulers() const override { return schedulerRegistry.keys(); }
+    std::unique_ptr<gr::SchedulerModel> createScheduler(std::string_view name, const property_map& params) override { return schedulerRegistry.create(name, params); }
+
     operator gr::BlockRegistry&() { return registry; }
+    operator gr::SchedulerRegistry&() { return schedulerRegistry; }
 };
 
 } // namespace gr
