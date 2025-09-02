@@ -6,8 +6,9 @@
 using paths = std::vector<std::filesystem::path>;
 
 struct TestContext {
-    gr::BlockRegistry registry;
-    gr::PluginLoader  loader;
+    gr::BlockRegistry     registry;
+    gr::SchedulerRegistry schedulerRegistry;
+    gr::PluginLoader      loader;
 
     template<typename... Args>
     gr::BlockRegistry initRegistry(Args*... args) {
@@ -17,5 +18,5 @@ struct TestContext {
     }
 
     template<typename... Args>
-    TestContext(std::vector<std::filesystem::path> pluginPaths, Args*... args) : registry(initRegistry(args...)), loader(registry, std::move(pluginPaths)) {}
+    TestContext(std::vector<std::filesystem::path> pluginPaths, Args*... args) : registry(initRegistry(args...)), loader(registry, schedulerRegistry, std::move(pluginPaths)) {}
 };

@@ -1,4 +1,4 @@
-add_library(gnuradio-core STATIC src/PmtTypeHelpers.cpp)
+add_library(gnuradio-core STATIC src/PmtTypeHelpers.cpp  src/Graph.cpp src/PluginLoader.cpp)
 
 set(public_headers
     include/gnuradio-4.0/annotated.hpp
