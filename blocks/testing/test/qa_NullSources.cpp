@@ -136,6 +136,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         if (auto ret = sch.exchange(std::move(g)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
+        expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
 
