@@ -197,7 +197,7 @@ def process_bulk(ins, outs):
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
 
-        bool              throws = false;
+        bool throws = false;
         try {
             expect(sched.runAndWait().has_value());
         } catch (const std::exception& ex) {

@@ -179,19 +179,6 @@ public:
         std::ignore = this->settings().applyStagedParameters();
     }
 
-    // explicit SchedulerBase(gr::Graph&& graph, std::string_view defaultPoolName, const profiling::Options& profiling_options = {}) //
-    //     : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
-    //     registerPropertyCallbacks();
-    // }
-    //
-    // explicit SchedulerBase(gr::Graph&& graph, property_map initialSettings, std::string_view defaultPoolName = gr::thread_pool::kDefaultCpuPoolId) //
-    //     : base_t(initialSettings), _graph(std::move(graph)), _profiler{{}}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
-    //     registerPropertyCallbacks();
-    //     std::ignore = this->settings().set(initialSettings);
-    //     std::ignore = this->settings().activateContext();
-    //     std::ignore = this->settings().applyStagedParameters();
-    // }
-
     ~SchedulerBase() {
         if (this->state() == lifecycle::RUNNING) {
             if (auto e = this->changeStateTo(lifecycle::REQUESTED_STOP); !e) {
@@ -279,7 +266,7 @@ public:
         const auto available = _graph.msgIn.streamReader().available();
         if (available != 0UZ) {
             ReaderSpanLike auto msgInSpan = _graph.msgIn.streamReader().get<SpanReleasePolicy::ProcessAll>(available);
-            _pendingMessagesToChildren.append_range(msgInSpan);
+            _pendingMessagesToChildren.insert(_pendingMessagesToChildren.end(), msgInSpan.begin(), msgInSpan.end());
         }
 
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
@@ -529,13 +516,11 @@ protected:
 
         std::vector<std::shared_ptr<BlockModel>> localBlockList;
         {
-            std::lock_guard lock(_executionOrderMutex);
             assert(jobList->size() > runnerID);
+            std::lock_guard                          lock(_executionOrderMutex);
             std::vector<std::shared_ptr<BlockModel>> blocks = jobList->at(runnerID);
             localBlockList.reserve(blocks.size());
-            for (const auto& block : blocks) {
-                localBlockList.push_back(block);
-            }
+            std::ranges::copy(blocks, std::back_inserter(localBlockList));
         }
 
         [[maybe_unused]] auto currentProgress    = this->_graph.progress().value();
@@ -561,7 +546,7 @@ protected:
 
                 adoptBlocks(runnerID, localBlockList);
 
-                std::ranges::for_each(localBlockList, [](auto& block) { block->processScheduledMessages(); });
+                std::ranges::for_each(localBlockList, &BlockModel::processScheduledMessages);
                 activeState = this->state();
                 msgToCount++;
             } else {
@@ -959,32 +944,6 @@ protected:
                     this->emitErrorMessage("propertyCallbackGraphGRC", "Failed to exchange graph");
                     return {};
                 }
-                // switch (originalState) {
-                // case RUNNING:
-                // case REQUESTED_PAUSE:
-                // case PAUSED: //
-                //     this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(REQUESTED_STOP));
-                //     this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> STOPPED", this->changeStateTo(STOPPED));
-                //     break;
-                // case REQUESTED_STOP:
-                // case INITIALISED: //
-                //     this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(STOPPED));
-                //     break;
-                // case IDLE:
-                //     assert(false); // doesn't happen
-                //     break;
-                // case STOPPED:
-                // case ERROR: break;
-                // default:;
-                // }
-                //
-                // _graph = std::move(newGraph);
-                //
-                // // Now ideally we'd just restart the Scheduler, but we can't since we're processing a message inside a working thread.
-                // // When the scheduler starts running it asserts that _nRunningJobs is 0, so we can't start it now, we're in the job.
-                // // We need to let poolWorker() unwind, decrement _nRunningJobs and then move scheduler to its original value.
-                // // Alternatively, we could forbid kGraphGRC unless Scheduler was in STOPPED state. That would simplify logic, but
-                // // put more burden on the client.
 
                 message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
             } catch (const std::exception& e) {
