@@ -276,6 +276,12 @@ public:
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
     void connectBlockMessagePorts() {
+        const auto available = _graph.msgIn.streamReader().available();
+        if (available != 0UZ) {
+            ReaderSpanLike auto msgInSpan = _graph.msgIn.streamReader().get<SpanReleasePolicy::ProcessAll>(available);
+            _pendingMessagesToChildren.append_range(msgInSpan);
+        }
+
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
