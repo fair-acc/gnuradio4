@@ -229,7 +229,7 @@ public:
             reset(); // reset internal states
         }
 
-        auto oldGraph = std::exchange(_graph, std::forward<Graph>(newGraph));
+        auto oldGraph = std::exchange(_graph, std::move(newGraph));
 
         if ((option != profiling::Options{})) { // need to update profiler
             rebuildProfiler(option);
@@ -238,9 +238,6 @@ public:
         if (_pool->name() != defaultPoolName) { // need to update thread pool
             _pool = gr::thread_pool::Manager::instance().get(defaultPoolName);
         }
-
-        init(); // re-initialize scheduler
-        assert(this->state() == IDLE);
 
         // restore the original lifecycle state
         if (lifecycle::isActive(oldState)) {
@@ -469,9 +466,16 @@ protected:
     }
 
     void start() {
+        using enum gr::lifecycle::State;
+
         disconnectAllEdges();
         if (auto result = connectPendingEdges(); !result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
+        }
+        if (this->state() == IDLE) {
+            if (auto result = this->changeStateTo(INITIALISED); !result) { // Need to go to INITIALISED first
+                return std::unexpected(result.error());
+            }
         }
 
         std::lock_guard lock(_executionOrderMutex);
