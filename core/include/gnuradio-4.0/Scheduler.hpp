@@ -476,11 +476,11 @@ protected:
 
         disconnectAllEdges();
         if (auto result = connectPendingEdges(); !result) {
-            this->emitErrorMessage("init()", "Failed to connect blocks in graph");
+            this->emitErrorMessage("start()", "Failed to connect blocks in graph");
         }
         if (this->state() == IDLE) {
             if (auto result = this->changeStateTo(INITIALISED); !result) { // Need to go to INITIALISED first
-                return std::unexpected(result.error());
+                this->emitErrorMessage("start()", result.error());
             }
         }
 
