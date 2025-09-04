@@ -430,8 +430,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         "runtime   src->sink overhead"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
@@ -444,8 +446,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(cpy)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(cpy).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         "runtime   src->copy->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
@@ -468,8 +472,10 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         "runtime   src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
@@ -486,8 +492,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b2).to<"in">(b3)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b3).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         "runtime   src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     }
 
@@ -504,8 +512,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&sched]() { invoke_work(sched); };
     };
     templated_cascaded_test(static_cast<float>(2.0), "runtime   src->mult(2.0)->div(2.0)->add(-1)->sink - float");
@@ -536,8 +546,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         }
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             bm::test::n_samples_produced = 0LU;
             bm::test::n_samples_consumed = 0LU;
@@ -567,8 +579,10 @@ inline const boost::ut::suite _simd_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult2).to<"in">(add1)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         "runtime   src->mult(2.0)->mult(0.5)->add(-1)->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             bm::test::n_samples_produced = 0LU;
             bm::test::n_samples_consumed = 0LU;
@@ -603,8 +617,10 @@ inline const boost::ut::suite _simd_tests = [] {
         }
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         "runtime   src->(mult(2.0)->mult(0.5)->add(-1))^10->sink (SIMD)"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             bm::test::n_samples_produced = 0LU;
             bm::test::n_samples_consumed = 0LU;
@@ -636,7 +652,10 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&testGraph]() {
             bm::test::n_samples_produced = 0LU;
             bm::test::n_samples_consumed = 0LU;
-            gr::scheduler::Simple sched{std::move(testGraph)};
+            gr::scheduler::Simple sched;
+            if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
             expect(sched.runAndWait().has_value());
             expect(eq(bm::test::n_samples_produced, N_SAMPLES)) << "did not produce enough output samples";
             expect(eq(bm::test::n_samples_consumed, N_SAMPLES)) << "did not consume enough input samples";
@@ -658,8 +677,10 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
-
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&sched]() {
             bm::test::n_samples_produced = 0LU;
             bm::test::n_samples_consumed = 0LU;

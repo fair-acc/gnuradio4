@@ -546,7 +546,6 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
 void interpolation_decimation_test(const IntDecTestData& data) {
     using namespace boost::ut;
     using namespace gr::testing;
-    using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
     auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
@@ -561,7 +560,11 @@ void interpolation_decimation_test(const IntDecTestData& data) {
         int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
     }
 
-    auto sched = scheduler(std::move(flow));
+    gr::scheduler::Simple<> sched;
+    ;
+    if (auto ret = sched.exchange(std::move(flow)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     expect(sched.runAndWait().has_value());
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
@@ -573,7 +576,6 @@ void stride_test(const StrideTestData& data) {
     using namespace boost::ut;
     using namespace gr::testing;
     using namespace gr::test;
-    using scheduler = gr::scheduler::Simple<>;
 
     const bool write_to_vector{data.exp_in_vector.size() != 0};
 
@@ -591,7 +593,11 @@ void stride_test(const StrideTestData& data) {
         int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
     }
 
-    auto sched = scheduler(std::move(flow));
+    gr::scheduler::Simple<> sched;
+    ;
+    if (auto ret = sched.exchange(std::move(flow)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     expect(sched.runAndWait().has_value());
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
@@ -624,7 +630,10 @@ void syncOrAsyncTest() {
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(tagSrc).to<"in">(asyncBlock))) << testInfo;
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(asyncBlock).template to<"in">(sink))) << testInfo;
 
-    scheduler::Simple sched{std::move(testGraph)};
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     expect(sched.runAndWait().has_value()) << testInfo;
     expect(eq(n_samples, sink._nSamplesProduced)) << testInfo;
 }
@@ -779,7 +788,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(intDecBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(intDecBlock).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(intDecBlock.status.process_counter, 2UZ));
@@ -829,7 +841,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#2"s, *sinks[2], "in"s)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#3"s, *sinks[3], "in"s)));
 
-        gr::scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
@@ -874,7 +889,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#2"s, *sinks[2], "in"s)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#3"s, *sinks[3], "in"s)));
 
-        gr::scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
@@ -1058,8 +1076,10 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto scheduler = scheduler::Simple(std::move(flow));
-
+        gr::scheduler::Simple scheduler;
+        if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto client = gr::test::thread_pool::execute("qa_Block::Client", [&scheduler] {
             const auto startTime = std::chrono::steady_clock::now();
             auto       isExpired = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };

@@ -306,7 +306,10 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto sched                                        = scheduler{std::move(flow)};
+        scheduler sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
         auto retVal = sched.runAndWait();
@@ -347,8 +350,10 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(sink1)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 1>(source).to<"in">(sink2)));
 
-        auto sched = scheduler{std::move(flow)};
-
+        scheduler sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
         auto retVal = sched.runAndWait();

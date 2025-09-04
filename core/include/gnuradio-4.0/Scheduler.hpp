@@ -87,16 +87,31 @@ struct SchedulerBase : Block<Derived> {
     using TaskExecutor = gr::thread_pool::TaskExecutor;
     using enum block::Category;
 
+private:
+    static consteval void _forbid_reserved_overrides() {
+        using Base = SchedulerBase<Derived, execution, TProfiler>;
+        // Lifecycle callback functions init/start/stop/pause/resume/reset need to remain reserved to SchedulerBase<Derived, ...>.
+        // Do NOT re-implement them in the Derived custom user-defined scheduler.
+        static_assert(std::same_as<decltype(&Derived::init), decltype(&Base::init)>, "Derived defines 'init()' (reserved). Use 'customInit()' instead.");
+        static_assert(std::same_as<decltype(&Derived::start), decltype(&Base::start)>, "Derived defines 'start()' (reserved). Use 'customStart()' instead.");
+        static_assert(std::same_as<decltype(&Derived::stop), decltype(&Base::stop)>, "Derived defines 'stop()' (reserved). Use 'customStop()' instead.");
+        static_assert(std::same_as<decltype(&Derived::pause), decltype(&Base::pause)>, "Derived defines 'pause()' (reserved). Use 'customPause()' instead.");
+        static_assert(std::same_as<decltype(&Derived::resume), decltype(&Base::resume)>, "Derived defines 'resume()' (reserved). Use 'customResume()' instead.");
+        static_assert(std::same_as<decltype(&Derived::reset), decltype(&Base::reset)>, "Derived defines 'reset()' (reserved). Use 'customReset()' instead.");
+    }
+
 protected:
-    std::atomic_bool                    _valid{true};
-    std::atomic<std::size_t>            _nWatchdogsRunning{0};
-    gr::Graph                           _graph;
-    TProfiler                           _profiler;
-    decltype(_profiler.forThisThread()) _profilerHandler;
-    std::shared_ptr<TaskExecutor>       _pool;
-    std::shared_ptr<gr::Sequence>       _nRunningJobs = std::make_shared<gr::Sequence>();
-    std::recursive_mutex                _executionOrderMutex; // only used when modifying and copying the graph->local job list
-    std::shared_ptr<JobLists>           _executionOrder = std::make_shared<JobLists>();
+    using ProfileHandle = decltype(std::declval<TProfiler&>().forThisThread());
+
+    std::atomic_bool              _valid{true};
+    std::atomic<std::size_t>      _nWatchdogsRunning{0};
+    gr::Graph                     _graph{};
+    TProfiler                     _profiler{};
+    ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
+    std::shared_ptr<TaskExecutor> _pool{gr::thread_pool::Manager::instance().defaultCpuPool()};
+    std::shared_ptr<gr::Sequence> _nRunningJobs = std::make_shared<gr::Sequence>();
+    std::recursive_mutex          _executionOrderMutex; // only used when modifying and copying the graph->local job list
+    std::shared_ptr<JobLists>     _executionOrder = std::make_shared<JobLists>();
 
     std::mutex                               _zombieBlocksMutex;
     std::vector<std::shared_ptr<BlockModel>> _zombieBlocks;
@@ -113,13 +128,21 @@ protected:
 
     std::atomic_flag _processingScheduledMessages;
 
+    void rebuildProfiler(const profiling::Options& opt) {
+        std::destroy_at(std::addressof(_profiler));
+        std::construct_at(std::addressof(_profiler), opt);
+        _profilerHandler = _profiler.forThisThread();
+    }
+
     void registerPropertyCallbacks() noexcept {
-        this->propertyCallbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
-        this->propertyCallbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
-        this->propertyCallbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
-        this->propertyCallbacks[scheduler::property::kEmplaceEdge]  = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
-        this->propertyCallbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
-        this->propertyCallbacks[scheduler::property::kGraphGRC]     = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
+        _forbid_reserved_overrides();
+        auto& callbacks                               = this->propertyCallbacks;
+        callbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
+        callbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
+        callbacks[scheduler::property::kEmplaceEdge]  = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
+        callbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
+        callbacks[scheduler::property::kGraphGRC]     = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
         this->settings().updateActiveParameters();
     }
 
@@ -140,22 +163,25 @@ public:
 
     [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
 
-    explicit SchedulerBase(gr::Graph&& graph, std::string_view defaultPoolName, const profiling::Options& profiling_options = {}) //
-        : _graph(std::move(graph)), _profiler{profiling_options}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
+    SchedulerBase() : base_t(gr::property_map()) { registerPropertyCallbacks(); }
+
+    SchedulerBase(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : base_t(initParameter) {
         registerPropertyCallbacks();
+        std::ignore = this->settings().set(initParameter);
+        std::ignore = this->settings().activateContext();
+        std::ignore = this->settings().applyStagedParameters();
     }
 
-    explicit SchedulerBase(gr::Graph&& graph, property_map initialSettings, std::string_view defaultPoolName = gr::thread_pool::kDefaultCpuPoolId) //
-        : base_t(initialSettings), _graph(std::move(graph)), _profiler{{}}, _profilerHandler{_profiler.forThisThread()}, _pool(gr::thread_pool::Manager::instance().get(defaultPoolName)) {
+    explicit SchedulerBase(property_map initParameters) noexcept(false) : base_t(initParameters) {
         registerPropertyCallbacks();
-        std::ignore = this->settings().set(initialSettings);
+        std::ignore = this->settings().set(initParameters);
         std::ignore = this->settings().activateContext();
         std::ignore = this->settings().applyStagedParameters();
     }
 
     ~SchedulerBase() {
         if (this->state() == lifecycle::RUNNING) {
-            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+            if (auto e = this->changeStateTo(lifecycle::REQUESTED_STOP); !e) {
                 std::println(std::cerr, "Failed to stop execution at destruction of scheduler: {} ({})", e.error().message, e.error().srcLoc());
                 std::abort();
             }
@@ -172,6 +198,59 @@ public:
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
 
+    [[nodiscard]] std::expected<gr::Graph, Error> exchange(gr::Graph&& newGraph, std::string_view defaultPoolName = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& option = {}) {
+        using enum lifecycle::State;
+        const auto oldState = this->state();
+        if (lifecycle::isActive(oldState)) { // need to stop running scheduler
+            if (auto result = this->changeStateTo(REQUESTED_STOP); !result) {
+                return std::unexpected(result.error());
+            }
+            waitDone(); // wait for all jobs to complete
+
+            if (auto result = this->changeStateTo(STOPPED); !result) {
+                return std::unexpected(result.error());
+            }
+        }
+
+        if (this->state() == ERROR || this->state() == STOPPED) {
+            reset(); // reset internal states
+        }
+
+        auto oldGraph = std::exchange(_graph, std::move(newGraph));
+
+        if ((option != profiling::Options{})) { // need to update profiler
+            rebuildProfiler(option);
+        }
+
+        if (_pool->name() != defaultPoolName) { // need to update thread pool
+            _pool = gr::thread_pool::Manager::instance().get(defaultPoolName);
+        }
+
+        // restore the original lifecycle state
+        if (lifecycle::isActive(oldState)) {
+            if (auto result = this->changeStateTo(INITIALISED); !result) { // Need to go to INITIALISED first
+                return std::unexpected(result.error());
+            }
+            if (auto result = this->changeStateTo(RUNNING); !result) {
+                return std::unexpected(result.error());
+            }
+
+            if (oldState == REQUESTED_PAUSE) {
+                if (auto result = this->changeStateTo(REQUESTED_PAUSE); !result) {
+                    return std::unexpected(result.error());
+                }
+            } else if (oldState == PAUSED) {
+                if (auto result = this->changeStateTo(REQUESTED_PAUSE); !result) {
+                    return std::unexpected(result.error());
+                }
+                if (auto result = this->changeStateTo(PAUSED); !result) {
+                    return std::unexpected(result.error());
+                }
+            }
+        }
+        return oldGraph;
+    }
+
     [[nodiscard]] const gr::Graph& graph() const noexcept { return _graph; }
     [[nodiscard]] const TProfiler& profiler() const noexcept { return _profiler; }
 
@@ -184,6 +263,12 @@ public:
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
     void connectBlockMessagePorts() {
+        const auto available = _graph.msgIn.streamReader().available();
+        if (available != 0UZ) {
+            ReaderSpanLike auto msgInSpan = _graph.msgIn.streamReader().get<SpanReleasePolicy::ProcessAll>(available);
+            _pendingMessagesToChildren.insert(_pendingMessagesToChildren.end(), msgInSpan.begin(), msgInSpan.end());
+        }
+
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
         std::ignore            = _toChildMessagePort.connect(_graph.msgIn);
         _graph.msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
@@ -212,7 +297,7 @@ public:
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
                 if (_messagePortsConnected) {
                     WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(1UZ);
-                    msgSpan[0]                  = std::move(msg);
+                    msgSpan[0]                  = msg;
                 } else {
                     // if not yet connected, keep messages to children in cache and forward when connecting
                     _pendingMessagesToChildren.push_back(msg);
@@ -262,21 +347,22 @@ public:
     }
 
     std::expected<void, Error> runAndWait() {
-        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("scheduler_base.runAndWait");
+        using enum lifecycle::State;
+        [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("scheduler_base.runAndWait");
         processScheduledMessages(); // make sure initial subscriptions are processed
-        if (this->state() == lifecycle::State::STOPPED || this->state() == lifecycle::State::ERROR) {
-            if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
+        if (this->state() == STOPPED || this->state() == ERROR) {
+            if (auto e = this->changeStateTo(INITIALISED); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
                 return std::unexpected(e.error());
             }
         }
-        if (this->state() == lifecycle::State::IDLE) {
-            if (auto e = this->changeStateTo(lifecycle::State::INITIALISED); !e) {
+        if (this->state() == IDLE) {
+            if (auto e = this->changeStateTo(INITIALISED); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
                 return std::unexpected(e.error());
             }
         }
-        if (auto e = this->changeStateTo(lifecycle::State::RUNNING); !e) {
+        if (auto e = this->changeStateTo(RUNNING); !e) {
             this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
             return std::unexpected(e.error());
         }
@@ -287,14 +373,14 @@ public:
         waitDone();
         processScheduledMessages();
 
-        if (this->state() == lifecycle::State::RUNNING) {
-            if (auto e = this->changeStateTo(lifecycle::State::REQUESTED_STOP); !e) {
+        if (this->state() == RUNNING) {
+            if (auto e = this->changeStateTo(REQUESTED_STOP); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
                 return std::unexpected(e.error());
             }
         }
-        if (this->state() == lifecycle::State::REQUESTED_STOP) {
-            if (auto e = this->changeStateTo(lifecycle::State::STOPPED); !e) {
+        if (this->state() == REQUESTED_STOP) {
+            if (auto e = this->changeStateTo(STOPPED); !e) {
                 this->emitErrorMessage("runAndWait() -> LifecycleState", e.error());
             }
         }
@@ -303,7 +389,7 @@ public:
     }
 
     void waitDone() {
-        [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.waitDone");
+        [[maybe_unused]] const auto pe = _profilerHandler->startCompleteEvent("scheduler_base.waitDone");
         while (_nRunningJobs->value() > 0UZ) {
             std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
         }
@@ -315,7 +401,7 @@ protected:
     void disconnectAllEdges() {
         _graph.disconnectAllEdges();
         graph::forEachBlock<TransparentBlockGroup>(_graph, [&](auto& block) {
-            if (block->blockCategory() == block::Category::TransparentBlockGroup) {
+            if (block->blockCategory() == TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 graph->blockRef().disconnectAllEdges();
             }
@@ -325,7 +411,7 @@ protected:
     bool connectPendingEdges() {
         bool result = _graph.connectPendingEdges();
         graph::forEachBlock<TransparentBlockGroup>(_graph, [&](auto& block) {
-            if (block->blockCategory() == block::Category::TransparentBlockGroup) {
+            if (block->blockCategory() == TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 result      = result && graph->blockRef().connectPendingEdges();
             }
@@ -354,23 +440,35 @@ protected:
     }
 
     void init() {
-        [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.init");
+        [[maybe_unused]] const auto pe = _profilerHandler->startCompleteEvent("scheduler_base.init");
         base_t::processScheduledMessages(); // make sure initial subscriptions are processed
         connectBlockMessagePorts();
+
+        if constexpr (requires(Derived& d) { d.customInit(); }) {
+            static_cast<Derived*>(this)->customInit();
+        }
     }
 
     void reset() {
-        _executionOrder->clear();
         graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("reset() -> LifecycleState", block->changeStateTo(lifecycle::INITIALISED)); });
         disconnectAllEdges();
+
+        if constexpr (requires(Derived& d) { d.customReset(); }) {
+            static_cast<Derived*>(this)->customReset();
+        }
     }
 
     void start() {
-        disconnectAllEdges();
-        auto result = connectPendingEdges();
+        using enum gr::lifecycle::State;
 
-        if (!result) {
-            this->emitErrorMessage("init()", "Failed to connect blocks in graph");
+        disconnectAllEdges();
+        if (auto result = connectPendingEdges(); !result) {
+            this->emitErrorMessage("start()", "Failed to connect blocks in graph");
+        }
+        if (this->state() == IDLE) {
+            if (auto result = this->changeStateTo(INITIALISED); !result) { // Need to go to INITIALISED first
+                this->emitErrorMessage("start()", result.error());
+            }
         }
 
         std::lock_guard lock(_executionOrderMutex);
@@ -386,13 +484,13 @@ protected:
 
         ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
 
+        assert(_nRunningJobs->value() == 0UZ);
+        assert(!_executionOrder->empty());
         if constexpr (executionPolicy() == ExecutionPolicy::singleThreaded || executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
-            assert(_nRunningJobs->value() == 0UZ);
             static_cast<Derived*>(this)->poolWorker(0UZ, _executionOrder);
         } else { // run on processing thread pool
-            [[maybe_unused]] const auto pe = _profilerHandler.startCompleteEvent("scheduler_base.runOnPool");
-            assert(_nRunningJobs->value() == 0UZ);
-            auto jobListsCopy = _executionOrder;
+            [[maybe_unused]] const auto pe           = _profilerHandler->startCompleteEvent("scheduler_base.runOnPool");
+            auto                        jobListsCopy = _executionOrder;
             for (std::size_t runnerID = 0UZ; runnerID < _executionOrder->size(); runnerID++) {
                 _pool->execute([this, runnerID, jobListsCopy]() { static_cast<Derived*>(this)->poolWorker(runnerID, jobListsCopy); });
             }
@@ -400,9 +498,13 @@ protected:
                 _nRunningJobs->wait(0UZ); // waits until at least one pool worker started
             }
         }
+        if constexpr (requires(Derived& d) { d.customStart(); }) {
+            static_cast<Derived*>(this)->customStart();
+        }
     }
 
     void poolWorker(const std::size_t runnerID, std::shared_ptr<std::vector<std::vector<std::shared_ptr<BlockModel>>>> jobList) noexcept {
+        using enum lifecycle::State;
         std::shared_ptr<gr::Sequence> progress     = _graph._progress; // life-time guaranteed
         std::shared_ptr<gr::Sequence> nRunningJobs = _nRunningJobs;
 
@@ -410,16 +512,15 @@ protected:
         nRunningJobs->notify_all();
         gr::thread_pool::thread::setThreadName(std::format("pW{}-{}", runnerID, gr::meta::shorten_type_name(this->unique_name)));
 
-        [[maybe_unused]] auto& profiler_handler = _profiler.forThisThread();
+        [[maybe_unused]] auto profiler_handler = _profiler.forThisThread();
 
         std::vector<std::shared_ptr<BlockModel>> localBlockList;
         {
+            assert(jobList->size() > runnerID);
             std::lock_guard                          lock(_executionOrderMutex);
             std::vector<std::shared_ptr<BlockModel>> blocks = jobList->at(runnerID);
             localBlockList.reserve(blocks.size());
-            for (const auto& block : blocks) {
-                localBlockList.push_back(block);
-            }
+            std::ranges::copy(blocks, std::back_inserter(localBlockList));
         }
 
         [[maybe_unused]] auto currentProgress    = this->_graph.progress().value();
@@ -427,7 +528,7 @@ protected:
         std::size_t           msgToCount         = 0UZ;
         auto                  activeState        = this->state();
         do {
-            [[maybe_unused]] auto pe = profiler_handler.startCompleteEvent("scheduler_base.work");
+            [[maybe_unused]] auto pe = profiler_handler->startCompleteEvent("scheduler_base.work");
             if constexpr (executionPolicy() == ExecutionPolicy::singleThreadedBlocking) {
                 // optionally tracking progress and block if there is none
                 currentProgress = progress->value();
@@ -445,7 +546,7 @@ protected:
 
                 adoptBlocks(runnerID, localBlockList);
 
-                std::ranges::for_each(localBlockList, [](auto& block) { block->processScheduledMessages(); });
+                std::ranges::for_each(localBlockList, &BlockModel::processScheduledMessages);
                 activeState = this->state();
                 msgToCount++;
             } else {
@@ -456,15 +557,15 @@ protected:
                 }
             }
 
-            if (activeState == lifecycle::State::RUNNING) {
+            if (activeState == RUNNING) {
                 gr::work::Result result = traverseBlockListOnce(localBlockList);
                 if (result.status == work::Status::DONE) {
                     break; // nothing happened -> shutdown this worker
                 } else if (result.status == work::Status::ERROR) {
-                    this->emitErrorMessageIfAny("LifecycleState (ERROR)", this->changeStateTo(lifecycle::State::ERROR));
+                    this->emitErrorMessageIfAny("LifecycleState (ERROR)", this->changeStateTo(ERROR));
                     break;
                 }
-            } else if (activeState == lifecycle::State::PAUSED) {
+            } else if (activeState == PAUSED) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
                 msgToCount = 0UZ;
             } else { // other states
@@ -533,35 +634,48 @@ protected:
     }
 
     void stop() {
+        using enum lifecycle::State;
         graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) {
-            this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+            this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(REQUESTED_STOP));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(lifecycle::State::STOPPED));
+                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(STOPPED));
             }
         });
 
-        this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
+        this->emitErrorMessageIfAny("stop() -> LifecycleState ->STOPPED", this->changeStateTo(STOPPED));
+        if constexpr (requires(Derived& d) { d.customStop(); }) {
+            static_cast<Derived*>(this)->customStop();
+        }
     }
 
     void pause() {
+        using enum lifecycle::State;
         graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) {
-            this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::REQUESTED_PAUSE));
+            this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(REQUESTED_PAUSE));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(lifecycle::State::PAUSED));
+                this->emitErrorMessageIfAny("pause() -> LifecycleState", block->changeStateTo(PAUSED));
             }
         });
-        this->emitErrorMessageIfAny("pause() -> LifecycleState", this->changeStateTo(lifecycle::State::PAUSED));
+        this->emitErrorMessageIfAny("pause() -> LifecycleState", this->changeStateTo(PAUSED));
+        if constexpr (requires(Derived& d) { d.customPause(); }) {
+            static_cast<Derived*>(this)->customPause();
+        }
     }
 
     void resume() {
+        using enum lifecycle::State;
         auto result = connectPendingEdges();
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
-        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(lifecycle::RUNNING)); });
+        graph::forEachBlock<TransparentBlockGroup>(_graph, [this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(RUNNING)); });
+        if constexpr (requires(Derived& d) { d.customResume(); }) {
+            static_cast<Derived*>(this)->customResume();
+        }
     }
 
     std::optional<Message> propertyCallbackEmplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        using enum lifecycle::State;
         assert(propertyName == scheduler::property::kEmplaceBlock);
         using namespace std::string_literals;
         const auto&         data       = message.data.value();
@@ -587,19 +701,19 @@ protected:
                 _adoptionBlocks[runnerIndex].push_back(newBlock);
 
                 switch (newBlock->state()) {
-                case lifecycle::State::STOPPED:
-                case lifecycle::State::IDLE: //
-                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(lifecycle::State::INITIALISED));
-                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(lifecycle::State::RUNNING));
+                case STOPPED:
+                case IDLE: //
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(INITIALISED));
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(RUNNING));
                     break;
-                case lifecycle::State::INITIALISED: //
-                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(lifecycle::State::RUNNING));
+                case INITIALISED: //
+                    this->emitErrorMessageIfAny("adoptBlocks -> INITIALIZED", newBlock->changeStateTo(RUNNING));
                     break;
-                case lifecycle::State::RUNNING:
-                case lifecycle::State::REQUESTED_PAUSE:
-                case lifecycle::State::PAUSED:
-                case lifecycle::State::REQUESTED_STOP:
-                case lifecycle::State::ERROR: //
+                case RUNNING:
+                case REQUESTED_PAUSE:
+                case PAUSED:
+                case REQUESTED_STOP:
+                case ERROR: //
                     this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", magic_enum::enum_name(newBlock->state())));
                     break;
                 }
@@ -671,6 +785,7 @@ protected:
       This mechanism supports safe dynamic block removal while the scheduler is running, without blocking execution.
     */
     void cleanupZombieBlocks(std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
+        using enum lifecycle::State;
         if (localBlockList.empty()) {
             return;
         }
@@ -680,7 +795,7 @@ protected:
         auto it = _zombieBlocks.begin();
 
         while (it != _zombieBlocks.end()) {
-            auto localBlockIt = std::find(localBlockList.begin(), localBlockList.end(), *it);
+            const auto localBlockIt = std::ranges::find(localBlockList, *it);
             if (localBlockIt == localBlockList.end()) {
                 // we only care about the blocks local to our thread.
                 ++it;
@@ -690,25 +805,25 @@ protected:
             bool shouldDelete = false;
 
             switch ((*it)->state()) {
-            case lifecycle::State::IDLE:
-            case lifecycle::State::STOPPED:
-            case lifecycle::State::INITIALISED: // block can be deleted immediately
+            case IDLE:
+            case STOPPED:
+            case INITIALISED: // block can be deleted immediately
                 shouldDelete = true;
                 break;
-            case lifecycle::State::ERROR: // delete as well
+            case ERROR: // delete as well
                 shouldDelete = true;
                 break;
-            case lifecycle::State::REQUESTED_STOP: // block will be deleted later
+            case REQUESTED_STOP: // block will be deleted later
                 break;
-            case lifecycle::State::REQUESTED_PAUSE: // block will be deleted later
+            case REQUESTED_PAUSE: // block will be deleted later
                 // There's no transition from REQUESTED_PAUSE to REQUESTED_STOP
                 // Will be moved to REQUESTED_STOP as soon as it's possible
                 break;
-            case lifecycle::State::PAUSED: // zombie was in REQUESTED_PAUSE and now finally in PAUSED. Can be stopped now.
+            case PAUSED: // zombie was in REQUESTED_PAUSE and now finally in PAUSED. Can be stopped now.
                 // Will be deleted in a next zombie maintenance period
-                this->emitErrorMessageIfAny("cleanupZombieBlocks", (*it)->changeStateTo(lifecycle::State::REQUESTED_STOP));
+                this->emitErrorMessageIfAny("cleanupZombieBlocks", (*it)->changeStateTo(REQUESTED_STOP));
                 break;
-            case lifecycle::State::RUNNING: assert(false && "Doesn't happen: zombie blocks are never running"); break;
+            case RUNNING: assert(false && "Doesn't happen: zombie blocks are never running"); break;
             }
 
             if (shouldDelete) {
@@ -754,8 +869,9 @@ protected:
       The block will be physically deleted by cleanupZombieBlocks() when it reaches a safe state.
     */
     void makeZombie(std::shared_ptr<BlockModel> block) {
-        if (block->state() == lifecycle::State::PAUSED || block->state() == lifecycle::State::RUNNING) {
-            this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+        using enum lifecycle::State;
+        if (block->state() == PAUSED || block->state() == RUNNING) {
+            this->emitErrorMessageIfAny("makeZombie", block->changeStateTo(REQUESTED_STOP));
         }
 
         {
@@ -763,8 +879,7 @@ protected:
             // it would be zombie before being adopted, so we need to remove it from adoption list
             std::lock_guard guard(_adoptionBlocksMutex);
             for (std::vector<std::shared_ptr<BlockModel>>& adoptionList : _adoptionBlocks) {
-                auto it = std::find(adoptionList.begin(), adoptionList.end(), block);
-                if (it != adoptionList.end()) {
+                if (auto it = std::ranges::find(adoptionList, block); it != adoptionList.end()) {
                     adoptionList.erase(it);
                     break;
                 }
@@ -778,23 +893,24 @@ protected:
     // Moves all blocks into the zombie list
     // Useful for bulk operations such as "set grc yaml" message
     void makeAllZombies() {
+        using enum lifecycle::State;
         std::lock_guard guard(_zombieBlocksMutex);
 
         for (auto& block : this->_graph.blocks()) {
             switch (block->state()) {
-            case lifecycle::State::RUNNING:
-            case lifecycle::State::REQUESTED_PAUSE:
-            case lifecycle::State::PAUSED: //
-                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(lifecycle::State::REQUESTED_STOP));
+            case RUNNING:
+            case REQUESTED_PAUSE:
+            case PAUSED: //
+                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(REQUESTED_STOP));
                 break;
 
-            case lifecycle::State::INITIALISED: //
-                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(lifecycle::State::STOPPED));
+            case INITIALISED: //
+                this->emitErrorMessageIfAny("makeAllZombies", block->changeStateTo(STOPPED));
                 break;
-            case lifecycle::State::IDLE:
-            case lifecycle::State::STOPPED:
-            case lifecycle::State::ERROR:
-            case lifecycle::State::REQUESTED_STOP:
+            case IDLE:
+            case STOPPED:
+            case ERROR:
+            case REQUESTED_STOP:
                 // Can go into the zombie list and deleted
                 break;
             default:;
@@ -807,6 +923,7 @@ protected:
     }
 
     std::optional<Message> propertyCallbackGraphGRC([[maybe_unused]] std::string_view propertyName, Message message) {
+        using enum lifecycle::State;
         assert(propertyName == scheduler::property::kGraphGRC);
 
         auto& pluginLoader = gr::globalPluginLoader();
@@ -823,32 +940,10 @@ protected:
 
                 const auto originalState = this->state();
 
-                switch (originalState) {
-                case lifecycle::State::RUNNING:
-                case lifecycle::State::REQUESTED_PAUSE:
-                case lifecycle::State::PAUSED: //
-                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-                    break;
-                case lifecycle::State::REQUESTED_STOP:
-                case lifecycle::State::INITIALISED: //
-                    this->emitErrorMessageIfAny("propertyCallbackGraphGRC -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::STOPPED));
-                    break;
-                case lifecycle::State::IDLE:
-                    assert(false); // doesn't happen
-                    break;
-                case lifecycle::State::STOPPED:
-                case lifecycle::State::ERROR: break;
-                default:;
+                if (auto result = this->exchange(std::move(newGraph)); !result) {
+                    this->emitErrorMessage("propertyCallbackGraphGRC", "Failed to exchange graph");
+                    return {};
                 }
-
-                _graph = std::move(newGraph);
-
-                // Now ideally we'd just restart the Scheduler, but we can't since we're processing a message inside a working thread.
-                // When the scheduler starts running it asserts that _nRunningJobs is 0, so we can't start it now, we're in the job.
-                // We need to let poolWorker() unwind, decrement _nRunningJobs and then move scheduler to its original value.
-                // Alternatively, we could forbid kGraphGRC unless Scheduler was in STOPPED state. That would simplify logic, but
-                // put more burden on the client.
 
                 message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
             } catch (const std::exception& e) {
@@ -890,36 +985,25 @@ protected:
 };
 
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
-class Simple : public SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler> {
+struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Simple loop based Scheduler, which iterates over all blocks in the order they have beein defined and emplaced definition in the graph.)"">;
 
-    friend class lifecycle::StateMachine<Simple<execution, TProfiler>>;
-    friend struct SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
-
-public:
-    using base_t = SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler>;
-
-    explicit Simple(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
-    explicit Simple(gr::Graph&& graph, property_map initialSettings, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId) : base_t(std::move(graph), std::move(initialSettings), defaultThreadPool) {}
-
-private:
-    void init() {
-        base_t::init();
-        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("scheduler_simple.init");
+    void customInit() {
+        [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("scheduler_simple.init");
 
         // generate job list
         const gr::Graph   flatGraph = graph::flatten(this->_graph);
         const std::size_t nBlocks   = flatGraph.blocks().size();
 
         std::size_t n_batches = 1UZ;
-        switch (base_t::executionPolicy()) {
+        switch (this->executionPolicy()) {
         case ExecutionPolicy::singleThreaded:
         case ExecutionPolicy::singleThreadedBlocking: break;
         case ExecutionPolicy::multiThreaded: n_batches = std::min(static_cast<std::size_t>(this->_pool->maxThreads()), nBlocks); break;
         default:;
         }
 
-        std::lock_guard lock(base_t::_executionOrderMutex);
+        std::lock_guard lock(this->_executionOrderMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         this->_executionOrder->clear();
@@ -932,11 +1016,6 @@ private:
                 job.push_back(flatGraph.blocks()[j]);
             }
         }
-    }
-
-    void reset() {
-        base_t::reset();
-        init();
     }
 };
 
@@ -965,22 +1044,13 @@ inline void printExecutionOrder(const std::vector<std::vector<std::shared_ptr<Bl
 } // namespace detail
 
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
-class BreadthFirst : public SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler> {
+struct BreadthFirst : SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Breadth First Scheduler which traverses the graph starting from the source blocks in a breath first fashion
 detecting cycles and blocks which can be reached from several source blocks.)"">;
 
-    friend class lifecycle::StateMachine<BreadthFirst<execution, TProfiler>>;
-    friend struct SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
 
-public:
-    using base_t = SchedulerBase<BreadthFirst<execution, TProfiler>, execution, TProfiler>;
-
-    explicit BreadthFirst(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
-    explicit BreadthFirst(gr::Graph&& graph, property_map initialSettings, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId) : base_t(std::move(graph), std::move(initialSettings), defaultThreadPool) {}
-
-private:
-    void init() {
+    void customInit() {
         /* implements Breadth-first search scheduling algorithm (https://en.wikipedia.org/wiki/Breadth-first_search)
          * 1. compute 'adjacencyList'
          * 2. determine all 'sourceBlocks' S (no incoming edges)
@@ -998,8 +1068,7 @@ private:
          * [2] P. Morin, "Open Data Structures". [Online]. available at: https://opendatastructures.org/
          */
         using block_t                  = std::shared_ptr<BlockModel>;
-        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("breadth_first.init");
-        base_t::init();
+        [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("breadth_first.init");
 
         gr::Graph                      flatGraph     = gr::graph::flatten(this->_graph);
         const gr::graph::AdjacencyList adjacencyList = graph::computeAdjacencyList(flatGraph);
@@ -1039,35 +1108,20 @@ private:
 
         const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
-        std::lock_guard guard(base_t::_adoptionBlocksMutex);
-        std::lock_guard lock(base_t::_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
+        std::lock_guard lock(this->_executionOrderMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
     }
-
-    void reset() {
-        base_t::reset();
-        init();
-    }
 };
 
 template<ExecutionPolicy execution = ExecutionPolicy::singleThreaded, profiling::ProfilerLike TProfiler = profiling::null::Profiler>
-class DepthFirst : public SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler> {
+struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler> {
     using Description = Doc<R""(Depth First Scheduler which traverses the graph starting from the source blocks in a depth-first manner.)"">;
-
-    friend class lifecycle::StateMachine<DepthFirst<execution, TProfiler>>;
-    friend struct SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>;
     static_assert(execution == ExecutionPolicy::singleThreaded || execution == ExecutionPolicy::multiThreaded, "Unsupported execution policy");
 
-public:
-    using base_t = SchedulerBase<DepthFirst<execution, TProfiler>, execution, TProfiler>;
-
-    explicit DepthFirst(gr::Graph&& graph, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) : base_t(std::move(graph), defaultThreadPool, profiling_options) {}
-    explicit DepthFirst(gr::Graph&& graph, property_map initialSettings, std::string_view defaultThreadPool = gr::thread_pool::kDefaultCpuPoolId) : base_t(std::move(graph), std::move(initialSettings), defaultThreadPool) {}
-
-private:
-    void init() {
+    void customInit() {
         /**
          * implements Depth-first search scheduling algorithm (https://en.wikipedia.org/wiki/Depth-first_search)
          * 1. compute 'adjacencyList'
@@ -1087,8 +1141,7 @@ private:
          * [2] P. Morin, "Open Data Structures". [Online]. available at: https://opendatastructures.org/
          */
         using block_t                  = std::shared_ptr<BlockModel>;
-        [[maybe_unused]] const auto pe = this->_profilerHandler.startCompleteEvent("depth_first.init");
-        base_t::init();
+        [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("depth_first.init");
 
         gr::Graph                  flatGraph     = gr::graph::flatten(this->_graph);
         const graph::AdjacencyList adjacencyList = graph::computeAdjacencyList(flatGraph);
@@ -1097,37 +1150,32 @@ private:
         std::vector<block_t> blockList;
         std::set<block_t>    visited;
 
-        auto dfs = [&]<typename Self>(Self&& self, const block_t& node) -> void {
+        auto dfs = [&](this auto&& self, const block_t& node) -> void {
             if (!visited.insert(node).second) {
                 return; // already visited
             }
             blockList.push_back(node);
-            // recursively visit all outgoing neighbours
+
             if (adjacencyList.contains(node)) {
                 for (const auto& edges : adjacencyList.at(node) | std::views::values) {
                     for (const auto* edge : edges) {
-                        self(self, edge->destinationBlock());
+                        self(edge->destinationBlock());
                     }
                 }
             }
         };
 
         for (const auto& src : sourceBlocks) {
-            dfs(dfs, src);
+            dfs(src);
         }
 
         const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
-        std::lock_guard guard(base_t::_adoptionBlocksMutex);
-        std::lock_guard lock(base_t::_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
+        std::lock_guard lock(this->_executionOrderMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
-    }
-
-    void reset() {
-        base_t::reset();
-        init();
     }
 };
 
