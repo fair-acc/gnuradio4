@@ -22,7 +22,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
@@ -37,7 +40,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
     } | kTestTypes;
 
@@ -53,7 +59,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         expect(eq(g.connect(src, "out"s, copy, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(copy, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
@@ -71,7 +80,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         expect(eq(g.connect(src, "out"s, head, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(head, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N_head));
     } | kTestTypes;
@@ -85,7 +97,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
     } | kTestTypes;
 
@@ -98,7 +113,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
@@ -114,7 +132,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         expect(eq(g.connect(src, "out"s, sim, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(sim, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
@@ -130,7 +151,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         expect(eq(g.connect(src, "out"s, sim, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(sim, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
@@ -146,7 +170,10 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         expect(eq(g.connect(src, "out"s, sim, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(sim, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
-        gr::scheduler::Simple sch{std::move(g)};
+        gr::scheduler::Simple sch;
+        if (auto ret = sch.exchange(std::move(g)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sch.runAndWait().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;

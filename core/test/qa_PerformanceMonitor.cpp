@@ -95,7 +95,10 @@ int main(int argc, char* argv[]) {
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outRes">(monitorPerformance).to<"in">(sinkRes)));
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outRate">(monitorPerformance).to<"in">(sinkRate)));
 
-    auto sched                                        = scheduler::Simple{std::move(testGraph)};
+    gr::scheduler::Simple<> sched;
+    if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, runTime > 0 ? std::chrono::seconds(runTime) : 2s);
     expect(sched.runAndWait().has_value());
 

@@ -326,9 +326,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
     using namespace gr;
 
     "Direct settings change"_test = [] {
-        using scheduler               = gr::scheduler::Simple<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphLinear(trace), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(getGraphLinear(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
 
         auto ret1 = sched.settings().set({{"timeout_ms", gr::Size_t(6)}});
         expect(ret1.empty()) << "setting one known parameter";
@@ -380,9 +382,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     std::println("INFO: std::thread::hardware_concurrency() = {} - CPU thread bounds = [{}, {}]", std::thread::hardware_concurrency(), minThreads, maxThreads);
 
     "SimpleScheduler_linear"_test = [] {
-        using scheduler               = gr::scheduler::Simple<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphLinear(trace), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(getGraphLinear(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 8u);
@@ -390,9 +394,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_linear"_test = [] {
-        using scheduler               = gr::scheduler::BreadthFirst<>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphLinear(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>       trace = std::make_shared<Tracer>();
+        gr::scheduler::BreadthFirst<> sched;
+        if (auto ret = sched.exchange(getGraphLinear(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 8u);
@@ -400,9 +406,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "SimpleScheduler_parallel"_test = [] {
-        using scheduler               = gr::scheduler::Simple<>;
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphParallel(trace), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(getGraphParallel(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 14u);
@@ -410,9 +418,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_parallel"_test = [] {
-        using scheduler               = gr::scheduler::BreadthFirst<>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphParallel(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>       trace = std::make_shared<Tracer>();
+        gr::scheduler::BreadthFirst<> sched;
+        if (auto ret = sched.exchange(getGraphParallel(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 14u);
@@ -435,10 +445,12 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "SimpleScheduler_scaled_sum"_test = [] {
-        using scheduler = gr::scheduler::Simple<>;
         // construct an example graph and get an adjacency list for it
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphScaledSum(trace), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(getGraphScaledSum(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 10u);
@@ -446,9 +458,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "BreadthFirstScheduler_scaled_sum"_test = [] {
-        using scheduler               = gr::scheduler::BreadthFirst<>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphScaledSum(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>       trace = std::make_shared<Tracer>();
+        gr::scheduler::BreadthFirst<> sched;
+        if (auto ret = sched.exchange(getGraphScaledSum(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() == 10u);
@@ -456,18 +470,22 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "SimpleScheduler_linear_multi_threaded"_test = [] {
-        using scheduler               = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphLinear(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>                                              trace = std::make_shared<Tracer>();
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(getGraphLinear(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(that % t.size() >= 8u);
     };
 
     "BreadthFirstScheduler_linear_multi_threaded"_test = [] {
-        using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphLinear(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>                                                    trace = std::make_shared<Tracer>();
+        gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(getGraphLinear(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs()->size() == 2u);
         checkBlockNames(sched.jobs()->at(0), {"s1", "mult2"});
@@ -478,18 +496,22 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "SimpleScheduler_parallel_multi_threaded"_test = [] {
-        using scheduler               = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphParallel(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>                                              trace = std::make_shared<Tracer>();
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(getGraphParallel(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 14u) << std::format("execution order incomplete: {}", gr::join(t, ", "));
     };
 
     "BreadthFirstScheduler_parallel_multi_threaded"_test = [] {
-        using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphParallel(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>                                                    trace = std::make_shared<Tracer>();
+        gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(getGraphParallel(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(sched.jobs()->size() == 2u);
         checkBlockNames(sched.jobs()->at(0), {"s1", "mult1b", "mult2b", "outb"});
@@ -500,19 +522,23 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "SimpleScheduler_scaled_sum_multi_threaded"_test = [] {
-        using scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
         // construct an example graph and get an adjacency list for it
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphScaledSum(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>                                              trace = std::make_shared<Tracer>();
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(getGraphScaledSum(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         auto t = trace->getVector();
         expect(boost::ut::that % t.size() >= 10u);
     };
 
     "BreadthFirstScheduler_scaled_sum_multi_threaded"_test = [] {
-        using scheduler               = gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded>;
-        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        auto                    sched = scheduler{getGraphScaledSum(trace), gr::thread_pool::kDefaultCpuPoolId};
+        std::shared_ptr<Tracer>                                                    trace = std::make_shared<Tracer>();
+        gr::scheduler::BreadthFirst<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        if (auto ret = sched.exchange(getGraphScaledSum(trace)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
         expect(eq(sched.jobs()->size(), 2u));
         checkBlockNames(sched.jobs()->at(0), {"s1", "mult", "out"});
@@ -523,14 +549,16 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "LifecycleBlock"_test = [] {
-        using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
 
         auto& lifecycleSource = flow.emplaceBlock<LifecycleSource<float>>();
         auto& lifecycleBlock  = flow.emplaceBlock<LifecycleBlock<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(lifecycleSource).to<"in">(lifecycleBlock)));
 
-        auto sched = scheduler{std::move(flow), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         expect(sched.runAndWait().has_value());
         expect(sched.changeStateTo(gr::lifecycle::State::INITIALISED).has_value());
 
@@ -547,7 +575,6 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate DONE check-infinite loop"_test = [] {
         using namespace gr::testing;
-        using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
 
         auto& source  = flow.emplaceBlock<CountingSource<float>>();
@@ -556,8 +583,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto sched = scheduler{std::move(flow), gr::thread_pool::kDefaultCpuPoolId};
-
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         std::atomic_bool shutDownByWatchdog{false};
 
         auto watchdogThread = gr::test::thread_pool::execute("watchdog", [&sched, &shutDownByWatchdog]() {
@@ -607,7 +636,6 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate source DONE state: down-stream using EOS tag"_test = [&createWatchdog] {
         using namespace gr::testing;
-        using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
 
         auto& source  = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", 1024U}});
@@ -616,7 +644,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto sched                                        = scheduler{std::move(flow), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value());
 
@@ -630,7 +661,6 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports"_test = [&createWatchdog] {
         using namespace gr::testing;
-        using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
 
         auto& source  = flow.emplaceBlock<NullSource<float>>();
@@ -639,7 +669,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto sched                                        = scheduler{std::move(flow), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value());
 
@@ -653,7 +686,6 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate sink DONE status: upstream via disconnecting ports"_test = [&createWatchdog] {
         using namespace gr::testing;
-        using scheduler = gr::scheduler::Simple<>;
         gr::Graph flow;
 
         auto& source  = flow.emplaceBlock<NullSource<float>>();
@@ -662,7 +694,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto sched                                        = scheduler{std::move(flow), gr::thread_pool::kDefaultCpuPoolId};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
         expect(sched.runAndWait().has_value());
 
@@ -676,7 +711,6 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     "blocking scheduler"_test = [] {
         using namespace gr;
         using namespace gr::testing;
-        using TScheduler = scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking>;
 
         Graph flow;
         auto& source  = flow.emplaceBlock<NullSource<float>>();
@@ -685,7 +719,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto scheduler                     = TScheduler{std::move(flow), gr::thread_pool::kDefaultCpuPoolId};
+        scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking> scheduler;
+        if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
+            expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
+        }
         scheduler.timeout_ms               = 100U; // also dynamically settable via messages/block interface
         scheduler.timeout_inactivity_count = 10U;  // also dynamically settable via messages/block interface
 

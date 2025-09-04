@@ -32,7 +32,10 @@ const boost::ut::suite DynamicBlocktests = [] {
         }
         expect(gr::ConnectionResult::SUCCESS == graph.connect<"out">(adder).to<"in">(sink));
 
-        gr::scheduler::Simple sched(std::move(graph));
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
 
         expect(sched.runAndWait().has_value());
 
