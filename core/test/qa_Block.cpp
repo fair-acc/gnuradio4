@@ -952,50 +952,61 @@ const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
     using namespace std::string_literals;
     using namespace gr;
 
-    "constructor test"_test = [] {
-        // Test the initializer list constructor
-        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, //
-            {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}, {gr::tag::SIGNAL_QUANTITY.shortKey(), "voltage"}, {gr::tag::SIGNAL_UNIT.shortKey(), "V"}, {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
+    "auto update PortMetaInfo from Tag"_test = [&] {
+        using namespace gr::testing;
+        using namespace gr::tag;
+        const gr::Size_t nSamples = 100;
+        Graph            testGraph;
 
-        expect(eq(48000.f, portMetaInfo.sample_rate.value));
-        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
-        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
-        expect(eq("V"s, portMetaInfo.signal_unit.value));
-        expect(eq(-1.f, portMetaInfo.signal_min.value));
-        expect(eq(+1.f, portMetaInfo.signal_max.value));
-    };
+        const property_map srcParams1 = {                       //
+            {SAMPLE_RATE.shortKey(), 42.f},                     //
+            {SIGNAL_NAME.shortKey(), "SIGNAL_NAME_42"},         //
+            {SIGNAL_QUANTITY.shortKey(), "SIGNAL_QUANTITY_42"}, //
+            {SIGNAL_UNIT.shortKey(), "SIGNAL_UNIT_42"},         //
+            {SIGNAL_MIN.shortKey(), 42.f},                      //
+            {SIGNAL_MAX.shortKey(), 42.f}};
 
-    "reset test"_test = [] {
-        PortMetaInfo portMetaInfo;
-        portMetaInfo.auto_update.clear();
-        expect(portMetaInfo.auto_update.empty());
+        const property_map srcParams2 = {   //
+            {SAMPLE_RATE.shortKey(), 43.f}, //
+            {SIGNAL_NAME.shortKey(), "SIGNAL_NAME_43"}};
 
-        portMetaInfo.reset();
+        const auto srcTags = std::vector<Tag>{Tag{10, srcParams1}, Tag{50, srcParams2}};
 
-        expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_NAME.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_QUANTITY.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_UNIT.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
-        expect(eq(portMetaInfo.auto_update.size(), 16UZ));
-    };
+        auto& src     = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}});
+        src._tags     = srcTags;
+        auto& monitor = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitor"}});
+        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
 
-    "update test"_test = [] {
-        PortMetaInfo portMetaInfo;
-        property_map updateProps{{gr::tag::SAMPLE_RATE.shortKey(), 96000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "UpdatedSignal"}};
-        portMetaInfo.update(updateProps);
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitor)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor).to<"in">(sink)));
 
-        expect(eq(96000.f, portMetaInfo.sample_rate));
-        expect(eq("UpdatedSignal"s, portMetaInfo.signal_name));
-    };
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
 
-    "get test"_test = [] {
-        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}});
-        const auto   props = portMetaInfo.get();
+        expect(eq(src._nSamplesProduced, nSamples));
+        expect(eq(monitor._nSamplesProduced, nSamples));
+        expect(eq(sink._nSamplesProduced, nSamples));
 
-        expect(eq(48000.f, std::get<float>(props.at(gr::tag::SAMPLE_RATE.shortKey()))));
-        expect(eq("TestSignal"s, std::get<std::string>(props.at(gr::tag::SIGNAL_NAME.shortKey()))));
+        expect(eq(src.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(monitor.sample_rate, 43.0f));
+        expect(eq(sink.sample_rate, 43.0f));
+
+        expect(eq(monitor.in.metaInfo.sample_rate.value, 43.f));
+        expect(eq(monitor.in.metaInfo.signal_name.value, "SIGNAL_NAME_43"s));
+        expect(eq(monitor.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_42"s));
+        expect(eq(monitor.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_42"s));
+        expect(eq(monitor.in.metaInfo.signal_min.value, 42.f));
+        expect(eq(monitor.in.metaInfo.signal_max.value, 42.f));
+
+        expect(eq(sink.in.metaInfo.sample_rate.value, 43.f));
+        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_43"s));
+        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_42"s));
+        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_42"s));
+        expect(eq(sink.in.metaInfo.signal_min.value, 42.f));
+        expect(eq(sink.in.metaInfo.signal_max.value, 42.f));
     };
 };
 

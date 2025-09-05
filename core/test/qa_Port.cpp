@@ -404,6 +404,19 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(metaInfo.data_type.value, "float32"s));
     };
 
+    "initializer list ctor"_test = [] {
+        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}, //
+            {gr::tag::SIGNAL_QUANTITY.shortKey(), "voltage"}, {gr::tag::SIGNAL_UNIT.shortKey(), "V"},                           //
+            {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
+
+        expect(eq(48000.f, portMetaInfo.sample_rate.value));
+        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
+        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
+        expect(eq("V"s, portMetaInfo.signal_unit.value));
+        expect(eq(-1.f, portMetaInfo.signal_min.value));
+        expect(eq(+1.f, portMetaInfo.signal_max.value));
+    };
+
     "update & get roundtrip"_test = [] {
         PortMetaInfo metaInfo{"f32"};
         property_map props;
@@ -416,8 +429,14 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         metaInfo.update(props);
         expect(eq(metaInfo.sample_rate.value, 48000.f));
         expect(eq(metaInfo.signal_name.value, "IF"s));
+        expect(eq(metaInfo.signal_quantity.value, "voltage"s));
+        expect(eq(metaInfo.signal_unit.value, "[V]"s));
+        expect(eq(metaInfo.signal_min.value, -1.f));
+        expect(eq(metaInfo.signal_max.value, +1.f));
 
         const property_map out = metaInfo.get();
+        expect(eq(std::get<float>(out.at(tag::SAMPLE_RATE.shortKey())), 48000.f));
+        expect(eq(std::get<std::string>(out.at(tag::SIGNAL_NAME.shortKey())), "IF"s));
         expect(eq(std::get<std::string>(out.at(tag::SIGNAL_UNIT.shortKey())), "[V]"s));
         expect(eq(std::get<float>(out.at(tag::SIGNAL_MIN.shortKey())), -1.f));
         expect(eq(std::get<float>(out.at(tag::SIGNAL_MAX.shortKey())), 1.f));
@@ -430,16 +449,80 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(throws<std::exception>([&metaInfo, &wrong] { metaInfo.update(wrong); }));
     };
 
-    "reset auto_update"_test = [] {
-        PortMetaInfo m;
-        m.auto_update.clear();
+    "update partial changes before throw"_test = [] {
+        PortMetaInfo metaInfo;
         property_map p;
+        // to be sure in which order settings are applied
+        metaInfo.auto_update = {gr::tag::SAMPLE_RATE.shortKey(), gr::tag::SIGNAL_MIN.shortKey(), gr::tag::SIGNAL_MAX.shortKey()};
+
+        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
+        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
+        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
+        expect(throws<std::exception>([&] { metaInfo.update(p); }));
+        expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated
+        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest())); // default value
+        expect(eq(metaInfo.signal_max.value, std::numeric_limits<float>::max()));    // default value, it was not updated after throw
+    };
+
+    "reset auto_update"_test = [] {
+        PortMetaInfo portMetaInfo;
+        property_map p;
+        p[tag::SAMPLE_RATE.shortKey()] = 42.f;
+        portMetaInfo.update(p);
+        expect(eq(portMetaInfo.sample_rate.value, 42.f));
+        portMetaInfo.auto_update.clear();
         p[tag::SAMPLE_RATE.shortKey()] = 99.f;
-        m.update(p); // shouldn't update
-        expect(eq(m.sample_rate.value, 1.f));
-        m.reset();
+        portMetaInfo.update(p); // shouldn't update
+        expect(eq(portMetaInfo.sample_rate.value, 42.f));
+        portMetaInfo.reset();
+        expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_NAME.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_QUANTITY.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_UNIT.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
+        expect(eq(portMetaInfo.sample_rate.value, 42.f)); // shouldn't reset sample_rate
+        portMetaInfo.update(p);
+        expect(eq(portMetaInfo.sample_rate.value, 99.f));
+    };
+
+    // extra tests
+    "auto_update subset only updates selected keys"_test = [] {
+        PortMetaInfo m;
+        m.sample_rate = 1.0f;
+        m.signal_name = "orig"s;
+        m.auto_update = {gr::tag::SAMPLE_RATE.shortKey()}; // Only SAMPLE_RATE will be updated
+
+        property_map p;
+        p[gr::tag::SAMPLE_RATE.shortKey()] = 12345.f;
+        p[gr::tag::SIGNAL_NAME.shortKey()] = std::string("new-name");
+
         m.update(p);
-        expect(eq(m.sample_rate.value, 99.f));
+        expect(eq(m.sample_rate.value, 12345.f));
+        expect(eq(m.signal_name.value, "orig"s)); // unchanged
+    };
+
+    "update<true> noexcept overload compiles & updates"_test = [] {
+        PortMetaInfo m{"int16"};
+        property_map p;
+        p[gr::tag::SAMPLE_RATE.shortKey()] = 96000.f;
+        // should not throw (template param = true)
+        m.update<true>(p);
+        expect(eq(m.sample_rate.value, 96000.f));
+        // (Don't feed it wrong types here, since noexcept spec disallows throws)
+    };
+
+    "get() roundtrip after partial update"_test = [] {
+        PortMetaInfo m{"f32"};
+        property_map p;
+        p[gr::tag::SIGNAL_MIN.shortKey()] = -0.5f;
+        p[gr::tag::SIGNAL_MAX.shortKey()] = +0.5f;
+        m.update(p);
+
+        auto out = m.get();
+        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MIN.shortKey())), -0.5f));
+        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MAX.shortKey())), +0.5f));
+        expect(eq(std::get<std::string>(out.at(gr::tag::SIGNAL_NAME.shortKey())), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 
@@ -676,52 +759,6 @@ const boost::ut::suite<"tag-distance helpers"> _tagdist = [] { // NOSONAR (N.B. 
         auto val  = gr::nSamplesToNextTagConditional(in, pred, 0UZ);
         expect(val.has_value());
         expect(eq(val.value(), 2UZ));
-    };
-};
-
-const boost::ut::suite<"PortMetaInfo extras"> _pmi2 = [] { // NOSONAR (N.B. lambda size)
-    using namespace boost::ut;
-    using namespace gr;
-    using namespace std::string_literals;
-
-    "auto_update subset only updates selected keys"_test = [] {
-        PortMetaInfo m;
-        m.sample_rate = 1.0f;
-        m.signal_name = "orig"s;
-
-        // Only SAMPLE_RATE will be updated
-        m.auto_update = {gr::tag::SAMPLE_RATE.shortKey()};
-
-        property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 12345.f;
-        p[gr::tag::SIGNAL_NAME.shortKey()] = std::string("new-name");
-
-        m.update(p);
-        expect(eq(m.sample_rate.value, 12345.f));
-        expect(eq(m.signal_name.value, "orig"s)); // unchanged
-    };
-
-    "update<true> noexcept overload compiles & updates"_test = [] {
-        PortMetaInfo m{"int16"};
-        property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 96000.f;
-        // should not throw (template param = true)
-        m.update<true>(p);
-        expect(eq(m.sample_rate.value, 96000.f));
-        // (Don't feed it wrong types here, since noexcept spec disallows throws)
-    };
-
-    "get() roundtrip after partial update"_test = [] {
-        PortMetaInfo m{"f32"};
-        property_map p;
-        p[gr::tag::SIGNAL_MIN.shortKey()] = -0.5f;
-        p[gr::tag::SIGNAL_MAX.shortKey()] = +0.5f;
-        m.update(p);
-
-        auto out = m.get();
-        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MIN.shortKey())), -0.5f));
-        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MAX.shortKey())), +0.5f));
-        expect(eq(std::get<std::string>(out.at(gr::tag::SIGNAL_NAME.shortKey())), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 

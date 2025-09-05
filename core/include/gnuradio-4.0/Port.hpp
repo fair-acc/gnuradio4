@@ -226,7 +226,9 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
             if (std::holds_alternative<T>(value)) {
                 member = std::get<T>(value);
             } else {
-                throw gr::exception("invalid-argument: incorrect type for " + key);
+                if constexpr (!isNoexcept) {
+                    throw gr::exception("invalid-argument: incorrect type for " + key);
+                }
             }
         };
 
