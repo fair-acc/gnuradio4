@@ -73,15 +73,16 @@ inline std::size_t calculateNSamplesToProcess(std::size_t available, std::size_t
 template<typename T>
 struct StreamingPoller {
     // TODO consider whether reusing port<T> here makes sense
-    gr::CircularBuffer<T>            buffer      = gr::CircularBuffer<T>(detail::data_sink_buffer_size);
-    decltype(buffer.new_reader())    reader      = buffer.new_reader();
-    decltype(buffer.new_writer())    writer      = buffer.new_writer();
-    gr::CircularBuffer<Tag>          tagBuffer   = gr::CircularBuffer<Tag>(detail::data_sink_tag_buffer_size);
-    decltype(tagBuffer.new_reader()) tagReader   = tagBuffer.new_reader();
-    decltype(tagBuffer.new_writer()) tagWriter   = tagBuffer.new_writer();
-    std::size_t                      samplesRead = 0; // reader thread
-    std::atomic<bool>                finished    = false;
-    std::atomic<std::size_t>         dropCount   = 0;
+    gr::CircularBuffer<T>            buffer             = gr::CircularBuffer<T>(detail::data_sink_buffer_size);
+    decltype(buffer.new_reader())    reader             = buffer.new_reader();
+    decltype(buffer.new_writer())    writer             = buffer.new_writer();
+    gr::CircularBuffer<Tag>          tagBuffer          = gr::CircularBuffer<Tag>(detail::data_sink_tag_buffer_size);
+    decltype(tagBuffer.new_reader()) tagReader          = tagBuffer.new_reader();
+    decltype(tagBuffer.new_writer()) tagWriter          = tagBuffer.new_writer();
+    std::size_t                      samplesRead        = 0; // reader thread
+    std::atomic<bool>                finished           = false;
+    std::atomic<std::size_t>         droppedSampleCount = 0;
+    std::atomic<std::size_t>         droppedTagCount    = 0;
     std::size_t                      minRequiredSamples; // the number of samples to process must be in a range [minRequiredSamples, maxRequiredSamples]
     std::size_t                      maxRequiredSamples;
 
@@ -375,24 +376,8 @@ struct Metadata {
     property_map toTagMap() const { return {{std::string(tag::SIGNAL_RATE.shortKey()), sampleRate}, {std::string(tag::SIGNAL_NAME.shortKey()), signalName}, {std::string(tag::SIGNAL_QUANTITY.shortKey()), signalQuantity}, {std::string(tag::SIGNAL_UNIT.shortKey()), signalUnit}, {std::string(tag::SIGNAL_MIN.shortKey()), signalMin}, {std::string(tag::SIGNAL_MAX.shortKey()), signalMax}}; }
 };
 
-inline std::optional<property_map> tagAndMetadata(const std::optional<property_map>& tagData, const std::optional<Metadata>& metadata) {
-    if (!tagData && !metadata) {
-        return std::nullopt;
-    }
-
-    property_map merged;
-    if (metadata) {
-        merged = metadata->toTagMap();
-    }
-    if (tagData) {
-        merged.insert(tagData->begin(), tagData->end());
-    }
-
-    return merged;
-}
-
 template<typename T>
-[[nodiscard]] inline DataSet<T> createDataset(const Metadata& metadata) {
+[[nodiscard]] inline DataSet<T> createDataset(const Metadata& metadata, std::size_t reserveSize = 0UZ) {
     DataSet<T> ds;
     ds.signal_names      = {metadata.signalName};
     ds.signal_quantities = {metadata.signalQuantity};
@@ -412,7 +397,21 @@ template<typename T>
 
     ds.meta_information.resize(1UZ);
 
+    if (reserveSize != 0UZ) {
+        ds.signal_values.reserve(reserveSize);
+        ds.axis_values[0].reserve(reserveSize);
+    }
+
     return ds;
+}
+
+inline constexpr void checkTag([[maybe_unused]] const Tag& tag) {
+#ifndef NDEBUG
+    if (tag.index != 0) { // DataSink enforces input_chunk_size == 1
+        std::println(stderr, "DataSink always has input_chunk_size == 1 and only Tags with index == 0 are available; tag.index:{}, tag.map:{}", tag.index, tag.map);
+        std::abort();
+    }
+#endif
 }
 } // namespace detail
 
@@ -537,62 +536,62 @@ public:
         auto            handler          = std::make_shared<StreamingPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
         std::lock_guard lg(_listener_mutex);
         handler->finished = _listeners_finished;
-        addListener(std::make_unique<ContinuousListener<gr::meta::null_type>>(handler, withBackpressure, *this), withBackpressure);
+        addListener(std::make_unique<ContinuousListener<>>(handler, withBackpressure, *this), withBackpressure);
         return handler;
     }
 
-    template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getTriggerPoller(M&& matcher, PollerConfig config = {}) {
+    template<trigger::Matcher TMatcher>
+    std::shared_ptr<DataSetPoller<T>> getTriggerPoller(TMatcher&& matcher, PollerConfig config = {}) {
         const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
         auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
         std::lock_guard lg(_listener_mutex);
         handler->finished = _listeners_finished;
-        addListener(std::make_unique<TriggerListener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, config.preSamples, config.postSamples, withBackpressure), withBackpressure);
+        addListener(std::make_unique<TriggerListener<TMatcher>>(std::forward<TMatcher>(matcher), handler, config.preSamples, config.postSamples, withBackpressure), withBackpressure);
         ensureHistorySize(config.preSamples);
         return handler;
     }
 
-    template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getMultiplexedPoller(M&& matcher, PollerConfig config = {}) {
+    template<trigger::Matcher TMatcher>
+    std::shared_ptr<DataSetPoller<T>> getMultiplexedPoller(TMatcher&& matcher, PollerConfig config = {}) {
         std::lock_guard lg(_listener_mutex);
         const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
         auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
-        addListener(std::make_unique<MultiplexedListener<gr::meta::null_type, M>>(std::forward<M>(matcher), config.maximumWindowSize, handler, withBackpressure), withBackpressure);
+        addListener(std::make_unique<MultiplexedListener<TMatcher>>(std::forward<TMatcher>(matcher), config.maximumWindowSize, handler, withBackpressure), withBackpressure);
         return handler;
     }
 
-    template<trigger::Matcher M>
-    std::shared_ptr<DataSetPoller<T>> getSnapshotPoller(M&& matcher, PollerConfig config = {}) {
+    template<trigger::Matcher TMatcher>
+    std::shared_ptr<DataSetPoller<T>> getSnapshotPoller(TMatcher&& matcher, PollerConfig config = {}) {
         const auto      withBackpressure = config.overflowPolicy == OverflowPolicy::Backpressure;
         auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
         std::lock_guard lg(_listener_mutex);
-        addListener(std::make_unique<SnapshotListener<gr::meta::null_type, M>>(std::forward<M>(matcher), config.delay, handler, withBackpressure), withBackpressure);
+        addListener(std::make_unique<SnapshotListener<TMatcher>>(std::forward<TMatcher>(matcher), config.delay, handler, withBackpressure), withBackpressure);
         return handler;
     }
 
-    template<StreamCallback<T> Callback>
-    void registerStreamingCallback(std::size_t maxChunkSize, Callback&& callback) {
+    template<StreamCallback<T> TCallback>
+    void registerStreamingCallback(std::size_t maxChunkSize, TCallback&& callback) {
         std::lock_guard lg(_listener_mutex);
-        addListener(std::make_unique<ContinuousListener<Callback>>(maxChunkSize, std::forward<Callback>(callback), *this), false);
+        addListener(std::make_unique<ContinuousListener<TCallback>>(maxChunkSize, std::forward<TCallback>(callback), *this), false);
     }
 
-    template<trigger::Matcher M, DataSetCallback<T> Callback>
-    void registerTriggerCallback(M&& matcher, std::size_t preSamples, std::size_t postSamples, Callback&& callback) {
+    template<trigger::Matcher TMatcher, DataSetCallback<T> TCallback>
+    void registerTriggerCallback(TMatcher&& matcher, std::size_t preSamples, std::size_t postSamples, TCallback&& callback) {
         std::lock_guard lg(_listener_mutex);
-        addListener(std::make_unique<TriggerListener<Callback, M>>(std::forward<M>(matcher), preSamples, postSamples, std::forward<Callback>(callback)), false);
+        addListener(std::make_unique<TriggerListener<TMatcher, TCallback>>(std::forward<TMatcher>(matcher), preSamples, postSamples, std::forward<TCallback>(callback)), false);
         ensureHistorySize(preSamples);
     }
 
-    template<trigger::Matcher M, DataSetCallback<T> Callback>
-    void registerMultiplexedCallback(M&& matcher, std::size_t maximumWindowSize, Callback&& callback) {
+    template<trigger::Matcher TMatcher, DataSetCallback<T> TCallback>
+    void registerMultiplexedCallback(TMatcher&& matcher, std::size_t maximumWindowSize, TCallback&& callback) {
         std::lock_guard lg(_listener_mutex);
-        addListener(std::make_unique<MultiplexedListener<Callback, M>>(std::forward<M>(matcher), maximumWindowSize, std::forward<Callback>(callback)), false);
+        addListener(std::make_unique<MultiplexedListener<TMatcher, TCallback>>(std::forward<TMatcher>(matcher), maximumWindowSize, std::forward<TCallback>(callback)), false);
     }
 
-    template<trigger::Matcher M, DataSetCallback<T> Callback>
-    void registerSnapshotCallback(M&& matcher, std::chrono::nanoseconds delay, Callback&& callback) {
+    template<trigger::Matcher TMatcher, DataSetCallback<T> TCallback>
+    void registerSnapshotCallback(TMatcher&& matcher, std::chrono::nanoseconds delay, TCallback&& callback) {
         std::lock_guard lg(_listener_mutex);
-        addListener(std::make_unique<SnapshotListener<Callback, M>>(std::forward<M>(matcher), delay, std::forward<Callback>(callback)), false);
+        addListener(std::make_unique<SnapshotListener<TMatcher, TCallback>>(std::forward<TMatcher>(matcher), delay, std::forward<TCallback>(callback)), false);
     }
 
     void stop() noexcept {
@@ -605,25 +604,16 @@ public:
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inData) noexcept {
-        // Note: AbstractListener::process currently accepts a property_map for a single Tag only.
-        // Consider updating the method signature to handle multiple Tags simultaneously.
-        std::optional<property_map> tagData;
-        if (this->inputTagsPresent()) {
-            assert(this->mergedInputTag().index == 0);
-            tagData = this->mergedInputTag().map;
+        std::lock_guard lg(_listener_mutex); // TODO review/profile if a lock-free data structure should be used here
+        const auto      historyView = _history ? _history->get_span(0UZ) : std::span<const T>();
+        std::erase_if(_listeners, [](const auto& l) { return l->expired; });
+        for (auto& listener : _listeners) {
+            listener->process(historyView, inData, this->inputTags());
+        }
+        if (_history) {
+            _history->push_front(inData);
         }
 
-        {
-            std::lock_guard lg(_listener_mutex); // TODO review/profile if a lock-free data structure should be used here
-            const auto      historyView = _history ? _history->get_span(0UZ) : std::span<const T>();
-            std::erase_if(_listeners, [](const auto& l) { return l->expired; });
-            for (auto& listener : _listeners) {
-                listener->process(historyView, inData, tagData);
-            }
-            if (_history) {
-                _history->push_front(inData);
-            }
-        }
         return work::Status::OK;
     }
 
@@ -662,32 +652,42 @@ private:
 
         virtual void setMetadata(detail::Metadata) = 0;
 
-        virtual void process(std::span<const T> history, std::span<const T> data, std::optional<property_map> tagData0) = 0;
-        virtual void stop()                                                                                             = 0;
+        virtual void process(std::span<const T> history, std::span<const T> data, std::span<const Tag> tags) = 0;
+        virtual void stop()                                                                                  = 0;
     };
 
-    template<typename Callback>
+    template<trigger::Matcher TMatcher, typename TCallback>
     struct DataSetBaseListener : public AbstractListener {
-        bool                            isBlocking = false;
-        std::weak_ptr<DataSetPoller<T>> poller;
-        Callback                        callback;
+        static constexpr bool hasCallback = !std::is_same_v<TCallback, gr::meta::null_type>;
 
-        template<typename CallbackFW>
-        explicit DataSetBaseListener(CallbackFW&& callback_) : callback(std::forward<CallbackFW>(callback_)) {}
+        TMatcher                        _matcher;
+        gr::property_map                _matcherState;
+        detail::Metadata                _metadata;
+        std::weak_ptr<DataSetPoller<T>> _poller;
+        TCallback                       _callback;
+        bool                            _isBlocking = false;
 
-        explicit DataSetBaseListener(std::shared_ptr<DataSetPoller<T>> poller_, bool isBlocking_) : isBlocking(isBlocking_), poller(std::move(poller_)) {}
+        template<trigger::Matcher TMatcherFW>
+        explicit DataSetBaseListener(TMatcherFW&& matcher, std::shared_ptr<DataSetPoller<T>> poller, bool isBlocking)
+        requires(!hasCallback)
+            : _matcher(std::forward<TMatcherFW>(matcher)), _poller(std::move(poller)), _isBlocking(isBlocking) {}
+
+        template<trigger::Matcher TMatcherFW, typename TCallbackFW>
+        explicit DataSetBaseListener(TMatcherFW&& matcher, TCallbackFW&& callback)
+        requires(hasCallback)
+            : _matcher(std::forward<TMatcherFW>(matcher)), _callback(std::forward<TCallbackFW>(callback)) {}
 
         inline void publishDataSet(DataSet<T>&& data) {
-            if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
-                callback(std::move(data));
+            if constexpr (hasCallback) {
+                _callback(std::move(data));
             } else {
-                auto pollerPtr = poller.lock();
+                auto pollerPtr = _poller.lock();
                 if (!pollerPtr) {
                     this->setExpired();
                     return;
                 }
 
-                if (isBlocking || pollerPtr->writer.available() > 0) {
+                if (_isBlocking || pollerPtr->writer.available() > 0) {
                     auto writeData = pollerPtr->writer.reserve(1UZ);
                     writeData[0UZ] = std::move(data);
                     writeData.publish(1UZ);
@@ -696,324 +696,336 @@ private:
                 }
             }
         }
+
+        void setMetadata(detail::Metadata metadata) override { _metadata = std::move(metadata); }
     };
 
-    template<typename Callback>
+    template<typename TCallback = gr::meta::null_type>
     struct ContinuousListener : public AbstractListener {
-        static constexpr auto hasCallback       = !std::is_same_v<Callback, gr::meta::null_type>;
-        static constexpr auto callbackTakesTags = std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>> || std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>;
+        static constexpr bool hasCallback       = !std::is_same_v<TCallback, gr::meta::null_type>;
+        static constexpr bool callbackTakesTags = std::is_invocable_v<TCallback, std::span<const T>, std::span<const Tag>> || std::is_invocable_v<TCallback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>;
 
-        const DataSink<T>&              parent_sink;
-        bool                            block           = false;
-        std::size_t                     samples_written = 0;
+        const DataSink<T>&              _parentSink;
+        bool                            _isBlocking        = false;
+        std::size_t                     _nPublishedSamples = 0;
         std::optional<detail::Metadata> _pendingMetadata;
 
-        // callback-only
-        std::size_t      buffer_fill = 0;
-        std::vector<T>   buffer;
-        std::vector<Tag> tag_buffer;
+        // callback mode only
+        std::size_t _maxChunkSize; // // 0 = no limit; process all available samples at once
+        TCallback   _callback;
 
-        // polling-only
-        std::weak_ptr<StreamingPoller<T>> polling_handler = {};
-        Callback                          callback;
+        // poller mode only
+        std::weak_ptr<StreamingPoller<T>> _poller = {};
 
-        template<typename CallbackFW>
-        explicit ContinuousListener(std::size_t maxChunkSize, CallbackFW&& c, const DataSink<T>& parent) : parent_sink(parent), buffer(maxChunkSize), callback{std::forward<CallbackFW>(c)} {}
+        template<typename TCallbackFW>
+        explicit ContinuousListener(std::size_t maxChunkSize, TCallbackFW&& c, const DataSink<T>& parent)
+        requires(hasCallback)
+            : _parentSink(parent), _maxChunkSize(maxChunkSize), _callback{std::forward<TCallbackFW>(c)} {}
 
-        explicit ContinuousListener(std::shared_ptr<StreamingPoller<T>> poller_, bool doBlock, const DataSink<T>& parent) : parent_sink(parent), block(doBlock), polling_handler{std::move(poller_)} {}
+        explicit ContinuousListener(std::shared_ptr<StreamingPoller<T>> poller, bool isBlocking, const DataSink<T>& parent)
+        requires(!hasCallback)
+            : _parentSink(parent), _isBlocking(isBlocking), _poller{std::move(poller)} {}
 
         inline void callCallback(std::span<const T> data, std::span<const Tag> tags) {
-            if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>) {
-                callback(std::move(data), tags, parent_sink);
-            } else if constexpr (std::is_invocable_v<Callback, std::span<const T>, std::span<const Tag>>) {
-                callback(std::move(data), tags);
+            if constexpr (std::is_invocable_v<TCallback, std::span<const T>, std::span<const Tag>, const DataSink<T>&>) {
+                _callback(data, tags, _parentSink);
+            } else if constexpr (std::is_invocable_v<TCallback, std::span<const T>, std::span<const Tag>>) {
+                _callback(data, tags);
             } else {
-                callback(std::move(data));
+                _callback(data);
             }
         }
 
         void setMetadata(detail::Metadata metadata) override { _pendingMetadata = std::move(metadata); }
 
-        void process(std::span<const T>, std::span<const T> data, std::optional<property_map> tagData0) override {
+        void process(std::span<const T>, std::span<const T> data, std::span<const Tag> tags) override {
             if constexpr (hasCallback) {
-                // if there's pending data, fill buffer and send out
-                if (buffer_fill > 0) {
-                    const auto n = std::min(data.size(), buffer.size() - buffer_fill);
-                    std::ranges::copy(data.first(n), buffer.begin() + static_cast<std::ptrdiff_t>(buffer_fill));
-                    if constexpr (callbackTakesTags) {
-                        if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
-                            tag_buffer.emplace_back(static_cast<std::ptrdiff_t>(buffer_fill), std::move(*tag));
-                        }
-                        _pendingMetadata.reset();
-                        tagData0.reset();
-                    }
-                    buffer_fill += n;
-                    if (buffer_fill == buffer.size()) {
-                        callCallback(std::span(buffer), std::span(tag_buffer));
-                        samples_written += buffer.size();
-                        buffer_fill = 0;
-                        tag_buffer.clear();
-                    }
+                const std::size_t nSamples = data.size();
+                const std::size_t chunk    = _maxChunkSize != 0 ? _maxChunkSize : nSamples;
+                std::size_t       offset   = 0;
 
-                    data = data.last(data.size() - n);
-                }
-
-                // send out complete chunks directly
-                while (data.size() >= buffer.size()) {
+                while (offset < nSamples) {
+                    const std::size_t len   = std::min(chunk, nSamples - offset);
+                    auto              slice = data.subspan(offset, len);
                     if constexpr (callbackTakesTags) {
-                        std::vector<Tag> tags;
-                        if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
-                            tags.emplace_back(0, std::move(*tag));
+                        const std::size_t end            = offset + len;
+                        const auto        nTagsInRange   = static_cast<std::size_t>(std::ranges::count_if(tags, [offset, end](const Tag& t) { return t.index >= offset && t.index < end; }));
+                        const std::size_t nTagsToPublish = _pendingMetadata.has_value() ? nTagsInRange + 1 : nTagsInRange;
+                        std::vector<Tag>  tmpTags;
+                        if (nTagsToPublish > 0) {
+                            tmpTags.reserve(nTagsToPublish);
+                            if (_pendingMetadata.has_value()) {
+                                tmpTags.emplace_back(0, _pendingMetadata->toTagMap());
+                                _pendingMetadata.reset();
+                            }
+
+                            for (const Tag& tag : tags) {
+                                if (tag.index >= offset && tag.index < end) {
+                                    tmpTags.emplace_back(tag.index - offset, tag.map);
+                                }
+                            }
                         }
-                        tagData0.reset();
-                        _pendingMetadata.reset();
-                        callCallback(data.first(buffer.size()), std::span(tags));
+                        callCallback(slice, std::span(tmpTags));
                     } else {
-                        callback(data.first(buffer.size()));
+                        _callback(slice);
                     }
-                    samples_written += buffer.size();
-                    data = data.last(data.size() - buffer.size());
-                }
-
-                // write remaining data to the buffer
-                if (!data.empty()) {
-                    std::ranges::copy(data, buffer.begin());
-                    buffer_fill = data.size();
-                    if constexpr (callbackTakesTags) {
-                        if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
-                            tag_buffer.emplace_back(0, std::move(*tag));
-                        }
-                        _pendingMetadata.reset();
-                    }
+                    _nPublishedSamples += len;
+                    offset += len;
                 }
             } else {
-                auto poller = polling_handler.lock();
+                auto poller = _poller.lock();
                 if (!poller) {
                     this->setExpired();
                     return;
                 }
 
-                const auto toWrite = block ? data.size() : std::min(data.size(), poller->writer.available());
+                const std::size_t nSamplesToPublish  = _isBlocking ? data.size() : std::min(data.size(), poller->writer.available());
+                const auto        nTagsInRange       = static_cast<std::size_t>(std::ranges::count_if(tags, [nSamplesToPublish](const Tag& t) { return t.index < nSamplesToPublish; }));
+                const std::size_t availableInputTags = _pendingMetadata.has_value() ? nTagsInRange + 1 : nTagsInRange;
+                const std::size_t nTagsToPublish     = _isBlocking ? availableInputTags : std::min(availableInputTags, poller->tagWriter.available());
 
-                if (toWrite > 0) {
-                    if (auto tag = detail::tagAndMetadata(tagData0, _pendingMetadata)) {
-                        auto tw = poller->tagWriter.reserve(1UZ);
-                        tw[0UZ] = {samples_written, std::move(*tag)};
-                        tw.publish(1UZ);
+                if (nSamplesToPublish > 0) {
+                    if (nTagsToPublish > 0) {
+                        WriterSpanLike auto outTags = poller->tagWriter.reserve(nTagsToPublish);
+                        std::size_t         counter = 0UZ;
+                        if (_pendingMetadata.has_value()) {
+                            outTags[counter++] = {_nPublishedSamples, _pendingMetadata->toTagMap()};
+                            _pendingMetadata.reset();
+                        }
+                        for (const Tag& tag : tags) {
+                            if (counter >= nTagsToPublish) {
+                                break;
+                            }
+                            if (tag.index < nSamplesToPublish) {
+                                outTags[counter++] = {_nPublishedSamples + tag.index, tag.map};
+                            }
+                        }
+                        outTags.publish(nTagsToPublish);
                     }
-                    _pendingMetadata.reset();
-                    auto writeData = poller->writer.reserve(toWrite);
-                    std::ranges::copy(data | std::views::take(toWrite), writeData.begin());
-                    writeData.publish(writeData.size());
+                    WriterSpanLike auto outSamples = poller->writer.reserve(nSamplesToPublish);
+                    std::ranges::copy(data | std::views::take(nSamplesToPublish), outSamples.begin());
+                    outSamples.publish(nSamplesToPublish);
                 }
-                poller->dropCount += data.size() - toWrite;
-                samples_written += toWrite;
+                poller->droppedSampleCount += data.size() - nSamplesToPublish;
+                poller->droppedTagCount += availableInputTags - nTagsToPublish;
+                _nPublishedSamples += nSamplesToPublish;
             }
         }
 
         void stop() override {
-            if constexpr (hasCallback) {
-                if (buffer_fill > 0) {
-                    callCallback(std::span(buffer).first(buffer_fill), std::span(tag_buffer));
-                    tag_buffer.clear();
-                    buffer_fill = 0;
-                }
-            } else {
-                if (auto p = polling_handler.lock()) {
+            if constexpr (!hasCallback) {
+                if (auto p = _poller.lock()) {
                     p->finished = true;
                 }
             }
         }
-    };
+    }; // struct ContinuousListener
 
-    struct PendingWindow {
+    struct TriggerCapture {
         DataSet<T>  dataset;
-        std::size_t pending_post_samples = 0;
+        std::size_t nRemainingPostSamples = 0;
     };
 
-    template<typename Callback, trigger::Matcher TMatcher>
-    struct TriggerListener : public DataSetBaseListener<Callback> {
-        std::size_t preSamples  = 0;
-        std::size_t postSamples = 0;
+    template<trigger::Matcher TMatcher, typename TCallback = gr::meta::null_type>
+    struct TriggerListener : public DataSetBaseListener<TMatcher, TCallback> {
+        using Base = DataSetBaseListener<TMatcher, TCallback>;
 
-        detail::Metadata          _metadata;
-        gr::property_map          trigger_matcher_state;
-        TMatcher                  trigger_matcher = {};
-        std::deque<PendingWindow> pending_trigger_windows; // triggers that still didn't receive all their data
+        std::size_t                _preSamples  = 0;
+        std::size_t                _postSamples = 0;
+        std::deque<TriggerCapture> _triggerCaptures; // trigger captures that still didn't receive all their data
 
-        template<trigger::Matcher Matcher>
-        explicit TriggerListener(Matcher&& matcher, std::shared_ptr<DataSetPoller<T>> poller_, std::size_t pre, std::size_t post, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller_), doBlock), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)) {}
+        template<trigger::Matcher TMatcherFW>
+        explicit TriggerListener(TMatcherFW&& matcher, std::shared_ptr<DataSetPoller<T>> poller_, std::size_t pre, std::size_t post, bool isBlocking)
+        requires(!Base::hasCallback)
+            : DataSetBaseListener<TMatcher, TCallback>(std::forward<TMatcherFW>(matcher), std::move(poller_), isBlocking), _preSamples(pre), _postSamples(post) {}
 
-        template<typename CallbackFW, trigger::Matcher Matcher>
-        explicit TriggerListener(Matcher&& matcher, std::size_t pre, std::size_t post, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), preSamples(pre), postSamples(post), trigger_matcher(std::forward<Matcher>(matcher)) {}
+        template<trigger::Matcher TMatcherFW, typename TCallbackFW>
+        explicit TriggerListener(TMatcherFW&& matcher, std::size_t pre, std::size_t post, TCallbackFW&& cb)
+        requires(Base::hasCallback)
+            : DataSetBaseListener<TMatcher, TCallback>(std::forward<TMatcherFW>(matcher), std::forward<TCallbackFW>(cb)), _preSamples(pre), _postSamples(post) {}
 
-        void setMetadata(detail::Metadata metadata) override { _metadata = std::move(metadata); }
+        void process(std::span<const T> history, std::span<const T> inData, std::span<const Tag> tags) override {
+            for (const Tag& tag : tags) {
+                detail::checkTag(tag);
 
-        void process(std::span<const T> history, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher("", Tag{0, *tagData0}, trigger_matcher_state) == trigger::MatchResult::Matching) {
-                DataSet<T>        dataset       = detail::createDataset<T>(_metadata);
-                const std::size_t minPreSamples = std::min(preSamples, history.size());
-                dataset.signal_values.reserve(minPreSamples + postSamples);
-                dataset.axis_values.reserve(minPreSamples + postSamples);
-
-                std::ranges::copy(history.subspan(0UZ, minPreSamples) | std::views::reverse, std::back_inserter(dataset.signal_values));
-                std::ranges::copy(std::views::iota(0UZ, minPreSamples), std::back_inserter(dataset.axis_values[0]));
-                dataset.extents[0UZ] = static_cast<std::int32_t>(dataset.signalValues(0UZ).size());
-
-                dataset.timing_events = {{{static_cast<std::ptrdiff_t>(minPreSamples), *tagData0}}};
-                pending_trigger_windows.push_back({.dataset = std::move(dataset), .pending_post_samples = postSamples});
+                if (!tag.map.empty() && this->_matcher("", tag, this->_matcherState) == trigger::MatchResult::Matching) {
+                    const std::size_t minPreSamples = std::min(_preSamples, history.size());
+                    DataSet<T>        dataset       = detail::createDataset<T>(this->_metadata, minPreSamples + _postSamples);
+                    std::ranges::copy(history.subspan(0UZ, minPreSamples) | std::views::reverse, std::back_inserter(dataset.signal_values));
+                    std::ranges::copy(std::views::iota(0UZ, minPreSamples), std::back_inserter(dataset.axis_values[0]));
+                    dataset.extents[0UZ] = static_cast<std::int32_t>(dataset.signalValues(0UZ).size());
+                    dataset.timing_events[0UZ].emplace_back(static_cast<std::ptrdiff_t>(minPreSamples), tag.map);
+                    _triggerCaptures.push_back({.dataset = std::move(dataset), .nRemainingPostSamples = _postSamples});
+                }
             }
 
-            auto window = pending_trigger_windows.begin();
-            while (window != pending_trigger_windows.end()) {
-                const std::size_t nPostSamples = std::min(window->pending_post_samples, inData.size());
-                const std::size_t oldSize      = window->dataset.signal_values.size();
-                std::ranges::copy(inData.first(nPostSamples), std::back_inserter(window->dataset.signal_values));
-                std::ranges::copy(std::views::iota(oldSize, window->dataset.signalValues(0UZ).size()), std::back_inserter(window->dataset.axis_values[0UZ]));
-                window->dataset.extents[0UZ] = static_cast<std::int32_t>(window->dataset.signalValues(0UZ).size());
+            auto capture = _triggerCaptures.begin();
+            while (capture != _triggerCaptures.end()) {
+                const std::size_t nPostSamples = std::min(capture->nRemainingPostSamples, inData.size());
+                const std::size_t oldSize      = capture->dataset.signalValues(0UZ).size();
+                std::ranges::copy(inData.first(nPostSamples), std::back_inserter(capture->dataset.signal_values));
+                const std::size_t newSize = capture->dataset.signalValues(0UZ).size();
+                std::ranges::copy(std::views::iota(oldSize, newSize), std::back_inserter(capture->dataset.axis_values[0UZ]));
+                capture->dataset.extents[0UZ] = static_cast<std::int32_t>(newSize);
 
-                window->pending_post_samples -= nPostSamples;
+                capture->nRemainingPostSamples -= nPostSamples;
 
-                if (window->pending_post_samples == 0) {
-                    this->publishDataSet(std::move(window->dataset));
-                    window = pending_trigger_windows.erase(window);
+                if (capture->nRemainingPostSamples == 0) {
+                    this->publishDataSet(std::move(capture->dataset));
+                    capture = _triggerCaptures.erase(capture);
                 } else {
-                    ++window;
+                    ++capture;
                 }
             }
         }
 
         void stop() override {
-            for (auto& window : pending_trigger_windows) {
+            for (auto& window : _triggerCaptures) {
                 if (!window.dataset.signal_values.empty()) {
                     this->publishDataSet(std::move(window.dataset));
                 }
             }
-            pending_trigger_windows.clear();
-            if (auto p = this->poller.lock()) {
+            _triggerCaptures.clear();
+            if (auto p = this->_poller.lock()) {
                 p->finished = true;
             }
         }
-    };
+    }; // struct TriggerListener
 
-    template<typename Callback, trigger::Matcher M>
-    struct MultiplexedListener : public DataSetBaseListener<Callback> {
-        M                         matcher;
-        gr::property_map          matcher_state;
-        detail::Metadata          _metadata;
-        std::optional<DataSet<T>> pending_dataset;
-        std::size_t               maximumWindowSize;
+    template<trigger::Matcher TMatcher, typename TCallback = gr::meta::null_type>
+    struct MultiplexedListener : public DataSetBaseListener<TMatcher, TCallback> {
+        using Base = DataSetBaseListener<TMatcher, TCallback>;
 
-        template<typename CallbackFW, trigger::Matcher Matcher>
-        explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize) {}
+        std::optional<DataSet<T>> _curDataset;
+        std::size_t               _maxDataSetSize; // 0 == unlimited
 
-        template<trigger::Matcher Matcher>
-        explicit MultiplexedListener(Matcher&& matcher_, std::size_t maxWindowSize, std::shared_ptr<DataSetPoller<T>> poller_, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller_), doBlock), matcher(std::forward<Matcher>(matcher_)), maximumWindowSize(maxWindowSize) {}
+        template<typename TCallbackFW, trigger::Matcher TMatcherFW>
+        explicit MultiplexedListener(TMatcherFW&& matcher, std::size_t maxDataSetSize, TCallbackFW&& callback)
+        requires(Base::hasCallback)
+            : DataSetBaseListener<TMatcher, TCallback>(std::forward<TMatcherFW>(matcher), std::forward<TCallbackFW>(callback)), _maxDataSetSize(maxDataSetSize) {}
 
-        void setMetadata(detail::Metadata metadata) override { _metadata = std::move(metadata); }
+        template<trigger::Matcher TMatcherFW>
+        explicit MultiplexedListener(TMatcherFW&& matcher, std::size_t maxDataSetSize, std::shared_ptr<DataSetPoller<T>> poller, bool isBlocking)
+        requires(!Base::hasCallback)
+            : DataSetBaseListener<TMatcher, TCallback>(std::forward<TMatcherFW>(matcher), std::move(poller), isBlocking), _maxDataSetSize(maxDataSetSize) {}
 
-        void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0) {
-                const auto obsr = matcher("", Tag{0, *tagData0}, matcher_state);
-                if (obsr == trigger::MatchResult::NotMatching || obsr == trigger::MatchResult::Matching) {
-                    if (pending_dataset) {
-                        if (obsr == trigger::MatchResult::NotMatching) {
-                            pending_dataset->timing_events[0UZ].emplace_back(pending_dataset->signal_values.size(), *tagData0);
-                        }
-                        this->publishDataSet(std::move(*pending_dataset));
-                        pending_dataset.reset();
+        void process(std::span<const T>, std::span<const T> inData, std::span<const Tag> tags) override {
+            // Overlapping trigger windows are not supported.
+            // Examples:
+            //   Start1–Stop1–Start2–Stop2 → OK: produces two DataSets: [Start1, Stop1) and [Start2, Stop2).
+            //   Start1–Start2–Stop1–Stop2 → When a capture is active, a new Start ends and publishes the current DataSet, then immediately starts a new one.
+            //   Result: two DataSets — [Start1, Start2) and [Start2, Stop1). Stop2 is ignored.
+            for (const Tag& tag : tags) {
+                detail::checkTag(tag);
+                // MatchResult::Matching == START trigger, MatchResult::NotMatching == STOP trigger
+                const auto matchResult = this->_matcher("", tag, this->_matcherState);
+                // Close current capture on either explicit Stop or implicit Stop (new Start)
+                if (matchResult == trigger::MatchResult::NotMatching || matchResult == trigger::MatchResult::Matching) {
+                    if (_curDataset) {
+                        _curDataset->timing_events[0UZ].emplace_back(static_cast<std::ptrdiff_t>(_curDataset->signalValues(0UZ).size()), tag.map);
+                        this->publishDataSet(std::move(*_curDataset));
+                        _curDataset.reset();
                     }
                 }
-                if (obsr == trigger::MatchResult::Matching) {
-                    pending_dataset = detail::createDataset<T>(_metadata);
-                    pending_dataset->signal_values.reserve(maximumWindowSize);
-                    pending_dataset->axis_values.reserve(maximumWindowSize);
-                    pending_dataset->timing_events = {{{0, *tagData0}}};
+                if (matchResult == trigger::MatchResult::Matching) {
+                    _curDataset = detail::createDataset<T>(this->_metadata, _maxDataSetSize);
+                    _curDataset->timing_events[0UZ].emplace_back(0, tag.map);
+
+                    // Multiple Start/Stop tags may share the same sample index; we start on the first Start and
+                    // ignore any further tags at this index to prevent empty DataSets at the same point.
+                    // This should not happen in practice.
+                    continue;
                 }
             }
-            if (pending_dataset) {
-                const auto        toWrite = std::min(inData.size(), maximumWindowSize - pending_dataset->signal_values.size());
-                const std::size_t oldSize = pending_dataset->signal_values.size();
-                std::ranges::copy(inData.first(toWrite), std::back_inserter(pending_dataset->signal_values));
-                std::ranges::copy(std::views::iota(oldSize, pending_dataset->signal_values.size()), std::back_inserter(pending_dataset->axis_values[0UZ]));
-                pending_dataset->extents[0UZ] = static_cast<std::int32_t>(pending_dataset->signal_values.size());
-
-                if (pending_dataset->signal_values.size() == maximumWindowSize) {
-                    this->publishDataSet(std::move(*pending_dataset));
-                    pending_dataset.reset();
+            if (_curDataset) {
+                const std::size_t maxSize = (_maxDataSetSize == 0) ? std::numeric_limits<std::size_t>::max() : _maxDataSetSize;
+                const std::size_t oldSize = _curDataset->signalValues(0UZ).size();
+                const std::size_t toWrite = std::min(inData.size(), maxSize - oldSize);
+                const std::size_t newSize = oldSize + toWrite;
+                if (toWrite > 0) {
+                    std::ranges::copy(inData.first(toWrite), std::back_inserter(_curDataset->signal_values));
+                    std::ranges::copy(std::views::iota(oldSize, newSize), std::back_inserter(_curDataset->axis_values[0UZ]));
+                    _curDataset->extents[0UZ] = static_cast<std::int32_t>(newSize);
+                }
+                if (newSize == maxSize) {
+                    this->publishDataSet(std::move(*_curDataset));
+                    _curDataset.reset();
                 }
             }
         }
 
         void stop() override {
-            if (pending_dataset) {
-                this->publishDataSet(std::move(*pending_dataset));
-                pending_dataset.reset();
+            if (_curDataset) {
+                this->publishDataSet(std::move(*_curDataset));
+                _curDataset.reset();
             }
-            if (auto p = this->poller.lock()) {
+            if (auto p = this->_poller.lock()) {
                 p->finished = true;
             }
         }
+    }; // struct MultiplexedListener
+
+    struct Snapshot {
+        property_map tagMap;
+        std::size_t  triggerIndex      = 0;
+        std::size_t  nRemainingSamples = 0;
     };
 
-    struct PendingSnapshot {
-        property_map tag_data;
-        std::size_t  delay           = 0;
-        std::size_t  pending_samples = 0;
-    };
+    template<trigger::Matcher TMatcher, typename TCallback = gr::meta::null_type>
+    struct SnapshotListener : public DataSetBaseListener<TMatcher, TCallback> {
+        using Base = DataSetBaseListener<TMatcher, TCallback>;
 
-    template<typename Callback, trigger::Matcher M>
-    struct SnapshotListener : public DataSetBaseListener<Callback> {
-        std::chrono::nanoseconds    time_delay;
-        std::size_t                 sample_delay = 0;
-        detail::Metadata            _metadata;
-        M                           trigger_matcher = {};
-        gr::property_map            trigger_matcher_state;
-        std::deque<PendingSnapshot> pending;
+        std::chrono::nanoseconds _timeDelay;       // set by the user
+        std::size_t              _sampleDelay = 0; // calculated from _timeDelay and sample rate
+        std::deque<Snapshot>     _snapshots;
 
-        template<trigger::Matcher Matcher>
-        explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, std::shared_ptr<DataSetPoller<T>> poller_, bool doBlock) : DataSetBaseListener<Callback>(std::move(poller_), doBlock), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)) {}
+        template<trigger::Matcher TMatcherFW>
+        explicit SnapshotListener(TMatcherFW&& matcher, std::chrono::nanoseconds delay, std::shared_ptr<DataSetPoller<T>> poller, bool isBlocking)
+        requires(!Base::hasCallback)
+            : DataSetBaseListener<TMatcher, TCallback>(std::forward<TMatcherFW>(matcher), std::move(poller), isBlocking), _timeDelay(delay) {}
 
-        template<typename CallbackFW, trigger::Matcher Matcher>
-        explicit SnapshotListener(Matcher&& matcher, std::chrono::nanoseconds delay, CallbackFW&& cb) : DataSetBaseListener<Callback>(std::forward<CallbackFW>(cb)), time_delay(delay), trigger_matcher(std::forward<Matcher>(matcher)) {}
+        template<typename TCallbackFW, trigger::Matcher TMatcherFW>
+        explicit SnapshotListener(TMatcherFW&& matcher, std::chrono::nanoseconds delay, TCallbackFW&& callback)
+        requires(Base::hasCallback)
+            : DataSetBaseListener<TMatcher, TCallback>(std::forward<TMatcherFW>(matcher), std::forward<TCallbackFW>(callback)), _timeDelay(delay) {}
 
         void setMetadata(detail::Metadata metadata) override {
-            sample_delay = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(time_delay).count() * metadata.sampleRate));
-            _metadata    = std::move(metadata);
+            _sampleDelay    = static_cast<std::size_t>(std::round(std::chrono::duration_cast<std::chrono::duration<float>>(_timeDelay).count() * metadata.sampleRate));
+            this->_metadata = std::move(metadata);
         }
 
-        void process(std::span<const T>, std::span<const T> inData, std::optional<property_map> tagData0) override {
-            if (tagData0 && trigger_matcher("", {0, *tagData0}, trigger_matcher_state) == trigger::MatchResult::Matching) {
-                auto new_pending = PendingSnapshot{*tagData0, sample_delay, sample_delay};
-                // make sure pending is sorted by number of pending_samples (insertion might be not at end if sample rate decreased)
-                auto rit = std::find_if(pending.rbegin(), pending.rend(), [delay = sample_delay](const auto& other) { return other.pending_samples < delay; });
-                pending.insert(rit.base(), std::move(new_pending));
+        void process(std::span<const T>, std::span<const T> inData, std::span<const Tag> tags) override {
+            for (const Tag& tag : tags) {
+                detail::checkTag(tag);
+                if (!tag.map.empty() && this->_matcher("", tag, this->_matcherState) == trigger::MatchResult::Matching) {
+                    _snapshots.push_back(Snapshot{tag.map, _sampleDelay, _sampleDelay});
+                }
             }
 
-            auto it = pending.begin();
-            while (it != pending.end()) {
-                if (it->pending_samples >= inData.size()) {
-                    it->pending_samples -= inData.size();
-                    break;
+            auto it = _snapshots.begin();
+            while (it != _snapshots.end()) {
+                if (it->nRemainingSamples >= inData.size()) {
+                    it->nRemainingSamples -= inData.size();
+                    ++it;
+                } else {
+                    DataSet<T> dataset = detail::createDataset<T>(this->_metadata, 1UZ);
+                    dataset.timing_events[0UZ].emplace_back(-static_cast<std::ptrdiff_t>(it->triggerIndex), std::move(it->tagMap));
+                    dataset.signal_values.push_back(inData[it->nRemainingSamples]);
+                    dataset.axis_values[0].push_back(0);
+                    dataset.extents[0UZ] = std::int32_t(1);
+                    this->publishDataSet(std::move(dataset));
+                    it = _snapshots.erase(it);
                 }
-
-                DataSet<T> dataset    = detail::createDataset<T>(_metadata);
-                dataset.timing_events = {{{-static_cast<std::ptrdiff_t>(it->delay), std::move(it->tag_data)}}};
-                dataset.signal_values = {inData[it->pending_samples]};
-                std::ranges::copy(std::views::iota(0UZ, dataset.signalValues(0UZ).size()), std::back_inserter(dataset.axis_values[0]));
-                dataset.extents[0UZ] = static_cast<std::int32_t>(dataset.signalValues(0UZ).size());
-                this->publishDataSet(std::move(dataset));
-                it = pending.erase(it);
             }
         }
 
         void stop() override {
-            pending.clear();
-            if (auto p = this->poller.lock()) {
+            _snapshots.clear();
+            if (auto p = this->_poller.lock()) {
                 p->finished = true;
             }
         }
-    };
+    }; // struct SnapshotListener
 };
 
 GR_REGISTER_BLOCK(gr::basic::DataSetSink, [T], [ float, double ])

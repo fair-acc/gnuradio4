@@ -164,7 +164,7 @@ you can set the `backPressure` property to false.
             const auto tags = inputSpan.tags(); // Tag handling
             for (const auto& [normalisedTagIndex, tagMap] : tags) {
                 if (normalisedTagIndex < static_cast<std::ptrdiff_t>(nSamplesToCopy)) {
-                    outputSpan.publishTag(tagMap, std::max(static_cast<std::size_t>(normalisedTagIndex) + static_cast<std::size_t>(diffOffset), 0UZ));
+                    outputSpan.publishTag(tagMap.get(), std::max(static_cast<std::size_t>(normalisedTagIndex) + static_cast<std::size_t>(diffOffset), 0UZ));
                 }
             }
             outputSpan.publish(nSamplesToCopy);

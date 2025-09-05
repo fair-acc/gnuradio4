@@ -167,15 +167,15 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         std::size_t nPorts = ins.size();
 
         const std::vector<SyncData> syncData = synchronize(ins);
-        const bool                  canSync  = !syncData.empty();
+        const bool                  canSync  = syncData.size() == nPorts;
 
         if (canSync) {
-            const std::size_t minPre            = std::ranges::min(syncData | std::views::transform([](const SyncData& data) { return data.nPre; }));
-            const std::size_t minPost           = std::ranges::min(syncData | std::views::transform([](const SyncData& data) { return data.nPost; }));
+            const std::size_t minPre            = std::ranges::min(syncData | std::views::transform(&SyncData::nPre));
+            const std::size_t minPost           = std::ranges::min(syncData | std::views::transform(&SyncData::nPost));
             const std::size_t minSamplesOut     = std::ranges::min(outs | std::views::transform([&](const auto& out) { return out.size(); }));
             const std::size_t nSamplesToPublish = std::min(minPre + 1 + minPost, minSamplesOut);
 
-            for (std::size_t i = 0UZ; i < ins.size(); i++) {
+            for (std::size_t i = 0UZ; i < nPorts; i++) {
                 const std::size_t nSamplesToDrop    = syncData[i].index - minPre;
                 const std::size_t nSamplesToConsume = nSamplesToDrop + nSamplesToPublish;
 
@@ -234,7 +234,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
     constexpr void publishDroppedSamplesTagIfNotZero(OutputSpanLike auto& out, std::size_t nDroppedSamples) {
         if (nDroppedSamples > 0UZ) {
-            out.publishTag({{gr::tag::N_DROPPED_SAMPLES.shortKey(), nDroppedSamples}}, 0UZ);
+            out.publishTag(property_map{{gr::tag::N_DROPPED_SAMPLES.shortKey(), nDroppedSamples}}, 0UZ);
         }
     }
 

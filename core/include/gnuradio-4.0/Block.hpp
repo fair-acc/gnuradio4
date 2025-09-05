@@ -785,7 +785,7 @@ public:
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
 protected:
-    Tag _mergedInputTag{};
+    std::vector<Tag> _inputTags{}; // store input tags, Tag::index = relative index, sorted by index, no duplicates
 
     bool             _outputTagsChanged = false; // It is used to indicate that processOne published a Tag and want prematurely break a loop. Should be set to "true" in block implementation processOne().
     std::vector<Tag> _outputTags{};              // This std::vector is used to cache published Tags when block implements processOne method. The tags are then copied to output spans. Note: that for he processOne each tag is published for all output ports
@@ -830,12 +830,12 @@ public:
     }
 
     Block(Block&& other) noexcept
-        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
-          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
-          stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)),                                         //
-          msgOut(std::move(other.msgOut)), propertySubscriptions(std::move(other.propertySubscriptions)),                                                        //
-          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
-          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                          //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                  //
+          stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)),                               //
+          msgOut(std::move(other.msgOut)), propertySubscriptions(std::move(other.propertySubscriptions)),                                              //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                             //
+          _inputTags(std::move(other._inputTags)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
           _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
 
     // There are a few const or conditionally const member variables, we cannot have a move-assignment that is equivalent to the move constructor
@@ -898,9 +898,9 @@ public:
 
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return blockingIO; }
 
-    [[nodiscard]] constexpr bool inputTagsPresent() const noexcept { return !_mergedInputTag.map.empty(); };
+    [[nodiscard]] constexpr bool inputTagsPresent() const noexcept { return !_inputTags.empty(); };
 
-    [[nodiscard]] constexpr const Tag& mergedInputTag() const noexcept { return _mergedInputTag; }
+    [[nodiscard]] constexpr const std::span<const Tag> inputTags() const noexcept { return {_inputTags.data(), _inputTags.size()}; }
 
     [[nodiscard]] constexpr const SettingsBase& settings() const noexcept { return _settings; }
 
@@ -1051,13 +1051,20 @@ public:
         }
     }
 
-    constexpr void publishMergedInputTag(auto& outputSpanTuple) noexcept {
+    constexpr void publishInputTags(auto& outputSpanTuple) noexcept {
         if constexpr (!noDefaultTagForwarding) {
             if (inputTagsPresent()) {
-                const auto&  autoForwardKeys = settings().autoForwardParameters();
-                property_map onlyAutoForwardMap;
-                std::ranges::copy_if(_mergedInputTag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); });
-                for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
+                const auto& autoForwardKeys = settings().autoForwardParameters();
+                for (const Tag& tag : _inputTags) {
+                    property_map onlyAutoForwardMap;
+                    std::ranges::copy_if(tag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); });
+                    if (!onlyAutoForwardMap.empty()) {
+                        // We currently publish all tags at index 0—should we respect each tag’s index instead?
+                        // Note: processBulk/processOne can also publish tags; publishing a non-zero index here might break the
+                        // required monotonic (in-order) tag publishing.
+                        for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
+                    }
+                }
             }
         }
     }
@@ -1072,40 +1079,63 @@ public:
         _outputTags.clear();
     }
 
-    /**
-     * Merge tags from all sync ports into one merged tag, apply auto-update parameters
-     */
-    void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
+    template<typename TInputSpan>
+    [[nodiscard]] auto inputTagsView(TInputSpan& inputSpans, std::size_t untilLocalIndex = 1UZ) const noexcept {
+        std::vector<std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>> nonDuplicatedInputTags;
         for_each_reader_span(
-            [this, untilLocalIndex](auto& in) {
+            [untilLocalIndex, &nonDuplicatedInputTags](auto& in) {
                 if (in.isSync) {
                     std::size_t untilLocalIndexAdjusted = untilLocalIndex;
                     if constexpr (!backwardTagForwarding) {
                         untilLocalIndexAdjusted = 1UZ;
                     }
-                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndexAdjusted).map) {
-                        _mergedInputTag.map.insert_or_assign(key, value);
+                    for (const auto& p : in.tags(untilLocalIndexAdjusted)) {
+                        const bool duplicate = std::ranges::any_of(nonDuplicatedInputTags, [&p](const auto& p2) { return p2.first == p.first && p2.second.get() == p.second.get(); });
+                        if (!duplicate) {
+                            nonDuplicatedInputTags.push_back(p);
+                        }
                     }
                 }
             },
             inputSpans);
+        std::ranges::sort(nonDuplicatedInputTags, std::less<>{}, [](const auto& p) { return p.first; });
+        return nonDuplicatedInputTags;
+    }
+
+    void updateInputTagsAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
+        auto pairView = inputTagsView(inputSpans, untilLocalIndex);
+        auto tagsView = pairView | std::views::transform([](const auto& p) { return Tag{p.first >= 0 ? static_cast<std::size_t>(p.first) : 0UZ, p.second}; });
+        for (const auto& tag : tagsView) {
+            _inputTags.push_back(tag);
+        }
 
         if (inputTagsPresent()) {
-            settings().autoUpdate(_mergedInputTag); // apply tags as new settings if matching
+            for (auto& tag : _inputTags) {
+                settings().autoUpdate(tag); // apply tags as new settings if matching
+                applyChangedSettings(&tag);
+            }
         }
     }
 
-    void applyChangedSettings() {
+    void applyChangedSettings(Tag* tag) {
         if (!settings().changed()) {
             return;
         }
-        invokeUserProvidedFunction("applyChangedSettings()", [this] noexcept(false) {
+        invokeUserProvidedFunction("applyChangedSettings()", [this, tag] noexcept(false) {
             auto applyResult = settings().applyStagedParameters();
             checkBlockParameterConsistency();
 
             if (!applyResult.forwardParameters.empty()) {
-                for (auto& [key, value] : applyResult.forwardParameters) {
-                    _mergedInputTag.insert_or_assign(key, value);
+                if (tag == nullptr) {
+                    Tag& newTag = _inputTags.emplace_back(0, property_map{});
+                    std::ranges::sort(_inputTags, std::less<>{}, &Tag::index);
+                    for (auto& [key, value] : applyResult.forwardParameters) {
+                        newTag.map.insert_or_assign(key, value);
+                    }
+                } else {
+                    for (auto& [key, value] : applyResult.forwardParameters) {
+                        tag->map.insert_or_assign(key, value);
+                    }
                 }
             }
 
@@ -1154,30 +1184,10 @@ public:
             ports);
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
-
-    inline constexpr void publishTag(const property_map& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(tag_data, tagOffset); }
-
-    template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
-        if (_outputTags.empty()) {
-            _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
-        } else {
-            auto& lastTag = _outputTags.back();
-#ifndef NDEBUG
-            if (lastTag.index > tagOffset) { // check the order of published Tags.index
-                std::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
-                // std::abort();
-            }
-#endif
-            if (lastTag.index == tagOffset) { // -> merge tags with the same index
-                for (auto&& [key, value] : tagData) {
-                    lastTag.map.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
-                }
-            } else {
-                _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
-            }
-        }
+    template<PropertyMapType TPropertyMap>
+    inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
+        _outputTags.emplace_back(Tag(tagOffset, std::forward<TPropertyMap>(tagData)));
+        std::ranges::sort(_outputTags, std::less<>{}, &Tag::index);
     }
 
     inline constexpr void publishEoS() noexcept {
@@ -1944,7 +1954,7 @@ protected:
      *       - in the generic case the only tag in the current chunk is on the first sample
      *       - different strategies, see TagPropagation
      *   - settings
-     *      - apply and reset cached/merged tag
+     *      - apply and reset cached/input tags
      *   - get available samples count
      *     - syncIn: min/max/available samples to consume on SYNC ports
      *     - syncOut: min/max/available samples to produce on SYNC ports
@@ -1967,7 +1977,7 @@ protected:
         using TInputTypes  = traits::block::stream_input_port_types<Derived>;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
 
-        applyChangedSettings(); // apply settings even if the block is already stopped
+        applyChangedSettings(nullptr); // apply settings even if the block is already stopped
 
         if constexpr (!blockingIO) { // N.B. no other thread/constraint to consider before shutting down
             if (this->state() == lifecycle::State::REQUESTED_STOP) {
@@ -2016,7 +2026,7 @@ protected:
 
         if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
             auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
-            updateMergedInputTagAndApplySettings(inputSpans, inputSkipBefore);                        // apply all tags in the skipped data range
+            updateInputTagsAndApplySettings(inputSpans, inputSkipBefore);                             // apply all tags in the skipped data range
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
@@ -2042,13 +2052,11 @@ protected:
         auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
-        updateMergedInputTagAndApplySettings(inputSpans, processedIn);
-
-        applyChangedSettings();
+        updateInputTagsAndApplySettings(inputSpans, processedIn);
 
         // Actual publishing occurs when outputSpans go out of scope. If processedOut == 0, the Tags will not be published.
         publishCachedOutputTags(outputSpans);
-        publishMergedInputTag(outputSpans);
+        publishInputTags(outputSpans);
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
@@ -2118,15 +2126,18 @@ protected:
 
         if (processedOut > 0) {
             publishCachedOutputTags(outputSpans);
-            _mergedInputTag.map.clear(); // clear temporary cached input tags after processing - won't be needed after this
+            _inputTags.clear(); // clear temporary cached input tags after processing
         } else {
             // if no data is published or consumed => do not publish any tags
             for_each_writer_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);
         }
+        if constexpr (traits::block::stream_output_port_types<Derived>::size == 0) { // if sink block
+            _inputTags.clear();
+        }
 
         if (lifecycle::isShuttingDown(this->state())) {
             emitErrorMessageIfAny("isShuttingDown -> STOPPED", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-            applyChangedSettings();
+            applyChangedSettings(nullptr);
             userReturnStatus = DONE;
             processedIn      = 0UZ;
         }

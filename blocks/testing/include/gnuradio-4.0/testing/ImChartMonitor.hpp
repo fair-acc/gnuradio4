@@ -29,25 +29,24 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
     PortIn<T> in;
 
-    A<float, "sample rate", Visible, Doc<"Sampling frequency in Hz">, Unit<"Hz">, Limits<float(0), std::numeric_limits<float>::max()>>                    sample_rate      = 1000.0f;
-    A<std::string, "signal name", Visible, Doc<"human-readable identifier for the signal">>                                                               signal_name      = "unknown signal";
-    A<int, "signal index", Doc<"which sub-DataSet-signal to display. -1: plot all">>                                                                      signal_index     = -1;
-    A<gr::Size_t, "history length", Doc<"number of samples retained in ring buffer">>                                                                     n_history        = isDataSetLike ? 3ULL : 1000ULL;
-    A<gr::Size_t, "tag history length", Doc<"number of tag entries retained in tag buffer">>                                                              n_tag_history    = 20ULL;
-    A<bool, "reset view", Doc<"true: triggers a view reset">>                                                                                             reset_view       = true;
-    A<bool, "plot graph", Doc<"controls whether to draw the main data graph">>                                                                            plot_graph       = true;
-    A<bool, "plot timing", Doc<"controls whether to display timing info">>                                                                                plot_timing      = false;
-    A<bool, "plot merged tags", Doc<"controls whether to display merged timing info">>                                                                    plot_merged_tags = false;
-    A<std::uint64_t, "timeout", Unit<"ms">, Limits<std::uint64_t(0), std::numeric_limits<std::uint64_t>::max()>, Doc<"Timeout duration in milliseconds">> timeout_ms       = 40ULL;
-    A<gr::Size_t, "chart width", Doc<"chart character width in terminal">>                                                                                chart_width      = 130U;
-    A<gr::Size_t, "chart heigth", Doc<"chart character width in terminal">>                                                                               chart_height     = 28U;
+    A<float, "sample rate", Visible, Doc<"Sampling frequency in Hz">, Unit<"Hz">, Limits<float(0), std::numeric_limits<float>::max()>>                    sample_rate   = 1000.0f;
+    A<std::string, "signal name", Visible, Doc<"human-readable identifier for the signal">>                                                               signal_name   = "unknown signal";
+    A<int, "signal index", Doc<"which sub-DataSet-signal to display. -1: plot all">>                                                                      signal_index  = -1;
+    A<gr::Size_t, "history length", Doc<"number of samples retained in ring buffer">>                                                                     n_history     = isDataSetLike ? 3ULL : 1000ULL;
+    A<gr::Size_t, "tag history length", Doc<"number of tag entries retained in tag buffer">>                                                              n_tag_history = 20ULL;
+    A<bool, "reset view", Doc<"true: triggers a view reset">>                                                                                             reset_view    = true;
+    A<bool, "plot graph", Doc<"controls whether to draw the main data graph">>                                                                            plot_graph    = true;
+    A<bool, "plot timing", Doc<"controls whether to display timing info">>                                                                                plot_timing   = false;
+    A<std::uint64_t, "timeout", Unit<"ms">, Limits<std::uint64_t(0), std::numeric_limits<std::uint64_t>::max()>, Doc<"Timeout duration in milliseconds">> timeout_ms    = 40ULL;
+    A<gr::Size_t, "chart width", Doc<"chart character width in terminal">>                                                                                chart_width   = 130U;
+    A<gr::Size_t, "chart heigth", Doc<"chart character width in terminal">>                                                                               chart_height  = 28U;
 
-    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, plot_merged_tags, timeout_ms, chart_width, chart_height);
+    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, timeout_ms, chart_width, chart_height);
 
     HistoryBuffer<T> _historyBufferX{n_history};
     HistoryBuffer<T> _historyBufferY{n_history};
     HistoryBuffer<T> _historyBufferTags{n_history};
-    std::size_t      _n_samples_total = 0UZ;
+    std::size_t      _nTotalSamples = 0UZ;
 
     struct TagInfo {
         TimePoint      timestamp;
@@ -81,54 +80,54 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
     void stop() { std::println("stopped sink {} aka. '{}'", this->unique_name, this->name); }
 
-    constexpr void processOne(const T& input) {
-        TimePoint nowStamp = ClockSourceType::now();
+    constexpr work::Status processBulk(std::span<const T> inSpan) {
+        bool inputTagsPresent = this->inputTagsPresent();
+        for (const T& sample : inSpan) {
+            TimePoint nowStamp = ClockSourceType::now();
 
-        _n_samples_total++;
+            _nTotalSamples++;
 
-        if constexpr (std::is_arithmetic_v<T>) {
-            if constexpr (drawAsynchronously) {
-                in.max_samples = static_cast<std::size_t>(2.f * sample_rate * static_cast<float>(timeout_ms) / 1000.f);
+            if constexpr (std::is_arithmetic_v<T>) {
+                if constexpr (drawAsynchronously) {
+                    in.max_samples = static_cast<std::size_t>(2.f * sample_rate * static_cast<float>(timeout_ms) / 1000.f);
+                }
+                const T Ts = T(1.0f) / T(sample_rate);
+                _historyBufferX.push_back(static_cast<T>(_nTotalSamples) * static_cast<T>(Ts));
             }
-            const T Ts = T(1.0f) / T(sample_rate);
-            _historyBufferX.push_back(static_cast<T>(_n_samples_total) * static_cast<T>(Ts));
-        }
-        _historyBufferY.push_back(input);
+            _historyBufferY.push_back(sample);
 
-        if (this->inputTagsPresent()) { // received tag
-            _historyBufferTags.push_back(_historyBufferY.back());
-
-            if (plot_merged_tags) {
-                _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = this->_mergedInputTag.map, .index = _tagIndex++, .relIndex = 0, .merged = true});
-            }
-            auto tags = in.tagReader().get();
-            for (const auto& [relIndex, tagMap] : tags) {
-                _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = tagMap, .index = relIndex});
-            }
-
-            this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
-        } else {
-            if constexpr (std::is_floating_point_v<T>) {
-                _historyBufferTags.push_back(std::numeric_limits<T>::quiet_NaN());
+            if (inputTagsPresent) {
+                _historyBufferTags.push_back(_historyBufferY.back());
+                const auto& inTags = this->inputTags();
+                for (const auto& [relIndex, tagMap] : inTags) {
+                    _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = tagMap, .index = relIndex});
+                }
+                inputTagsPresent = false; // process input tags only once
             } else {
-                _historyBufferTags.push_back(std::numeric_limits<T>::lowest());
+                if constexpr (std::is_floating_point_v<T>) {
+                    _historyBufferTags.push_back(std::numeric_limits<T>::quiet_NaN());
+                } else {
+                    _historyBufferTags.push_back(std::numeric_limits<T>::lowest());
+                }
+            }
+
+            if (timeout_ms > 0U) {
+                if (nowStamp < (_lastUpdate + std::chrono::milliseconds(timeout_ms))) {
+                    continue;
+                }
+                _lastUpdate = nowStamp;
+            }
+
+            if (plot_graph) {
+                plotGraph();
+            }
+
+            if (plot_timing) {
+                plotTiming();
             }
         }
 
-        if (timeout_ms > 0U) {
-            if (nowStamp < (_lastUpdate + std::chrono::milliseconds(timeout_ms))) {
-                return;
-            }
-            _lastUpdate = nowStamp;
-        }
-
-        if (plot_graph) {
-            plotGraph();
-        }
-
-        if (plot_timing) {
-            plotTiming();
-        }
+        return work::Status::OK;
     }
 
     work::Status draw(const property_map& config = {}, std::source_location location = std::source_location::current()) noexcept {
@@ -152,7 +151,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
             if (reset_view) {
                 gr::graphs::resetView();
             }
-            std::println("\nPlot Graph for '{}' - #samples total: {}", signal_name, _n_samples_total);
+            std::println("\nPlot Graph for '{}' - #samples total: {}", signal_name, _nTotalSamples);
 
             auto adjustRange = [](T min, T max) {
                 min            = std::min(min, T(0));

@@ -18,19 +18,6 @@
 
 using namespace std::chrono_literals;
 
-template<>
-struct std::formatter<gr::Tag> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template<typename FormatContext>
-    constexpr auto format(const gr::Tag& tag, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "{} -> {}", tag.index, tag.map);
-    }
-};
-
 namespace gr::basic::data_sink_test {
 
 constexpr auto kProcessingDelayMs = 600u;
@@ -106,12 +93,14 @@ struct Matcher {
 
 static Tag makeTag(std::size_t index, int year, int month, int day) { return Tag{index, {{"YEAR", year}, {"MONTH", month}, {"DAY", day}}}; }
 
-static std::vector<Tag> makeTestTags(std::size_t firstIndex, std::size_t interval) {
+static std::vector<Tag> makeTestTags(std::size_t firstIndex, std::size_t interval, std::size_t nTagsPerIndex = 1UZ) {
     std::vector<Tag> tags;
     for (int y = 1; y <= 3; ++y) {
         for (int m = 1; m <= 2; ++m) {
             for (int d = 1; d <= 3; ++d) {
-                tags.push_back(makeTag(firstIndex, y, m, d));
+                for (int iT = 0; iT < static_cast<int>(nTagsPerIndex); iT++) {
+                    tags.push_back(makeTag(firstIndex, y + iT, m + iT, d + iT));
+                }
                 firstIndex += interval;
             }
         }
@@ -138,13 +127,6 @@ static std::string toAsciiArt(std::span<trigger::MatchResult> states) {
     return r;
 }
 
-std::size_t checkedSum(std::size_t a, std::ptrdiff_t b) {
-    using namespace boost::ut;
-    const auto signedA = static_cast<std::ptrdiff_t>(a);
-    expect(ge(signedA + b, 0));
-    return static_cast<std::size_t>(signedA + b);
-}
-
 template<trigger::Matcher TMatcher>
 std::string runMatcherTest(std::span<const Tag> tags, TMatcher matcher) {
     std::vector<trigger::MatchResult> result;
@@ -153,81 +135,6 @@ std::string runMatcherTest(std::span<const Tag> tags, TMatcher matcher) {
         result.push_back(matcher("", tag, {}));
     }
     return toAsciiArt(result);
-}
-
-std::pair<std::vector<Tag>, std::vector<Tag>> extractMetadataTags(const std::vector<Tag>& tags) {
-    constexpr auto   tagsToExtract = std::array{gr::tag::SAMPLE_RATE.shortKey(), gr::tag::SIGNAL_NAME.shortKey(), gr::tag::SIGNAL_UNIT.shortKey(), gr::tag::SIGNAL_MIN.shortKey(), gr::tag::SIGNAL_MAX.shortKey()};
-    std::vector<Tag> metadataTags;
-    std::vector<Tag> nonMetadataTags;
-    for (const auto& tag : tags) {
-        Tag metadata;
-        Tag nonMetadata;
-        metadata.index    = tag.index;
-        nonMetadata.index = tag.index;
-        for (const auto& [key, value] : tag.map) {
-            if (std::find(tagsToExtract.begin(), tagsToExtract.end(), key) != tagsToExtract.end()) {
-                metadata.map[key] = value;
-            } else {
-                nonMetadata.map[key] = value;
-            }
-        }
-        if (!metadata.map.empty()) {
-            metadataTags.push_back(metadata);
-        }
-        if (!nonMetadata.map.empty()) {
-            nonMetadataTags.push_back(nonMetadata);
-        }
-    }
-    return {metadataTags, nonMetadataTags};
-}
-
-struct Metadata {
-    std::optional<std::string> signal_name;
-    std::optional<std::string> signal_unit;
-    std::optional<float>       signal_min;
-    std::optional<float>       signal_max;
-    std::optional<float>       sample_rate;
-};
-
-Metadata metadataFromTag(const Tag& tag) {
-    Metadata m;
-    for (const auto& [key, value] : tag.map) {
-        if (key == gr::tag::SIGNAL_NAME.shortKey()) {
-            m.signal_name = std::get<std::string>(value);
-        } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
-            m.signal_unit = std::get<std::string>(value);
-        } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
-            m.signal_min = std::get<float>(value);
-        } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
-            m.signal_max = std::get<float>(value);
-        } else if (key == gr::tag::SAMPLE_RATE.shortKey()) {
-            m.sample_rate = std::get<float>(value);
-        }
-    }
-    return m;
-}
-
-Metadata latestMetadata(const std::vector<Tag>& tags) {
-    Metadata metadata;
-    for (const auto& tag : tags | std::views::reverse) {
-        const auto m = metadataFromTag(tag);
-        if (!metadata.signal_name) {
-            metadata.signal_name = m.signal_name;
-        }
-        if (!metadata.signal_unit) {
-            metadata.signal_unit = m.signal_unit;
-        }
-        if (!metadata.signal_min) {
-            metadata.signal_min = m.signal_min;
-        }
-        if (!metadata.signal_max) {
-            metadata.signal_max = m.signal_max;
-        }
-        if (!metadata.sample_rate) {
-            metadata.sample_rate = m.sample_rate;
-        }
-    }
-    return metadata;
 }
 
 bool spinUntil(std::chrono::milliseconds timeout, auto fnc) {
@@ -242,19 +149,60 @@ bool spinUntil(std::chrono::milliseconds timeout, auto fnc) {
     return false;
 }
 
+trigger::MatchResult isTrigger(std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
+    const auto v = tag.get(gr::tag::TRIGGER_NAME.shortKey());
+    return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+};
+
+struct DataSetTestParams {
+    std::size_t nSignalValues  = 0;
+    std::string signalName     = "TestName";
+    std::string signalUnit     = "TestUnit";
+    std::string signalQuantity = "TestQuantity";
+    float       rangeMin       = -2.f;
+    float       rangeMax       = 2.f;
+
+    std::ptrdiff_t timingEventIndex = 0;
+    std::string    triggerName      = "TRIGGER";
+    std::uint64_t  triggerTimeMax   = 0;
+};
+
+void checkDataSet(const DataSet<float>& dataset, std::vector<float>& receivedData, std::size_t& nReceivedTags, DataSetTestParams expectedParams = {}, std::source_location location = std::source_location::current()) {
+    using namespace boost::ut;
+    using namespace gr::tag;
+
+    const auto                     locationStr = std::format("{}:{} ", location.file_name(), location.line());
+    std::expected<void, gr::Error> dsCheck     = dataset::checkConsistency(dataset, "dataset - blocking polling trigger mode overlapping");
+    expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
+    expect(eq(dataset.size(), 1UZ)) << locationStr;
+
+    expect(eq(dataset.signal_values.size(), expectedParams.nSignalValues)) << locationStr;
+
+    expect(eq(dataset.signalName(0UZ), expectedParams.signalName)) << locationStr;
+    expect(eq(dataset.signalUnit(0UZ), expectedParams.signalUnit)) << locationStr;
+    expect(eq(dataset.signalQuantity(0UZ), expectedParams.signalQuantity)) << locationStr;
+    expect(eq(dataset.signalRange(0UZ), gr::Range<float>{expectedParams.rangeMin, expectedParams.rangeMax})) << locationStr;
+
+    expect(eq(dataset.timingEvents(0UZ).size(), 1UZ)) << locationStr; // only trigger is stored
+    expect(eq(dataset.timingEvents(0UZ)[0UZ].first, static_cast<std::ptrdiff_t>(expectedParams.timingEventIndex))) << locationStr;
+    const auto eventMap = dataset.timingEvents(0UZ)[0UZ].second;
+    expect(eq(eventMap.size(), 2UZ)) << locationStr;
+    const bool containsTriggerName = eventMap.contains(TRIGGER_NAME.shortKey());
+    expect(containsTriggerName) << locationStr;
+    if (containsTriggerName) {
+        expect(eq(std::get<std::string>(eventMap.at(TRIGGER_NAME.shortKey())), expectedParams.triggerName)) << locationStr;
+    }
+    const bool containsTriggerTime = eventMap.contains(TRIGGER_TIME.shortKey());
+    expect(containsTriggerTime) << locationStr;
+    if (containsTriggerTime) {
+        expect(lt(std::get<std::uint64_t>(eventMap.at(TRIGGER_TIME.shortKey())), static_cast<std::uint64_t>(expectedParams.triggerTimeMax))) << locationStr;
+    }
+
+    receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+    nReceivedTags += dataset.timingEvents(0UZ).size();
+};
+
 } // namespace gr::basic::data_sink_test
-
-template<typename T>
-std::string formatList(const T& l) {
-    return std::format("[{}]", gr::join(l, ", "));
-}
-
-template<typename T, typename U>
-bool indexesMatch(const T& lhs, const U& rhs) {
-    auto index_match = [](const auto& l, const auto& r) { return l.index == r.index; };
-
-    return std::equal(std::begin(lhs), std::end(lhs), std::begin(rhs), std::end(rhs), index_match);
-}
 
 using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
 
@@ -266,18 +214,19 @@ const boost::ut::suite DataSinkTests = [] {
     using namespace std::string_literals;
     using namespace gr::test;
 
-    "callback continuous mode"_test = [] {
-        constexpr gr::Size_t  kSamples   = 200005;
-        constexpr std::size_t kChunkSize = 1000;
+    "continuous mode - callback"_test = [] {
+        using namespace gr::tag;
+        constexpr gr::Size_t  kSamples      = 200005;
+        constexpr std::size_t kMaxChunkSize = 1000;
 
-        const auto srcTags = makeTestTags(0, 1000);
+        const std::vector<Tag> srcTags = makeTestTags(0, 1234, 1);
 
-        gr::Graph                testGraph;
-        auto&                    src                   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test source"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
-        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
-        delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
-        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test source"}});
+        gr::Graph testGraph;
+        auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, //
+                  {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, {SIGNAL_MIN.shortKey(), -42.f}, {SIGNAL_MAX.shortKey(), 42.f}});
+        auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        delay.settings().autoForwardParameters().insert({"DAY", "MONTH", "YEAR"}); // custom auto forward keys
+        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {SIGNAL_NAME.shortKey(), "TestName"}});
         src._tags  = srcTags;
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
@@ -285,26 +234,20 @@ const boost::ut::suite DataSinkTests = [] {
 
         std::atomic<std::size_t> samplesSeen1 = 0;
         std::atomic<std::size_t> chunksSeen1  = 0;
-        auto                     callback     = [&samplesSeen1, &chunksSeen1, &kChunkSize](std::span<const float> buffer) {
+        auto                     callback     = [&samplesSeen1, &chunksSeen1, &kMaxChunkSize](std::span<const float> buffer) {
             for (std::size_t i = 0; i < buffer.size(); ++i) {
                 expect(eq(buffer[i], static_cast<float>(samplesSeen1 + i)));
             }
-
             samplesSeen1 += buffer.size();
             chunksSeen1++;
-            if (chunksSeen1 < 201) {
-                expect(eq(buffer.size(), kChunkSize));
-            } else {
-                expect(eq(buffer.size(), 5UZ));
-            }
+            expect(le(buffer.size(), kMaxChunkSize));
         };
 
         std::mutex       m2;
         std::size_t      samplesSeen2 = 0;
         std::size_t      chunksSeen2  = 0;
         std::vector<Tag> receivedTags;
-
-        auto callbackWithTags = [&samplesSeen2, &chunksSeen2, &m2, &receivedTags, &kChunkSize](std::span<const float> buffer, std::span<const Tag> tags) {
+        auto             callbackWithTags = [&samplesSeen2, &chunksSeen2, &m2, &receivedTags, &kMaxChunkSize](std::span<const float> buffer, std::span<const Tag> tags) {
             for (std::size_t i = 0; i < buffer.size(); ++i) {
                 expect(eq(buffer[i], static_cast<float>(samplesSeen2 + i)));
             }
@@ -314,17 +257,12 @@ const boost::ut::suite DataSinkTests = [] {
                 expect(lt(tag.index, buffer.size()));
             }
 
-            auto lg = std::lock_guard{m2};
-
+            auto lg       = std::lock_guard{m2};
             auto absolute = tags | std::views::transform([&samplesSeen2](const auto& t) { return gr::Tag{t.index + samplesSeen2, t.map}; });
             receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
             samplesSeen2 += buffer.size();
             chunksSeen2++;
-            if (chunksSeen2 < 201) {
-                expect(eq(buffer.size(), kChunkSize));
-            } else {
-                expect(eq(buffer.size(), 5UZ));
-            }
+            expect(le(buffer.size(), kMaxChunkSize));
         };
 
         auto callbackWithTagsAndSink = [&sink](std::span<const float>, std::span<const Tag>, const DataSink<float>& passedSink) {
@@ -340,13 +278,13 @@ const boost::ut::suite DataSinkTests = [] {
 
             expect(spinUntil(4s, [&] {
                 if (!callbackRegistered) {
-                    callbackRegistered = globalDataSinkRegistry().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kChunkSize, callback);
+                    callbackRegistered = globalDataSinkRegistry().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kMaxChunkSize, callback);
                 }
                 if (!callbackWithTagsRegistered) {
-                    callbackWithTagsRegistered = globalDataSinkRegistry().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kChunkSize, callbackWithTags);
+                    callbackWithTagsRegistered = globalDataSinkRegistry().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kMaxChunkSize, callbackWithTags);
                 }
                 if (!callbackWithTagsAndSinkRegistered) {
-                    callbackWithTagsAndSinkRegistered = globalDataSinkRegistry().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kChunkSize, callbackWithTagsAndSink);
+                    callbackWithTagsAndSinkRegistered = globalDataSinkRegistry().registerStreamingCallback<float>(DataSinkQuery::sinkName("test_sink"), kMaxChunkSize, callbackWithTagsAndSink);
                 }
                 return callbackRegistered && callbackWithTagsRegistered && callbackWithTagsAndSinkRegistered;
             })) << boost::ut::fatal;
@@ -359,46 +297,58 @@ const boost::ut::suite DataSinkTests = [] {
         expect(sched.runAndWait().has_value());
         registerThread.join();
 
+        expect(eq(src._nSamplesProduced, kSamples));
+
         auto lg = std::lock_guard{m2};
-        expect(eq(chunksSeen1.load(), 201UZ));
-        expect(eq(chunksSeen2, 201UZ));
+        expect(ge(chunksSeen1.load(), 201UZ));
+        expect(ge(chunksSeen2, 201UZ));
         expect(eq(samplesSeen1.load(), static_cast<std::size_t>(kSamples)));
         expect(eq(samplesSeen2, static_cast<std::size_t>(kSamples)));
-        const auto& [metadataTags, nonMetadataTags] = extractMetadataTags(receivedTags);
-        expect(eq(nonMetadataTags.size(), srcTags.size()));
-        expect(indexesMatch(nonMetadataTags, srcTags)) << std::format("{} != {}", formatList(receivedTags), formatList(srcTags));
-        const auto metadata = latestMetadata(metadataTags);
-        expect(eq(metadata.signal_name.value_or("<unset>"), "test source"s));
-        expect(eq(metadata.signal_unit.value_or("<unset>"), "test unit"s));
-        expect(eq(metadata.signal_min.value_or(-1234567.f), -42.f));
-        expect(eq(metadata.signal_max.value_or(-1234567.f), 42.f));
+
+        std::vector<Tag> srcAndMetaTags;
+        // Add metadata tag published by DataSink
+        srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.shortKey(), 1.f}, {SIGNAL_MAX.shortKey(), 42.f}, {SIGNAL_MIN.shortKey(), -42.f}, //
+                                             {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}});
+        // Add tag published by TagSource init with parameters
+        srcAndMetaTags.emplace_back(0UZ, property_map{{SIGNAL_MAX.shortKey(), 42.f}, {SIGNAL_MIN.shortKey(), -42.f}, {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}, //
+                                             {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}});
+
+        // Add sources tags
+        srcAndMetaTags.insert(srcAndMetaTags.end(), srcTags.begin(), srcTags.end());
+        expect(gr::testing::equal_tag_lists(receivedTags, srcAndMetaTags));
     };
 
-    "blocking polling continuous mode"_test = [] {
-        constexpr gr::Size_t kSamples = 200000;
+    "continuous mode - blocking/non-blocking polling"_test = [](bool isBlocking) {
+        using namespace gr::tag;
+        OverflowPolicy       overflowPolicy = isBlocking ? OverflowPolicy::Backpressure : OverflowPolicy::Drop;
+        constexpr gr::Size_t kSamples       = 200005;
 
         gr::Graph  testGraph;
-        const auto tags                                = makeTestTags(0, 1000);
-        auto&      src                                 = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
-        src._tags                                      = tags;
-        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
-        delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
-        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
+        const auto srcTags = makeTestTags(0, 1234, 2);
+        auto&      src     = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, //
+                     {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, {SIGNAL_MIN.shortKey(), -42.f}, {SIGNAL_MAX.shortKey(), 42.f}});
+        src._tags          = srcTags;
+        auto& delay        = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        delay.settings().autoForwardParameters().insert({"DAY", "MONTH", "YEAR"}); // custom aut forward keys
+        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {SIGNAL_NAME.shortKey(), "TestName"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
-        auto runner1 = std::async([] {
+        auto invalidTypePoller = globalDataSinkRegistry().getStreamingPoller<double>(DataSinkQuery::sinkName("test_sink"));
+        expect(eq(invalidTypePoller, nullptr));
+
+        auto runner1 = std::async([overflowPolicy] {
             std::shared_ptr<StreamingPoller<float>> poller;
-            expect(spinUntil(4s, [&poller] {
-                poller = globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"));
+            expect(spinUntil(4s, [&poller, overflowPolicy] {
+                poller = globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"), {.overflowPolicy = overflowPolicy});
                 return poller != nullptr;
             })) << boost::ut::fatal;
 
             std::vector<float> received;
             bool               seenFinished = false;
             while (!seenFinished) {
+                std::this_thread::sleep_for(50ms); // always wait to force full buffer
                 seenFinished = poller->finished;
                 while (poller->process([&received](const auto& data) { received.insert(received.end(), data.begin(), data.end()); })) {
                 }
@@ -407,16 +357,17 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(poller, received);
         });
 
-        auto runner2 = std::async([] {
+        auto runner2 = std::async([overflowPolicy] {
             std::shared_ptr<StreamingPoller<float>> poller;
-            expect(spinUntil(4s, [&poller] {
-                poller = globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::signalName("test signal"));
+            expect(spinUntil(4s, [&poller, overflowPolicy] {
+                poller = globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::signalName("TestName"), {.overflowPolicy = overflowPolicy});
                 return poller != nullptr;
             })) << boost::ut::fatal;
             std::vector<float> received;
             std::vector<Tag>   receivedTags;
             bool               seenFinished = false;
             while (!seenFinished) {
+                std::this_thread::sleep_for(50ms); // always wait to force full buffer
                 seenFinished = poller->finished;
                 while (poller->process([&received, &receivedTags](const auto& data, const auto& tags_) {
                     auto absolute = tags_ | std::views::transform([&received](const auto& t) { return gr::Tag{t.index + received.size(), t.map}; });
@@ -448,74 +399,95 @@ const boost::ut::suite DataSinkTests = [] {
 
         const auto& [pollerDataOnly, received1]               = runner1.get();
         const auto& [pollerWithTags, received2, receivedTags] = runner2.get();
-        const auto& [metadataTags, nonMetadataTags]           = extractMetadataTags(receivedTags);
-        expect(eq(received1.size(), expected.size()));
-        expect(eq(received1, expected));
-        expect(eq(pollerDataOnly->dropCount.load(), 0UZ));
-        expect(eq(received2.size(), expected.size()));
-        expect(eq(received2, expected));
-        expect(eq(nonMetadataTags.size(), tags.size()));
-        expect(eq(indexesMatch(nonMetadataTags, tags), true)) << std::format("{} != {}", formatList(nonMetadataTags), formatList(tags));
-        expect(eq(metadataTags.size(), 1UZ));
-        expect(eq(metadataTags[0UZ].index, 0UZ));
-        const auto metadata = latestMetadata(metadataTags);
-        expect(eq(metadata.signal_name.value_or("<unset>"), "test signal"s));
-        expect(eq(metadata.signal_unit.value_or("<unset>"), "test unit"s));
-        expect(eq(metadata.signal_min.value_or(-1234567.f), -42.f));
-        expect(eq(metadata.signal_max.value_or(-1234567.f), 42.f));
-        expect(eq(pollerWithTags->dropCount.load(), 0UZ));
-    };
 
-    "blocking polling trigger mode non-overlapping"_test = [] {
+        if (isBlocking) {
+            std::vector<Tag> srcAndMetaTags;
+            // Add metadata tag published by DataSink
+            srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.shortKey(), 1.f}, {SIGNAL_MAX.shortKey(), 42.f}, {SIGNAL_MIN.shortKey(), -42.f}, //
+                                                 {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}});
+            // Add tag published by TagSource init with parameters
+            srcAndMetaTags.emplace_back(0UZ, property_map{{SIGNAL_MAX.shortKey(), 42.f}, {SIGNAL_MIN.shortKey(), -42.f}, {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}, //
+                                                 {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}});
+            // Add sources tags
+            srcAndMetaTags.insert(srcAndMetaTags.end(), srcTags.begin(), srcTags.end());
+            expect(gr::testing::equal_tag_lists(receivedTags, srcAndMetaTags));
+
+            expect(eq(received1.size(), expected.size()));
+            expect(eq(received1, expected));
+            expect(eq(received2.size(), expected.size()));
+            expect(eq(received2, expected));
+
+            expect(eq(pollerWithTags->droppedSampleCount.load(), 0UZ));
+            expect(eq(pollerWithTags->droppedTagCount.load(), 0UZ));
+            expect(eq(pollerDataOnly->droppedSampleCount.load(), 0UZ));
+            expect(eq(pollerDataOnly->droppedTagCount.load(), 0UZ));
+        } else {
+            expect(eq(received1.size() + pollerDataOnly->droppedSampleCount.load(), expected.size()));
+            expect(eq(received2.size() + pollerWithTags->droppedSampleCount.load(), expected.size()));
+            expect(gt(pollerWithTags->droppedSampleCount.load(), 0UZ));
+            expect(gt(pollerDataOnly->droppedSampleCount.load(), 0UZ));
+        }
+    } | std::vector<bool>{true, false};
+
+    "trigger mode - polling/callback overlapping/non-overlapping"_test = [] {
         using namespace gr::tag;
-        constexpr gr::Size_t kSamples = 200000;
+        const std::uint32_t nSamples    = 150000;
+        const std::size_t   preSamples  = 5;
+        const std::size_t   postSamples = 7;
+
+        const std::vector<std::size_t> triggerIndices = {1001, 1001, 1002, 1003, 1003, 1005, 1007, 10000, 10000, 20000};
+        std::vector<Tag>               srcTags;
+        std::uint64_t                  timeCounter = 0;
+        for (std::size_t i : triggerIndices) {
+            // tags should not be identical, duplicates are ignored by Block::inputTags()
+            srcTags.push_back(Tag{i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}, {TRIGGER_TIME.shortKey(), timeCounter++}}});
+        }
+        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER1"}, {TRIGGER_TIME.shortKey(), timeCounter + 1}}});
+        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER2"}, {TRIGGER_TIME.shortKey(), timeCounter + 2}}});
+        srcTags.push_back(Tag{22000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER3"}, {TRIGGER_TIME.shortKey(), timeCounter + 3}}});
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", nSamples}, {"mark_tag", false}, {"verbose_console", true}, //
+                {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, {SIGNAL_MIN.shortKey(), -2.f}, {SIGNAL_MAX.shortKey(), 2.f}});
 
-        const auto tags = std::vector<Tag>{{3000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}, {8000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER"}}}, {180000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
-        src._tags       = tags;
-        auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", -2.0f}, {"signal_max", 2.0f}});
+        src._tags   = srcTags;
+        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "TestName"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
-        auto polling = std::async([] {
-            auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-                const auto v = tag.get(TRIGGER_NAME.shortKey());
-                return v && std::get<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
-            };
+        std::mutex         mutexCallback;
+        std::vector<float> receivedDataCallback;
+        std::size_t        nReceivedTagsCallback = 0;
+        auto               callback              = [&receivedDataCallback, &nReceivedTagsCallback, &mutexCallback, timeCounter](auto&& dataset) {
+            std::lock_guard lg{mutexCallback};
+            checkDataSet(dataset, receivedDataCallback, nReceivedTagsCallback, {.nSignalValues = preSamples + postSamples, .timingEventIndex = preSamples, .triggerTimeMax = timeCounter});
+        };
+        auto callbackThread = std::thread([&] { //
+            gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
+            expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerTriggerCallback<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, preSamples, postSamples, callback); })) << boost::ut::fatal;
+        });
 
-            std::shared_ptr<DataSetPoller<int32_t>> poller;
+        auto polling = std::async([timeCounter, preSamples, postSamples] {
+            std::shared_ptr<DataSetPoller<float>> poller;
             expect(spinUntil(4s, [&] {
-                // lookup by signal name
-                poller = globalDataSinkRegistry().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, {.preSamples = 3, .postSamples = 2});
+                poller = globalDataSinkRegistry().getTriggerPoller<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, {.preSamples = preSamples, .postSamples = postSamples});
                 return poller != nullptr;
             })) << boost::ut::fatal;
-            std::vector<int32_t>                                 receivedData;
-            std::vector<std::pair<std::ptrdiff_t, property_map>> receivedTags;
-            bool                                                 seenFinished = false;
+            std::vector<float> receivedData;
+            std::size_t        nReceivedTags = 0;
+            bool               seenFinished  = false;
             while (!seenFinished) {
-                seenFinished            = poller->finished;
-                [[maybe_unused]] auto r = poller->process([&receivedData, &receivedTags](const auto& datasets) {
+                seenFinished = poller->finished.load();
+                while (poller->process([&receivedData, &nReceivedTags, timeCounter, preSamples, postSamples](const auto& datasets) {
                     for (const auto& dataset : datasets) {
-                        receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
-                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "dataset - blocking polling trigger mode non-overlapping");
-                        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
-
-                        // signal info from sink settings
-                        expect(eq(dataset.signalName(0UZ), "test signal"s));
-                        expect(eq(dataset.signalUnit(0UZ), "none"s));
-                        expect(eq(dataset.signalRange(0UZ), gr::Range<std::int32_t>{-2, +2}));
-                        expect(eq(dataset.timingEvents(0UZ).size(), 1UZ));
-                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, 3));
-                        receivedTags.insert(receivedTags.end(), dataset.timingEvents(0UZ).begin(), dataset.timingEvents(0UZ).end());
+                        checkDataSet(dataset, receivedData, nReceivedTags, {.nSignalValues = preSamples + postSamples, .timingEventIndex = preSamples, .triggerTimeMax = timeCounter});
                     }
-                });
+                })) {
+                }
             }
-            return std::make_tuple(poller, receivedData, receivedTags);
+            return std::make_tuple(poller, receivedData, nReceivedTags);
         });
 
         Scheduler sched;
@@ -523,140 +495,94 @@ const boost::ut::suite DataSinkTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sched.runAndWait().has_value());
+        callbackThread.join();
 
-        const auto& [poller, receivedData, receivedTags] = polling.get();
-        const auto expected_tags                         = {tags[0UZ], tags[2UZ]}; // triggers-only
+        expect(eq(src._nSamplesProduced, nSamples));
 
-        expect(eq(receivedData.size(), 10UZ));
-        expect(eq(receivedData, std::vector<int32_t>{2997, 2998, 2999, 3000, 3001, 179997, 179998, 179999, 180000, 180001}));
-        expect(eq(receivedTags.size(), expected_tags.size()));
+        const auto& [poller, receivedData, nReceivedTags] = polling.get();
+        expect(eq(poller->dropCount.load(), 0u));
 
-        expect(eq(poller->dropCount.load(), 0UZ));
-    };
-
-    "propagation of signal metadata per data set"_test = [] {
-        using namespace gr::tag;
-        constexpr gr::Size_t kSamples = 40000000;
-
-        gr::Graph  testGraph;
-        auto&      src  = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "no unit"}, {"signal_min", -2.f}, {"signal_max", 2.f}});
-        const auto tags = std::vector<Tag>{{39000000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
-        src._tags       = tags;
-        auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"signal_name", "test signal"}});
-
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
-
-        auto polling = std::async([] {
-            std::vector<int32_t>                                 receivedData;
-            std::vector<std::pair<std::ptrdiff_t, property_map>> receivedTags;
-            bool                                                 seenFinished = false;
-
-            auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-                const auto type = tag.get(TRIGGER_NAME.shortKey());
-                return (type && std::get<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
-            };
-            std::shared_ptr<DataSetPoller<int32_t>> poller;
-            expect(spinUntil(4s, [&] {
-                poller = globalDataSinkRegistry().getTriggerPoller<int32_t>(DataSinkQuery::signalName("test signal"), isTrigger, {.preSamples = 0UZ, .postSamples = 2UZ});
-                return poller != nullptr;
-            })) << boost::ut::fatal;
-
-            if (!poller) {
-                return std::make_tuple(poller, receivedData, receivedTags);
+        std::vector<float> expectedData;
+        expectedData.reserve(triggerIndices.size() * (preSamples + postSamples));
+        for (std::size_t i : triggerIndices) {
+            for (std::size_t k = i - preSamples; k < i + postSamples; k++) {
+                expectedData.push_back(static_cast<float>(k));
             }
-
-            while (!seenFinished) {
-                seenFinished            = poller->finished;
-                [[maybe_unused]] auto r = poller->process([&receivedData, &receivedTags](const auto& datasets) {
-                    for (const auto& dataset : datasets) {
-                        receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
-                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "DataSet");
-                        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
-
-                        // signal info from sink settings
-                        expect(eq(dataset.signalName(0UZ), "test signal"s));
-                        expect(eq(dataset.signalUnit(0UZ), "no unit"s));
-                        expect(eq(dataset.signalRange(0UZ), gr::Range<std::int32_t>{-2, +2}));
-                        expect(eq(dataset.timingEvents(0UZ).size(), 1UZ));
-                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, 0));
-                        receivedTags.insert(receivedTags.end(), dataset.timingEvents(0UZ).begin(), dataset.timingEvents(0UZ).end());
-                    }
-                });
-            }
-            return std::make_tuple(poller, receivedData, receivedTags);
-        });
-
-        Scheduler sched;
-        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
-        expect(sched.runAndWait().has_value());
 
-        const auto& [_, receivedData, receivedTags] = polling.get();
-        expect(eq(receivedData, std::vector<int32_t>{39000000, 39000001}));
+        // polling
+        expect(eq(receivedData.size(), triggerIndices.size() * (preSamples + postSamples)));
+        expect(eq(receivedData, expectedData));
+        expect(eq(nReceivedTags, triggerIndices.size()));
+
+        // callback
+        expect(eq(receivedDataCallback.size(), triggerIndices.size() * (preSamples + postSamples)));
+        expect(eq(receivedDataCallback, expectedData));
+        expect(eq(nReceivedTagsCallback, triggerIndices.size()));
     };
 
-    "blocking snapshot mode"_test = [] {
+    "snapshot mode - polling/callback"_test = [] {
         using namespace gr::tag;
-        constexpr gr::Size_t kSamples = 200000;
+        constexpr gr::Size_t kSamples      = 200000;
+        constexpr float      kSampleRate   = 10000.f;
+        constexpr auto       kDelay        = std::chrono::milliseconds{500}; // sample rate 10000 -> 5000 samples
+        const double         seconds       = std::chrono::duration<double>(kDelay).count();
+        const std::size_t    nSamplesDelay = static_cast<std::size_t>(seconds * static_cast<double>(kSampleRate));
+
+        const std::vector<std::size_t> triggerIndices = {1001, 1001, 1002, 1003, 1003, 1005, 1007, 10000, 10000, 20000};
+        std::vector<Tag>               srcTags;
+        std::uint64_t                  timeCounter = 0;
+        for (std::size_t i : triggerIndices) {
+            srcTags.push_back(Tag{i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}, {TRIGGER_TIME.shortKey(), timeCounter++}}});
+        }
+        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER1"}, {TRIGGER_TIME.shortKey(), timeCounter + 1}}});
+        srcTags.push_back(Tag{21000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER2"}, {TRIGGER_TIME.shortKey(), timeCounter + 2}}});
+        srcTags.push_back(Tag{22000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER3"}, {TRIGGER_TIME.shortKey(), timeCounter + 3}}});
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {gr::tag::SAMPLE_RATE.shortKey(), 10000.f}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", 0.f}, {"signal_max", static_cast<float>(kSamples - 1)}});
-        src._tags     = {{3000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}, {8000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER"}}}, {180000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
-        auto& delay   = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false},                                                 //
+                {SAMPLE_RATE.shortKey(), kSampleRate}, {SIGNAL_NAME.shortKey(), "TestName"}, {SIGNAL_UNIT.shortKey(), "TestUnit"}, {SIGNAL_QUANTITY.shortKey(), "TestQuantity"}, //
+                {SIGNAL_MIN.shortKey(), 0.f}, {SIGNAL_MAX.shortKey(), static_cast<float>(kSamples - 1)}});
+        src._tags     = srcTags;
+        auto& delay   = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto& sink    = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {SIGNAL_NAME.shortKey(), "TestName"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
 
-        constexpr auto kDelay = std::chrono::milliseconds{500}; // sample rate 10000 -> 5000 samples
+        DataSetTestParams dataSetTestParams = {.nSignalValues = 1, .rangeMin = 0.f, .rangeMax = static_cast<float>(kSamples - 1.), .timingEventIndex = -static_cast<std::ptrdiff_t>(nSamplesDelay), .triggerTimeMax = timeCounter};
 
-        std::vector<int32_t> receivedDataCb;
-
-        auto callback = [&receivedDataCb](const auto& dataset) { receivedDataCb.insert(receivedDataCb.end(), dataset.signal_values.begin(), dataset.signal_values.end()); };
-
-        auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
-            const auto v = tag.get(TRIGGER_NAME.shortKey());
-            return (v && std::get<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+        std::vector<float> receivedDataCallback;
+        std::size_t        nReceivedTagsCallback = 0;
+        auto               callback              = [&receivedDataCallback, &nReceivedTagsCallback, &dataSetTestParams](const auto& dataset) { //
+            checkDataSet(dataset, receivedDataCallback, nReceivedTagsCallback, dataSetTestParams);
         };
 
-        auto registerThread = std::thread([&] {
+        auto callbackThread = std::thread([&] {
             gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
-            expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerSnapshotCallback<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, callback); })) << boost::ut::fatal;
+            expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerSnapshotCallback<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, kDelay, callback); })) << boost::ut::fatal;
         });
 
-        auto poller_result = std::async([isTrigger, kDelay] {
-            std::shared_ptr<DataSetPoller<int32_t>> poller;
+        auto polling = std::async([kDelay, &dataSetTestParams] {
+            std::shared_ptr<DataSetPoller<float>> poller;
             expect(spinUntil(4s, [&] {
-                poller = globalDataSinkRegistry().getSnapshotPoller<int32_t>(DataSinkQuery::sinkName("test_sink"), isTrigger, {.delay = kDelay});
+                poller = globalDataSinkRegistry().getSnapshotPoller<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, {.delay = kDelay});
                 return poller != nullptr;
             })) << boost::ut::fatal;
 
-            std::vector<int32_t> receivedData;
+            std::vector<float> receivedData;
+            std::size_t        nReceivedTags = 0;
 
             bool seenFinished = false;
             while (!seenFinished) {
                 seenFinished            = poller->finished;
-                [[maybe_unused]] auto r = poller->process([&receivedData](const auto& datasets) {
+                [[maybe_unused]] auto r = poller->process([&receivedData, &nReceivedTags, &dataSetTestParams](const auto& datasets) {
                     for (const auto& dataset : datasets) {
-                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "dataset blocking snapshot mode");
-                        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
-
-                        // signal info propagated from source to sink
-                        expect(eq(dataset.signalName(0UZ), "test signal"s));
-                        expect(eq(dataset.signalUnit(0UZ), "none"s));
-                        expect(eq(dataset.signalRange(0UZ), gr::Range<int32_t>{0, kSamples - 1}));
-                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, -5000));
-                        receivedData.insert(receivedData.end(), dataset.signal_values.begin(), dataset.signal_values.end());
+                        checkDataSet(dataset, receivedData, nReceivedTags, dataSetTestParams);
                     }
                 });
             }
-
-            return std::make_tuple(poller, receivedData);
+            return std::make_tuple(poller, receivedData, nReceivedTags);
         });
 
         Scheduler sched;
@@ -664,26 +590,37 @@ const boost::ut::suite DataSinkTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sched.runAndWait().has_value());
+        callbackThread.join();
 
-        registerThread.join();
+        expect(eq(src._nSamplesProduced, kSamples));
 
-        const auto& [poller, receivedData] = poller_result.get();
-        expect(eq(receivedDataCb, receivedData));
-        expect(eq(receivedData, std::vector<int32_t>{8000, 185000}));
-        expect(eq(poller->dropCount.load(), 0UZ));
+        const auto& [poller, receivedData, nReceivedTags] = polling.get();
+        expect(eq(poller->dropCount.load(), 0u));
+
+        std::vector<float> expectedData;
+        std::ranges::transform(triggerIndices, std::back_inserter(expectedData), [nSamplesDelay](std::size_t i) { return static_cast<float>(i + nSamplesDelay); });
+
+        // polling
+        expect(eq(receivedData.size(), triggerIndices.size()));
+        expect(eq(receivedData, expectedData));
+        expect(eq(nReceivedTags, triggerIndices.size()));
+
+        // callback
+        expect(eq(receivedDataCallback.size(), triggerIndices.size()));
+        expect(eq(receivedDataCallback, expectedData));
+        expect(eq(nReceivedTagsCallback, triggerIndices.size()));
     };
 
-    "blocking multiplexed mode"_test = [] {
+    "multiplexed mode - blocking polling"_test = [] {
         // Use large delay and timeout to ensure this also works in debug/coverage builds
         const auto tags = makeTestTags(0, 10000);
 
         const gr::Size_t n_samples = static_cast<gr::Size_t>(tags.size() * 10000 + 100000);
         gr::Graph        testGraph;
-        auto&            src                           = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", n_samples}, {"mark_tag", false}});
-        src._tags                                      = tags;
-        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", 2500u}});
-        std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
-        delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
+        auto&            src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", n_samples}, {"mark_tag", false}});
+        src._tags            = tags;
+        auto& delay          = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", 2500u}});
+        delay.settings().autoForwardParameters().insert({"DAY", "MONTH", "YEAR"}); // custom auto forward keys
         auto& sink = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
@@ -772,165 +709,7 @@ const boost::ut::suite DataSinkTests = [] {
         }
     };
 
-    "blocking polling trigger mode overlapping"_test = [] {
-        using namespace gr::tag;
-        constexpr std::uint32_t kSamples  = 150000;
-        constexpr std::size_t   kTriggers = 300;
-
-        gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
-
-        for (std::size_t i = 0; i < kTriggers; ++i) {
-            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}});
-        }
-
-        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
-
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
-
-        auto polling = std::async([] {
-            auto isTrigger = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
-
-            std::shared_ptr<DataSetPoller<float>> poller;
-            expect(spinUntil(4s, [&] {
-                poller = globalDataSinkRegistry().getTriggerPoller<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, {.preSamples = 3000, .postSamples = 2000});
-                return poller != nullptr;
-            })) << boost::ut::fatal;
-            std::vector<float> receivedData;
-            std::vector<Tag>   receivedTags;
-            bool               seenFinished = false;
-            while (!seenFinished) {
-                seenFinished = poller->finished.load();
-                while (poller->process([&receivedData, &receivedTags](const auto& datasets) {
-                    for (const auto& dataset : datasets) {
-                        std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataset, "dataset - blocking polling trigger mode overlapping");
-                        expect(dsCheck.has_value()) << [&] { return std::format("unexpected: {}", dsCheck.error()); } << fatal;
-                        expect(eq(dataset.size(), 1UZ)) << "DataSink supports only 1 signal per DataSet<T> (for the time being)";
-
-                        expect(eq(dataset.signal_values.size(), 5000u) >> fatal);
-                        receivedData.push_back(dataset.signal_values.front());
-                        receivedData.push_back(dataset.signal_values.back());
-                        expect(eq(dataset.timingEvents(0UZ).size(), 1UZ));
-                        expect(eq(dataset.timingEvents(0UZ)[0UZ].first, 3000));
-                        auto absolute = dataset.timingEvents(0UZ) | std::views::transform([&receivedData](const auto& t) { return gr::Tag{checkedSum(receivedData.size(), t.first), t.second}; });
-                        receivedTags.insert(receivedTags.end(), absolute.begin(), absolute.end());
-                    }
-                })) {
-                }
-            }
-            return std::make_tuple(poller, receivedData, receivedTags);
-        });
-
-        Scheduler sched;
-        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        expect(sched.runAndWait().has_value());
-
-        const auto& [poller, receivedData, receivedTags] = polling.get();
-        auto expectedStart                               = std::vector<float>{57000, 61999, 57001, 62000, 57002};
-        expect(eq(poller->dropCount.load(), 0u));
-        expect(eq(receivedData.size(), 2 * kTriggers) >> fatal);
-        expect(eq(std::vector(receivedData.begin(), receivedData.begin() + 5), expectedStart));
-        expect(eq(receivedTags.size(), kTriggers));
-    };
-
-    "callback trigger mode overlapping"_test = [] {
-        using namespace gr::tag;
-        constexpr std::uint32_t kSamples  = 150000;
-        constexpr std::size_t   kTriggers = 300;
-
-        gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
-
-        for (std::size_t i = 0; i < kTriggers; ++i) {
-            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}});
-        }
-
-        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
-
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
-
-        auto isTrigger = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
-
-        std::mutex         m;
-        std::vector<float> receivedData;
-
-        auto callback = [&receivedData, &m](auto&& dataset) {
-            std::lock_guard lg{m};
-            expect(eq(dataset.signal_values.size(), 5000u));
-            receivedData.push_back(dataset.signal_values.front());
-            receivedData.push_back(dataset.signal_values.back());
-        };
-
-        auto registerThread = std::thread([&] { //
-            gr::thread_pool::thread::setThreadName("qa_DS:registerThread");
-            expect(spinUntil(4s, [&] { return globalDataSinkRegistry().registerTriggerCallback<float>(DataSinkQuery::sinkName("test_sink"), isTrigger, 3000, 2000, callback); })) << boost::ut::fatal;
-        });
-
-        Scheduler sched;
-        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        expect(sched.runAndWait().has_value());
-        registerThread.join();
-
-        std::lock_guard lg{m};
-        auto            expectedStart = std::vector<float>{57000, 61999, 57001, 62000, 57002};
-        expect(eq(receivedData.size(), 2 * kTriggers));
-        expect(eq(std::vector(receivedData.begin(), receivedData.begin() + 5), expectedStart));
-    };
-
-    "non-blocking polling continuous mode"_test = [] {
-        constexpr std::uint32_t kSamples = 200000;
-
-        gr::Graph testGraph;
-        auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
-        auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
-        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
-
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
-
-        auto invalid_type_poller = globalDataSinkRegistry().getStreamingPoller<double>(DataSinkQuery::sinkName("test_sink"));
-        expect(eq(invalid_type_poller, nullptr));
-
-        auto polling = std::async([] {
-            std::shared_ptr<StreamingPoller<float>> poller;
-            expect(spinUntil(4s, [&poller] {
-                poller = globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::sinkName("test_sink"));
-                return poller != nullptr;
-            })) << boost::ut::fatal;
-
-            std::size_t samplesSeen  = 0;
-            bool        seenFinished = false;
-            while (!seenFinished) {
-                using namespace std::chrono_literals;
-                std::this_thread::sleep_for(20ms);
-
-                seenFinished = poller->finished.load();
-                while (poller->process([&samplesSeen](const auto& data) { samplesSeen += data.size(); })) {
-                }
-            }
-
-            return std::make_tuple(poller, samplesSeen);
-        });
-
-        Scheduler sched;
-        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        expect(sched.runAndWait().has_value());
-
-        const auto& [poller, samplesSeen] = polling.get();
-        expect(eq(samplesSeen + poller->dropCount, static_cast<std::size_t>(kSamples)));
-    };
-
-    "data set poller"_test = [] {
+    "DataSet - polling"_test = [] {
         gr::Graph testGraph;
         auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
         auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
@@ -989,7 +768,7 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(receivedDataSets[1UZ].timingEvents(0UZ)[0UZ].first, 100));
     };
 
-    "data set callback"_test = [] {
+    "DataSet - callback"_test = [] {
         gr::Graph testGraph;
         auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
         auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});

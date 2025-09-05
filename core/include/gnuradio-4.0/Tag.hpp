@@ -84,6 +84,19 @@ struct alignas(hardware_constructive_interference_size) Tag {
 
 } // namespace gr
 
+template<>
+struct std::formatter<gr::Tag> {
+    template<typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template<typename FormatContext>
+    constexpr auto format(const gr::Tag& tag, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "{}->{{ {} }}", tag.index, tag.map);
+    }
+};
+
 namespace gr {
 using meta::fixed_string;
 

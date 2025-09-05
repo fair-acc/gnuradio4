@@ -20,13 +20,15 @@ struct TestParams {
     std::size_t                       expectedNSamples = 0UZ;
 };
 
-void runTest(const TestParams& par) {
+void runTest(const TestParams& par, std::source_location srcLocation = std::source_location::current()) {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::basic;
     using namespace gr::testing;
 
-    expect(eq(par.inValues.size(), par.inTags.size()));
+    const auto locationStr = std::format("{}:{} ", srcLocation.file_name(), srcLocation.line());
+
+    expect(eq(par.inValues.size(), par.inTags.size())) << locationStr;
 
     gr::Graph graph;
 
@@ -57,7 +59,7 @@ void runTest(const TestParams& par) {
 
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
         sources[i]->_tags = par.inTags[i];
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, syncBlock, "inputs#"s + std::to_string(i)));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, syncBlock, "inputs#"s + std::to_string(i))) << locationStr;
     }
 
     for (std::size_t i = 0; i < nPorts; i++) {
@@ -66,7 +68,7 @@ void runTest(const TestParams& par) {
             sinkParams.insert_or_assign("log_samples", false);
         }
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(syncBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(syncBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s)) << locationStr;
     }
 
     gr::scheduler::Simple sched;
@@ -77,14 +79,15 @@ void runTest(const TestParams& par) {
 
     for (std::size_t i = 0; i < sinks.size(); i++) {
         if (par.expectedValues.empty()) {
-            expect(eq(par.expectedNSamples, sinks[i]->_nSamplesProduced));
+            expect(eq(par.expectedNSamples, sinks[i]->_nSamplesProduced)) << locationStr;
         } else {
-            expect(std::ranges::equal(sinks[i]->_samples, par.expectedValues[i])) << std::format("sinks[{}]->_samples does not match to expected values:\nSink:{}\nExpected:{}\n", i, sinks[i]->_samples, par.expectedValues[i]);
+            expect(std::ranges::equal(sinks[i]->_samples, par.expectedValues[i])) << //
+                std::format("sinks[{}]->_samples does not match to expected values:\nSink:{}\nExpected:{} at {}\n", i, sinks[i]->_samples, par.expectedValues[i], locationStr);
         }
     }
 
     for (std::size_t i = 0; i < sinks.size(); i++) {
-        expect(equal_tag_lists(sinks[i]->_tags, par.expectedTags[i], {}));
+        expect(equal_tag_lists(sinks[i]->_tags, par.expectedTags[i], {})) << std::format("sink[{}] not equal_tag_lists at {}\n", i, locationStr);
     }
 }
 
@@ -96,10 +99,6 @@ gr::Tag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
     return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}}};
 };
 
-gr::Tag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
-};
-
 const boost::ut::suite SyncBlockTests = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -107,28 +106,28 @@ const boost::ut::suite SyncBlockTests = [] {
     using namespace gr::testing;
 
     "SyncBlock basic test"_test = [] {
-        runTest({                                                                                             //
-            .tolerance = 2ULL,                                                                                //
-            .inValues  =                                                                                      //
-            {                                                                                                 //
-                {1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1},                                                         //
-                {1, 2, 0, 1, 2, 3, 4, 0, 1, 2, 3, 0, 1, 2},                                                   //
-                {1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 0, 1, 2, 3}},                                            //
-            .inTags =                                                                                         //
-            {                                                                                                 //
-                {genSyncTag(1, 99), genSyncTag(5, 201), genSyncTag(10, 301)},                                 //
-                {genSyncTag(2, 100), genSyncTag(7, 199), genSyncTag(11, 299)},                                //
-                {genSyncTag(3, 101), genSyncTag(9, 200), genSyncTag(12, 300)}},                               //
-            .expectedValues =                                                                                 //
-            {                                                                                                 //
-                {1, 0, 1, 2, 3, 0, 1, 2, 0, 1},                                                               //
-                {2, 0, 1, 2, 3, 0, 1, 2, 0, 1},                                                               //
-                {3, 0, 1, 2, 3, 0, 1, 2, 0, 1}},                                                              //
-            .expectedTags =                                                                                   //
-            {                                                                                                 //
-                {genSyncTag(1, 99), genSyncTag(5, 201), genDropSyncTag(8, 2, 301)},                           //
-                {genDropTag(0, 1), genSyncTag(1, 100), genDropSyncTag(5, 1, 199), genDropSyncTag(8, 1, 299)}, //
-                {genDropTag(0, 2), genSyncTag(1, 101), genDropSyncTag(5, 2, 200), genSyncTag(8, 300)}}});
+        runTest({                                                                                                                   //
+            .tolerance = 2ULL,                                                                                                      //
+            .inValues  =                                                                                                            //
+            {                                                                                                                       //
+                {1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1},                                                                               //
+                {1, 2, 0, 1, 2, 3, 4, 0, 1, 2, 3, 0, 1, 2},                                                                         //
+                {1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 0, 1, 2, 3}},                                                                  //
+            .inTags =                                                                                                               //
+            {                                                                                                                       //
+                {genSyncTag(1, 99), genSyncTag(5, 201), genSyncTag(10, 301)},                                                       //
+                {genSyncTag(2, 100), genSyncTag(7, 199), genSyncTag(11, 299)},                                                      //
+                {genSyncTag(3, 101), genSyncTag(9, 200), genSyncTag(12, 300)}},                                                     //
+            .expectedValues =                                                                                                       //
+            {                                                                                                                       //
+                {1, 0, 1, 2, 3, 0, 1, 2, 0, 1},                                                                                     //
+                {2, 0, 1, 2, 3, 0, 1, 2, 0, 1},                                                                                     //
+                {3, 0, 1, 2, 3, 0, 1, 2, 0, 1}},                                                                                    //
+            .expectedTags =                                                                                                         //
+            {                                                                                                                       //
+                {genSyncTag(1, 99), genSyncTag(5, 201), genDropTag(8, 2), genSyncTag(8, 301)},                                      //
+                {genDropTag(0, 1), genSyncTag(1, 100), genDropTag(5, 1), genSyncTag(5, 199), genDropTag(8, 1), genSyncTag(8, 299)}, //
+                {genDropTag(0, 2), genSyncTag(1, 101), genDropTag(5, 2), genSyncTag(5, 200), genSyncTag(8, 300)}}});
     };
 
     "SyncBlock missing tag test"_test = [] {
@@ -151,26 +150,26 @@ const boost::ut::suite SyncBlockTests = [] {
                 {5, 6, 7, 8, 9, 10, 11}},                                      //
             .expectedTags =                                                    //
             {                                                                  //
-                {genDropSyncTag(0, 5, 200), genSyncTag(5, 300)},               // Sample 5 was copied to the output, including the sync tag, even though the tag was not used
+                {genDropTag(0, 5), genSyncTag(0, 200), genSyncTag(5, 300)},    // Sample 5 was copied to the output, including the sync tag, even though the tag was not used
                 {genDropTag(0, 5), genSyncTag(5, 300)},                        //
                 {genDropTag(0, 5), genSyncTag(5, 300)}}});
     };
 
     "SyncBlock isSync test"_test = [] {
-        runTest({                                                                                                                           //
-            .nSamples       = 300'000,                                                                                                      //
-            .maxHistorySize = 32'000,                                                                                                       //
-            .tolerance      = 2ULL,                                                                                                         //
-            .inValues       = {{}, {}},                                                                                                     //
-            .inTags         =                                                                                                               //
-            {                                                                                                                               //
-                {genSyncTag(10, 100), genSyncTag(100'100, 200), genSyncTag(201'000, 300)},                                                  //
-                {genSyncTag(1, 100), genSyncTag(100'000, 200), genSyncTag(200'000, 300)}},                                                  //
-            .expectedValues = {},                                                                                                           //                                                           //
-            .expectedTags   =                                                                                                               //
-            {                                                                                                                               //
-                {genDropTag(0, 9), genSyncTag(1, 100), genDropTag(65537, 91), genSyncTag(100'000, 200), genDropSyncTag(200'000, 900, 300)}, // 65537 -> depends on buffer size
-                {genSyncTag(1, 100), genSyncTag(100'000, 200), genSyncTag(200'000, 300)}},                                                  //
+        runTest({                                                                                                                                            //
+            .nSamples       = 300'000,                                                                                                                       //
+            .maxHistorySize = 32'000,                                                                                                                        //
+            .tolerance      = 2ULL,                                                                                                                          //
+            .inValues       = {{}, {}},                                                                                                                      //
+            .inTags         =                                                                                                                                //
+            {                                                                                                                                                //
+                {genSyncTag(10, 100), genSyncTag(100'100, 200), genSyncTag(201'000, 300)},                                                                   //
+                {genSyncTag(1, 100), genSyncTag(100'000, 200), genSyncTag(200'000, 300)}},                                                                   //
+            .expectedValues = {},                                                                                                                            //                                                           //
+            .expectedTags   =                                                                                                                                //
+            {                                                                                                                                                //
+                {genDropTag(0, 9), genSyncTag(1, 100), genDropTag(65537, 91), genSyncTag(100'000, 200), genDropTag(200'000, 900), genSyncTag(200'000, 300)}, // 65537 -> depends on buffer size
+                {genSyncTag(1, 100), genSyncTag(100'000, 200), genSyncTag(200'000, 300)}},                                                                   //
             .expectedNSamples = 299'000});
     };
 

@@ -53,11 +53,15 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     [[nodiscard]] constexpr auto processOne(T a) noexcept {
         // optional user-level tag processing
         if (this->inputTagsPresent()) {
-            if (this->inputTagsPresent() && this->mergedInputTag().map.contains("N_SAMPLES_MAX")) {
-                const auto value = this->mergedInputTag().map.at("N_SAMPLES_MAX");
-                if (std::holds_alternative<uint64_t>(value)) { // should be std::size_t but emscripten/pmtv seem to have issues with it
-                    should_receive_n_samples = std::get<uint64_t>(value);
-                    _last_tag_position       = in.streamReader().position();
+            const auto& inTags = this->inputTags();
+            for (const gr::Tag& tag : inTags) {
+                if (tag.map.contains("N_SAMPLES_MAX")) {
+                    const auto value = tag.map.at("N_SAMPLES_MAX");
+                    if (std::holds_alternative<uint64_t>(value)) { // should be std::size_t but emscripten/pmtv seem to have issues with it
+                        should_receive_n_samples = std::get<uint64_t>(value);
+                        _last_tag_position       = in.streamReader().position();
+                    }
+                    break;
                 }
             }
         }
