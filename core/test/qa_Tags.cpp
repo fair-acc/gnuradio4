@@ -10,31 +10,19 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
-template<>
-struct std::formatter<gr::Tag> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
 
-    template<typename FormatContext>
-    constexpr auto format(const gr::Tag& tag, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "  {}->{{ {} }}\n", tag.index, tag.map);
-    }
-};
-
+// Disable automatic tag forwarding (gr::NoDefaultTagForwarding) because we handle tags
+// manually in processBulk(): we publish with outSamples.publishTag(...) and consume
+// them via inSamples.rawTags.consume(nTagsToConsume).
 template<typename T>
-struct RealignTagsToChunks : gr::Block<RealignTagsToChunks<T>> {
+struct RealignTagsToChunks : gr::Block<RealignTagsToChunks<T>, gr::NoDefaultTagForwarding> {
     using Description = gr::Doc<R""(A block that forwards samples and tags, moving tags onto the first sample of the current
 or next chunk, whichever is closer. Also adds an "offset" key to the tag map signifying how much it was moved.)"">;
-    // gr::PortIn<T, Doc<"In">, RequiredSamples<1024, 1024, true>> inPort;
+
     gr::PortIn<T, gr::Doc<"In">, gr::RequiredSamples<24, 24, false>> inPort;
-    // gr::PortIn<T, Doc<"In">> inPort;
-    gr::PortOut<T> outPort;
+    gr::PortOut<T>                                                   outPort;
 
     GR_MAKE_REFLECTABLE(RealignTagsToChunks, inPort, outPort);
-
-    double sampling_rate = 1.0;
 
     // TODO: References are required here because InputSpan and OutputSpan have internal states
     // (e.g., tagsPublished) that are unique to each instance. Copying these objects without proper
@@ -45,7 +33,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         std::size_t tagsForwarded = 0;
         for (gr::Tag tag : inSamples.rawTags) {
             if (tag.index < (inSamples.streamIndex + (inSamples.size() + 1) / 2)) {
-                tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
+                tag.insert_or_assign("index_offset", static_cast<int>(tag.index) - static_cast<int>(inSamples.streamIndex));
                 outSamples.publishTag(tag.map, 0);
                 tagsForwarded++;
             } else {
@@ -388,9 +376,9 @@ const boost::ut::suite TagPropagation = [] {
     "TagPropagation autoForwardParameters tags from TagSource<float, USE_PROCESS_ONE>"_test  = [&] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
 
     "CustomTagHandling"_test = []() {
-        gr::Size_t         n_samples = 1024;
+        gr::Size_t         nSamples = 1111;
         Graph              testGraph;
-        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
+        const property_map srcParameter = {{"n_samples_max", nSamples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
         src._tags                       = {
             {0, {{"key", "value@0"}, {"key0", "value@0"}}},          //
@@ -402,9 +390,13 @@ const boost::ut::suite TagPropagation = [] {
             {1002, {{"key", "value@1002"}, {"key6", "value@1002"}}}, //
             {1023, {{"key", "value@1023"}, {"key7", "value@1023"}}}  //
         };
+
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
         auto& realign = testGraph.emplaceBlock<RealignTagsToChunks<float>>();
-        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true}});
+        // RealignTagsToChunks should not auto-forward tags (it has gr::NoDefaultTagForwarding attribute)
+        std::vector<std::string> customAutoForwardKeys = {"key", "key0", "key1", "key2", "key3", "key4", "key5", "key6", "key7"};
+        realign.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", nSamples}, {"verbose_console", true}});
 
         // [ TagSource ] -> [ tag realign block ] -> [ TagSink ]
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"inPort">(realign)));
@@ -416,9 +408,22 @@ const boost::ut::suite TagPropagation = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
-        expect(eq(sink._nSamplesProduced, 1008U)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
-        expect(eq(sink._tags.size(), 3UZ));                                                          // default policy is to drop epilogue samples
+        expect(eq(src._nSamplesProduced, nSamples));
+        expect(eq(sink._nSamplesProduced, 1104U)); // default policy is to drop epilogue samples
+        expect(eq(sink._tags.size(), 9UZ));
+
+        std::vector<Tag> expectedTags = std::vector<Tag>{
+            {0, {{"index_offset", 0}, {"signal_name", "tagStream"}}},                      //
+            {0, {{"index_offset", 0}, {"key", "value@0"}, {"key0", "value@0"}}},           //
+            {0, {{"index_offset", 1}, {"key", "value@1"}, {"key1", "value@1"}}},           //
+            {96, {{"index_offset", 4}, {"key", "value@100"}, {"key2", "value@100"}}},      //
+            {144, {{"index_offset", 6}, {"key", "value@150"}, {"key3", "value@150"}}},     //
+            {1008, {{"index_offset", -8}, {"key", "value@1000"}, {"key4", "value@1000"}}}, //
+            {1008, {{"index_offset", -7}, {"key", "value@1001"}, {"key5", "value@1001"}}}, //
+            {1008, {{"index_offset", -6}, {"key", "value@1002"}, {"key6", "value@1002"}}}, //
+            {1032, {{"index_offset", -9}, {"key", "value@1023"}, {"key7", "value@1023"}}}  //
+        };
+        expect(equal_tag_lists(sink._tags, expectedTags));
     };
 
     auto runPolicyTest = []<typename TDecimator>(const std::vector<Tag>& expectedTags) {
@@ -453,25 +458,30 @@ const boost::ut::suite TagPropagation = [] {
 
         expect(eq(src._nSamplesProduced, nSamples));
         expect(eq(sink._nSamplesProduced, 4U));
-        expect(eq(sink._tags.size(), 4UZ));
+        expect(eq(sink._tags.size(), expectedTags.size()));
 
         expect(equal_tag_lists(sink._tags, expectedTags));
     };
 
     "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                             //
-            {0, {{"key", "value@0"}, {"key0", "value@0"}}},                           //
-            {1, {{"key", "value@5"}, {"key4", "value@4"}, {"key5", "value@5"}}},      //
-            {2, {{"key", "value@20"}, {"key15", "value@15"}, {"key20", "value@20"}}}, //
+        std::vector<Tag>       expectedTags = std::vector<Tag>{      //
+            {0, {{"key", "value@0"}, {"key0", "value@0"}}},    //
+            {1, {{"key", "value@4"}, {"key4", "value@4"}}},    //
+            {1, {{"key", "value@5"}, {"key5", "value@5"}}},    //
+            {2, {{"key", "value@15"}, {"key15", "value@15"}}}, //
+            {2, {{"key", "value@20"}, {"key20", "value@20"}}}, //
             {3, {{"key", "value@25"}, {"key25", "value@25"}}}};
         runPolicyTest.template operator()<DecimatorForward<float>>(expectedTags);
     };
 
     "Tag propagation with decimation - Backward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                                             //
-            {0, {{"key", "value@5"}, {"key0", "value@0"}, {"key4", "value@4"}, {"key5", "value@5"}}}, //
-            {1, {{"key", "value@15"}, {"key15", "value@15"}}},                                        //
-            {2, {{"key", "value@25"}, {"key20", "value@20"}, {"key25", "value@25"}}},                 //
+        std::vector<Tag>       expectedTags = std::vector<Tag>{      //
+            {0, {{"key", "value@0"}, {"key0", "value@0"}}},    //
+            {0, {{"key", "value@4"}, {"key4", "value@4"}}},    //
+            {0, {{"key", "value@5"}, {"key5", "value@5"}}},    //
+            {1, {{"key", "value@15"}, {"key15", "value@15"}}}, //
+            {2, {{"key", "value@20"}, {"key20", "value@20"}}}, //
+            {2, {{"key", "value@25"}, {"key25", "value@25"}}}, //
             {3, {{"key", "value@35"}, {"key35", "value@35"}}}};
         runPolicyTest.template operator()<DecimatorBackward<float>>(expectedTags);
     };
@@ -488,7 +498,16 @@ const boost::ut::suite RepeatedTags = [] {
         Graph              testGraph;
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
-        src._tags                       = {{2, {{SAMPLE_RATE.shortKey(), 2.f}}}, {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, {8, {{SAMPLE_RATE.shortKey(), 8.f}}}};
+        std::vector<Tag>   srcTags      = std::vector<Tag>{
+            {2, {{SAMPLE_RATE.shortKey(), 2.f}}},  //
+            {2, {{SAMPLE_RATE.shortKey(), 2.1f}}}, // same index
+            {3, {{SAMPLE_RATE.shortKey(), 3.f}}},  //
+            {5, {{SAMPLE_RATE.shortKey(), 5.f}}},  //
+            {8, {{SAMPLE_RATE.shortKey(), 8.f}}},  //
+            {8, {{SAMPLE_RATE.shortKey(), 8.1f}}}  // same index for the last tag
+        };
+
+        src._tags = srcTags;
 
         auto& monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
         auto& sinkOne    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
@@ -503,12 +522,18 @@ const boost::ut::suite RepeatedTags = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(eq(src._tags.size(), 4UZ));
-        expect(eq(monitorOne._tags.size(), 13UZ));
-        expect(eq(sinkOne._tags.size(), 13UZ));
+        std::vector<std::size_t> expectedIndices = {2, 2, 3, 5, 8, 8, 11, 11, 12, 14, 17, 17, 20, 20, 21, 23, 26, 26, 29, 29};
+        expect(eq(src._tags.size(), srcTags.size()));
+        expect(eq(monitorOne._tags.size(), 20UZ));
+        expect(eq(sinkOne._tags.size(), 20UZ));
         for (std::size_t i = 0; i < monitorOne._tags.size(); i++) {
-            expect(monitorOne._tags[i].map.at(SAMPLE_RATE.shortKey()) == src._tags[i % src._tags.size()].map.at(SAMPLE_RATE.shortKey()));
-            expect(sinkOne._tags[i].map.at(SAMPLE_RATE.shortKey()) == src._tags[i % src._tags.size()].map.at(SAMPLE_RATE.shortKey()));
+            // TODO: check also indices for USE_PROCESS_ONE
+            if constexpr (srcType == ProcessFunction::USE_PROCESS_BULK) {
+                expect(eq(monitorOne._tags[i].index, expectedIndices[i]));
+                expect(eq(sinkOne._tags[i].index, expectedIndices[i]));
+            }
+            expect(monitorOne._tags[i].map.at(SAMPLE_RATE.shortKey()) == srcTags[i % srcTags.size()].map.at(SAMPLE_RATE.shortKey()));
+            expect(sinkOne._tags[i].map.at(SAMPLE_RATE.shortKey()) == srcTags[i % srcTags.size()].map.at(SAMPLE_RATE.shortKey()));
         }
     };
 

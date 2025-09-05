@@ -16,19 +16,30 @@ GR_REGISTER_BLOCK("gr::basic::StreamFilter", gr::basic::StreamFilterImpl, ([T], 
 
 template<typename T, bool streamOut = false, trigger::Matcher TMatcher = trigger::BasicTriggerNameCtxMatcher::Filter>
 requires(std::is_arithmetic_v<T> || gr::meta::complex_like<T>)
-struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>> {
-    using Description = Doc<R"(@brief Converts stream of input data into chunked discrete DataSet<T> based on tag-based pre- / post-conditions
+struct StreamFilterImpl : Block<StreamFilterImpl<T, streamOut, TMatcher>, NoDefaultTagForwarding> {
+    using Description                            = Doc<R"(
+@brief Converts a stream of input samples into chunked DataSet<T> objects based on tag-defined pre/post conditions.
 Notes:
-* n_pre must be less than the size of the output port's CircularBuffer. The block waits until all n_pre samples can be written to the output in a single iteration.
-* In stream-to-stream mode, the 'stop' Tag is not included in the output stream.
-* In stream-to-dataset mode, the 'stop' Tag is included in the DataSet output.
-* Stream-to-stream mode has limited support for overlapping triggers. Configurations such as Start-Stop-Start-Stop work as expected,
-but configurations like Start-Start-Stop-Stop result in undefined behavior.
-If data accumulation is active, the second 'start' is ignored, and the output may vary depending on subsequent tags.
-* Tags for pre-samples are not stored and are not included in the output.
-* It is expected that 'start' and 'stop' Tags will come from different iterations.
-If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataSet is created. This may lead to incorrect or unexpected output.)">;
+- Constraints
+  - `n_pre` must be strictly less than the capacity of the output port's circular buffer.
+    The block waits until all `n_pre` samples can be written in a single iteration.
 
+- Stream-to-Dataset mode
+  - Only tags whose indices are within the published sample range are added to the DataSet.
+
+- Stream-to-Stream mode
+  - Limited support for overlapping triggers: sequences like start-stop-start-stop work,
+    while start-start-stop-stop has undefined behavior. If data accumulation is active,
+    the second 'start' is ignored and the output may depend on subsequent tags.
+  - All tags are propagated. Tags outside a published range are published
+    with the first sample of the next range.
+
+- Tag timing & merging
+  - 'stop' tag is not included in the output if `n_post == 0`.
+  - 'start' and 'stop' tags are expected to arrive in different iterations.
+  - If multiple 'start' or 'stop' tags arrive in a single merged tag, only one DataSet
+    is created, which may lead to incorrect or unexpected output.
+)">;
     constexpr static std::size_t MIN_BUFFER_SIZE = 1024U;
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments> // optional annotation shortening
     using A = Annotated<U, description, Arguments...>;
@@ -52,11 +63,13 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
     A<float, "signal_min", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_min = 0.f;
     A<float, "signal_max", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_max = 1.f;
 
-    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, out, filter, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+    GR_MAKE_REFLECTABLE(StreamFilterImpl, filter, in, out, n_pre, n_post, n_max, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
     // internal trigger state
-    HistoryBuffer<T> _history{MIN_BUFFER_SIZE + n_pre};
-    TMatcher         _matcher{};
+    HistoryBuffer<T>     _history{MIN_BUFFER_SIZE + n_pre};
+    std::deque<gr::Tag>  _historyTags;       // store tags for  pre-samples
+    std::vector<gr::Tag> _autoForwardedTags; // used only in Stream-To-DataSet mode (streamOut == false)
+    TMatcher             _matcher{};
 
     struct AccumulationState {
         bool        isActive           = false;
@@ -149,11 +162,16 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
     }
 
     gr::work::Status processBulkStream(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
-        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(_filterState);
+        const auto&                inTags          = this->inputTags();
+        std::optional<std::size_t> matchedTagIndex = findFirstTriggerTag();
+        const Tag                  emptyTag{};
+        const Tag&                 matchedTag = matchedTagIndex.has_value() ? inTags[*matchedTagIndex] : emptyTag;
+
+        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(matchedTag, _filterState);
         _accState.update(startTrigger, endTrigger, isSingleTrigger, n_pre, n_post);
 
         if (!_accState.isActive) { // If accumulation is not active, consume all input samples and publish 0 samples.
-            copyInputSamplesToHistory(inSamples, inSamples.size());
+            updateHistory(inSamples, inSamples.size(), true);
             std::ignore = inSamples.consume(inSamples.size());
             outSamples.publish(0UZ);
         } else { // accumulation is active
@@ -190,18 +208,44 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                 _accState.updatePostSamples(nPostSamplesToCopy);
             }
 
-            copyInputSamplesToHistory(inSamples, nSamplesToPublish - nPreSamplesToCopy);
-            std::ignore = inSamples.consume(nSamplesToPublish - nPreSamplesToCopy);
+            bool inTagsPublished = false;
+            if (nSamplesToPublish > 0) {
+                // publish history tags -> clear history tags
+                for (const Tag& tag : _historyTags) {
+                    const std::size_t offset = (n_pre > 0 && tag.index < nPreSamplesToCopy) ? (nPreSamplesToCopy - tag.index) : 0UZ;
+                    outSamples.publishTag(std::move(tag.map), offset);
+                }
+                _historyTags.clear();
+                // publish input tags -> don't added them to the history
+                for (const Tag& tag : inTags) {
+                    const std::size_t offset = nPreSamplesToCopy + tag.index;
+                    outSamples.publishTag(tag.map, offset);
+                }
+                inTagsPublished = true;
+            }
+
+            if (_accState.isActive) {
+                updateHistory(inSamples, nSamplesToPublish - nPreSamplesToCopy, !inTagsPublished);
+                std::ignore = inSamples.consume(nSamplesToPublish - nPreSamplesToCopy);
+            } else {
+                updateHistory(inSamples, inSamples.size(), !inTagsPublished);
+                std::ignore = inSamples.consume(inSamples.size());
+            }
             outSamples.publish(nSamplesToPublish);
         }
         return work::Status::OK;
     }
 
     gr::work::Status processBulkDataSet(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
-        //    This is a workaround to support cases of overlapping datasets, for example, Start1-Start2-Stop1-Stop2 case.
-        //    always add new DataSet when Start trigger is present
+        const auto&                inTags          = this->inputTags();
+        std::optional<std::size_t> matchedTagIndex = findFirstTriggerTag();
+        const Tag                  emptyTag{};
+        const Tag&                 matchedTag = matchedTagIndex.has_value() ? inTags[*matchedTagIndex] : emptyTag;
+
+        // This is a workaround to support cases of overlapping datasets, for example, Start1-Start2-Stop1-Stop2 case.
+        // Always add new DataSet when Start trigger is present
         property_map tmpFilterState;
-        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(tmpFilterState);
+        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(matchedTag, tmpFilterState);
         if (startTrigger) {
             _tempDataSets.emplace_back();
             initNewDataSet(_tempDataSets.back());
@@ -215,7 +259,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
         // Update state only for the front dataset which is not in the isPostActiveState
         for (std::size_t i = 0; i < _tempDataSets.size(); i++) {
             if (!_accState[i].isPostActive) {
-                const auto [startTrigger2, endTrigger2, isSingleTrigger2] = detectTrigger(_filterState[i]);
+                const auto [startTrigger2, endTrigger2, isSingleTrigger2] = detectTrigger(matchedTag, _filterState[i]);
                 if (endTrigger2) {
                     _accState[i].update(startTrigger2, endTrigger2, isSingleTrigger2, n_pre, n_post);
                 }
@@ -223,8 +267,8 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
             }
         }
 
-        if (_tempDataSets.empty()) { // If accumulation is not active (no active DataSets), consume all input samples and publish 0 samples.
-            copyInputSamplesToHistory(inSamples, inSamples.size());
+        if (_tempDataSets.empty()) { // If accumulation is not active (no active DataSets) -> update history, consume all input samples and publish 0 samples.
+            updateHistory(inSamples, inSamples.size(), true);
             std::ignore = inSamples.consume(inSamples.size());
             outSamples.publish(0UZ);
             return work::Status::OK;
@@ -243,22 +287,24 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                     accState.isPreActive = false;
                     accState.nPreSamples = nPreSamplesToCopy;
                     accState.nSamples += nPreSamplesToCopy;
-                }
 
-                // Note: Tags for pre-samples are not added to DataSet
-                if (n_max.value == 0UZ || ds.signal_values.size() < n_max.value) { // Add tags only if the DataSet is not full
-                    const Tag& mergedTag = this->mergedInputTag();
-                    if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
-                        ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(ds.signal_values.size()), mergedTag.map);
+                    if (nPreSamplesToCopy > 0) {
+                        for (const Tag& tag : _historyTags) {
+                            if (tag.index <= nPreSamplesToCopy && !tag.map.empty()) {
+                                ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(nPreSamplesToCopy - tag.index), tag.map);
+                            }
+                        }
                     }
                 }
 
+                std::size_t nNonPreSamplesCopied = 0;
                 if (!accState.isPostActive) { // normal data accumulation
                     const std::size_t nSamplesToCopy = n_max.value == 0UZ ? inSamples.size() : std::min(n_max.value - ds.signal_values.size(), inSamples.size());
                     if (nSamplesToCopy > 0) {
                         ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), inSamples.begin() + static_cast<std::ptrdiff_t>(nSamplesToCopy));
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nSamplesToCopy);
                         accState.nSamples += nSamplesToCopy;
+                        nNonPreSamplesCopied += nSamplesToCopy;
                     }
                 } else {                                                                                                                  // post samples data accumulation
                     const std::size_t nPostSamplesToCopy = n_max.value == 0UZ ? std::min(accState.nPostSamplesRemain, inSamples.size()) : //
@@ -267,35 +313,46 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                         ds.signal_values.insert(ds.signal_values.end(), inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(nPostSamplesToCopy)));
                         fillAxisValues(ds, static_cast<int>(accState.nSamples - accState.nPreSamples), nPostSamplesToCopy);
                         accState.updatePostSamples(nPostSamplesToCopy);
+                        nNonPreSamplesCopied += nPostSamplesToCopy;
                     } else {
                         accState.isActive = false;
                     }
                 }
+
+                // Add tags only if at least one sample from current iteration is copied to DataSet
+                if (nNonPreSamplesCopied > 0 && !ds.timing_events.empty() && !inTags.empty()) {
+                    for (const Tag& tag : inTags) {
+                        if (!tag.map.empty()) {
+                            ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(accState.nSamples - nNonPreSamplesCopied + tag.index), tag.map);
+                        }
+                    }
+                }
             }
-            this->_mergedInputTag.map.clear(); // ensure that the input tag is only propagated once
         }
 
-        copyInputSamplesToHistory(inSamples, inSamples.size());
+        updateHistory(inSamples, inSamples.size(), true);
         std::ignore = inSamples.consume(inSamples.size());
 
         // publish all completed DataSet<T>
         std::size_t publishedCounter = 0UZ;
-        while (true) {
-            if (!_tempDataSets.empty() && !_accState.front().isActive) {
-                auto& ds = _tempDataSets.front();
-                assert(!ds.extents.empty());
-                ds.extents[0UZ] = static_cast<std::int32_t>(ds.signal_values.size());
-                if (!ds.signal_values.empty()) { // TODO: do we need to publish empty  DataSet at all, empty DataSet can occur when n_max is set.
-                    gr::dataset::updateMinMax(ds);
-                }
-                outSamples[publishedCounter] = std::move(ds);
-                _tempDataSets.pop_front();
-                _accState.pop_front();
-                _filterState.pop_front();
-                publishedCounter++;
-            } else {
+        while (!_tempDataSets.empty() && !_accState.front().isActive) {
+            if (publishedCounter >= outSamples.size()) {
                 break;
             }
+            auto& ds = _tempDataSets.front();
+            assert(!ds.extents.empty());
+            ds.extents[0UZ] = static_cast<std::int32_t>(ds.signal_values.size());
+            if (!ds.signal_values.empty()) { // TODO: do we need to publish empty  DataSet at all, empty DataSet can occur when n_max is set.
+                gr::dataset::updateMinMax(ds);
+            }
+            outSamples[publishedCounter] = std::move(ds);
+            _tempDataSets.pop_front();
+            _accState.pop_front();
+            _filterState.pop_front();
+            publishedCounter++;
+        }
+        if (publishedCounter > 0) {
+            publishAutoForwardedTags(outSamples);
         }
         outSamples.publish(publishedCounter);
 
@@ -303,14 +360,62 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
     }
 
 private:
-    auto detectTrigger(property_map& filterState) {
+    [[nodiscard]] std::optional<std::size_t> findFirstTriggerTag() const {
+        // If multiple Start/Stop/SingleTrigger trigger tags arrive at the same sample index ,
+        // we process only the first one (regardless of Start, Stop or singleTrigger) and ignore the rest.
+        // This should not occur in practice because it guarantees at most one trigger per sample index.
+        // Note: StreamToDataSet have only Tags at index 0, since input_chunk_size == 1
+        const auto& inTags = this->inputTags();
+        if (inTags.empty()) {
+            return std::nullopt;
+        }
+        for (std::size_t i = 0; i < inTags.size(); ++i) {
+            const Tag& tag = inTags[i];
+#ifndef NDEBUG
+            if (tag.index != 0) {
+                std::println(stderr, "StreamToDataSet expects tags only at index==0 (input_chunk_size==1); got index:{} map:{}", tag.index, tag.map);
+                std::abort();
+            }
+#endif
+            if constexpr (streamOut) {
+                // _filterState is a single property_map
+                // We need to create temporary copy here since matcher changes state.
+                property_map tmpFilterState                            = _filterState;
+                const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(tag, tmpFilterState);
+                if (startTrigger || endTrigger || isSingleTrigger) {
+                    return i;
+                }
+            } else {
+                // first check with empty (just created) state for a Start trigger
+                property_map tmpEmptyFilterState;
+                const auto [startTriggerEmpty, endTriggerEmpty, isSingleTriggerEmpty] = detectTrigger(tag, tmpEmptyFilterState);
+                if (startTriggerEmpty || endTriggerEmpty || isSingleTriggerEmpty) {
+                    return i;
+                }
+                // _filterState is a collection of property_map
+                for (const property_map& filterState : _filterState) {
+                    // We need to create temporary copy here since matcher changes state.
+                    property_map tmpFilterState                            = filterState;
+                    const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(tag, tmpFilterState);
+                    if (startTrigger || endTrigger || isSingleTrigger) {
+                        return i;
+                    }
+                }
+            }
+        }
+
+        // fallback return first tag
+        return 0UZ;
+    }
+
+    [[nodiscard]] auto detectTrigger(const Tag& tag, property_map& filterState) const {
         struct {
             bool startTrigger    = false;
             bool endTrigger      = false;
             bool isSingleTrigger = false;
         } result;
 
-        const trigger::MatchResult matchResult = _matcher(filter.value, this->mergedInputTag(), filterState);
+        const trigger::MatchResult matchResult = _matcher(filter.value, tag, filterState);
         if (matchResult != trigger::MatchResult::Ignore) {
             assert(filterState.contains("isSingleTrigger"));
             result.startTrigger    = matchResult == trigger::MatchResult::Matching;
@@ -320,10 +425,29 @@ private:
         return result;
     }
 
-    void copyInputSamplesToHistory(InputSpanLike auto& inSamples, std::size_t maxSamplesToCopy) {
-        if (n_pre > 0) {
-            const auto samplesToCopy = std::min(maxSamplesToCopy, inSamples.size());
-            _history.push_front(inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy)));
+    void updateHistory(InputSpanLike auto& inSamples, std::size_t maxSamplesToCopy, bool copyInputTags) {
+        const auto samplesToCopy = std::min(maxSamplesToCopy, inSamples.size());
+        if (samplesToCopy > 0) {
+            const auto& inTags = this->inputTags();
+            if constexpr (streamOut) {
+                if (copyInputTags) {
+                    _historyTags.insert(_historyTags.end(), inTags.begin(), inTags.end());
+                }
+            } else {
+                if (copyInputTags && n_pre > 0) {
+                    _historyTags.insert(_historyTags.end(), inTags.begin(), inTags.end());
+                }
+                copyInputTagsToAutoForwardedTags();
+            };
+            if (n_pre > 0) {
+                _history.push_front(inSamples.begin(), std::next(inSamples.begin(), static_cast<std::ptrdiff_t>(samplesToCopy)));
+                for (Tag& tag : _historyTags) {
+                    tag.index += samplesToCopy;
+                }
+            }
+            if constexpr (!streamOut) {
+                std::erase_if(_historyTags, [N = static_cast<std::size_t>(n_pre.value)](const gr::Tag& t) { return t.index > N; });
+            }
         }
     }
 
@@ -343,14 +467,36 @@ private:
         dataSet.signal_names.emplace_back(signal_name);
         dataSet.signal_quantities.emplace_back(signal_quantity);
         dataSet.signal_units.emplace_back(signal_unit);
-        dataSet.signal_ranges.resize(1UZ);  // one data set
-        dataSet.meta_information.resize(1); // one data set
+        dataSet.signal_ranges.resize(1UZ);  // one signal
+        dataSet.meta_information.resize(1); // one signal
         dataSet.meta_information[0]["ctx"]    = filter;
         dataSet.meta_information[0]["n_pre"]  = n_pre;
         dataSet.meta_information[0]["n_post"] = n_post;
         dataSet.meta_information[0]["n_max"]  = n_max;
 
-        dataSet.timing_events.resize(1UZ); // one data set
+        dataSet.timing_events.resize(1UZ); // one signal
+    }
+
+    void copyInputTagsToAutoForwardedTags() {
+        const auto& autoForwardKeys = this->settings().autoForwardParameters();
+        for (const Tag& tag : this->inputTags()) {
+            property_map onlyAutoForwardMap;
+            std::ranges::copy_if(tag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); });
+            if (!onlyAutoForwardMap.empty()) {
+                _autoForwardedTags.emplace_back(0, std::move(onlyAutoForwardMap));
+            }
+        }
+    }
+
+    void publishAutoForwardedTags(OutputSpanLike auto& outSpan)
+    requires(!streamOut)
+    {
+        if (!_autoForwardedTags.empty()) {
+            for (const Tag& tag : _autoForwardedTags) {
+                outSpan.publishTag(std::move(tag.map), 0);
+            }
+            _autoForwardedTags.clear();
+        }
     }
 };
 

@@ -777,14 +777,18 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
             {2, {{"key2", "value@2"}}},    //
             {4, {{"key4", "value@4"}}},    //
             {6, {{"key6", "value@6"}}},    //
-            {8, {{"ke8", "value@8"}}},     //
+            {8, {{"key8", "value@8"}}},    //
+            {9, {{"key9", "value@9"}}},    //
             {10, {{"key10", "value@10"}}}, //
+            {11, {{"key11", "value@11"}}}, //
             {12, {{"key12", "value@12"}}}, //
             {14, {{"key14", "value@14"}}}  //
         };
 
-        auto& intDecBlock = testGraph.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
-        auto& sink        = testGraph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
+        auto&                    intDecBlock           = testGraph.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
+        std::vector<std::string> customAutoForwardKeys = {"key0", "key2", "key4", "key6", "key8", "key9", "key10", "key11", "key12", "key14"};
+        intDecBlock.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
+        auto& sink = testGraph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(intDecBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(intDecBlock).to<"in">(sink)));
 
@@ -797,6 +801,20 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(intDecBlock.status.process_counter, 2UZ));
         expect(eq(intDecBlock.status.total_in, 20UZ));
         expect(eq(intDecBlock.status.total_out, 20UZ));
+        expect(eq(sink._tags.size(), 7UZ));
+
+        std::vector<Tag> expectedTags = std::vector<Tag>{
+            {0, {{"key0", "value@0"}}},    // published in the 1st iteration
+            {10, {{"key2", "value@2"}}},   // "forwarded" tag from the 1st iteration
+            {10, {{"key4", "value@4"}}},   // "forwarded" tag from the 1st iteration
+            {10, {{"key6", "value@6"}}},   // "forwarded" tag from the 1st iteration
+            {10, {{"key8", "value@8"}}},   // "forwarded" tag from the 1st iteration
+            {10, {{"key9", "value@9"}}},   // "forwarded" tag from the 1st iteration
+            {10, {{"key10", "value@10"}}}, // first tag of the 2nd iteration;
+            // keys key11, key12, and key14 are forwarded to the 3rd iteration,
+            // but since there are no more samples, they are not published
+        };
+        expect(equal_tag_lists(sink._tags, expectedTags));
     };
 
     "SyncOrAsync ports tests"_test = [] {

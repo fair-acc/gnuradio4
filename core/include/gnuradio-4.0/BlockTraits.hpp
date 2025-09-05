@@ -210,6 +210,7 @@ public:
     [[nodiscard]] constexpr iterator    begin() const noexcept { return internalSpan.begin(); }
     [[nodiscard]] constexpr iterator    end() const noexcept { return internalSpan.end(); }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
+
     operator const std::span<const T>&() const noexcept { return internalSpan; }
     operator std::span<const T>&() noexcept { return internalSpan; }
     // operator std::span<const T>&&() = delete;
@@ -224,7 +225,7 @@ struct DummyInputSpan : public DummyReaderSpan<T> {
     bool                     isConnected = true;
     bool                     isSync      = true;
     auto                     tags() { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
-    [[nodiscard]] inline Tag getMergedTag(std::size_t /*untilLocalIndex*/) const { return {}; }
+    auto                     tags(std::size_t /*untilLocalIndex*/) { return std::views::empty<std::pair<std::size_t, const property_map&>>; }
     void                     consumeTags(std::size_t /*untilLocalIndex*/) {}
 };
 static_assert(ReaderSpanLike<DummyInputSpan<int>>);
@@ -249,6 +250,7 @@ public:
     [[nodiscard]] constexpr iterator    begin() const noexcept { return internalSpan.begin(); }
     [[nodiscard]] constexpr iterator    end() const noexcept { return internalSpan.end(); }
     [[nodiscard]] constexpr std::size_t size() const noexcept { return internalSpan.size(); }
+
     operator const std::span<T>&() const noexcept { return internalSpan; }
     operator std::span<T>&() noexcept { return internalSpan; }
 
