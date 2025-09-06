@@ -246,7 +246,9 @@ class CircularBuffer {
               _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), //
               _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)),                //
               _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
-              _claimStrategy(ClaimType(_size)) {}
+              _claimStrategy(ClaimType(_size)) {
+            assert(std::has_single_bit(_size));
+        }
 
 #ifdef HAS_POSIX_MAP_INTERFACE
         static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
@@ -705,7 +707,7 @@ class CircularBuffer {
     // static_assert(BufferReaderLike<Reader<T>>);
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
-        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {
+        if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T> && std::has_single_bit(sizeof(T))) {
             return double_mapped_memory_resource::allocator<T>();
         } else {
             return Allocator();
