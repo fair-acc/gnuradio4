@@ -1,22 +1,39 @@
+#include <boost/ut.hpp>
+
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <bitset>
+#include <cassert>
+#include <charconv>
 #include <cmath>
+#include <deque>
 #include <format>
+#include <functional>
 #include <limits>
+#include <map>
 #include <numbers>
 #include <numeric>
+#include <optional>
 #include <print>
 #include <queue>
+#include <ranges>
 #include <set>
+#include <source_location>
+#include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
+#include "gnuradio-4.0/Graph.hpp"
 #include "gnuradio-4.0/Message.hpp"
+#include "gnuradio-4.0/Tag.hpp"
+
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -82,13 +99,67 @@ std::size_t utf8Width(std::string_view s) {
     return count;
 }
 
+namespace detail {
+
+// already in your tree, pasted here for completeness
+inline std::pair<std::string_view, std::size_t> portBaseNameAndOffset(std::string_view name, const gr::PortDefinition& pd) noexcept {
+    std::string_view base = name;
+    std::size_t      off  = 0UZ;
+
+    if (auto pos = name.find('#'); pos != std::string_view::npos) {
+        base = name.substr(0UZ, pos);
+        std::size_t tmp{};
+        auto*       first = name.data() + pos + 1;
+        auto*       last  = name.data() + name.size();
+        if (std::from_chars(first, last, tmp).ec == std::errc{}) {
+            off = tmp;
+        }
+    }
+
+    if (std::holds_alternative<gr::PortDefinition::IndexBased>(pd.definition)) {
+        const auto& d = std::get<gr::PortDefinition::IndexBased>(pd.definition);
+        if (d.subIndex != gr::meta::invalid_index) {
+            off = d.subIndex; // authoritative
+        }
+    }
+
+    return {base, off};
+}
+
+template<gr::PortDirection Dir>
+inline std::size_t totalPorts(gr::BlockModel& blk) {
+    // Sum sizes over all dynamic collections; stop when index runs out.
+    std::size_t total = 0;
+    for (std::size_t i = 0;; ++i) {
+        try {
+            std::size_t s = (Dir == gr::PortDirection::INPUT) ? blk.dynamicInputPortsSize(i) : blk.dynamicOutputPortsSize(i);
+            total += s;
+        } catch (...) {
+            break;
+        }
+    }
+    return total;
+}
+
+template<gr::PortDirection Dir>
+inline std::string portLabel(gr::BlockModel& blk, const gr::PortDefinition& pd) {
+    try {
+        const gr::DynamicPort& p = (Dir == gr::PortDirection::INPUT) ? blk.dynamicInputPort(pd) : blk.dynamicOutputPort(pd);
+        const auto [base, off]   = portBaseNameAndOffset(p.name, pd);
+        return std::format("{}#{}", base, off);
+    } catch (...) {
+        return "<?>"; // unresolved / invalid
+    }
+}
+
+} // namespace detail
+
 //------------------------------------------------------
 // Phase 0: Core data model
 //------------------------------------------------------
 enum class LayoutPref { HORIZONTAL, VERTICAL, AUTO, UNDEFINED };
-enum class PortDirection { In, Out };
-enum class PortSyncKind { Sync, Async, Msg };
 enum class Side : std::size_t { Left = 0UZ, Right = 1UZ, Top = 2UZ, Bottom = 3UZ };
+enum class EdgeType { Forward, Feedback, Lateral };
 
 Side oppositeSide(Side s) noexcept {
     using enum Side;
@@ -165,6 +236,27 @@ struct Point {
     [[nodiscard]] friend constexpr Point operator/(Point a, T s) noexcept { return {a.x / s, a.y / s}; }
 };
 
+namespace std {
+template<gr::arithmetic_or_complex_like T, typename CharT>
+struct formatter<Point<T>, CharT> {
+    constexpr auto parse(std::basic_format_parse_context<CharT>& ctx) { return ctx.begin(); }
+    template<typename FormatContext>
+    constexpr auto format(const Point<T>& p, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "({},{})", p.x, p.y);
+    }
+};
+
+template<typename CharT>
+struct formatter<std::byte, CharT> {
+    constexpr auto parse(basic_format_parse_context<CharT>& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    constexpr auto format(std::byte b, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "0b{}", std::bitset<8>{std::to_integer<unsigned>(b)}.to_string());
+    }
+};
+} // namespace std
+
 template<gr::arithmetic_or_complex_like T>
 constexpr T manhattanNorm(Point<T> p1, Point<T> p2 = {0, 0}) noexcept {
     const T dx = std::max(p1.x, p2.x) - std::min(p1.x, p2.x);
@@ -193,7 +285,7 @@ constexpr Point<T> min(Point<T> p1, Point<T> p2 = {Point<T>::invalid_position, P
 
 template<gr::arithmetic_or_complex_like T>
 constexpr Point<T> max(Point<T> p1, Point<T> p2 = {0, 0}) {
-    return {std::min(p1.x, p2.x), std::min(p1.y, p2.y)};
+    return {std::max(p1.x, p2.x), std::max(p1.y, p2.y)};
 }
 
 template<gr::arithmetic_or_complex_like T>
@@ -246,7 +338,7 @@ enum class Direction : std::uint8_t {
     NorthWest = (1 << 7),   //
     None      = 0b00000000, //
 };
-[[nodiscard]] constexpr std::size_t index(Direction d) noexcept { return size_t(std::countr_zero(std::to_underlying<Direction>(d))); }
+[[nodiscard]] constexpr std::size_t index(Direction d) noexcept { return (d == Direction::None) ? 8UZ : size_t(std::countr_zero(std::to_underlying<Direction>(d))); }
 static_assert(index(Direction::None) == 8UZ);
 static_assert(index(Direction::North) == 0UZ);
 
@@ -288,507 +380,616 @@ static_assert(isDiagonalDirection(Direction::NorthEast));
 [[nodiscard]] constexpr Direction operator~(Direction d) noexcept { return static_cast<Direction>(~std::to_underlying(d)); }
 [[nodiscard]] constexpr bool      has(Direction mask, Direction flag) noexcept { return static_cast<bool>(mask & flag); }
 
-struct Port {
-    std::string         label;                                   /// short port label
-    PortDirection       direction;                               /// In vs Out
-    PortSyncKind        syncKind;                                /// Sync / Async / Msg
-    std::optional<Side> preferredSide = std::nullopt;            /// initial layouting hint
-    std::size_t         portIndex     = gr::meta::invalid_index; /// index into Node::inputs or ::outputs
-    Point<double>       position{};                              /// the (x,y) just *outside* your box frame
-    Direction           exitDir{0};                              /// one of Canvas::NORTH/EAST/SOUTH/WEST
+inline LayoutPref getLayoutPref(const std::shared_ptr<gr::BlockModel>& block) {
+    auto& ui = const_cast<gr::BlockModel*>(block.get())->uiConstraints();
+    if (auto it = ui.find("layout_pref"); it != ui.end()) {
+        if (auto* str = std::get_if<std::string>(&it->second)) {
+            if (*str == "horizontal") {
+                return LayoutPref::HORIZONTAL;
+            }
+            if (*str == "vertical") {
+                return LayoutPref::VERTICAL;
+            }
+            if (*str == "auto") {
+                return LayoutPref::AUTO;
+            }
+        }
+    }
+    return LayoutPref::UNDEFINED;
+}
 
-    template<gr::arithmetic_or_complex_like T>
-    constexpr Point<T> anchorPoint() const noexcept {
-        return position.get<T>();
-        ;
+inline void setLayoutPref(std::shared_ptr<gr::BlockModel>& block, LayoutPref pref) {
+    std::string prefStr                   = pref == LayoutPref::HORIZONTAL ? "horizontal" : //
+                              pref == LayoutPref::VERTICAL ? "vertical"
+                                                                             : //
+                              pref == LayoutPref::AUTO ? "auto"
+                                                                         : "undefined"; //
+    block->uiConstraints()["layout_pref"] = prefStr;
+}
+
+template<gr::arithmetic_or_complex_like T = double>
+Point<T> getPosition(const std::shared_ptr<gr::BlockModel>& block) {
+    auto& ui = const_cast<gr::BlockModel*>(block.get())->uiConstraints();
+    T     x  = Point<T>::invalid_position;
+    T     y  = Point<T>::invalid_position;
+
+    if (auto it = ui.find("pos_x"); it != ui.end()) {
+        if (auto* val = std::get_if<double>(&it->second)) {
+            x = static_cast<T>(*val);
+        }
+    }
+    if (auto it = ui.find("pos_y"); it != ui.end()) {
+        if (auto* val = std::get_if<double>(&it->second)) {
+            y = static_cast<T>(*val);
+        }
+    }
+    return {x, y};
+}
+
+// Port layout information storage
+class PortInfo {
+    bool                            _isInput;
+    std::shared_ptr<gr::BlockModel> _block;         /// local reference to block -> used to access uiConstraints and other related infos
+    std::size_t                     _idx;           /// ordinal of the port in the block
+    std::optional<Side>             _preferredSide; /// UI related -> needs to be stored in BlockModel::uiConstraints() property_map
+    Point<double>                   _position;      /// UI related -> needs to be stored in BlockModel::uiConstraints() property_map
+    Direction                       _exitDir;       /// UI related -> needs to be stored in BlockModel::uiConstraints() property_map
+    std::string                     _name;          /// existing information in BlockModel
+    gr::port::BitMask               _portBitInfo;   /// existing information in BlockModel
+
+public:
+    void syncFromUIConstraints() {
+        if (!_block) {
+            return;
+        }
+
+        auto&      ui        = _block->uiConstraints();
+        const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
+        const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
+
+        // Ensure vector exists and has correct size
+        auto& vec = [&]() -> std::vector<pmtv::pmt>& {
+            auto [it, _] = ui.try_emplace(mapKey, std::vector<pmtv::pmt>(portCount));
+            if (!std::holds_alternative<std::vector<pmtv::pmt>>(it->second)) {
+                it->second = std::vector<pmtv::pmt>(portCount);
+            }
+            auto& v = std::get<std::vector<pmtv::pmt>>(it->second);
+            if (v.size() != portCount) {
+                v.resize(portCount);
+            }
+            return v;
+        }();
+
+        if (_idx >= vec.size()) {
+            return; // Safety check
+        }
+
+        // Ensure property_map exists at this index
+        auto& m = [&]() -> gr::property_map& {
+            if (!std::holds_alternative<gr::property_map>(vec[_idx])) {
+                vec[_idx] = gr::property_map{};
+            }
+            return std::get<gr::property_map>(vec[_idx]);
+        }();
+
+        // Read or initialize preferred side
+        if (auto it = m.find("side"); it != m.end()) {
+            if (auto* v = std::get_if<int>(&it->second)) {
+                _preferredSide = static_cast<Side>(*v);
+            }
+        } else {
+            // Initialize with default if not present
+            _preferredSide = _isInput ? Side::Left : Side::Right;
+            m["side"]      = static_cast<int>(*_preferredSide);
+        }
+
+        // Read or initialize position
+        bool hasX = false, hasY = false;
+        if (auto it = m.find("pos_x"); it != m.end()) {
+            if (auto* v = std::get_if<double>(&it->second)) {
+                _position.x = *v;
+                hasX        = true;
+            }
+        }
+        if (auto it = m.find("pos_y"); it != m.end()) {
+            if (auto* v = std::get_if<double>(&it->second)) {
+                _position.y = *v;
+                hasY        = true;
+            }
+        }
+        if (!hasX || !hasY) {
+            // Initialize position from block position if not set
+            Point<double> blockPos = getPosition<double>(_block);
+            if (!hasX) {
+                _position.x = blockPos.x;
+                m["pos_x"]  = _position.x;
+            }
+            if (!hasY) {
+                _position.y = blockPos.y;
+                m["pos_y"]  = _position.y;
+            }
+        }
+
+        // Read or initialize exit direction
+        if (auto it = m.find("exit_dir"); it != m.end()) {
+            if (auto* v = std::get_if<int>(&it->second)) {
+                _exitDir = static_cast<Direction>(*v);
+            }
+        } else {
+            // Initialize based on preferred side
+            switch (*_preferredSide) {
+            case Side::Left: _exitDir = Direction::West; break;
+            case Side::Right: _exitDir = Direction::East; break;
+            case Side::Top: _exitDir = Direction::North; break;
+            case Side::Bottom: _exitDir = Direction::South; break;
+            }
+            m["exit_dir"] = static_cast<int>(_exitDir);
+        }
     }
 
+    PortInfo() = delete;
+
+    PortInfo(gr::PortDirection direction, const std::shared_ptr<gr::BlockModel>& srcRef, std::size_t index)
+        : _isInput(direction == gr::PortDirection::INPUT), _block(srcRef), _idx(index), //
+          _preferredSide(_isInput ? Side::Left : Side::Right), _exitDir(_isInput ? Direction::West : Direction::East) {
+        const auto&                         types    = _isInput ? _block->blockInputTypes() : _block->blockOutputTypes();
+        const std::vector<gr::PortMetaInfo> metaInfo = _isInput ? _block->inputMetaInfos() : _block->outputMetaInfos();
+
+        _name        = metaInfo[_idx].name;
+        _portBitInfo = types[_idx];
+        syncFromUIConstraints();
+    }
+    PortInfo(const PortInfo&)            = default;
+    PortInfo(PortInfo&&)                 = default;
+    PortInfo& operator=(const PortInfo&) = default;
+    PortInfo& operator=(PortInfo&&)      = default;
+
+    [[nodiscard]] std::shared_ptr<gr::BlockModel>      block() noexcept { return _block; }
+    [[nodiscard]] std::size_t                          portIdx() const noexcept { return _idx; }
+    [[nodiscard]] constexpr gr::port::BitMask          portBitInfo() const noexcept { return _portBitInfo; }
+    [[nodiscard]] constexpr std::string_view           name() const noexcept { return _name; }
+    [[nodiscard]] constexpr gr::PortDirection          direction() const { return gr::port::decodeDirection(_portBitInfo); }
+    [[nodiscard]] constexpr bool                       isInput() const noexcept { return gr::port::isInput(_portBitInfo); }
+    [[nodiscard]] constexpr bool                       isSynchronous() const noexcept { return gr::port::isSynchronous(_portBitInfo); }
+    [[nodiscard]] constexpr bool                       isStream() const noexcept { return gr::port::isStream(_portBitInfo); }
+    [[nodiscard]] constexpr const std::optional<Side>& preferredSide() const noexcept { return _preferredSide; }
     template<gr::arithmetic_or_complex_like T>
-    constexpr Point<T> exitPoint() const noexcept {
+    [[nodiscard]] constexpr Point<T> anchorPoint() const noexcept {
+        return position().get<T>();
+    }
+    template<gr::arithmetic_or_complex_like T>
+    [[nodiscard]] constexpr Point<T> exitPoint() const noexcept {
         Point<T> anchor = anchorPoint<T>();
         using enum Direction;
-        switch (exitDir) { // (dx,dy) for the four axial directions
-        case West: return {anchor.x > T(0) ? anchor.x - T(1) : T(0), anchor.y + T(0)};
-        case East: return {anchor.x + T(1), anchor.y + T(0)};
-        case North: return {anchor.x + T(0), anchor.y > 0 ? anchor.y - T(1) : T(0)};
-        case South: return {anchor.x + T(0), anchor.y + T(1)};
-        default: return {anchor.x, anchor.y}; // (diagonals are never used here)
+        switch (exitDir()) {
+        case West: return {anchor.x > T(0) ? anchor.x - T(1) : T(0), anchor.y};
+        case East: return {anchor.x + T(1), anchor.y};
+        case North: return {anchor.x, anchor.y > 0 ? anchor.y - T(1) : T(0)};
+        case South: return {anchor.x, anchor.y + T(1)};
+        default: return anchor;
         }
+    }
+
+    [[nodiscard]] constexpr const Point<double>& position() const noexcept { return _position; }
+    void                                         addPosition(Point<double> offset) noexcept { position(position() + offset); }
+    [[nodiscard]] constexpr const Direction&     exitDir() const noexcept { return _exitDir; }
+
+    void preferredSide(Side newSide) noexcept {
+        _preferredSide = newSide;
+        updateUIConstraints("side", static_cast<int>(newSide));
+    }
+
+    void position(Point<double> newPos) noexcept {
+        _position = newPos;
+        updateUIConstraints("pos_x", newPos.x);
+        updateUIConstraints("pos_y", newPos.y);
+    }
+
+    void exitDir(Direction newDir) noexcept {
+        _exitDir = newDir;
+        updateUIConstraints("exit_dir", static_cast<int>(newDir));
+    }
+
+private:
+    void updateUIConstraints(const std::string& key, pmtv::pmt value) {
+        if (!_block) {
+            return;
+        }
+
+        auto&      ui        = _block->uiConstraints();
+        const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
+        const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
+
+        // Ensure vector exists and has correct size
+        auto& vec = [&]() -> std::vector<pmtv::pmt>& {
+            auto [it, _] = ui.try_emplace(mapKey, std::vector<pmtv::pmt>(portCount));
+            if (!std::holds_alternative<std::vector<pmtv::pmt>>(it->second)) {
+                it->second = std::vector<pmtv::pmt>(portCount);
+            }
+            auto& v = std::get<std::vector<pmtv::pmt>>(it->second);
+            if (v.size() != portCount) {
+                v.resize(portCount);
+            }
+            return v;
+        }();
+
+        // Ensure property_map exists at this index
+        if (_idx >= vec.size()) {
+            return; // Safety check
+        }
+
+        if (!std::holds_alternative<gr::property_map>(vec[_idx])) {
+            vec[_idx] = gr::property_map{};
+        }
+
+        auto& m = std::get<gr::property_map>(vec[_idx]);
+        m[key]  = std::move(value);
     }
 };
 
-struct Node {
-    std::string       title;
-    std::vector<Port> ports; // unified storage
-    LayoutPref        layout = LayoutPref::UNDEFINED;
+template<gr::PortDirection direction>
+inline std::vector<PortInfo> getPortInfos(const std::shared_ptr<gr::BlockModel>& block) {
+    constexpr bool        isInput = direction == gr::PortDirection::INPUT;
+    const auto&           types   = isInput ? block->blockInputTypes() : block->blockOutputTypes();
+    std::vector<PortInfo> out;
+    out.reserve(types.size());
 
-    // derived maps (indices into ports[])
-    std::vector<std::size_t> _inIdx;
-    std::vector<std::size_t> _outIdx;
+    for (std::size_t i = 0UZ; i < types.size(); ++i) {
+        out.emplace_back(PortInfo(direction, block, i));
+    }
+    return out;
+}
 
-    // assigned in Phase 1:
-    Point<double> _position{};
+inline std::size_t inputCount(const std::shared_ptr<gr::BlockModel>& block) { return getPortInfos<gr::PortDirection::INPUT>(block).size(); }
+inline std::size_t outputCount(const std::shared_ptr<gr::BlockModel>& block) { return getPortInfos<gr::PortDirection::OUTPUT>(block).size(); }
 
-    Node() = default;
-    Node(std::string t, std::vector<Port> ins, std::vector<Port> outs, LayoutPref pref = LayoutPref::UNDEFINED) : title(std::move(t)), layout(pref) {
-        ports.reserve(ins.size() + outs.size());
-        // append inputs
-        for (auto& p : ins) {
-            p.direction = PortDirection::In; // ensure correct direction
-            ports.push_back(std::move(p));
-        }
-        // append outputs
-        for (auto& p : outs) {
-            p.direction = PortDirection::Out;
-            ports.push_back(std::move(p));
-        }
-        rebuildMaps();
-    }
-
-    // --- basic access -----------------------------------------------------
-    template<gr::arithmetic_or_complex_like T>
-    Point<T> position() const noexcept {
-        return {static_cast<T>(_position.x), static_cast<T>(_position.y)};
-    }
-    template<gr::arithmetic_or_complex_like T>
-    Point<T> centre() const noexcept {
-        return {static_cast<T>(_position.x) + width<T>() / T(2), static_cast<T>(_position.y) + height<T>() / T(2)};
-    }
-    template<gr::arithmetic_or_complex_like T>
-    Point<T> topLeft() const noexcept {
-        return {static_cast<T>(_position.x), static_cast<T>(_position.y)};
-    }
-    template<gr::arithmetic_or_complex_like T>
-    Point<T> topRight() const noexcept {
-        return {static_cast<T>(_position.x) + width<T>() - T(1), static_cast<T>(_position.y)};
-    }
-    template<gr::arithmetic_or_complex_like T>
-    Point<T> bottomLeft() const noexcept {
-        return {static_cast<T>(_position.x), static_cast<T>(_position.y) + height<T>() - T(1)};
-    }
-    template<gr::arithmetic_or_complex_like T>
-    Point<T> bottomRight() const noexcept {
-        return {static_cast<T>(_position.x) + width<T>() - T(1), static_cast<T>(_position.y) + height<T>() - T(1)};
-    }
-    template<gr::arithmetic_or_complex_like T>
-    Rect<T> rect() const noexcept {
-        return {static_cast<T>(_position.x), static_cast<T>(_position.y), static_cast<T>(_position.x) + width<T>() - T(1), static_cast<T>(_position.y) + height<T>() - T(1)};
-    }
-
-    template<gr::arithmetic_or_complex_like T>
-    Point<T> size() const noexcept {
-        return {width<T>(), height<T>()};
-    }
-
-    // input/output helpers (keep old semantics for Edge indices)
-    size_t      inputCount() const noexcept { return _inIdx.size(); }
-    size_t      outputCount() const noexcept { return _outIdx.size(); }
-    Port&       in(size_t i) { return ports.at(_inIdx.at(i)); }
-    const Port& in(size_t i) const { return ports.at(_inIdx.at(i)); }
-    Port&       out(size_t i) { return ports.at(_outIdx.at(i)); }
-    const Port& out(size_t i) const { return ports.at(_outIdx.at(i)); }
-
-    // iter-style helpers (optional)
-    template<class F>
-    void forEachInput(F&& f) {
-        for (size_t i = 0; i < inputCount(); ++i) {
-            f(in(i), i);
+inline std::size_t portsOnSide(const std::shared_ptr<gr::BlockModel>& block, Side side) {
+    std::size_t count = 0UZ;
+    for (const auto& info : getPortInfos<gr::PortDirection::INPUT>(block)) {
+        if (info.preferredSide() && *info.preferredSide() == side) {
+            count++;
         }
     }
-    template<class F>
-    void forEachOutput(F&& f) {
-        for (size_t i = 0; i < outputCount(); ++i) {
-            f(out(i), i);
+    for (const auto& info : getPortInfos<gr::PortDirection::OUTPUT>(block)) {
+        if (info.preferredSide() && *info.preferredSide() == side) {
+            count++;
         }
     }
+    return count;
+}
 
-    // --- layout/size ------------------------------------------------------
-    template<gr::arithmetic_or_complex_like T>
-    void update(Point<T> newPosition) {
-        update(newPosition.x, newPosition.y);
-    }
-    void update(auto newX, auto newY) {
-        _position = Point{static_cast<double>(newX), static_cast<double>(newY)};
-        // refresh portIndex inside each direction group
-        size_t inRank  = 0;
-        size_t outRank = 0;
-        for (size_t k = 0; k < ports.size(); ++k) {
-            auto& p = ports[k];
-            if (p.direction == PortDirection::In) {
-                p.portIndex = inRank++;
-            } else {
-                p.portIndex = outRank++;
+inline PortInfo getPortByDefinition(const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& portDef, gr::PortDirection direction) {
+    const bool            isInput = direction == gr::PortDirection::INPUT;
+    std::vector<PortInfo> infos   = isInput ? getPortInfos<gr::PortDirection::INPUT>(block) : getPortInfos<gr::PortDirection::OUTPUT>(block);
+
+    auto split_base_off = [](std::string_view name) -> std::pair<std::string_view, std::size_t> {
+        std::string_view base = name;
+        std::size_t      off  = 0;
+        if (auto pos = name.find('#'); pos != std::string_view::npos) {
+            base = name.substr(0, pos);
+            std::size_t tmp{};
+            const char* first = name.data() + pos + 1;
+            const char* last  = name.data() + name.size();
+            if (std::from_chars(first, last, tmp).ec == std::errc{}) {
+                off = tmp;
             }
         }
-        layoutPorts();
-    }
+        return {base, off};
+    };
 
-    [[nodiscard]] constexpr std::size_t portsOnSide(Side s) const noexcept {
-        std::size_t cnt = 0;
-        for (auto const& p : ports) {
-            if (p.preferredSide && *p.preferredSide == s) {
-                ++cnt;
+    if (auto* idx = std::get_if<gr::PortDefinition::IndexBased>(&portDef.definition)) {
+        // First try to get the port through the BlockModel's dynamic port resolution
+        try {
+            const gr::DynamicPort& dp = (direction == gr::PortDirection::INPUT) ? block->dynamicInputPort(portDef) : block->dynamicOutputPort(portDef);
+
+            // The dynamic port gives us the actual port name (e.g., "out2#0")
+            auto [wantBase, wantOff] = split_base_off(dp.name);
+
+            // Now find this port in our infos by matching the name
+            for (const auto& info : infos) {
+                auto [haveBase, haveOff] = split_base_off(info.name());
+                if (haveBase == wantBase && haveOff == wantOff) {
+                    return info;
+                }
+            }
+        } catch (...) {
+            // If dynamic resolution fails, fall back to direct indexing
+        }
+
+        // check subIndex first for collection ports
+        if (idx->subIndex != gr::meta::invalid_index && idx->subIndex < infos.size()) {
+            return infos[idx->subIndex];
+        }
+
+        // Then try topLevel for non-collection ports
+        if (idx->topLevel < infos.size()) {
+            return infos[idx->topLevel];
+        }
+    } else if (auto* str = std::get_if<gr::PortDefinition::StringBased>(&portDef.definition)) {
+        auto [wantBase, wantOff] = split_base_off(str->name);
+
+        // Exact match on base+offset
+        for (const auto& info : infos) {
+            auto [haveBase, haveOff] = split_base_off(info.name());
+            if (haveBase == wantBase && haveOff == wantOff) {
+                return info;
             }
         }
-        return cnt;
+
+        // Base-only fallback
+        for (const auto& info : infos) {
+            auto [haveBase, _] = split_base_off(info.name());
+            (void)_;
+            if (haveBase == wantBase) {
+                return info;
+            }
+        }
     }
 
-    template<gr::arithmetic_or_complex_like T = std::size_t>
-    [[nodiscard]] T width() const noexcept {
-        using enum Side;
-        auto sumLabel = [&](Side side) -> T {
+    throw gr::exception(std::format("Port {} in {} not found", portDef, block->name()));
+}
+
+template<gr::arithmetic_or_complex_like T = std::size_t>
+T calculateWidth(const std::shared_ptr<gr::BlockModel>& block) {
+    using enum Side;
+
+    auto sumLabel = [&](Side side) -> T {
+        T acc = T(0);
+        for (const auto& info : getPortInfos<gr::PortDirection::INPUT>(block)) {
+            if (info.preferredSide() && *info.preferredSide() == side) {
+                acc = std::max(acc, static_cast<T>(utf8Width(info.name())));
+            }
+        }
+        for (const auto& info : getPortInfos<gr::PortDirection::OUTPUT>(block)) {
+            if (info.preferredSide() && *info.preferredSide() == side) {
+                acc = std::max(acc, static_cast<T>(utf8Width(info.name())));
+            }
+        }
+        return acc;
+    };
+
+    const T leftW  = sumLabel(Left);
+    const T rightW = sumLabel(Right);
+
+    const T lrBase   = leftW + rightW + T(1);
+    const T titWidth = static_cast<T>(utf8Width(block->name()) + 2UZ);
+    T       interior = std::max(lrBase, titWidth);
+
+    const bool hasTB = portsOnSide(block, Top) + portsOnSide(block, Bottom) > 0UZ;
+    if (hasTB) {
+        auto rowLen = [&](Side side) {
             T acc = T(0);
-            for (auto const& p : ports) {
-                if (p.preferredSide && *p.preferredSide == side) {
-                    acc = std::max(acc, static_cast<T>(utf8Width(p.label)));
+            for (const auto& info : getPortInfos<gr::PortDirection::INPUT>(block)) {
+                if (info.preferredSide() && *info.preferredSide() == side) {
+                    acc += T(1) + static_cast<T>(utf8Width(info.name())) + T(1);
+                }
+            }
+            for (const auto& info : getPortInfos<gr::PortDirection::OUTPUT>(block)) {
+                if (info.preferredSide() && *info.preferredSide() == side) {
+                    acc += T(1) + static_cast<T>(utf8Width(info.name())) + T(1);
                 }
             }
             return acc;
         };
+        const T topLen = rowLen(Top);
+        const T botLen = rowLen(Bottom);
 
-        const T leftW  = sumLabel(Left);
-        const T rightW = sumLabel(Right);
+        const T rowMax      = std::max(topLen > T(0) ? topLen - T(1) : T(0), botLen > T(0) ? botLen - T(1) : T(0));
+        const T lrPlusTitle = leftW + rightW + static_cast<T>(2UZ + utf8Width(block->name()));
 
-        const T lrBase   = leftW + rightW + T(1);
-        const T titWidth = static_cast<T>(utf8Width(title) + 2UZ);
-        T       interior = std::max(lrBase, titWidth);
-
-        const bool hasTB = portsOnSide(Top) + portsOnSide(Bottom) > 0UZ;
-        if (hasTB) {
-            auto rowLen = [&](Side side) {
-                T acc = T(0);
-                for (auto const& p : ports) {
-                    if (p.preferredSide && *p.preferredSide == side) {
-                        acc += T(1) + static_cast<T>(utf8Width(p.label)) + T(1); // one for the glyph + label width + spacer
-                    }
-                }
-                return acc;
-            };
-            const T topLen = rowLen(Top);
-            const T botLen = rowLen(Bottom);
-
-            const T rowMax      = std::max(topLen > T(0) ? topLen - T(1) : T(0), botLen > T(0) ? botLen - T(1) : T(0));
-            const T lrPlusTitle = leftW + rightW + static_cast<T>(2UZ + utf8Width(title));
-
-            interior = std::max({interior, rowMax, lrPlusTitle});
-        }
-
-        return interior + 2; // vertical frame
+        interior = std::max({interior, rowMax, lrPlusTitle});
     }
 
-    template<gr::arithmetic_or_complex_like T = std::size_t>
-    [[nodiscard]] T height() const noexcept {
-        return std::max(static_cast<T>(std::max(portsOnSide(Side::Left), portsOnSide(Side::Right))) + T(2), T(3));
-    }
-
-private:
-    void rebuildMaps() {
-        _inIdx.clear();
-        _outIdx.clear();
-        for (size_t i = 0; i < ports.size(); ++i) {
-            if (ports[i].direction == PortDirection::In) {
-                _inIdx.push_back(i);
-            } else {
-                _outIdx.push_back(i);
-            }
-        }
-    }
-
-    void layoutPorts() {
-        using enum Side;
-
-        std::array<std::vector<Port*>, 4> buckets{};
-        std::array<std::size_t, 4>        offsets{1UZ, 1Uz, 1Uz, 1UZ}; // to avoid the left/top frame
-        std::ranges::for_each(ports, [&buckets, &offsets, this](Port& port) {
-            if (!port.preferredSide.has_value()) {
-                switch (this->layout) {
-                case LayoutPref::VERTICAL: port.preferredSide = (port.direction == PortDirection::In) ? Top : Bottom; break;
-                case LayoutPref::HORIZONTAL:
-                case LayoutPref::AUTO:
-                case LayoutPref::UNDEFINED:
-                default: port.preferredSide = (port.direction == PortDirection::In) ? Left : Right; break;
-                }
-            }
-            std::size_t sideIdx = std::to_underlying(*port.preferredSide);
-            switch (port.preferredSide.value()) {
-
-            case Left: {
-                port.position = this->topLeft<double>();
-                port.position.y += static_cast<double>(offsets[sideIdx]);
-                port.exitDir = Direction::West;
-            } break;
-            case Right: {
-                port.position = this->topRight<double>();
-                port.position.y += static_cast<double>(offsets[sideIdx]);
-                port.exitDir = Direction::East;
-            } break;
-            case Top: {
-                port.position = this->topLeft<double>();
-                port.position.x += static_cast<double>(offsets[sideIdx]);
-                offsets[sideIdx] += utf8Width(port.label);
-                port.exitDir = Direction::North;
-            } break;
-            case Bottom: {
-                port.position = this->bottomLeft<double>();
-                port.position.x += static_cast<double>(offsets[sideIdx]);
-                offsets[sideIdx] += utf8Width(port.label);
-                port.exitDir = Direction::South;
-            } break;
-            }
-            offsets[sideIdx]++;
-            buckets[sideIdx].push_back(&port);
-        });
-    }
-};
-
-enum class EdgeType { Forward, Feedback, Lateral };
-
-struct Edge { // logical Edge
-    std::size_t srcNode;
-    std::size_t srcPort;
-    std::size_t dstNode;
-    std::size_t dstPort;
-    std::string title = "e";
-    EdgeType    type  = EdgeType::Forward;
-
-    [[nodiscard]] std::size_t index() const noexcept {
-        // assuming: max 64 ports (6 bits), max nodes fit in remaining bits, i.e.
-        //   * for 32-bit size_t: 32 - 2*6 = 20 bits for node IDs (1M nodes each)
-        //   * for 64-bit size_t: 64 - 2*6 = 52 bits for node IDs (plenty)
-        static_assert(sizeof(std::size_t) >= 4, "need std::size_t at least 32-bit size_t");
-        constexpr std::size_t PORT_BITS = 6; // 64 ports max
-        constexpr std::size_t PORT_MASK = (1ULL << PORT_BITS) - 1;
-
-        // pack as: [srcNode][srcPort:6][dstNode][dstPort:6]
-        if constexpr (sizeof(std::size_t) == 4UZ) {
-            // 32-bit: 10 bits per node ID
-            constexpr std::size_t NODE_BITS = 10;
-            constexpr std::size_t NODE_MASK = (1ULL << NODE_BITS) - 1;
-
-            return ((srcNode & NODE_MASK) << (NODE_BITS + 2 * PORT_BITS)) | //
-                   ((srcPort & PORT_MASK) << (NODE_BITS + PORT_BITS)) |     //
-                   ((dstNode & NODE_MASK) << PORT_BITS) |                   //
-                   (dstPort & PORT_MASK);
-        } else {
-            // 64-bit: 26 bits per node ID (67M nodes)
-            constexpr std::size_t NODE_BITS = 26;
-            constexpr std::size_t NODE_MASK = (1ULL << NODE_BITS) - 1;
-
-            return ((srcNode & NODE_MASK) << (NODE_BITS + 2 * PORT_BITS)) | //
-                   ((srcPort & PORT_MASK) << (NODE_BITS + PORT_BITS)) |     //
-                   ((dstNode & NODE_MASK) << PORT_BITS) |                   //
-                   (dstPort & PORT_MASK);
-        }
-    }
-};
-
-template<PortDirection portDir, gr::fixed_string funcName = "checkPort">
-void checkPort(const std::vector<std::shared_ptr<Node>>& nodes, const Edge& e, std::source_location loc = std::source_location::current()) noexcept(false) {
-    using enum PortDirection;
-    constexpr std::string_view nodeStr = (portDir == Out) ? "srcNode" : "dstNode";
-    const std::size_t          nodeIdx = (portDir == Out) ? e.srcNode : e.dstNode;
-    if (nodeIdx >= nodes.size()) {
-        throw gr::exception(std::format("{}<{}>({}) -- {} {} out of range {}", funcName.c_str(), portDir, e, nodeStr, nodeIdx, nodes.size()), loc);
-    }
-
-    constexpr std::string_view portStr = (portDir == Out) ? "srcPort" : "dstPort";
-    const std::size_t          portIdx = (portDir == Out) ? e.srcPort : e.dstPort;
-    if (const std::size_t portCnt = (portDir == Out) ? nodes[nodeIdx]->outputCount() : nodes[nodeIdx]->inputCount(); portIdx >= portCnt) {
-        throw gr::exception(std::format("{}<{}>({}) -- {} '{}'-{} out of range {}", funcName.c_str(), portDir, e, nodes[nodeIdx]->title, portStr, portIdx, portCnt), loc);
-    }
-    const Port& port = (portDir == Out) ? nodes[nodeIdx]->out(portIdx) : nodes[nodeIdx]->in(portIdx);
-    if (port.direction != portDir) {
-        throw gr::exception(std::format("{}<{}>({}) -- {} {} '{}' is not a {} port", funcName.c_str(), portDir, e, nodeStr, portIdx, port.label, portDir), loc);
-    }
+    return interior + 2;
 }
 
-template<gr::fixed_string funcName = "checkPort">
-void checkEdge(const std::vector<std::shared_ptr<Node>>& nodes, const Edge& e, std::source_location loc = std::source_location::current()) noexcept(false) {
-    checkPort<PortDirection::Out, funcName>(nodes, e, loc);
-    checkPort<PortDirection::In, funcName>(nodes, e, loc);
+template<gr::arithmetic_or_complex_like T = std::size_t>
+inline T calculateHeight(const std::shared_ptr<gr::BlockModel>& block) {
+    return std::max(static_cast<T>(std::max(portsOnSide(block, Side::Left), portsOnSide(block, Side::Right))) + T(2), T(3));
 }
-
-namespace std {
-template<gr::arithmetic_or_complex_like T, typename CharT>
-struct formatter<Point<T>, CharT> {
-    constexpr auto parse(std::basic_format_parse_context<CharT>& ctx) { return ctx.begin(); }
-    template<typename FormatContext>
-    constexpr auto format(const Point<T>& p, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "({},{})", p.x, p.y);
-    }
-};
-template<typename CharT>
-struct formatter<Edge, CharT> {
-    constexpr auto parse(std::basic_format_parse_context<CharT>& ctx) { return ctx.begin(); }
-    template<typename FormatContext>
-    constexpr auto format(const Edge& e, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "{}: {}-{} -> {}-{}", e.title, e.srcNode, e.srcPort, e.dstNode, e.dstPort);
-    }
-};
-
-template<typename CharT>
-struct formatter<std::byte, CharT> {
-    constexpr auto parse(basic_format_parse_context<CharT>& ctx) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    constexpr auto format(std::byte b, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "0b{}", std::bitset<8>{std::to_integer<unsigned>(b)}.to_string());
-    }
-};
-} // namespace std
-
-struct Graph {
-    std::vector<std::shared_ptr<Node>> nodes;
-    std::vector<Edge>                  edges;
-
-    std::size_t addNode(const Node& n) {
-        nodes.emplace_back(std::make_shared<Node>(n));
-        return nodes.size() - 1;
-    }
-
-    std::size_t addNode(std::string name, std::initializer_list<Port> in = {}, std::initializer_list<Port> out = {}, LayoutPref layout = LayoutPref::UNDEFINED) { return addNode(Node{std::move(name), std::vector<Port>(in), std::vector<Port>(out), layout}); }
-
-    Graph& addNodes(std::initializer_list<Node> init) {
-        for (const auto& n : init) {
-            addNode(n);
-        }
-        return *this;
-    }
-
-    std::size_t findNode(const std::string& name) const {
-        for (std::size_t i = 0; i < nodes.size(); ++i) {
-            if (nodes[i] && nodes[i]->title == name) { // adjust if your names differ
-                return i;
-            }
-        }
-        throw std::runtime_error("Node not found: " + name);
-    }
-
-    static std::size_t findPort(const Node& n, const std::string& label, PortDirection dir) {
-        const std::size_t cnt = (dir == PortDirection::In) ? n.inputCount() : n.outputCount();
-
-        for (std::size_t i = 0; i < cnt; ++i) {
-            const Port& p = (dir == PortDirection::In) ? n.in(i) : n.out(i);
-            // NOTE: compare against Port::label; return the direction-local index
-            if (p.label == label) {
-                return i;
-            }
-        }
-        throw std::runtime_error("Port '" + label + "' not found on node '" + n.title + "'");
-    }
-
-public:
-    // ---------- Edge helpers ----------
-    Edge& addEdge(std::size_t sN, std::size_t sP, std::size_t dN, std::size_t dP, std::string label = {}) {
-        edges.push_back(Edge{sN, sP, dN, dP, std::move(label)});
-        return edges.back();
-    }
-
-    // Connect by node indices + port indices.
-    Graph& connect(std::size_t sN, std::size_t sP, std::size_t dN, std::size_t dP, std::string label = {}) {
-        addEdge(sN, sP, dN, dP, std::move(label));
-        return *this;
-    }
-
-    // Connect by node names + port indices.
-    Graph& connect(const std::string& sNode, std::size_t sPortIdx, const std::string& dNode, std::size_t dPortIdx, std::string label = {}) { return connect(findNode(sNode), sPortIdx, findNode(dNode), dPortIdx, std::move(label)); }
-
-    // Connect by node indices + port names.
-    Graph& connect(std::size_t sN, const std::string& sPortName, std::size_t dN, const std::string& dPortName, std::string label = {}) {
-        const std::size_t sP = findPort(*nodes[sN], sPortName, PortDirection::Out);
-        const std::size_t dP = findPort(*nodes[dN], dPortName, PortDirection::In);
-        return connect(sN, sP, dN, dP, std::move(label));
-    }
-
-    // Connect by node names + port names (most convenient).
-    Graph& connect(const std::string& sNode, const std::string& sPortName, const std::string& dNode, const std::string& dPortName, std::string label = {}) {
-        const std::size_t sN = findNode(sNode);
-        const std::size_t dN = findNode(dNode);
-        const std::size_t sP = findPort(*nodes[sN], sPortName, PortDirection::Out);
-        const std::size_t dP = findPort(*nodes[dN], dPortName, PortDirection::In);
-        return connect(sN, sP, dN, dP, std::move(label));
-    }
-
-    // Optional alias matching your old style:
-    Edge& addEdge(const std::string& sNode, const std::string& sPort, const std::string& dNode, const std::string& dPort, std::string label = {}) {
-        connect(sNode, sPort, dNode, dPort, label);
-        return edges.back();
-    }
-};
 
 template<gr::arithmetic_or_complex_like T>
-Point<T> minRequiredGapDistance(const Node& nodeFrom, const Node& nodeTo, const LayoutPreference& cfg = {}) noexcept {
+inline Point<T> centre(const std::shared_ptr<gr::BlockModel>& block) {
+    Point<T> pos    = getPosition<T>(block);
+    T        width  = calculateWidth<T>(block);
+    T        height = calculateHeight<T>(block);
+    return {pos.x + width / T(2), pos.y + height / T(2)};
+}
+
+template<gr::arithmetic_or_complex_like T>
+inline Point<T> topLeft(const std::shared_ptr<gr::BlockModel>& block) {
+    return getPosition<T>(block);
+}
+
+template<gr::arithmetic_or_complex_like T>
+inline Point<T> topRight(const std::shared_ptr<gr::BlockModel>& block) {
+    Point<T> pos   = getPosition<T>(block);
+    T        width = calculateWidth<T>(block);
+    return {pos.x + width - T(1), pos.y};
+}
+
+template<gr::arithmetic_or_complex_like T>
+inline Point<T> bottomLeft(const std::shared_ptr<gr::BlockModel>& block) {
+    Point<T> pos    = getPosition<T>(block);
+    T        height = calculateHeight<T>(block);
+    return {pos.x, pos.y + height - T(1)};
+}
+
+template<gr::arithmetic_or_complex_like T>
+inline Point<T> bottomRight(const std::shared_ptr<gr::BlockModel>& block) {
+    Point<T> pos    = getPosition<T>(block);
+    T        width  = calculateWidth<T>(block);
+    T        height = calculateHeight<T>(block);
+    return {pos.x + width - T(1), pos.y + height - T(1)};
+}
+
+template<gr::arithmetic_or_complex_like T>
+inline Rect<T> rect(const std::shared_ptr<gr::BlockModel>& block) {
+    Point<T> pos    = getPosition<T>(block);
+    T        width  = calculateWidth<T>(block);
+    T        height = calculateHeight<T>(block);
+    return {pos.x, pos.y, pos.x + width - T(1), pos.y + height - T(1)};
+}
+
+template<gr::arithmetic_or_complex_like T>
+inline Point<T> size(const std::shared_ptr<gr::BlockModel>& block) {
+    return {calculateWidth<T>(block), calculateHeight<T>(block)};
+}
+
+// Update block position and layout ports
+inline void updateBlock(std::shared_ptr<gr::BlockModel>& block, double x, double y) {
+    block->uiConstraints()["pos_x"] = x;
+    block->uiConstraints()["pos_y"] = y;
+    // Store calculated dimensions
+    block->uiConstraints()["width"]  = static_cast<double>(calculateWidth<double>(block));
+    block->uiConstraints()["height"] = static_cast<double>(calculateHeight<double>(block));
+
+    // init port ui meta info to defaults
+    auto inputInfos  = getPortInfos<gr::PortDirection::INPUT>(block);
+    auto outputInfos = getPortInfos<gr::PortDirection::OUTPUT>(block);
+    auto infos       = std::array{std::views::all(inputInfos), std::views::all(outputInfos)};
+    auto allPortInfos    = infos | std::views::join;
+
+    // Layout ports
+    LayoutPref layout = getLayoutPref(block);
     using enum Side;
-    const Point centreA  = nodeFrom.centre<T>();
-    const Point centreB  = nodeTo.centre<T>();
-    auto        minDistX = static_cast<T>(cfg.minGap + cfg.minPortDistance * (centreA.x < centreB.x ? (nodeFrom.portsOnSide(Right) + nodeTo.portsOnSide(Left)) : (nodeFrom.portsOnSide(Left) + nodeTo.portsOnSide(Right))));
-    auto        minDistY = static_cast<T>(cfg.minGap + cfg.minPortDistance * (centreA.y < centreB.y ? (nodeFrom.portsOnSide(Top) + nodeTo.portsOnSide(Bottom)) : (nodeFrom.portsOnSide(Bottom) + nodeTo.portsOnSide(Top))));
+    std::array<std::size_t, 4UZ> offsets{1UZ, 1UZ, 1UZ, 1UZ};
+    for (auto& portInfo : allPortInfos) {
+        if (!portInfo.preferredSide().has_value()) {
+            switch (layout) {
+            case LayoutPref::VERTICAL: portInfo.preferredSide(portInfo.direction() == gr::PortDirection::INPUT ? Top : Bottom); break;
+            case LayoutPref::HORIZONTAL:
+            case LayoutPref::AUTO:
+            case LayoutPref::UNDEFINED:
+            default: portInfo.preferredSide(portInfo.direction() == gr::PortDirection::INPUT ? Left : Right); break;
+            }
+        }
+
+        std::size_t sideIdx = std::to_underlying(*portInfo.preferredSide());
+        switch (portInfo.preferredSide().value()) {
+        case Left:
+            portInfo.position(topLeft<double>(block) + Point<double>(0.0, static_cast<double>(offsets[sideIdx])));
+            portInfo.exitDir(Direction::West);
+            break;
+        case Right:
+            portInfo.position(topRight<double>(block) + Point<double>(0.0, static_cast<double>(offsets[sideIdx])));
+            portInfo.exitDir(Direction::East);
+            break;
+        case Top:
+            portInfo.position(topLeft<double>(block) + Point<double>(static_cast<double>(offsets[sideIdx]), 0.0));
+            offsets[sideIdx] += utf8Width(portInfo.name());
+            portInfo.exitDir(Direction::North);
+            break;
+        case Bottom:
+            portInfo.position(bottomLeft<double>(block) + Point<double>(static_cast<double>(offsets[sideIdx]), 0.0));
+            offsets[sideIdx] += utf8Width(portInfo.name());
+            portInfo.exitDir(Direction::South);
+            break;
+        }
+        offsets[sideIdx]++;
+    }
+}
+
+template<gr::arithmetic_or_complex_like T>
+void updateBlock(std::shared_ptr<gr::BlockModel>& block, Point<T> newPosition) {
+    updateBlock(block, static_cast<double>(newPosition.x), static_cast<double>(newPosition.y));
+}
+
+// edge helpers
+[[nodiscard]] inline EdgeType getEdgeType(const gr::Edge& edge) {
+    auto& ui = const_cast<gr::Edge&>(edge).uiConstraints();
+    if (auto it = ui.find("edge_type"); it != ui.end()) {
+        if (auto* str = std::get_if<std::string>(&it->second)) {
+            if (*str == "feedback") {
+                return EdgeType::Feedback;
+            }
+            if (*str == "lateral") {
+                return EdgeType::Lateral;
+            }
+        }
+    }
+    return EdgeType::Forward;
+}
+
+inline void setEdgeType(gr::Edge& edge, EdgeType type) {
+    std::string typeStr               = type == EdgeType::Feedback ? "feedback" : type == EdgeType::Lateral ? "lateral" : "forward";
+    edge.uiConstraints()["edge_type"] = typeStr;
+}
+
+template<gr::arithmetic_or_complex_like T>
+Point<T> minRequiredGapDistance(const std::shared_ptr<gr::BlockModel>& nodeFrom, const std::shared_ptr<gr::BlockModel>& nodeTo, const LayoutPreference& cfg = {}) noexcept {
+    using enum Side;
+    const Point centreA = centre<T>(nodeFrom);
+    const Point centreB = centre<T>(nodeTo);
+
+    auto minDistX = static_cast<T>(cfg.minGap + cfg.minPortDistance * (centreA.x < centreB.x ? (portsOnSide(nodeFrom, Right) + portsOnSide(nodeTo, Left)) : (portsOnSide(nodeFrom, Left) + portsOnSide(nodeTo, Right))));
+
+    auto minDistY = static_cast<T>(cfg.minGap + cfg.minPortDistance * (centreA.y < centreB.y ? (portsOnSide(nodeFrom, Bottom) + portsOnSide(nodeTo, Top)) : (portsOnSide(nodeFrom, Top) + portsOnSide(nodeTo, Bottom))));
+
     return {minDistX, minDistY};
 }
 
 template<gr::arithmetic_or_complex_like T>
-void flipAllPortSides(Node& node, std::source_location loc = std::source_location::current()) {
-    std::ranges::for_each(node.ports, [&node, &loc](Port& port) {
-        if (!port.preferredSide) {
-            throw gr::exception(std::format("node: {}-{} undefined port side", node.title, port.label), loc);
+void flipAllPortSides(std::shared_ptr<gr::BlockModel>& block, std::source_location loc = std::source_location::current()) {
+    auto infos = std::array{std::views::all(getPortInfos<gr::PortDirection::INPUT>(block)), std::views::all(getPortInfos<gr::PortDirection::OUTPUT>(block))};
+    for (auto& info : infos | std::views::join) {
+        if (!info.preferredSide()) {
+            throw gr::exception(std::format("node: {}-{} undefined port side", block->name(), info.name()), loc);
         }
-        port.preferredSide = oppositeSide(*port.preferredSide);
-    });
-    node.update(node.position<T>());
+        info.preferredSide(oppositeSide(*info.preferredSide()));
+    }
+
+    updateBlock(block, getPosition<T>(block));
 }
 
 template<gr::arithmetic_or_complex_like T>
-T edgeCost(const std::vector<std::shared_ptr<Node>>& nodes, const Edge& e, std::source_location loc = std::source_location::current()) {
-    checkEdge<"edgeCost">(nodes, e, loc);
-    const auto& a = nodes[e.srcNode]->out(e.srcPort);
-    const auto& b = nodes[e.dstNode]->in(e.dstPort);
-    // return manhattanNorm(a.anchorPoint<T>(), b.anchorPoint<T>());
-    return manhattanNorm(a.exitPoint<T>(), b.exitPoint<T>());
+T edgeCost(const gr::Edge& edge, [[maybe_unused]] std::source_location loc = std::source_location::current()) {
+    PortInfo srcPort = getPortByDefinition(edge.sourceBlock(), edge.sourcePortDefinition(), gr::PortDirection::OUTPUT);
+    PortInfo dstPort = getPortByDefinition(edge.destinationBlock(), edge.destinationPortDefinition(), gr::PortDirection::INPUT);
+
+    return manhattanNorm(srcPort.exitPoint<T>(), dstPort.exitPoint<T>());
 }
 
 template<gr::arithmetic_or_complex_like T>
-T totalRoutingCost(std::vector<std::shared_ptr<Node>>& nodes, const std::vector<Edge>& edges, std::source_location loc = std::source_location::current()) {
-    std::ranges::for_each(nodes, [](std::shared_ptr<Node>& n) { n->update(n->position<T>()); });
-    return std::accumulate(std::ranges::begin(edges), std::ranges::end(edges), T(0), [&](T acc, const Edge& e) { return acc + edgeCost<T>(nodes, e, loc); });
+T totalRoutingCost(const std::span<std::shared_ptr<gr::BlockModel>>& nodes, const std::span<const gr::Edge>& edges, std::source_location loc = std::source_location::current()) {
+    std::ranges::for_each(nodes, [](std::shared_ptr<gr::BlockModel>& n) { updateBlock(n, getPosition<T>(n)); });
+    return std::accumulate(std::ranges::begin(edges), std::ranges::end(edges), T(0), [&](T acc, const gr::Edge& e) { return acc + edgeCost<T>(e, loc); });
 }
 
 // sum of costs of edges incident to node nodeIndex
 template<gr::arithmetic_or_complex_like T>
-T incidentCost(std::vector<std::shared_ptr<Node>>& nodes, const std::vector<Edge>& edges, std::size_t nodeIndex, std::source_location loc = std::source_location::current()) {
-    if (nodeIndex >= nodes.size()) {
-        throw gr::exception(std::format("node: {} out of range", nodeIndex), loc);
-    }
-    nodes[nodeIndex]->update(nodes[nodeIndex]->position<T>());
+T incidentCost(const std::span<const gr::Edge>& edges, std::shared_ptr<gr::BlockModel> nodeIndex, std::source_location loc = std::source_location::current()) {
+    updateBlock(nodeIndex, getPosition<T>(nodeIndex));
     T acc = T(0);
-    for (const auto& e : edges) {
-        if (e.srcNode == nodeIndex || e.dstNode == nodeIndex) {
-            acc += edgeCost<T>(nodes, e, loc);
+    for (const gr::Edge& e : edges) {
+        if (e.sourceBlock() == nodeIndex || e.destinationBlock() == nodeIndex) {
+            acc += edgeCost<T>(e, loc);
         }
     }
     return acc;
 }
 
 template<gr::arithmetic_or_complex_like T>
-[[maybe_unused]] std::size_t optimiseSideFlips(Graph& graph, std::size_t maxIters = 0, double improveEps = 0.10, std::source_location loc = std::source_location::current()) {
+[[maybe_unused]] std::size_t optimiseSideFlips(gr::Graph& graph, std::size_t maxIters = 0, double improveEps = 0.10, std::source_location loc = std::source_location::current()) {
     using enum Side;
 
     if (maxIters == 0) {
-        maxIters = std::max<std::size_t>(1, graph.nodes.size());
+        maxIters = std::max<std::size_t>(1, graph.blocks().size());
     }
-    std::ranges::for_each(graph.nodes, [](std::shared_ptr<Node>& n) { n->update(n->position<T>()); });
+    std::ranges::for_each(graph.blocks(), [](std::shared_ptr<gr::BlockModel>& n) { updateBlock(n, getPosition<T>(n)); });
 
     std::size_t flippedPorts = false;
-    T           prevTotal    = totalRoutingCost<T>(graph.nodes, graph.edges, loc);
+    T           prevTotal    = totalRoutingCost<T>(graph.blocks(), graph.edges(), loc);
     for (std::size_t it = 0; it < maxIters; ++it) {
         bool anyImprove = false;
 
-        for (std::size_t nodeIdx = 0; nodeIdx < graph.nodes.size(); ++nodeIdx) {
-            Node& n = *graph.nodes[nodeIdx];
-
-            if (n.layout == LayoutPref::HORIZONTAL || n.layout == LayoutPref::VERTICAL) {
-                const T before = incidentCost<T>(graph.nodes, graph.edges, nodeIdx);
+        for (std::shared_ptr<gr::BlockModel>& n : graph.blocks()) {
+            auto in  = getPortInfos<gr::PortDirection::INPUT>(n);
+            auto out = getPortInfos<gr::PortDirection::OUTPUT>(n);
+            if (getLayoutPref(n) == LayoutPref::HORIZONTAL || getLayoutPref(n) == LayoutPref::VERTICAL) {
+                const T before = incidentCost<T>(graph.edges(), n);
                 flipAllPortSides<T>(n, loc);
-                if (const T after = incidentCost<T>(graph.nodes, graph.edges, nodeIdx); after < before) { // better
+                if (const T after = incidentCost<T>(graph.edges(), n); after < before) { // better
                     anyImprove = true;
                     flippedPorts++;
                 } else { // worse -> revert port flip
@@ -797,21 +998,20 @@ template<gr::arithmetic_or_complex_like T>
                 continue;
             }
 
-            // const std::size_t before = incidentCost(nodes, edges, v);
             //  Snapshot current assignment
-            const std::size_t                I = n.inputCount();
-            const std::size_t                O = n.outputCount();
+            const std::size_t                I = n->inputMetaInfos().size();
+            const std::size_t                O = n->outputMetaInfos().size();
             std::vector<std::optional<Side>> keepIn(I);
             std::vector<std::optional<Side>> keepOut(O);
             for (std::size_t i = 0; i < I; ++i) {
-                keepIn[i] = n.in(i).preferredSide;
+                keepIn[i] = in[i].preferredSide();
             }
             for (std::size_t i = 0; i < O; ++i) {
-                keepOut[i] = n.out(i).preferredSide;
+                keepOut[i] = out[i].preferredSide();
             }
 
             // ---------------------- AUTO: enumerate legal assignments ----------------------
-            const T                              keep = incidentCost<T>(graph.nodes, graph.edges, nodeIdx);
+            const T                              keep = incidentCost<T>(graph.edges(), n);
             T                                    best = keep;
             static constexpr std::array<Side, 4> all{Left, Right, Top, Bottom};
 
@@ -843,13 +1043,13 @@ template<gr::arithmetic_or_complex_like T>
                 if (j == O) {
                     // apply candidate
                     for (std::size_t i = 0; i < I; ++i) {
-                        n.in(i).preferredSide = curIn[i];
+                        in[i].preferredSide(curIn[i]);
                     }
                     for (std::size_t i = 0; i < O; ++i) {
-                        n.out(i).preferredSide = curOut[i];
+                        out[i].preferredSide(curOut[i]);
                     }
-                    n.update(n.position<T>());
-                    const T c = incidentCost<T>(graph.nodes, graph.edges, nodeIdx);
+                    updateBlock(n, getPosition<T>(n));
+                    const T c = incidentCost<T>(graph.edges(), n);
                     if (c < best) {
                         best       = c;
                         bestIn     = curIn;
@@ -857,7 +1057,7 @@ template<gr::arithmetic_or_complex_like T>
                         anyImprove = true;
                         flippedPorts++;
                     }
-                    // restore is not needed here; next iteration will overwrite curIn/curOut
+                    // restore is not needed here; the next iteration will overwrite curIn/curOut
                     return;
                 }
                 for (Side s : all) {
@@ -888,25 +1088,25 @@ template<gr::arithmetic_or_complex_like T>
             // Commit best candidate if improved
             if (best < keep) {
                 for (std::size_t i = 0; i < I; ++i) {
-                    n.in(i).preferredSide = bestIn[i];
+                    in[i].preferredSide(bestIn[i]);
                 }
                 for (std::size_t i = 0; i < O; ++i) {
-                    n.out(i).preferredSide = bestOut[i];
+                    out[i].preferredSide(bestOut[i]);
                 }
-                n.update(n.position<T>());
+                updateBlock(n, getPosition<T>(n));
             } else {
                 // explicitly restore (defensive)
                 for (std::size_t i = 0; i < I; ++i) {
-                    n.in(i).preferredSide = keepIn[i];
+                    in[i].preferredSide(*keepIn[i]);
                 }
                 for (std::size_t i = 0; i < O; ++i) {
-                    n.out(i).preferredSide = keepOut[i];
+                    out[i].preferredSide(*keepOut[i]);
                 }
-                n.update(n.position<T>());
+                updateBlock(n, getPosition<T>(n));
             }
         }
 
-        const T      tot = totalRoutingCost<T>(graph.nodes, graph.edges, loc);
+        const T      tot = totalRoutingCost<T>(graph.blocks(), graph.edges(), loc);
         const double rel = (prevTotal == T(0)) ? 0.0 : static_cast<double>(prevTotal - tot) / static_cast<double>(prevTotal);
         if (!anyImprove || rel < improveEps) {
             break;
@@ -923,18 +1123,17 @@ template<gr::arithmetic_or_complex_like T>
 // and take the maximum over all outgoing edges (side branches don’t inflate).
 // Cycles are skipped via an 'onStack' mask.
 // -----------------------------------------------------------------------------
-inline std::vector<double> computeEffectiveWeights(const std::vector<std::shared_ptr<Node>>& nodes, const std::vector<Edge>& edges) {
-    std::vector<std::vector<std::size_t>> out(nodes.size());
-    std::vector<std::size_t>              connectedChildren(nodes.size(), 0UZ);
+inline std::vector<double> computeEffectiveWeights(const gr::Graph& graph, const std::span<const gr::Edge>& edges) {
+    std::vector<std::vector<std::size_t>> out(graph.blocks().size());
+    std::vector<std::size_t>              connectedChildren(graph.blocks().size(), 0UZ);
 
-    for (auto const& e : edges) {
-        checkEdge<"computeEffectiveWeights">(nodes, e); // validates indices
-        out[e.srcNode].push_back(e.dstNode);
-        connectedChildren[e.dstNode]++; // N.B. node can have multiple children connected to the same output.
+    for (auto const& edge : edges) {
+        out[*gr::graph::blockIndex(graph, edge.sourceBlock())].push_back(*gr::graph::blockIndex(graph, edge.destinationBlock()));
+        connectedChildren[*gr::graph::blockIndex(graph, edge.destinationBlock())]++; // N.B. node can have multiple children connected to the same output.
     }
 
-    std::vector<double> effectiveMass(nodes.size(), std::numeric_limits<double>::quiet_NaN()); // NaN = not computed yet
-    std::vector<bool>   onStack(nodes.size(), false);
+    std::vector<double> effectiveMass(graph.blocks().size(), std::numeric_limits<double>::quiet_NaN()); // NaN = not computed yet
+    std::vector<bool>   onStack(graph.blocks().size(), false);
 
     std::function<double(std::size_t)> dfs = [&](std::size_t u) -> double {
         if (!std::isnan(effectiveMass[u])) {
@@ -944,7 +1143,7 @@ inline std::vector<double> computeEffectiveWeights(const std::vector<std::shared
         onStack[u]  = true;
         double best = 1.0; // ensure at least minimal mass unit
         for (std::size_t nodeIdx : out[u]) {
-            assert(nodeIdx < nodes.size());
+            assert(nodeIdx < graph.blocks().size());
             if (onStack[nodeIdx]) { // detected cycle -> skip
                 continue;
             }
@@ -955,8 +1154,8 @@ inline std::vector<double> computeEffectiveWeights(const std::vector<std::shared
         return effectiveMass[u] = best;
     };
 
-    std::vector<double> w(nodes.size(), 1.0);
-    for (std::size_t i = 0UZ; i < nodes.size(); ++i) {
+    std::vector<double> w(graph.blocks().size(), 1.0);
+    for (std::size_t i = 0UZ; i < graph.blocks().size(); ++i) {
         w[i] = dfs(i);
     }
     return w;
@@ -989,11 +1188,11 @@ class BHQuad {
 public:
     explicit BHQuad(std::size_t leafCap = 8) : leafCap_(leafCap) {}
 
-    void build(const std::vector<std::shared_ptr<Node>>& nodes) {
+    void build(const std::vector<std::shared_ptr<gr::BlockModel>>& nodes) {
         // cache positions
         pts_.resize(nodes.size());
         for (std::size_t i = 0; i < nodes.size(); ++i) {
-            pts_[i] = nodes[i]->centre<T>();
+            pts_[i] = centre<T>(nodes[i]);
         }
 
         // square bounds around all points
@@ -1265,36 +1464,36 @@ private:
  *
  * where ẑ = Δ / r is the unit direction from source to destination anchors.
  */
-inline static void phase1_place_spring_model(Graph& graph, const LayoutPreference& cfg = {}) {
+inline static void phase1_place_spring_model(gr::Graph& graph, const LayoutPreference& cfg = {}) {
     using T = double;
     using enum Side;
 
-    const size_t N = graph.nodes.size();
+    const size_t N = graph.blocks().size();
     if (N == 0) {
         return;
     }
 
     // 0) normalise layout + give every node a valid position and anchors
-    for (auto& n : graph.nodes) {
-        if (n->layout == LayoutPref::UNDEFINED) {
-            n->layout = (cfg.layout == LayoutPref::AUTO ? LayoutPref::HORIZONTAL : cfg.layout);
+    for (auto& n : graph.blocks()) {
+        if (getLayoutPref(n) == LayoutPref::UNDEFINED) {
+            setLayoutPref(n, cfg.layout == LayoutPref::AUTO ? LayoutPref::HORIZONTAL : cfg.layout);
         }
-        if (n->position<T>() == Point<T>::Undefined()) {
-            n->update(cfg.minMargin, cfg.minMargin);
+        if (getPosition<T>(n) == Point<T>::Undefined()) {
+            updateBlock(n, static_cast<T>(cfg.minMargin), static_cast<T>(cfg.minMargin));
         } else {
-            n->update(n->position<T>());
+            updateBlock(n, getPosition<T>(n));
         }
     }
 
     // 2) right-weights (directed, downstream-only, fractional 1/N_in)
-    const std::vector<double> effectiveWeights = computeEffectiveWeights(graph.nodes, graph.edges);
+    const std::vector<double> effectiveWeights = computeEffectiveWeights(graph, graph.edges());
 
     // 3) initialise continuous state
     std::vector<Point<T>> position(N);
     std::vector<Point<T>> prevPosition(N);
     std::vector<Point<T>> velocity(N, {static_cast<T>(0), static_cast<T>(0)});
     for (std::size_t i = 0UZ; i < N; ++i) {
-        position[i]     = graph.nodes[i]->position<T>();
+        position[i]     = getPosition<T>(graph.blocks()[i]);
         prevPosition[i] = position[i];
         // position[i] = {T(i), T(i)};
     }
@@ -1319,14 +1518,14 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
     [[maybe_unused]] constexpr bool capWhenOK     = true; // stop pushing once at/over nominal
     constexpr double                eps           = 1e-6; // numeric guard
 
-    auto needXY = [&](const Node& A, const Node& B) -> Point<T> { //
-        return minRequiredGapDistance<T>(A, B, cfg) + (A.size<T>() + 1UZ) / 2UZ + (B.size<T>() + 1UZ) / 2UZ;
+    auto needXY = [&](const std::shared_ptr<gr::BlockModel>& A, const std::shared_ptr<gr::BlockModel>& B) -> Point<T> { //
+        return minRequiredGapDistance<T>(A, B, cfg) + (size<T>(A) + 1UZ) / 2UZ + (size<T>(B) + 1UZ) / 2UZ;
     };
 
     // how much we are *short* of the nominal clearance (per axis)
-    [[maybe_unused]] auto missXY = [&](const Node& A, const Node& B) -> Point<T> {
+    [[maybe_unused]] auto missXY = [&](const std::shared_ptr<gr::BlockModel>& A, const std::shared_ptr<gr::BlockModel>& B) -> Point<T> {
         const Point<T> need = needXY(A, B);
-        const Point<T> diff = A.centre<T>() - B.centre<T>();
+        const Point<T> diff = centre<T>(A) - centre<T>(B);
         return {std::max<T>(0, need.x - std::abs(diff.x)), std::max<T>(0, need.y - std::abs(diff.y))};
     };
 
@@ -1337,7 +1536,7 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
         }
     };
 
-    auto wantFor = [&](const Node& a, const Node& b) -> double {
+    auto wantFor = [&](const std::shared_ptr<gr::BlockModel>& a, const std::shared_ptr<gr::BlockModel>& b) -> double {
         const auto need = minRequiredGapDistance<double>(a, b, cfg);
         return std::max<double>(eps, std::hypot(need.x, need.y));
     };
@@ -1353,32 +1552,32 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
         std::ranges::fill(force, Point<T>{T(0), T(0)}); // initialise forces
         // refresh anchors positions
         for (size_t i = 0; i < N; ++i) {
-            graph.nodes[i]->update(position[i]);
+            updateBlock(graph.blocks()[i], position[i]);
         }
         // get right-bottom-most edge
         Point<T> canvasSize = {0, 0};
-        for (const std::shared_ptr<Node>& node : graph.nodes) {
-            auto bottomRight = node->bottomRight<T>();
-            canvasSize.x     = std::max(canvasSize.x, bottomRight.x);
-            canvasSize.y     = std::max(canvasSize.y, bottomRight.y);
+        for (const std::shared_ptr<gr::BlockModel>& node : graph.blocks()) {
+            auto bottomRightPos = bottomRight<T>(node);
+            canvasSize.x        = std::max(canvasSize.x, bottomRightPos.x);
+            canvasSize.y        = std::max(canvasSize.y, bottomRightPos.y);
         }
 
         // Per-iteration gains/common helpers
         const double repelGain = (dontRepelFor == 0) ? cfg.kRepel : (iteration >= dontRepelFor ? cfg.kRepel : cfg.kRepel * (double(iteration) / double(std::max<std::size_t>(1, dontRepelFor))));
 
         // --- Repulsive force (returns vector along (i->j)) --------------------
-        const auto repel = [&](const Node& A, const Node& B) -> Point<double> {
+        const auto repel = [&](const std::shared_ptr<gr::BlockModel>& A, const std::shared_ptr<gr::BlockModel>& B) -> Point<double> {
             using enum LayoutAlgorithm;
-            const Point<T> diff = B.centre<double>() - A.centre<double>();
+            const Point<T> diff = centre<double>(B) - centre<double>(A);
             const double   r    = std::max(std::hypot(diff.x, diff.y), eps);
             const Point<T> unit = diff / r;
 
-            const Point<T> minBlockDistance = minRequiredGapDistance<double>(A, B, cfg) + A.size<double>() / 2.0 + B.size<double>() / 2.0;
+            const Point<T> minBlockDistance = minRequiredGapDistance<double>(A, B, cfg) + size<double>(A) / 2.0 + size<double>(B) / 2.0;
 
             switch (cfg.algorithm) {
             case FruchtermanReingold: { // f_rep = l^2 * vec(v,u) / ||v-u||
                 const Point<T> minGap = minRequiredGapDistance<double>(A, B, cfg);
-                double         l      = std::max({minGap.x, minGap.y, A.size<double>().x, B.size<double>().x, A.size<double>().y, B.size<double>().y}); // largest dimension in x or y
+                double         l      = std::max({minGap.x, minGap.y, size<double>(A).x, size<double>(B).x, size<double>(A).y, size<double>(B).y}); // largest dimension in x or y
                 return cfg.kFruchtermanReingoldScale * l * l / r * unit;
             }
             case EadesLog: { // f_rep = c / r^N
@@ -1423,15 +1622,15 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
         };
 
         // --- Attractive force (returns vector along (A->B)) -------------------
-        [[maybe_unused]] const auto attract = [&](const Node& A, const Node& B, const Point<double>& d, double r, double want) -> Point<double> {
-            const Point<double> need = minRequiredGapDistance<double>(A, B, cfg) + A.size<double>() / 2.0 + B.size<double>() / 2.0;
+        [[maybe_unused]] const auto attract = [&](const std::shared_ptr<gr::BlockModel>& A, const std::shared_ptr<gr::BlockModel>& B, const Point<double>& d, double r, double want) -> Point<double> {
+            const Point<double> need = minRequiredGapDistance<double>(A, B, cfg) + size<double>(A) / 2.0 + size<double>(B) / 2.0;
             assert(need.x > 0.0 && need.y > 0.0);
             using enum LayoutAlgorithm;
             switch (cfg.algorithm) {
             case FruchtermanReingold: { // f_attr = (r_eff^2 / k) * û
                 const Point<T> unit   = d / r;
                 const Point<T> minGap = minRequiredGapDistance<double>(A, B, cfg);
-                double         l      = std::max({minGap.x, minGap.y, A.size<double>().x, B.size<double>().x, A.size<double>().y, B.size<double>().y}); // largest dimension in x or y
+                double         l      = std::max({minGap.x, minGap.y, size<double>(A).x, size<double>(B).x, size<double>(A).y, size<double>(B).y}); // largest dimension in x or y
                 return cfg.kFruchtermanReingoldScale * r * r / l * unit;
                 const double rEff = std::max(eps, r - l);                        // distance minus node extents
                 return (rEff * rEff) / cfg.kFruchtermanReingoldScale * l * unit; // attractive force pulls A toward B
@@ -1460,16 +1659,18 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
         };
 
         //  (A) Springs for every edge (use anchorPoint())
-        for (auto const& edge : graph.edges) {
-            checkEdge<"springModel">(graph.nodes, edge);
+        for (auto const& edge : graph.edges()) {
+            const std::size_t u = *gr::graph::blockIndex(graph, edge.sourceBlock());
+            const std::size_t v = *gr::graph::blockIndex(graph, edge.destinationBlock());
 
-            const std::size_t   u = edge.srcNode, v = edge.dstNode;
-            const Node&         A    = *graph.nodes[u];
-            const Node&         B    = *graph.nodes[v];
-            const Point<double> from = A.out(edge.srcPort).anchorPoint<double>();
-            const Point<double> to   = B.in(edge.dstPort).anchorPoint<double>();
-            const Point<double> d    = to - from;
-            double              r    = std::hypot(d.x, d.y);
+            const std::shared_ptr<gr::BlockModel>& A       = graph.blocks()[u];
+            const std::shared_ptr<gr::BlockModel>& B       = graph.blocks()[v];
+            PortInfo                               srcPort = getPortByDefinition(A, edge.sourcePortDefinition(), gr::PortDirection::OUTPUT);
+            PortInfo                               dstPort = getPortByDefinition(B, edge.destinationPortDefinition(), gr::PortDirection::INPUT);
+            const Point<double>                    from    = srcPort.anchorPoint<double>();
+            const Point<double>                    to      = dstPort.anchorPoint<double>();
+            const Point<double>                    d       = to - from;
+            double                                 r       = std::hypot(d.x, d.y);
             if (r < eps) {
                 r = eps;
             }
@@ -1499,19 +1700,17 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
         };
 
         for (std::size_t i = 0; i < N; ++i) {
-            const Node& Ai = *graph.nodes[i];
-            const auto  ci = Ai.centre<double>();
+            const auto ci = centre<double>(graph.blocks()[i]);
 
             for (std::size_t j = i + 1; j < N; ++j) {
-                const Node&         Aj   = *graph.nodes[j];
-                const auto          cj   = Aj.centre<double>();
+                const auto          cj   = centre<double>(graph.blocks()[j]);
                 const Point<double> diff = cj - ci;
                 double              r    = std::hypot(diff.x, diff.y);
                 if (r < eps) {
                     r = eps;
                 }
 
-                const Point<double> f = repel(Ai, Aj);
+                const Point<double> f = repel(graph.blocks()[i], graph.blocks()[j]);
                 force[i] -= f;
                 force[j] += f;
             }
@@ -1539,10 +1738,10 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
                 force[i].x += -gravUp * effectiveWeights[i];
                 force[i].y += -gravLeftW;
 
-                if (graph.nodes[i]->inputCount() == 0) {
+                if (inputCount(graph.blocks()[i]) == 0) {
                     const double kSrcWall = 2.5;
-                    const double minX     = double(std::max(cfg.minMargin, cfg.minGap + cfg.minPortDistance * graph.nodes[i]->portsOnSide(Side::Left)));
-                    const double minY     = double(std::max(cfg.minMargin, cfg.minGap + cfg.minPortDistance * graph.nodes[i]->portsOnSide(Side::Top)));
+                    const double minX     = double(std::max(cfg.minMargin, cfg.minGap + cfg.minPortDistance * portsOnSide(graph.blocks()[i], Side::Left)));
+                    const double minY     = double(std::max(cfg.minMargin, cfg.minGap + cfg.minPortDistance * portsOnSide(graph.blocks()[i], Side::Top)));
                     force[i].y += -kSrcWall * std::max(0.0, position[i].y - minY);
                     force[i].x += -kSrcWall * std::max(0.0, position[i].x - minX);
                 }
@@ -1591,16 +1790,15 @@ inline static void phase1_place_spring_model(Graph& graph, const LayoutPreferenc
     // 5) final snap + update anchors
     for (std::size_t i = 0UZ; i < N; ++i) {
         // nodes[i].update(std::floor(position[i].x), std::floor(position[i].y));
-        graph.nodes[i]->update(position[i]);
+        updateBlock(graph.blocks()[i], position[i]);
     }
 
     // post-fix pusb top-left node into view
-    Point<double> topLeft{};
-    std::ranges::for_each(graph.nodes, [&topLeft](const std::shared_ptr<Node>& node) { topLeft = min(topLeft, node->topLeft<double>()); });
-    Point<double> diff = topLeft - Point<double>(static_cast<double>(cfg.minMargin), static_cast<double>(cfg.minMargin));
+    Point<double> topLeftPos{};
+    std::ranges::for_each(graph.blocks(), [&topLeftPos](const std::shared_ptr<gr::BlockModel>& node) { topLeftPos = min(topLeftPos, topLeft<double>(node)); });
+    Point<double> diff = topLeftPos - Point<double>(static_cast<double>(cfg.minMargin), static_cast<double>(cfg.minMargin));
     Point<double> offset{diff.x < 0.0 ? std::floor(-diff.x) + 1.0 : 0.0, diff.y < 0.0 ? std::floor(-diff.y) + 1.0 : 0.0};
-    std::println("topLeft: {} - diff: {} -> offset: {}", topLeft, diff, offset);
-    std::ranges::for_each(graph.nodes, [&offset](std::shared_ptr<Node>& node) { node->update(node->topLeft<double>() + offset); });
+    std::ranges::for_each(graph.blocks(), [&offset](std::shared_ptr<gr::BlockModel>& node) { updateBlock(node, topLeft<double>(node) + offset); });
 }
 
 struct VRef {
@@ -1613,29 +1811,31 @@ struct VRef {
     friend bool operator==(const VRef&, const VRef&) = default;
 };
 
-static inline std::unordered_set<uint64_t> make_reversed_edges_H2(const Graph& graph) {
+static inline std::unordered_set<uint64_t> make_reversed_edges_H2(const gr::Graph& graph) {
     // P. Eades, X. Lin, and w.F. Smyth. A fast and effective heuristic for the feedback arc set problem. Information Processing Letters, 47(6): 319-323,1993
     auto                                  pack = [](std::size_t a, std::size_t b) { return (uint64_t(a) << 32) ^ uint64_t(b); };
-    std::vector<std::vector<std::size_t>> out(graph.nodes.size());
-    std::vector<std::vector<std::size_t>> in(graph.nodes.size());
-    for (auto& e : graph.edges) {
-        if (e.srcNode < graph.nodes.size() && e.dstNode < graph.nodes.size() && e.srcNode != e.dstNode) {
-            out[e.srcNode].push_back(e.dstNode);
-            in[e.dstNode].push_back(e.srcNode);
+    std::vector<std::vector<std::size_t>> out(graph.blocks().size());
+    std::vector<std::vector<std::size_t>> in(graph.blocks().size());
+    for (auto& e : graph.edges()) {
+        std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+        std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
+        if (srcIdx != dstIdx) {
+            out[srcIdx].push_back(dstIdx);
+            in[dstIdx].push_back(srcIdx);
         }
     }
 
-    std::vector<std::size_t> indeg(graph.nodes.size());
-    std::vector<std::size_t> outdeg(graph.nodes.size());
-    for (std::size_t v = 0UZ; v < graph.nodes.size(); ++v) {
+    std::vector<std::size_t> indeg(graph.blocks().size());
+    std::vector<std::size_t> outdeg(graph.blocks().size());
+    for (std::size_t v = 0UZ; v < graph.blocks().size(); ++v) {
         indeg[v]  = in[v].size();
         outdeg[v] = out[v].size();
     }
 
     std::deque<std::size_t> sources, sinks;
-    std::vector<char>       alive(graph.nodes.size(), 1);
+    std::vector<char>       alive(graph.blocks().size(), 1);
     auto                    push_srcs_sinks = [&] {
-        for (std::size_t v = 0UZ; v < graph.nodes.size(); ++v) {
+        for (std::size_t v = 0UZ; v < graph.blocks().size(); ++v) {
             if (alive[v]) {
                 if (indeg[v] == 0) {
                     sources.push_back(v);
@@ -1649,7 +1849,7 @@ static inline std::unordered_set<uint64_t> make_reversed_edges_H2(const Graph& g
 
     // E' = edges we KEEP in the forward direction
     std::unordered_set<uint64_t> keep;
-    keep.reserve(graph.edges.size());
+    keep.reserve(graph.edges().size());
 
     auto remove_v = [&](std::size_t v, bool keep_out) { // keep_out: true=keep all (v->u); false=keep all (u->v)
         alive[v] = 0;
@@ -1695,7 +1895,7 @@ static inline std::unordered_set<uint64_t> make_reversed_edges_H2(const Graph& g
             progressed = true;
         }
         // peel isolated (optional)
-        for (std::size_t v = 0UZ; v < graph.nodes.size(); ++v) {
+        for (std::size_t v = 0UZ; v < graph.blocks().size(); ++v) {
             if (alive[v] && indeg[v] == 0 && outdeg[v] == 0) {
                 alive[v]   = 0;
                 progressed = true;
@@ -1716,8 +1916,8 @@ static inline std::unordered_set<uint64_t> make_reversed_edges_H2(const Graph& g
         if (!progressed) {
             // pick v maximizing (outdeg - indeg); break ties arbitrarily
             int         bestScore = INT_MIN;
-            std::size_t best      = graph.nodes.size();
-            for (std::size_t v = 0; v < graph.nodes.size(); ++v) {
+            std::size_t best      = graph.blocks().size();
+            for (std::size_t v = 0; v < graph.blocks().size(); ++v) {
                 if (alive[v]) {
                     int s = static_cast<int>(outdeg[v]) - static_cast<int>(indeg[v]);
                     if (s > bestScore) {
@@ -1726,7 +1926,7 @@ static inline std::unordered_set<uint64_t> make_reversed_edges_H2(const Graph& g
                     }
                 }
             }
-            if (best == graph.nodes.size()) {
+            if (best == graph.blocks().size()) {
                 break; // done
             }
             remove_v(best, /*keep_out=*/true);
@@ -1739,130 +1939,42 @@ static inline std::unordered_set<uint64_t> make_reversed_edges_H2(const Graph& g
 
     // edges not kept must be reversed
     std::unordered_set<uint64_t> reversed;
-    reversed.reserve(graph.edges.size());
-    for (auto& e : graph.edges) {
-        if (e.srcNode < graph.nodes.size() && e.dstNode < graph.nodes.size() && e.srcNode != e.dstNode) {
-            if (!keep.count(pack(e.srcNode, e.dstNode))) {
-                reversed.insert(pack(e.srcNode, e.dstNode));
+    reversed.reserve(graph.edges().size());
+    for (auto& e : graph.edges()) {
+        std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+        std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
+        if (srcIdx != dstIdx) {
+            if (!keep.count(pack(srcIdx, dstIdx))) {
+                reversed.insert(pack(srcIdx, dstIdx));
             }
         }
     }
     return reversed;
 }
 
-#include <algorithm>
-#include <deque>
-#include <memory>
-#include <ranges>
-#include <vector>
-
-static constexpr std::size_t kInvalid = gr::meta::invalid_index; // or std::size_t(-1)
-
-std::vector<Graph> stronglyConnectedComponents(const Graph& graph) {
-    const std::size_t N = graph.nodes.size();
-
-    // --- undirected adjacency (weak components) ---
-    std::vector<std::vector<std::size_t>> adj(N);
-    for (const auto& e : graph.edges) {
-        if (e.srcNode < N && e.dstNode < N) {
-            adj[e.srcNode].push_back(e.dstNode);
-            adj[e.dstNode].push_back(e.srcNode);
-        }
-    }
-
-    // --- collect weakly connected components with BFS ---
-    std::vector<char>                     visited(N, 0);
-    std::vector<std::vector<std::size_t>> comps;
-    comps.reserve(N);
-
-    for (std::size_t s = 0; s < N; ++s) {
-        if (visited[s]) {
-            continue;
-        }
-
-        std::vector<std::size_t> comp;
-        std::deque<std::size_t>  q{s};
-        visited[s] = 1;
-
-        while (!q.empty()) {
-            auto v = q.front();
-            q.pop_front();
-            comp.push_back(v);
-            for (auto u : adj[v]) {
-                if (!visited[u]) {
-                    visited[u] = 1;
-                    q.push_back(u);
-                }
-            }
-        }
-        comps.push_back(std::move(comp));
-    }
-
-    // largest first, like your original
-    std::ranges::sort(comps, [](const auto& a, const auto& b) { return a.size() > b.size(); });
-
-    // --- build subgraphs with shallow-copied nodes and remapped edges ---
-    std::vector<Graph> result;
-    result.reserve(comps.size());
-
-    for (const auto& comp : comps) {
-        Graph g;
-        g.nodes.reserve(comp.size());
-
-        // shallow copy nodes into the subgraph
-        for (auto idx : comp) {
-            g.nodes.push_back(graph.nodes[idx]);
-        }
-
-        // old->new remap (vector is faster & terser than unordered_map here)
-        std::vector<std::size_t> remap(N, kInvalid);
-        for (std::size_t i = 0; i < comp.size(); ++i) {
-            remap[comp[i]] = i;
-        }
-
-        // keep only edges fully inside the component and remap endpoints
-        g.edges.reserve(graph.edges.size()); // upper bound; we shrink naturally
-        for (const auto& e : graph.edges) {
-            if (e.srcNode < N && e.dstNode < N) {
-                const auto ns = remap[e.srcNode];
-                const auto nd = remap[e.dstNode];
-                if (ns != kInvalid && nd != kInvalid) {
-                    Edge ne    = e;
-                    ne.srcNode = ns;
-                    ne.dstNode = nd;
-                    g.edges.push_back(std::move(ne));
-                }
-            }
-        }
-
-        result.push_back(std::move(g));
-    }
-
-    return result;
-}
-
 template<typename T = double>
-static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config = {}) {
-    if (graph.nodes.empty()) {
+static void phase1_place_sugiyama(gr::Graph& graph, const LayoutPreference& config = {}) {
+    if (graph.blocks().empty()) {
         return;
     }
 
-    const std::size_t N = graph.nodes.size();
-    for (auto& n : graph.nodes) {
-        if (n->layout == LayoutPref::UNDEFINED) {
-            n->layout = (config.layout == LayoutPref::AUTO ? LayoutPref::HORIZONTAL : config.layout);
+    const std::size_t N = graph.blocks().size();
+    for (std::shared_ptr<gr::BlockModel>& n : graph.blocks()) {
+        if (getLayoutPref(n) == LayoutPref::UNDEFINED) {
+            setLayoutPref(n, config.layout == LayoutPref::AUTO ? LayoutPref::HORIZONTAL : config.layout);
         }
-        n->update(n->_position == Point<T>::Undefined() ? Point<T>{static_cast<T>(config.minMargin), static_cast<T>(config.minMargin)} : n->_position);
+        updateBlock(n, getPosition<T>(n) == Point<T>::Undefined() ? Point<T>{static_cast<T>(config.minMargin), static_cast<T>(config.minMargin)} : getPosition<T>(n));
     }
 
     // ─────────────────────────────────────────────────
     // 1) Adjacency + cycle-breaking
     // ─────────────────────────────────────────────────
-    std::vector<std::vector<std::size_t>> out(N), in(N);
-    for (const auto& e : graph.edges) {
-        if (e.srcNode < N && e.dstNode < N && e.srcNode != e.dstNode) {
-            out[e.srcNode].push_back(e.dstNode);
-            in[e.dstNode].push_back(e.srcNode);
+    // std::vector<std::vector<std::size_t>> out(N), in(N);
+    std::map<std::shared_ptr<gr::BlockModel>, std::vector<std::shared_ptr<gr::BlockModel>>> out{}, in{};
+    for (const auto& e : graph.edges()) {
+        if (e.sourceBlock() != e.destinationBlock()) {
+            out[e.sourceBlock()].push_back(e.destinationBlock());
+            in[e.destinationBlock()].push_back(e.sourceBlock());
         }
     }
 
@@ -1870,22 +1982,26 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
 
     // Use the Eades-Lin-Smyth heuristic for cycle breaking
     std::unordered_set<std::uint64_t> reversed = make_reversed_edges_H2(graph);
-    for (auto& e : graph.edges) {
-        if (reversed.count(pack_key(e.srcNode, e.dstNode))) {
-            e.type = EdgeType::Feedback;
+    for (auto& e : graph.edges()) {
+        std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+        std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
+        if (reversed.count(pack_key(srcIdx, dstIdx))) {
+            setEdgeType(e, EdgeType::Feedback);
         } else {
-            e.type = EdgeType::Forward; // will refine to Lateral after DFS
+            setEdgeType(e, EdgeType::Forward); // will refine to Lateral after DFS
         }
     }
 
     // helper functions for traversing the DAG with reversed edges
     auto get_predecessors = [&](std::size_t v) -> std::vector<std::size_t> {
         std::vector<std::size_t> preds;
-        for (const auto& e : graph.edges) {
-            if (e.dstNode == v && e.type == EdgeType::Forward) {
-                preds.push_back(e.srcNode);
-            } else if (e.srcNode == v && e.type == EdgeType::Feedback) {
-                preds.push_back(e.dstNode); // reversed edge
+        for (const auto& e : graph.edges()) {
+            std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+            std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
+            if (dstIdx == v && getEdgeType(e) == EdgeType::Forward) {
+                preds.push_back(srcIdx);
+            } else if (srcIdx == v && getEdgeType(e) == EdgeType::Feedback) {
+                preds.push_back(dstIdx); // reversed edge
             }
         }
         return preds;
@@ -1893,11 +2009,13 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
 
     auto get_successors = [&](std::size_t v) -> std::vector<std::size_t> {
         std::vector<std::size_t> succs;
-        for (const auto& e : graph.edges) {
-            if (e.srcNode == v && e.type == EdgeType::Forward) {
-                succs.push_back(e.dstNode);
-            } else if (e.dstNode == v && e.type == EdgeType::Feedback) {
-                succs.push_back(e.srcNode); // reversed edge
+        for (const auto& e : graph.edges()) {
+            std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+            std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
+            if (srcIdx == v && getEdgeType(e) == EdgeType::Forward) {
+                succs.push_back(dstIdx);
+            } else if (dstIdx == v && getEdgeType(e) == EdgeType::Feedback) {
+                succs.push_back(srcIdx); // reversed edge
             }
         }
         return succs;
@@ -1917,7 +2035,7 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
     };
 
     // find sources in this component
-    for (std::size_t v = 0UZ; v < graph.nodes.size(); ++v) {
+    for (std::size_t v = 0UZ; v < graph.blocks().size(); ++v) {
         bool is_source = true;
         for ([[maybe_unused]] auto p : get_predecessors(v)) {
             is_source = false;
@@ -1930,7 +2048,7 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
 
     // Find max column used by this component
     std::size_t max_col = 0;
-    for (std::size_t v = 0UZ; v < graph.nodes.size(); ++v) {
+    for (std::size_t v = 0UZ; v < graph.blocks().size(); ++v) {
         if (maxDFS[v] != gr::meta::invalid_index) {
             max_col = std::max(max_col, maxDFS[v] - col_offset);
         }
@@ -1947,7 +2065,7 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
     //     maxDFS[v] = std::min(maxDFS[v], dist);
     //
     //     for (auto& [u, rev] : get_successors(v)) {
-    //         std::println("dfs: {} -> {} rev: {}", graph.nodes[v]->title, graph.nodes[u]->title, rev);
+    //         std::println("dfs: {} -> {} rev: {}", graph.blocks()[v]->name(), graph.blocks()[u]->name(), rev);
     //         dfs(u, dist + 1UZ);
     //     }
     // };
@@ -1960,25 +2078,28 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
     }
 
     // Classify lateral edges based on DFS distances
-    for (auto& e : graph.edges) {
-        if (e.type == EdgeType::Forward                     //
-            && maxDFS[e.srcNode] != gr::meta::invalid_index //
-            && maxDFS[e.dstNode] != gr::meta::invalid_index //
-            && maxDFS[e.srcNode] == maxDFS[e.dstNode]) {
-            e.type = EdgeType::Lateral;
+    for (auto& e : graph.edges()) {
+        std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+        std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
+        if (getEdgeType(e) == EdgeType::Forward          //
+            && maxDFS[srcIdx] != gr::meta::invalid_index //
+            && maxDFS[dstIdx] != gr::meta::invalid_index //
+            && maxDFS[srcIdx] == maxDFS[dstIdx]) {
+            setEdgeType(e, EdgeType::Lateral);
         }
     }
 
     // TODO: continue here
     // Post-fix: detect micro-loops and reassign intermediate nodes
-    for (const auto& e : graph.edges) {
-        if (e.type != EdgeType::Lateral) {
+    for (const auto& e : graph.edges()) {
+        if (getEdgeType(e) != EdgeType::Lateral) {
             continue;
         }
-
+        std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+        std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
         // Find nodes that bridge this lateral edge
         for (std::size_t v = 0; v < N; ++v) {
-            if (v == e.srcNode || v == e.dstNode) {
+            if (v == srcIdx || v == dstIdx) {
                 continue;
             }
 
@@ -1986,19 +2107,21 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
             bool hasPathFromSrc = false;
             bool hasPathToDst   = false;
 
-            for (const auto& e2 : graph.edges) {
-                if (e2.srcNode == e.srcNode && e2.dstNode == v) {
+            for (const auto& e2 : graph.edges()) {
+                std::size_t srcIdx2 = *gr::graph::blockIndex(graph, e2.sourceBlock());
+                std::size_t dstIdx2 = *gr::graph::blockIndex(graph, e2.destinationBlock());
+                if (srcIdx2 == srcIdx && dstIdx2 == v) {
                     hasPathFromSrc = true;
                 }
-                if (e2.srcNode == v && e2.dstNode == e.dstNode) {
+                if (srcIdx2 == v && dstIdx2 == dstIdx) {
                     hasPathToDst = true;
                 }
             }
 
-            if (hasPathFromSrc && hasPathToDst && maxDFS[v] != maxDFS[e.srcNode]) {
-                std::println("Micro-loop: {} bridges lateral edge {}->{}", graph.nodes[v]->title, graph.nodes[e.srcNode]->title, graph.nodes[e.dstNode]->title);
-                std::println("  Reassigning {} from DFS {} to {}", graph.nodes[v]->title, maxDFS[v], maxDFS[e.srcNode]);
-                maxDFS[v] = maxDFS[e.srcNode];
+            if (hasPathFromSrc && hasPathToDst && maxDFS[v] != maxDFS[srcIdx]) {
+                std::println("Micro-loop: {} bridges lateral edge {}->{}", graph.blocks()[v]->name(), graph.blocks()[srcIdx]->name(), graph.blocks()[dstIdx]->name());
+                std::println("  Reassigning {} from DFS {} to {}", graph.blocks()[v]->name(), maxDFS[v], maxDFS[srcIdx]);
+                maxDFS[v] = maxDFS[srcIdx];
             }
         }
     }
@@ -2007,7 +2130,7 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
     std::size_t num_cols = *std::ranges::max_element(maxDFS) + 1UZ;
     std::println("maxDFS: {}", maxDFS);
     for (std::size_t i = 0; i < N; ++i) {
-        std::println(" {:10} = {}", graph.nodes[i]->title, maxDFS[i]);
+        std::println(" {:10} = {}", graph.blocks()[i]->name(), maxDFS[i]);
     }
 
     // ─────────────────────────────────────────────────
@@ -2049,7 +2172,7 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
     }
 
     std::ranges::fill(next_free_row, 0UZ);
-    for (std::size_t nodeID = 0UZ; nodeID < graph.nodes.size(); ++nodeID) {
+    for (std::size_t nodeID = 0UZ; nodeID < graph.blocks().size(); ++nodeID) {
         std::size_t col  = maxDFS[nodeID];
         std::size_t row  = next_free_row[col]++;
         grid[col][row]   = nodeID;
@@ -2161,26 +2284,28 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
         // Edge length penalties (closer columns weigh more)
         auto add_lengths = [&](std::size_t v) {
             const std::size_t vr = grid_pos[v].y;
-            for (const auto& e : graph.edges) {
-                double weight = 1.0;
+            for (const auto& e : graph.edges()) {
+                std::size_t srcIdx = *gr::graph::blockIndex(graph, e.sourceBlock());
+                std::size_t dstIdx = *gr::graph::blockIndex(graph, e.destinationBlock());
+                double      weight = 1.0;
 
                 // Adjust weight based on edge type
-                if (e.type == EdgeType::Feedback) {
+                if (getEdgeType(e) == EdgeType::Feedback) {
                     weight *= 0.5; // Less important to minimize feedback edges
-                } else if (e.type == EdgeType::Lateral) {
+                } else if (getEdgeType(e) == EdgeType::Lateral) {
                     weight *= 2.0; // More important to keep lateral edges short
                 }
 
-                if (e.srcNode == v) {
-                    std::size_t u     = e.dstNode;
+                if (srcIdx == v) {
+                    std::size_t u     = dstIdx;
                     std::size_t cdist = (grid_pos[u].x > col) ? (grid_pos[u].x - col) : (col - grid_pos[u].x);
                     if (cdist > 0) {
                         weight /= double(cdist);
                         cost += weight * double((grid_pos[u].y > vr) ? (grid_pos[u].y - vr) : (vr - grid_pos[u].y));
                     }
                 }
-                if (e.dstNode == v) {
-                    std::size_t u     = e.srcNode;
+                if (dstIdx == v) {
+                    std::size_t u     = srcIdx;
                     std::size_t cdist = (grid_pos[u].x > col) ? (grid_pos[u].x - col) : (col - grid_pos[u].x);
                     if (cdist > 0) {
                         weight /= double(cdist);
@@ -2398,9 +2523,9 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
                 if (nodeIdx == gr::meta::invalid_index) {
                     continue; // skip empty cells/non-drawable nodes
                 }
-                colWidth[col].paddingBefore = std::max(colWidth[col].paddingBefore, static_cast<T>(graph.nodes[nodeIdx]->portsOnSide(Side::Left) * config.minPortDistance));
-                colWidth[col].size          = std::max(colWidth[col].size, graph.nodes[nodeIdx]->width<T>());
-                colWidth[col].paddingAfter  = std::max(colWidth[col].paddingAfter, static_cast<T>(graph.nodes[nodeIdx]->portsOnSide(Side::Right) * config.minPortDistance));
+                colWidth[col].paddingBefore = std::max(colWidth[col].paddingBefore, static_cast<T>(portsOnSide(graph.blocks()[nodeIdx], Side::Left) * config.minPortDistance));
+                colWidth[col].size          = std::max(colWidth[col].size, size<T>(graph.blocks()[nodeIdx]).x);
+                colWidth[col].paddingAfter  = std::max(colWidth[col].paddingAfter, static_cast<T>(portsOnSide(graph.blocks()[nodeIdx], Side::Right) * config.minPortDistance));
             }
         }
 
@@ -2410,9 +2535,10 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
                 if (nodeIdx == gr::meta::invalid_index) {
                     continue; // skip empty cells/non-drawable nodes
                 }
-                rowHeight[row].paddingBefore = std::max(rowHeight[row].paddingBefore, static_cast<T>((graph.nodes[nodeIdx]->portsOnSide(Side::Top) > 0 ? 1 : 0) * config.minPortDistance));
-                rowHeight[row].size          = std::max(rowHeight[row].size, graph.nodes[nodeIdx]->height<T>());
-                rowHeight[row].paddingAfter  = std::max(rowHeight[row].paddingAfter, static_cast<T>((graph.nodes[nodeIdx]->portsOnSide(Side::Bottom) > 0 ? 1 : 0) * config.minPortDistance));
+                auto& node                   = graph.blocks()[nodeIdx];
+                rowHeight[row].paddingBefore = std::max(rowHeight[row].paddingBefore, static_cast<T>((portsOnSide(node, Side::Top) > 0 ? 1 : 0) * config.minPortDistance));
+                rowHeight[row].size          = std::max(rowHeight[row].size, size<T>(node).y);
+                rowHeight[row].paddingAfter  = std::max(rowHeight[row].paddingAfter, static_cast<T>((portsOnSide(node, Side::Bottom) > 0 ? 1 : 0) * config.minPortDistance));
             }
         }
     };
@@ -2431,7 +2557,7 @@ static void phase1_place_sugiyama(Graph& graph, const LayoutPreference& config =
                 if (nodeIdx == gr::meta::invalid_index) {
                     continue; // skip empty cells/non-drawable nodes
                 }
-                graph.nodes[nodeIdx]->update(Point<T>{columnOffset, rowOffset});
+                updateBlock(graph.blocks()[nodeIdx], Point<T>{columnOffset, rowOffset});
                 rowOffset += rowHeight[row].size + std::max(std::max(rowHeight[row].paddingAfter, rowHeight[row + 1UZ].paddingBefore), static_cast<T>(config.minDefaultGap));
             }
             columnOffset += colWidth[col].size + colWidth[col].paddingAfter + std::max(colWidth[col + 1UZ].paddingBefore, static_cast<T>(config.minDefaultGap));
@@ -2658,7 +2784,7 @@ inline constexpr std::string_view directionName(std::byte d) {
 // helper to flip an incoming movement into the oppositeDirection edge
 
 template<gr::arithmetic_or_complex_like T = std::size_t>
-void drawPath(Canvas& canvas, const Edge& edge, const std::vector<Point<T>>& path, bool isFeedback = false) {
+void drawPath(Canvas& canvas, const gr::Edge& edge, const std::vector<Point<T>>& path, bool isFeedback = false) {
     const std::size_t n = path.size();
     if (n < 2) {
         if (n == 1) { // single‐point marker
@@ -2681,7 +2807,7 @@ void drawPath(Canvas& canvas, const Edge& edge, const std::vector<Point<T>>& pat
         return;
     }
     // canvas.put(p0.x, p0.y, Canvas::mapBox(static_cast<std::byte>(dirs[1UZ])), isFeedback ? utf8Feedback : "");
-    canvas.addPath(p0.x, p0.y, static_cast<std::byte>(dirs[1UZ]), edge.index(), isFeedback ? utf8Feedback : "");
+    canvas.addPath(p0.x, p0.y, static_cast<std::byte>(dirs[1UZ]), std::hash<gr::Edge>{}(edge), isFeedback ? utf8Feedback : "");
 
     // 3) Draw all the internal junctions:
     //    Use the *oppositeDirection* of the incoming bit, OR’d with the outgoing bit.
@@ -2690,94 +2816,86 @@ void drawPath(Canvas& canvas, const Edge& edge, const std::vector<Point<T>>& pat
         Direction mask = oppositeDirection(dirs[i]) // incoming edge
                          | dirs[i + 1UZ];           // outgoing edge
         // canvas.put(p.x, p.y, Canvas::mapBox(static_cast<std::byte>(mask)), isFeedback ? utf8Feedback : "");
-        canvas.addPath(p.x, p.y, static_cast<std::byte>(mask), edge.index(), isFeedback ? utf8Feedback : "");
+        canvas.addPath(p.x, p.y, static_cast<std::byte>(mask), std::hash<gr::Edge>{}(edge), isFeedback ? utf8Feedback : "");
     }
 
     // 4) Draw the final stub at the destination cell (incoming edge only):
     auto& pt = path.back();
     // canvas.put(pt.x, pt.y, Canvas::mapBox(static_cast<std::byte>(oppositeDirection(dirs.back()))), isFeedback ? utf8Feedback : "");
-    canvas.addPath(pt.x, pt.y, static_cast<std::byte>(oppositeDirection(dirs.back())), edge.index(), isFeedback ? utf8Feedback : "");
+    canvas.addPath(pt.x, pt.y, static_cast<std::byte>(oppositeDirection(dirs.back())), std::hash<gr::Edge>{}(edge), isFeedback ? utf8Feedback : "");
 }
 
 //------------------------------------------------------
 // Phase 2: materialize & drawing helpers
 //------------------------------------------------------
-static std::string_view portGlyph(const Port& port) noexcept {
+static std::string_view portGlyph(const PortInfo& port, Side side) noexcept {
     using enum Side;
-    const bool isInput = port.direction == PortDirection::In;
-    const Side side    = port.preferredSide.value_or(isInput ? Left : Right);
 
-    switch (port.syncKind) {
-    case PortSyncKind::Sync:
+    if (!port.isStream()) {
+        return port.isInput() ? "⊖" : "⊕";
+    }
+    // stream port only
+    if (port.isSynchronous()) { // sync port
         switch (side) {
-        case Left: return isInput ? "▶" : "◀";
-        case Right: return isInput ? "◀" : "▶";
-        case Top: return isInput ? "▼" : "▲";
-        case Bottom: return isInput ? "▲" : "▼";
+        case Left: return port.isInput() ? "▶" : "◀";
+        case Right: return port.isInput() ? "◀" : "▶";
+        case Top: return port.isInput() ? "▼" : "▲";
+        case Bottom: return port.isInput() ? "▲" : "▼";
         }
-        break;
-
-    case PortSyncKind::Async:
+    } else { // async port
         switch (side) {
-        case Left: return isInput ? "▷" : "◁";
-        case Right: return isInput ? "◁" : "▷";
-        case Top: return isInput ? "▽" : "△";
-        case Bottom: return isInput ? "△" : "▽";
+        case Left: return port.isInput() ? "▷" : "◁";
+        case Right: return port.isInput() ? "◁" : "▷";
+        case Top: return port.isInput() ? "▽" : "△";
+        case Bottom: return port.isInput() ? "△" : "▽";
         }
-        break;
-    case PortSyncKind::Msg: return isInput ? "⊖" : "⊕";
     }
     return "?"; // should never happen
 }
 
-struct DrawableNode : public Node {};
-
 template<gr::arithmetic_or_complex_like T = std::size_t>
-inline void drawNode(Canvas& c, const DrawableNode& n) {
+inline void drawNode(Canvas& c, const std::shared_ptr<gr::BlockModel>& block) {
     using enum Side;
 
     // draw the block's frame
-    Rect<T> frame = n.rect<T>();
+    Rect<T> frame = rect<T>(block);
     c.hSpan(frame.x0, frame.x1, frame.y0);
     c.hSpan(frame.x0, frame.x1, frame.y1);
     c.vSpan(frame.y0, frame.y1, frame.x0);
     c.vSpan(frame.y0, frame.y1, frame.x1);
 
     // place title
-    std::size_t titleSize{utf8Width(n.title)};
-    if (n.portsOnSide(Top) == 0UZ && n.portsOnSide(Bottom) == 0UZ) {             // centred on the top frame
-        c.put(n.centre<T>().x - (titleSize >> 1UZ), n.position<T>().y, n.title); // no nodes on top or bottom
-    } else {                                                                     // centred inside the box
-        c.put(n.centre<T>().x - (titleSize >> 1UZ), n.centre<T>().y, n.title);
+    std::size_t titleSize{utf8Width(block->name())};
+    if (portsOnSide(block, Top) == 0UZ && portsOnSide(block, Bottom) == 0UZ) {                  // centred on the top frame
+        c.put(centre<T>(block).x - (titleSize >> 1UZ), getPosition<T>(block).y, block->name()); // no nodes on top or bottom
+    } else {                                                                                    // centred inside the box
+        c.put(centre<T>(block).x - (titleSize >> 1UZ), centre<T>(block).y, block->name());
     }
 
-    auto drawAnchor = [&](const Port& anchor) {
-        using enum Side;
-        const Point<T> pt = anchor.anchorPoint<T>();
-        c.put(pt.x, pt.y, portGlyph(anchor));
-        switch (*anchor.preferredSide) {
-        case Left: c.put(pt.x + 1UZ, pt.y, anchor.label); break;
-        case Right: c.put(pt.x - utf8Width(anchor.label), pt.y, anchor.label); break;
-        case Top: c.put(pt.x + 1UZ, pt.y, anchor.label); break;
-        case Bottom: c.put(pt.x + 1UZ, pt.y, anchor.label); break;
+    // Draw ports
+    auto infos = std::array{std::views::all(getPortInfos<gr::PortDirection::INPUT>(block)), std::views::all(getPortInfos<gr::PortDirection::OUTPUT>(block))};
+    for (auto& info : infos | std::views::join) {
+        if (!info.preferredSide()) {
+            continue;
         }
-    };
 
-    std::ranges::for_each(n.ports, drawAnchor);
-}
+        const Point<T> pt = info.anchorPoint<T>();
+        c.put(pt.x, pt.y, portGlyph(info, *info.preferredSide()));
 
-/// — finally, makePhys seeds, sizes and then distributes
-inline DrawableNode makePhys(const Node& ln, [[maybe_unused]] std::size_t hSpacing = 20UZ, [[maybe_unused]] std::size_t vSpacing = 5UZ, [[maybe_unused]] std::size_t hMargin = 2UZ, [[maybe_unused]] std::size_t vMargin = 2UZ) {
-    DrawableNode n{ln};
-    n.update(n.position<std::size_t>());
-    return n;
+        switch (*info.preferredSide()) {
+        case Left: c.put(pt.x + 1UZ, pt.y, info.name()); break;
+        case Right: c.put(pt.x - utf8Width(info.name()), pt.y, info.name()); break;
+        case Top: c.put(pt.x + 1UZ, pt.y, info.name()); break;
+        case Bottom: c.put(pt.x + 1UZ, pt.y, info.name()); break;
+        }
+    }
 }
 
 //------------------------------------------------------
 // Phase 3: Pathfinder via Dijkstra's algorithm
 //------------------------------------------------------
 template<gr::arithmetic_or_complex_like T = std::size_t>
-inline std::vector<Point<T>> routeDijkstra(const Canvas& canvas, const Graph& graph, const Edge& edge, LayoutPreference const& config = {}) {
+std::vector<Point<T>> routeDijkstra(const Canvas& canvas, const gr::Edge& edge, LayoutPreference const& config = {}) {
     using enum Direction;
     constexpr std::array<Direction, 9UZ> idxToMask{{// mask ↔ small index [0..8]
         None, North, East, South, West,             //
@@ -2794,11 +2912,11 @@ inline std::vector<Point<T>> routeDijkstra(const Canvas& canvas, const Graph& gr
         {{1, 0, 1.0}, {-1, 0, 1.0}, {0, 1, 1.0}, {0, -1, 1.0},                // horizontal moves
             {1, 1, sqrt2}, {-1, -1, sqrt2}, {1, -1, sqrt2}, {-1, 1, sqrt2}}}; // diagonal moves
 
-    const Port&           src       = graph.nodes.at(edge.srcNode)->out(edge.srcPort);
-    const Port&           dst       = graph.nodes.at(edge.dstNode)->in(edge.dstPort);
+    PortInfo              srcPort   = getPortByDefinition(edge.sourceBlock(), edge.sourcePortDefinition(), gr::PortDirection::OUTPUT);
+    PortInfo              dstPort   = getPortByDefinition(edge.destinationBlock(), edge.destinationPortDefinition(), gr::PortDirection::INPUT);
     constexpr std::size_t DIR_COUNT = idxToMask.size();
     std::size_t const     total     = canvas.width * canvas.height;
-    std::size_t const     dstCell   = toCellIndex(dst.exitPoint<T>());
+    std::size_t const     dstCell   = toCellIndex(dstPort.exitPoint<T>());
 
     // distance[cell][dirIdx] = best cost so far arriving along that direction
     std::vector<std::array<double, DIR_COUNT>> distance(total);
@@ -2817,12 +2935,20 @@ inline std::vector<Point<T>> routeDijkstra(const Canvas& canvas, const Graph& gr
     std::priority_queue<State, std::vector<State>, decltype(cmp)> queue(cmp);
 
     // prime starting point
-    const Point<T>  srcPosition{src.exitPoint<T>()};
-    const Direction srcExit{src.exitDir};
-    const Point<T>  dstPosition{dst.exitPoint<T>()};
-    const Direction dstExit{oppositeDirection(dst.exitDir)};
-    distance[toCellIndex(srcPosition)][index(src.exitDir)] = 0.0;
+    const Point<T>  srcPosition{srcPort.exitPoint<T>()};
+    const Direction srcExit{srcPort.exitDir()};
+    const Point<T>  dstPosition{dstPort.exitPoint<T>()};
+    const Direction dstExit{oppositeDirection(dstPort.exitDir())};
+    distance[toCellIndex(srcPosition)][index(srcPort.exitDir())] = 0.0;
     queue.emplace(0.0, srcPosition, srcExit, /*steps*/ 0UZ);
+
+    // Validate positions
+    if (srcPosition == Point<T>::Undefined() || dstPosition == Point<T>::Undefined()) {
+        std::println(stderr, "Warning: Invalid port positions for edge {}", edge);
+        std::println(stderr, "  Source: {} at {}", srcPort.name(), srcPosition);
+        std::println(stderr, "  Dest: {} at {}", dstPort.name(), dstPosition);
+        return {}; // Return empty path instead of crashing
+    }
 
     // Dijkstra main loop
     while (!queue.empty()) {
@@ -2916,15 +3042,15 @@ inline std::vector<Point<T>> routeDijkstra(const Canvas& canvas, const Graph& gr
 
 //------------------------------------------------------
 
-template<gr::arithmetic_or_complex_like T = std::size_t>
-[[nodiscard]] inline static std::string drawExample(Graph& graph, const LayoutPreference& config = {}) {
-    std::vector<Graph> graphs = stronglyConnectedComponents(graph);
+template<typename TGraph, gr::arithmetic_or_complex_like T = std::size_t>
+[[nodiscard]] inline static std::string drawExample(TGraph graph, const LayoutPreference& config = {}) {
+    std::vector<gr::Graph> graphs = gr::graph::weaklyConnectedComponents(graph);
     if (graphs.size() > 1UZ) {
         std::println("more than one subcomponent: {}", graphs.size());
         std::string      ret;
         LayoutPreference subGraphConfig = config;
         for (auto& g : graphs) {
-            ret += drawExample(g, subGraphConfig);
+            ret += drawExample(std::move(g), subGraphConfig);
             subGraphConfig.minMargin = 0UZ; // ignore margins for subsequent graphs
         }
         return ret;
@@ -2938,40 +3064,39 @@ template<gr::arithmetic_or_complex_like T = std::size_t>
     }
 
     // 2) create physical nodes
-    std::vector<DrawableNode> dNodes;
-    dNodes.reserve(graph.nodes.size());
-    for (const std::shared_ptr<Node>& ln : graph.nodes) {
-        dNodes.push_back(makePhys(*ln));
+    std::vector<std::shared_ptr<gr::BlockModel>> dNodes;
+    dNodes.reserve(graph.blocks().size());
+    for (const std::shared_ptr<gr::BlockModel>& ln : graph.blocks()) {
+        dNodes.push_back(ln);
     }
 
     // 3) canvas size
     std::size_t W = 0UZ;
     std::size_t H = 0UZ;
-    for (const DrawableNode& n : dNodes) {
+    for (const std::shared_ptr<gr::BlockModel>& n : dNodes) {
         Point gap = minRequiredGapDistance<T>(n, n);
-        W         = std::max(W, n.bottomRight<T>().x + gap.x);
-        H         = std::max(H, n.bottomRight<T>().y + gap.y);
+        W         = std::max(W, bottomRight<T>(n).x + gap.x);
+        H         = std::max(H, bottomRight<T>(n).y + gap.y);
     }
     Canvas canvas(W, H);
 
     // 4) draw boxes + ports + labels
-    for (const DrawableNode& node : dNodes) {
+    for (const std::shared_ptr<gr::BlockModel>& node : dNodes) {
         drawNode(canvas, node);
     }
 
     // 5) route edges
-    for (const Edge& e : graph.edges) {
-        checkEdge<"drawExample(..) -- routeEdges">(graph.nodes, e);
+    for (const gr::Edge& e : graph.edges()) {
         LayoutPreference routingConfig = config;
-        if (e.type == EdgeType::Feedback) {
+        if (getEdgeType(e) == EdgeType::Feedback) {
             routingConfig.straightPenalty *= 0.8; // Allow more turns for feedback
             std::println("feedback edge: {}", e);
-        } else if (e.type == EdgeType::Lateral) {
+        } else if (getEdgeType(e) == EdgeType::Lateral) {
             routingConfig.straightPenalty *= 1.5; // Prefer straight for lateral
         }
 
-        std::vector<Point<T>> path = routeDijkstra(canvas, graph, e, routingConfig);
-        drawPath(canvas, e, path, e.type == EdgeType::Feedback);
+        std::vector<Point<T>> path = routeDijkstra(canvas, e, routingConfig);
+        drawPath(canvas, e, path, getEdgeType(e) == EdgeType::Feedback);
     }
 
     // 7) output
@@ -2981,147 +3106,190 @@ template<gr::arithmetic_or_complex_like T = std::size_t>
 //------------------------------------------------------
 // five demos
 //------------------------------------------------------
-inline static std::string example_base1() {
-    using enum PortDirection;
-    using enum PortSyncKind;
-    Graph graph;
-    graph.addNodes({{"src#1", {}, {{"out", Out, Sync}}},                       //
-        {"src#2", {}, {{"out", Out, Sync}}},                                   //
-        {"add", {{"in0", In, Sync}, {"in1", In, Sync}}, {{"out", Out, Sync}}}, //
-        {"snk#1", {{"in", In, Sync}}, {}}});
-    graph.edges = {           //
-        {0UZ, 0UZ, 2UZ, 0UZ}, //
-        {1UZ, 0UZ, 2UZ, 1UZ}, //
-        {2UZ, 0UZ, 3UZ, 0UZ}};
-    return drawExample(graph);
-}
-inline static std::string example_base2() {
-    using enum PortDirection;
-    using enum PortSyncKind;
-    Graph graph;
-    graph.addNodes({
-        {"src#1", {}, {{"out", Out, Async}}},                                          //
-        {"split", {{"in0", In, Async}}, {{"out1", Out, Async}, {"out1", Out, Async}}}, //
-        {"snk#1", {{"in", In, Async}}, {}},                                            //
-        {"snk#2", {{"in", In, Async}}, {}},                                            //
-    });
-    graph.edges = {           //
-        {0UZ, 0UZ, 1UZ, 0UZ}, //
-        {1UZ, 0UZ, 2UZ, 0UZ}, //
-        {1UZ, 1UZ, 3UZ, 0UZ}};
-    return drawExample(graph);
-}
 
-[[maybe_unused]] inline static std::string example_cyclic_A() {
-    using enum PortDirection;
-    using enum PortSyncKind;
-    Graph graph;
-    graph.addNodes({
-        {"src#1", {}, {{"reference", Out, Sync}}},                          //
-        {"Σ", {{"in0", In, Sync}, {"in1", In, Sync}}, {{"Δ", Out, Async}}}, //
-        {"D(s)", {{"e", In, Sync}}, {{"u", Out, Sync}}},                    //
-        {"G(s)", {{"u", In, Sync}}, {{"y", Out, Sync}}},                    //
-        {"M(s)", {{"tap", In, Async}}, {{"m", Out, Sync}}},                 //
-        {"snk#1", {{"output", In, Sync}}, {}},                              //
-    });
-    graph.edges = {{0, 0, 1, 0}, //
-        {1, 0, 2, 0},            //
-        {2, 0, 3, 0},            //
-        {3, 0, 4, 0},            //
-        {3, 0, 5, 0},            //
-        {4, 0, 1, 1}};
-    return drawExample(graph);
+/**
+ * use this block to mock different input-output scenarios
+ */
+template<typename T, std::size_t nInSync, std::size_t nInAsync, std::size_t nMsgIn, std::size_t nOutSync, std::size_t nOutAsync, std::size_t nMsgOut>
+requires(std::is_arithmetic_v<T>)
+struct GenericBlock : gr::Block<GenericBlock<T, nInSync, nInAsync, nMsgIn, nOutSync, nOutAsync, nMsgOut>> {
+    std::array<gr::PortIn<T>, nInSync>             in1{};
+    std::array<gr::PortIn<T, gr::Async>, nInAsync> in2{};
+    std::array<gr::MsgPortIn, nMsgIn>              msgIns{};
+
+    std::array<gr::PortOut<T>, nOutSync>             out1{};
+    std::array<gr::PortOut<T, gr::Async>, nOutAsync> out2{};
+    std::array<gr::MsgPortOut, nMsgOut>              msgOuts{};
+
+    GR_MAKE_REFLECTABLE(GenericBlock, in1, in2, msgIns, out1, out2, msgOuts);
+
+    gr::work::Status processBulk(auto /*ins1*/, auto /*ins2*/, auto /*outs1*/, auto /*outs2*/) { return gr::work::Status::OK; }
+};
+
+inline static gr::Graph example_base1() {
+    using namespace boost::ut;
+
+    gr::Graph graph;
+
+    // Create blocks using emplaceBlock (similar to qa_Scheduler examples)
+    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
+    auto& src2 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#2"}});
+    auto& add  = graph.emplaceBlock<GenericBlock<float, 2, 0, 0, 1, 0, 0>>({{"name", "add"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
+
+    // Connect using the actual gr::Graph API
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0UZ>(add)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src2).to<"in1", 1UZ>(add)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(add).to<"in1", 0>(snk1)));
+
+    return graph;
 }
 
-[[maybe_unused]] inline static std::string example_cyclic_B() {
-    using enum PortDirection;
-    using enum PortSyncKind;
-    Graph graph;
-    graph.addNodes({
-        {"src#1", {}, {{"reference", Out, Sync}}},                                                //
-        {"Σ", {{"in0", In, Sync}, {"fb", In, Async}}, {{"Δ", Out, Async}}, LayoutPref::VERTICAL}, //
-        {"D(s)", {{"e", In, Sync}}, {{"u", Out, Sync}}},                                          //
-        {"G(s)", {{"u", In, Sync}}, {{"y", Out, Sync}}},                                          //
-        {"M(s)", {{"y", In, Async}}, {{"m", Out, Sync}}},                                         //
-        {"snk#1", {{"output", In, Sync}}, {}},                                                    //
-    });
-    graph.edges = {
-        {0, 0, 1, 0}, //
-        {1, 0, 2, 0}, //
-        {2, 0, 3, 0}, //
-        {3, 0, 4, 0}, //
-        {3, 0, 5, 0}, //
-        {4, 0, 1, 1}, //
-    };
-    return drawExample(graph);
+inline static gr::Graph example_base2() {
+    using namespace boost::ut;
+
+    gr::Graph graph;
+
+    auto& src1  = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 0, 1, 0>>({{"name", "src#1"}});
+    auto& split = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 2, 0>>({{"name", "split"}});
+    auto& snk1  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", "snk#1"}});
+    auto& snk2  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", "snk#2"}});
+
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(src1).to<"in2", 0>(split)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(split).to<"in2", 0>(snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 1>(split).to<"in2", 0>(snk2)));
+
+    return graph;
 }
 
-[[maybe_unused]] inline static std::string example_auto() {
-    using enum PortDirection;
-    using enum PortSyncKind;
-    Graph graph;
-    graph.addNodes({
-        {"src#1", {}, {{"reference", Out, Sync}}, LayoutPref::AUTO},                      //
-        {"Σ", {{"⊕", In, Sync}, {"⊖", In, Sync}}, {{"Δ", Out, Async}}, LayoutPref::AUTO}, //
-        {"D(s)", {{"e", In, Sync}}, {{"u", Out, Sync}}, LayoutPref::AUTO},                //
-        {"G(s)", {{"u", In, Sync}}, {{"y", Out, Sync}}, LayoutPref::AUTO},                //
-        {"snk#1", {{"output", In, Sync}}, {}, LayoutPref::AUTO},                          //
-        {"M(s)", {{"y", In, Async}}, {{"m", Out, Sync}}, LayoutPref::HORIZONTAL},         //
-    });
-    graph.edges = {{0, 0, 1, 0}, //
-        {1, 0, 2, 0},            //
-        {2, 0, 3, 0},            //
-        {3, 0, 4, 0},            //
-        {3, 0, 5, 0},            //
-        {5, 0, 1, 1}};
-    return drawExample(graph);
+inline static gr::Graph example_cyclic_A() {
+    using namespace boost::ut;
+
+    gr::Graph graph;
+
+    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
+    auto& sum  = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", "Σ"}});
+    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}});
+    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}});
+    auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
+
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in1", 1>(sum))); // feedback
+
+    return graph;
 }
 
-[[maybe_unused]] inline static std::string example_large() {
-    using enum PortDirection;
-    using enum PortSyncKind;
-    auto  defaultLayout = LayoutPref::AUTO;
-    Graph graph;
-    graph.addNodes({
-        {"src#1", {}, {{"reference", Out, Sync}}, defaultLayout},                                       // block 0
-        {"Σ", {{"⊕", In, Sync}, {"⊖", In, Sync, Side::Bottom}}, {{"Δ", Out, Async}}, LayoutPref::AUTO}, // block 1
-        {"D(s)", {{"e", In, Sync}}, {{"u", Out, Sync}}, defaultLayout},                                 // block 2
-        {"G(s)", {{"u", In, Sync}}, {{"y", Out, Sync}}, defaultLayout},                                 // block 3
-        {"snk#1", {{"output", In, Sync}}, {}, defaultLayout},                                           // block 4
-        {"M(s)",                                                                                        // block 5
-            {{"y", In, Async}, {"fb", In, Msg}},                                                        //
-            {{"m", Out, Sync}, {"out", Out, Msg}}, defaultLayout},                                      //
-        {"M2(s)", {{"y", In, Async}}, {{"m", Out, Sync}}, LayoutPref::HORIZONTAL},                      // block 6
-        {"src#2", {}, {{"out", Out, Sync}}, defaultLayout},                                             // block 7
-        {"snk#2", {{"in", In, Sync}}, {}, defaultLayout},                                               // block 8
-        {"snk#3", {{"in", In, Sync}}, {}, defaultLayout},                                               // block 9
-        {"M3(s)", {{"y", In, Async}}, {{"m", Out, Sync}}, LayoutPref::AUTO},                            // block 10
-    });
-    graph.edges = {
-        {0, 0, 1, 0, "e1"},       //
-        {1, 0, 2, 0, "e1"},       //
-        {2, 0, 3, 0, "e1"},       //
-        {3, 0, 4, 0, "e1"},       //
-        {3, 0, 5, 0, "e1"},       //
-        {5, 0, 1, 1, "e1"},       //
-        {5, 1, 6, 0, "loop-out"}, // additional micro/local fb loop
-        {6, 0, 5, 1, "loop-in"},  // additional micro/local fb loop
-    }; //
+inline static gr::Graph example_cyclic_B() {
+    using namespace boost::ut;
 
-    // known not to work with basic layout algorithm
-    graph.edges.emplace_back(7, 0, 10, 0, "src#2->M3(s)");    // second unconnected sub-graph src#2->M3(s)
-    graph.edges.emplace_back(10, 0, 9, 0, "M2(s)->snk#2");    // second unconnected sub-graph M2(s)->snk#2
-    graph.edges.emplace_back(5, 0, 8, 0, "second off-shoot"); // second off-shoot branch M(s)->snk#3
+    gr::Graph graph;
 
-    return drawExample(graph);
+    auto&            src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
+    gr::property_map prop{{"layout_pref", "vertical"}};
+    auto&            sum = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", "Σ"}, {"ui_constraints", prop}});
+    // setLayoutPref(gr::graph::findBlock(graph, sum.unique_name).value(), LayoutPref::VERTICAL);
+
+    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}});
+    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}});
+    auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
+
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in1", 1>(sum))); // feedback
+
+    return graph;
+}
+
+inline static gr::Graph example_auto() {
+    using namespace boost::ut;
+
+    gr::Graph graph;
+
+    gr::property_map prop{{"layout_pref", "auto"}};
+    auto&            src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}, {"ui_constraints", prop}});
+    auto&            sum  = graph.emplaceBlock<GenericBlock<float, 2, 0, 0, 0, 1, 0>>({{"name", "Σ"}, {"ui_constraints", prop}});
+    auto&            ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}, {"ui_constraints", prop}});
+    auto&            gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}, {"ui_constraints", prop}});
+    auto&            snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}, {"ui_constraints", prop}});
+
+    auto& ms = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
+    // setLayoutPref(std::shared_ptr<gr::BlockModel>(graph.findBlock(ms.unique_name).value()), LayoutPref::HORIZONTAL);
+
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in1", 1>(sum))); // feedback
+
+    return graph;
+}
+
+inline static gr::Graph example_large() {
+    using namespace boost::ut;
+
+    gr::Graph        graph;
+    gr::property_map prop_auto{{"layout_pref", "auto"}};
+    gr::property_map prop_ver{{"layout_pref", "vertical"}};
+    gr::property_map prop_hor{{"layout_pref", "horizontal"}};
+
+    // Create all blocks
+    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
+
+    auto& sum = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", "Σ"}, {"ui_constraints", prop_auto}});
+    // Set bottom side for second input port
+    // auto sumBlock = graph.findBlock(sum.unique_name).value();
+    // in(sumBlock, 1).preferredSide(Side::Bottom);
+
+    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}});
+    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
+
+    auto& ms  = graph.emplaceBlock<GenericBlock<float, 0, 2, 0, 1, 1, 0>>({{"name", "M(s)"}});
+    auto& m2s = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "M2(s)"}, {"ui_constraints", prop_hor}});
+
+    auto& src2 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#2"}});
+    auto& snk2 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#2"}});
+    auto& snk3 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#3"}});
+    auto& m3s  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M3(s)"}, {"ui_constraints", prop_auto}});
+
+    // Main connections
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in2", 1>(sum))); // feedback
+
+    // Micro feedback loop
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 1>(ms).to<"in1", 0>(m2s)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(m2s).to<"in2", 1>(ms)));
+
+    // Second sub-graph
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src2).to<"in2", 0>(m3s)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(m3s).to<"in1", 0>(snk2)));
+
+    // Additional connection
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in1", 0>(snk3)));
+
+    return graph;
 }
 
 int main() {
-    std::println("=== Base example 1 ===\n{}", example_base1());
-    std::println("=== Base example 2 ===\n{}", example_base2());
-    std::println("=== Cyclic example A ===\n{}", example_cyclic_A());
-    std::println("=== Cyclic example B (vertical) ===\n{}", example_cyclic_B());
-    std::println("=== AUTO layout example ===\n{}", example_auto());
-    std::println("=== Larger example ===\n{}", example_large());
+    std::println("=== Base example 1 ===\n{}", drawExample(example_base1()));
+    std::println("=== Base example 2 ===\n{}", drawExample(example_base2()));
+    std::println("=== Cyclic example A ===\n{}", drawExample(example_cyclic_A()));
+    std::println("=== Cyclic example B (vertical) ===\n{}", drawExample(example_cyclic_B()));
+    std::println("=== AUTO layout example ===\n{}", drawExample(example_auto()));
+    std::println("=== Larger example ===\n{}", drawExample(example_large()));
     return 0;
 }
