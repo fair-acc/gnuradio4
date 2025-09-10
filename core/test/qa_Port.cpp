@@ -428,7 +428,10 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
 
     "update & get roundtrip"_test = [] {
         PortMetaInfo metaInfo{"f32"};
+        metaInfo.name = "TestPortName";
         property_map props;
+        props["data_type"]                     = "f32_42";          // this field won't be updated, not in gr::tag::kDefaultTags
+        props["name"]                          = "TestPortName_42"; // this field won't be updated, not in gr::tag::kDefaultTags
         props[tag::SAMPLE_RATE.shortKey()]     = 48000.f;
         props[tag::SIGNAL_NAME.shortKey()]     = std::string("IF");
         props[tag::SIGNAL_QUANTITY.shortKey()] = std::string("voltage");
@@ -444,6 +447,8 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(metaInfo.signal_max.value, +1.f));
 
         const property_map out = metaInfo.get();
+        expect(eq(std::get<std::string>(out.at("data_type")), "f32"s));
+        expect(eq(std::get<std::string>(out.at("name")), "TestPortName"s));
         expect(eq(std::get<float>(out.at(tag::SAMPLE_RATE.shortKey())), 48000.f));
         expect(eq(std::get<std::string>(out.at(tag::SIGNAL_NAME.shortKey())), "IF"s));
         expect(eq(std::get<std::string>(out.at(tag::SIGNAL_QUANTITY.shortKey())), "voltage"s));
@@ -459,7 +464,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(!metaInfo.update(wrong).has_value());
     };
 
-    "update partial changes before throw"_test = [] {
+    "update partial changes before wrong type"_test = [] {
         PortMetaInfo metaInfo;
         property_map p;
         // to be sure in which order settings are applied
