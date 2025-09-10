@@ -1092,7 +1092,7 @@ public:
 
         if (inputTagsPresent()) {
             settings().autoUpdate(_mergedInputTag); // apply tags as new settings if matching
-            for_each_port([&]<PortLike Port>(Port& inputPort) { inputPort.metaInfo.template update<true>(_mergedInputTag.map); }, inputPorts<PortType::STREAM>(&self()));
+            for_each_port([&]<PortLike Port>(Port& inputPort) { emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", inputPort.metaInfo.update(_mergedInputTag.map)); }, inputPorts<PortType::STREAM>(&self()));
         }
     }
 

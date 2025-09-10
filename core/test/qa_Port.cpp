@@ -426,7 +426,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         props[tag::SIGNAL_UNIT.shortKey()]     = std::string("[V]");
         props[tag::SIGNAL_MIN.shortKey()]      = -1.f;
         props[tag::SIGNAL_MAX.shortKey()]      = 1.f;
-        metaInfo.update(props);
+        expect(metaInfo.update(props).has_value());
         expect(eq(metaInfo.sample_rate.value, 48000.f));
         expect(eq(metaInfo.signal_name.value, "IF"s));
         expect(eq(metaInfo.signal_quantity.value, "voltage"s));
@@ -442,11 +442,11 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(std::get<float>(out.at(tag::SIGNAL_MAX.shortKey())), 1.f));
     };
 
-    "update wrong type throws"_test = [] {
+    "update wrong type"_test = [] {
         PortMetaInfo metaInfo;
         property_map wrong;
         wrong[tag::SAMPLE_RATE.shortKey()] = 123; // int instead of float
-        expect(throws<std::exception>([&metaInfo, &wrong] { metaInfo.update(wrong); }));
+        expect(!metaInfo.update(wrong).has_value());
     };
 
     "update partial changes before throw"_test = [] {
@@ -458,7 +458,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
         p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
         p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
-        expect(throws<std::exception>([&] { metaInfo.update(p); }));
+        expect(!metaInfo.update(p).has_value());
         expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated
         expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest())); // default value
         expect(eq(metaInfo.signal_max.value, std::numeric_limits<float>::max()));    // default value, it was not updated after throw
@@ -468,11 +468,11 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         PortMetaInfo portMetaInfo;
         property_map p;
         p[tag::SAMPLE_RATE.shortKey()] = 42.f;
-        portMetaInfo.update(p);
+        expect(portMetaInfo.update(p).has_value());
         expect(eq(portMetaInfo.sample_rate.value, 42.f));
         portMetaInfo.auto_update.clear();
         p[tag::SAMPLE_RATE.shortKey()] = 99.f;
-        portMetaInfo.update(p); // shouldn't update
+        expect(portMetaInfo.update(p).has_value()); // shouldn't update
         expect(eq(portMetaInfo.sample_rate.value, 42.f));
         portMetaInfo.reset();
         expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
@@ -482,7 +482,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
         expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
         expect(eq(portMetaInfo.sample_rate.value, 42.f)); // shouldn't reset sample_rate
-        portMetaInfo.update(p);
+        expect(portMetaInfo.update(p).has_value());
         expect(eq(portMetaInfo.sample_rate.value, 99.f));
     };
 
@@ -497,19 +497,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         p[gr::tag::SAMPLE_RATE.shortKey()] = 12345.f;
         p[gr::tag::SIGNAL_NAME.shortKey()] = std::string("new-name");
 
-        m.update(p);
+        expect(m.update(p).has_value());
         expect(eq(m.sample_rate.value, 12345.f));
         expect(eq(m.signal_name.value, "orig"s)); // unchanged
-    };
-
-    "update<true> noexcept overload compiles & updates"_test = [] {
-        PortMetaInfo m{"int16"};
-        property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 96000.f;
-        // should not throw (template param = true)
-        m.update<true>(p);
-        expect(eq(m.sample_rate.value, 96000.f));
-        // (Don't feed it wrong types here, since noexcept spec disallows throws)
     };
 
     "get() roundtrip after partial update"_test = [] {
@@ -517,7 +507,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         property_map p;
         p[gr::tag::SIGNAL_MIN.shortKey()] = -0.5f;
         p[gr::tag::SIGNAL_MAX.shortKey()] = +0.5f;
-        m.update(p);
+        expect(m.update(p).has_value());
 
         auto out = m.get();
         expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MIN.shortKey())), -0.5f));

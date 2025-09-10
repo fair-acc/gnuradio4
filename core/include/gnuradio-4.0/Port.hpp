@@ -207,46 +207,57 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
     explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) //
         : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
-    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
+    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { std::ignore = update(metaInfo); } // TODO: how to handle an error here?
 
     void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
 
-    template<bool isNoexcept = false>
-    void update(const property_map& metaInfo) noexcept(isNoexcept) {
+    [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
         if (metaInfo.empty()) {
-            return;
+            return {};
         }
 
-        auto updateValue = [&metaInfo](const std::string& key, auto& member) {
+        auto updateValue = [&metaInfo, &location](const std::string& key, auto& member) -> std::expected<void, Error> {
             if (!metaInfo.contains(key)) {
-                return;
+                return {};
             }
             const auto& value = metaInfo.at(key);
             using T           = std::decay_t<decltype(member.value)>;
             if (std::holds_alternative<T>(value)) {
                 member = std::get<T>(value);
             } else {
-                if constexpr (!isNoexcept) {
-                    throw gr::exception("invalid-argument: incorrect type for " + key);
-                }
+                return std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key {} (expected:{}, got:{}, value:{})", key, gr::meta::type_name<T>(), gr::meta::type_name<std::decay_t<decltype(value)>>(), value), location});
             }
+            return {};
         };
 
         for (const auto& key : auto_update) {
             if (key == gr::tag::SAMPLE_RATE.shortKey()) {
-                updateValue(key, sample_rate);
+                if (auto r = updateValue(key, sample_rate); !r) {
+                    return r;
+                }
             } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
-                updateValue(key, signal_name);
+                if (auto r = updateValue(key, signal_name); !r) {
+                    return r;
+                }
             } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
-                updateValue(key, signal_quantity);
+                if (auto r = updateValue(key, signal_quantity); !r) {
+                    return r;
+                }
             } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
-                updateValue(key, signal_unit);
+                if (auto r = updateValue(key, signal_unit); !r) {
+                    return r;
+                }
             } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
-                updateValue(key, signal_min);
+                if (auto r = updateValue(key, signal_min); !r) {
+                    return r;
+                }
             } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
-                updateValue(key, signal_max);
+                if (auto r = updateValue(key, signal_max); !r) {
+                    return r;
+                }
             }
         }
+        return {};
     }
 
     [[nodiscard]] property_map get() const noexcept {
