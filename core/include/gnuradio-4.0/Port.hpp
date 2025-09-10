@@ -245,12 +245,9 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
-        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
-        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
-        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
-        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
-        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
-        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
+        refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { //
+            metaInfo.insert_or_assign(std::string(refl::data_member_name<PortMetaInfo, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*this)));
+        });
 
         return metaInfo;
     }

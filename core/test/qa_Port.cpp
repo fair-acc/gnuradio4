@@ -446,6 +446,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         const property_map out = metaInfo.get();
         expect(eq(std::get<float>(out.at(tag::SAMPLE_RATE.shortKey())), 48000.f));
         expect(eq(std::get<std::string>(out.at(tag::SIGNAL_NAME.shortKey())), "IF"s));
+        expect(eq(std::get<std::string>(out.at(tag::SIGNAL_QUANTITY.shortKey())), "voltage"s));
         expect(eq(std::get<std::string>(out.at(tag::SIGNAL_UNIT.shortKey())), "[V]"s));
         expect(eq(std::get<float>(out.at(tag::SIGNAL_MIN.shortKey())), -1.f));
         expect(eq(std::get<float>(out.at(tag::SIGNAL_MAX.shortKey())), 1.f));
