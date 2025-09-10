@@ -947,7 +947,31 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
     };
 };
 
-const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
+template<typename T>
+struct PortMetaInfoTestBlockWithManyPorts : gr::Block<PortMetaInfoTestBlockWithManyPorts<T>> {
+    static constexpr std::size_t nPorts = 2UZ;
+
+    gr::PortIn<T>              in1;
+    std::vector<gr::PortIn<T>> in2{nPorts};
+    gr::PortOut<T>             out;
+
+    GR_MAKE_REFLECTABLE(PortMetaInfoTestBlockWithManyPorts, in1, in2, out);
+
+    template<gr::InputSpanLike TInput2>
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan1, const std::span<TInput2>& inSpan2, gr::OutputSpanLike auto& outSpan) {
+        const std::size_t n = std::min(inSpan1.size(), outSpan.size());
+        std::copy_n(inSpan1.begin(), n, outSpan.begin());
+        std::ignore = inSpan1.consume(n);
+        for (auto& locInSpan2 : inSpan2) {
+            std::ignore = locInSpan2.consume(n);
+        }
+        outSpan.publish(n);
+
+        return gr::work::Status::OK;
+    }
+};
+
+const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
     using namespace gr;
@@ -955,30 +979,41 @@ const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
     "auto update PortMetaInfo from Tag"_test = [&] {
         using namespace gr::testing;
         using namespace gr::tag;
+
         const gr::Size_t nSamples = 100;
         Graph            testGraph;
 
-        const property_map srcParams1 = {                       //
-            {SAMPLE_RATE.shortKey(), 42.f},                     //
-            {SIGNAL_NAME.shortKey(), "SIGNAL_NAME_42"},         //
-            {SIGNAL_QUANTITY.shortKey(), "SIGNAL_QUANTITY_42"}, //
-            {SIGNAL_UNIT.shortKey(), "SIGNAL_UNIT_42"},         //
-            {SIGNAL_MIN.shortKey(), 42.f},                      //
-            {SIGNAL_MAX.shortKey(), 42.f}};
+        auto createSrcTags = [](std::size_t srcNum) -> std::vector<Tag> {
+            const property_map srcParams1 = {                                            //
+                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum)},                    //
+                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum)},         //
+                {SIGNAL_QUANTITY.shortKey(), std::format("SIGNAL_QUANTITY_{}", srcNum)}, //
+                {SIGNAL_UNIT.shortKey(), std::format("SIGNAL_UNIT_{}", srcNum)},         //
+                {SIGNAL_MIN.shortKey(), static_cast<float>(srcNum)},                     //
+                {SIGNAL_MAX.shortKey(), static_cast<float>(srcNum)}};
 
-        const property_map srcParams2 = {   //
-            {SAMPLE_RATE.shortKey(), 43.f}, //
-            {SIGNAL_NAME.shortKey(), "SIGNAL_NAME_43"}};
+            const property_map srcParams2 = {                                //
+                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum) + 10.f}, //
+                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum + 10)}};
 
-        const auto srcTags = std::vector<Tag>{Tag{10, srcParams1}, Tag{50, srcParams2}};
+            return std::vector<Tag>{Tag{10 + 5 * srcNum, srcParams1}, Tag{50 + 5 * srcNum, srcParams2}};
+        };
 
-        auto& src     = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}});
-        src._tags     = srcTags;
-        auto& monitor = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitor"}});
-        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
+        auto& src1 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource1"}, {"n_samples_max", nSamples}});
+        src1._tags = createSrcTags(1);
+        auto& src2 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource2"}, {"n_samples_max", nSamples}});
+        src2._tags = createSrcTags(2);
+        auto& src3 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource3"}, {"n_samples_max", nSamples}});
+        src3._tags = createSrcTags(3);
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitor)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor).to<"in">(sink)));
+        auto& manyPortsBlock = testGraph.emplaceBlock<PortMetaInfoTestBlockWithManyPorts<float>>({{"name", "PortMetaInfoTestBlockWithManyPorts"}});
+
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
+
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src1).to<"in1">(manyPortsBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src2).to<"in2", 0>(manyPortsBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src3).to<"in2", 1>(manyPortsBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(manyPortsBlock).to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -986,27 +1021,44 @@ const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(eq(src._nSamplesProduced, nSamples));
-        expect(eq(monitor._nSamplesProduced, nSamples));
+        expect(eq(src1._nSamplesProduced, nSamples));
+        expect(eq(src2._nSamplesProduced, nSamples));
+        expect(eq(src3._nSamplesProduced, nSamples));
         expect(eq(sink._nSamplesProduced, nSamples));
 
-        expect(eq(src.sample_rate, 1000.0f)); // default value (set in the class)
-        expect(eq(monitor.sample_rate, 43.0f));
-        expect(eq(sink.sample_rate, 43.0f));
+        expect(eq(src1.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(src2.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(src3.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(sink.sample_rate, 13.0f));   // updated from the last tag across all sources
 
-        expect(eq(monitor.in.metaInfo.sample_rate.value, 43.f));
-        expect(eq(monitor.in.metaInfo.signal_name.value, "SIGNAL_NAME_43"s));
-        expect(eq(monitor.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_42"s));
-        expect(eq(monitor.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_42"s));
-        expect(eq(monitor.in.metaInfo.signal_min.value, 42.f));
-        expect(eq(monitor.in.metaInfo.signal_max.value, 42.f));
+        expect(eq(manyPortsBlock.in1.metaInfo.sample_rate.value, 11.f));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_name.value, "SIGNAL_NAME_11"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_1"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_unit.value, "SIGNAL_UNIT_1"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_min.value, 1.f));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_max.value, 1.f));
 
-        expect(eq(sink.in.metaInfo.sample_rate.value, 43.f));
-        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_43"s));
-        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_42"s));
-        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_42"s));
-        expect(eq(sink.in.metaInfo.signal_min.value, 42.f));
-        expect(eq(sink.in.metaInfo.signal_max.value, 42.f));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.sample_rate.value, 12.f));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_name.value, "SIGNAL_NAME_12"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_2"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_unit.value, "SIGNAL_UNIT_2"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_min.value, 2.f));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_max.value, 2.f));
+
+        expect(eq(manyPortsBlock.in2[1].metaInfo.sample_rate.value, 13.f));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_min.value, 3.f));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_max.value, 3.f));
+
+        // updated from the last tag across all sources
+        expect(eq(sink.in.metaInfo.sample_rate.value, 13.f));
+        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
+        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
+        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(sink.in.metaInfo.signal_min.value, 3.f));
+        expect(eq(sink.in.metaInfo.signal_max.value, 3.f));
     };
 };
 
