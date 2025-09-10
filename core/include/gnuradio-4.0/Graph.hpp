@@ -67,14 +67,14 @@ inline std::string format(GraphLike auto const& graph) {
     return os.str();
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto& what, std::source_location location = std::source_location::current()) noexcept {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto const& what, std::source_location location = std::source_location::current()) noexcept {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block->uniqueName() == what.unique_name; }); it != graph.blocks().end()) {
         return *it;
     }
     return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location));
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::shared_ptr<BlockModel> what, std::source_location location = std::source_location::current()) noexcept {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block.get() == std::addressof(*what); }); it != graph.blocks().end()) {
         return *it;
     }
@@ -89,6 +89,19 @@ std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const
     }
     return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
 }
+
+std::expected<std::size_t, Error> blockIndex(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
+    std::size_t index = 0UZ;
+    for (const auto& block : graph.blocks()) {
+        if (block->uniqueName() == uniqueBlockName) {
+            return index;
+        }
+        index++;
+    }
+    return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
+}
+
+std::expected<std::size_t, Error> blockIndex(GraphLike auto const& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept { return blockIndex(graph, what->uniqueName(), location); }
 
 // forward declaration
 template<block::Category traverseCategory, typename Fn>
@@ -726,7 +739,6 @@ static_assert(BlockLike<Graph>);
 /*******************************************************************************************************/
 
 namespace graph {
-
 namespace detail {
 template<block::Category traverseCategory, typename Fn>
 void traverseSubgraphs(GraphLike auto const& root, Fn&& visitGraph) {
@@ -808,18 +820,113 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
 }
 
 using AdjacencyList = std::unordered_map<std::shared_ptr<gr::BlockModel>, //
-    std::unordered_map<gr::PortDefinition, std::vector<gr::Edge*>>>;
+    std::unordered_map<gr::PortDefinition, std::vector<const gr::Edge*>>>;
 
-inline AdjacencyList computeAdjacencyList(GraphLike auto& root) {
+AdjacencyList computeAdjacencyList(const GraphLike auto& root) {
     AdjacencyList result;
-    for (gr::Edge& edge : root.edges()) {
-        std::vector<gr::Edge*>& srcMapPort = result[edge.sourceBlock()][edge.sourcePortDefinition()];
+    for (const gr::Edge& edge : root.edges()) {
+        std::vector<const gr::Edge*>& srcMapPort = result[edge.sourceBlock()][edge.sourcePortDefinition()];
         srcMapPort.push_back(std::addressof(edge));
     }
     return result;
 }
 
-inline std::span<gr::Edge* const> outgoingEdges(const AdjacencyList& adj, const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& port) {
+inline std::vector<gr::Graph> weaklyConnectedComponents(const gr::Graph& graph) {
+    const auto        blocksSpan = graph.blocks();
+    const std::size_t N          = blocksSpan.size();
+
+    std::unordered_map<const gr::BlockModel*, std::size_t> indexOf;
+    indexOf.reserve(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        indexOf.emplace(blocksSpan[i].get(), i);
+    }
+
+    std::vector<std::vector<std::size_t>> adjacencyList(N);
+    adjacencyList.reserve(N);
+    for (const gr::Edge& e : graph.edges()) {
+        const auto* sb  = e.sourceBlock().get();
+        const auto* db  = e.destinationBlock().get();
+        auto        sit = indexOf.find(sb);
+        auto        dit = indexOf.find(db);
+        if (sit != indexOf.end() && dit != indexOf.end()) {
+            const auto s = sit->second;
+            const auto d = dit->second;
+            adjacencyList[s].push_back(d);
+            adjacencyList[d].push_back(s);
+        }
+    }
+
+    // BFS component labelling and collecting node lists
+    std::vector<int>                      compId(N, -1);
+    std::vector<std::vector<std::size_t>> comps;
+    comps.reserve(N);
+
+    for (std::size_t s = 0; s < N; ++s) {
+        if (compId[s] != -1) {
+            continue;
+        }
+
+        std::vector<std::size_t> comp;
+        comp.reserve(8);
+        std::deque<std::size_t> q;
+        q.push_back(s);
+        compId[s] = static_cast<int>(comps.size());
+
+        while (!q.empty()) {
+            const auto v = q.front();
+            q.pop_front();
+            comp.push_back(v);
+
+            for (auto u : adjacencyList[v]) {
+                if (compId[u] == -1) {
+                    compId[u] = compId[v];
+                    q.push_back(u);
+                }
+            }
+        }
+        comps.push_back(std::move(comp));
+    }
+
+    // sort components according to size (i.e. number of blocks)
+    std::vector<std::size_t> order(comps.size());
+    std::iota(order.begin(), order.end(), 0UZ);
+    std::ranges::sort(order, [&](std::size_t a, std::size_t b) { return comps[a].size() > comps[b].size(); });
+
+    std::vector<std::size_t> compRank(comps.size());
+    for (std::size_t rank = 0; rank < order.size(); ++rank) {
+        compRank[order[rank]] = rank;
+    }
+
+    std::vector<gr::Graph> result(order.size());
+    for (std::size_t rank = 0; rank < order.size(); ++rank) {
+        const auto cid = order[rank];
+        auto&      g   = result[rank];
+        g.clear();
+        for (auto idx : comps[cid]) {
+            g.addBlock(blocksSpan[idx], /*initBlock=*/false);
+        }
+    }
+
+    // add only edges that are exclusively in the same component
+    for (const gr::Edge& e : graph.edges()) {
+        const auto itS = indexOf.find(e.sourceBlock().get());
+        const auto itD = indexOf.find(e.destinationBlock().get());
+        if (itS == indexOf.end() || itD == indexOf.end()) {
+            continue;
+        }
+
+        const auto cidS = compId[itS->second];
+        const auto cidD = compId[itD->second];
+        if (cidS >= 0 && cidS == cidD) {
+            const auto rank = compRank[static_cast<std::size_t>(cidS)];
+            result[rank].addEdge(e); // shallow edge copy: same blocks/ports
+        }
+    }
+
+    return result;
+}
+
+inline std::span<const gr::Edge* const> outgoingEdges(const AdjacencyList& adj, const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& port) {
     if (auto it = adj.find(block); it != adj.end()) {
         if (auto pit = it->second.find(port); pit != it->second.end()) {
             return std::span(pit->second);
@@ -844,6 +951,159 @@ inline std::vector<std::shared_ptr<BlockModel>> findSourceBlocks(const Adjacency
     sources.erase(std::remove_if(sources.begin(), sources.end(), [&](const auto& b) { return destinations.contains(b); }), sources.end());
     std::sort(sources.begin(), sources.end(), [](const auto& a, const auto& b) { return a->name() < b->name(); });
     return sources;
+}
+
+struct FeedbackLoop {
+    std::vector<Edge> edges;
+};
+
+template<GraphLike TGraph>
+std::vector<FeedbackLoop> detectFeedbackLoops(const TGraph& graph) {
+    enum class VisitState { Unvisited, Gray, Black };
+
+    std::unordered_map<std::shared_ptr<BlockModel>, VisitState> visited;
+    std::vector<FeedbackLoop>                                   loops;
+    std::vector<std::shared_ptr<BlockModel>>                    path;
+    std::vector<Edge>                                           pathEdges;
+
+    const AdjacencyList adjList = computeAdjacencyList(graph);
+
+    forEachBlock<block::Category::All>(graph, [&](const auto& block) { visited[block] = VisitState::Unvisited; });
+
+    auto dfs = [&](this auto&& self, auto& current) -> void {
+        visited[current] = VisitState::Gray;
+        path.push_back(current);
+
+        if (auto it = adjList.find(current); it != adjList.end()) {
+            for (const auto& [_, edges] : it->second) {
+                for (const Edge* edge : edges) {
+                    auto next = edge->destinationBlock();
+                    pathEdges.push_back(*edge);
+
+                    if (visited[next] == VisitState::Gray) { // back-edge found - extract cycle
+                        auto cycleStart = std::ranges::find(path, next);
+                        if (cycleStart != path.end()) {
+                            FeedbackLoop loop;
+                            auto         startIdx = std::distance(path.begin(), cycleStart);
+
+                            // copy cycle edges in order
+                            std::ranges::copy(pathEdges | std::views::drop(startIdx), std::back_inserter(loop.edges));
+                            loops.push_back(std::move(loop));
+                        }
+                    } else if (visited[next] == VisitState::Unvisited) {
+                        self(next);
+                    }
+
+                    pathEdges.pop_back();
+                }
+            }
+        }
+
+        path.pop_back();
+        visited[current] = VisitState::Black;
+    };
+
+    forEachBlock<block::Category::All>(graph, [&](auto& block) {
+        if (visited[block] == VisitState::Unvisited) {
+            dfs(block);
+        }
+    });
+
+    return loops;
+}
+
+[[nodiscard]] inline std::expected<std::size_t, Error> calculateLoopPrimingSize(const FeedbackLoop& loop, std::source_location location = std::source_location::current()) {
+    if (loop.edges.empty()) {
+        return 0UZ;
+    }
+
+    // step 1: check for feedback loop rate consistency
+    std::int32_t cumulativeNumerator{1};
+    std::int32_t cumulativeDenominator{1};
+    for (const auto& edge : loop.edges) {
+        auto ratio = edge.destinationBlock()->resamplingRatio();
+        cumulativeNumerator *= ratio.numerator;
+        cumulativeDenominator *= ratio.denominator;
+    }
+    if (cumulativeNumerator != cumulativeDenominator) { // stable feedback, net transformation must be 1:1
+        return std::unexpected(Error(std::format("feedback loop has unstable rate transformation: {}:{} (net gain: {:.3f})", cumulativeNumerator, cumulativeDenominator, static_cast<double>(cumulativeDenominator) / cumulativeNumerator), location));
+    }
+
+    // step 2: calculate minimum samples needed
+    std::size_t samplesNeeded = 1UZ;
+
+    std::size_t edgeIdx = 0UZ;
+    for (const auto& edge : loop.edges) {
+        auto destBlock   = edge.destinationBlock();
+        auto destPortDef = edge.destinationPortDefinition();
+
+        std::size_t destPortIdx = std::visit(
+            [&destBlock](const auto& portDef) -> std::size_t {
+                using T = std::decay_t<decltype(portDef)>;
+                if constexpr (std::is_same_v<T, PortDefinition::IndexBased>) {
+                    return portDef.topLevel;
+                } else {
+                    return destBlock->dynamicInputPortIndex(portDef.name);
+                }
+            },
+            destPortDef.definition);
+
+        // known invariant at this stage: loop is rate-stable
+        if (edgeIdx == 0UZ) {
+            auto sourceRatio = edge.sourceBlock()->resamplingRatio();
+            if (sourceRatio.denominator > 0) {
+                std::size_t sourceInputNeeded = (samplesNeeded * static_cast<std::size_t>(sourceRatio.numerator)) / static_cast<std::size_t>(sourceRatio.denominator);
+                samplesNeeded                 = std::max(samplesNeeded, sourceInputNeeded);
+            }
+
+            if (edge.sourceBlock()->stride() > 0) {
+                samplesNeeded = std::max(samplesNeeded, static_cast<std::size_t>(edge.sourceBlock()->stride()));
+            }
+        }
+        edgeIdx++;
+
+        auto destRatio = destBlock->resamplingRatio();
+        auto destMinIn = destBlock->minInputRequirements();
+
+        if (destPortIdx < destMinIn.size() && destMinIn[destPortIdx] > 0) {
+            samplesNeeded = std::max(samplesNeeded, destMinIn[destPortIdx]);
+        }
+
+        if (destRatio.numerator > 0) {
+            samplesNeeded = std::max(samplesNeeded, static_cast<std::size_t>(destRatio.numerator));
+        }
+
+        if (destBlock->stride() > 0) {
+            samplesNeeded = std::max(samplesNeeded, static_cast<std::size_t>(destBlock->stride()));
+        }
+    }
+
+    return samplesNeeded;
+}
+
+[[nodiscard]] inline std::expected<std::size_t, Error> primeLoop(const FeedbackLoop& loop, std::size_t nSamples, std::source_location location = std::source_location::current()) {
+    if (loop.edges.empty()) {
+        return std::unexpected(Error("empty feedback loop cannot be primed", location));
+    }
+    // need to inject in the last edge where the feedback loop is closed
+    const auto& closingEdge = loop.edges.back();
+    try {
+        std::size_t inputPortIdx = gr::absolutePortIndex<gr::PortDirection::INPUT>(closingEdge.destinationBlock(), closingEdge.destinationPortDefinition());
+        return closingEdge.destinationBlock()->primeInputPort(inputPortIdx, nSamples, location);
+    } catch (const gr::exception& e) {
+        return std::unexpected(Error(std::format("failed to prime loop: {}", e.what()), location));
+    }
+}
+
+inline void printFeedbackLoop(const FeedbackLoop& loop, std::size_t loopIdx = 0UZ, std::source_location location = std::source_location::current()) {
+    std::println("Feedback Loop #{} ({} edges):", loopIdx, loop.edges.size());
+
+    std::size_t edgeIdx = 0UZ;
+    for (const auto& edge : loop.edges) {
+        std::println("  [{}] {} -> {} (buffer: {}, weight: {})", edgeIdx++, edge.sourceBlock()->name(), edge.destinationBlock()->name(), edge.minBufferSize(), edge.weight());
+    }
+
+    std::println("  Recommended priming: {} samples\n", calculateLoopPrimingSize(loop, location));
 }
 
 } // namespace graph
