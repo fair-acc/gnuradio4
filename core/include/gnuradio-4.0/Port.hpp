@@ -216,51 +216,30 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
 
     [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
-        if (metaInfo.empty()) {
-            return {};
+        for (const auto& [key, value] : metaInfo) {
+            if (!auto_update.contains(key)) {
+                continue;
+            }
+            std::expected<void, Error> maybeError = {};
+            refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) {
+                using MemberType = refl::data_member_type<PortMetaInfo, kIdx>;
+                using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+
+                const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
+                if (fieldName == key) {
+                    if (std::holds_alternative<Type>(value)) {
+                        auto& member = refl::data_member<kIdx>(*this);
+                        std::ignore  = member.validate_and_set(std::get<Type>(value));
+                    } else {
+                        maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key {} (expected:{}, got:{}, value:{})", key, gr::meta::type_name<Type>(), gr::meta::type_name<std::decay_t<decltype(value)>>(), value), location});
+                    }
+                }
+            });
+            if (!maybeError) {
+                return maybeError;
+            }
         }
 
-        auto updateValue = [&metaInfo, &location](const std::string& key, auto& member) -> std::expected<void, Error> {
-            if (!metaInfo.contains(key)) {
-                return {};
-            }
-            const auto& value = metaInfo.at(key);
-            using T           = std::decay_t<decltype(member.value)>;
-            if (std::holds_alternative<T>(value)) {
-                member = std::get<T>(value);
-            } else {
-                return std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key {} (expected:{}, got:{}, value:{})", key, gr::meta::type_name<T>(), gr::meta::type_name<std::decay_t<decltype(value)>>(), value), location});
-            }
-            return {};
-        };
-
-        for (const auto& key : auto_update) {
-            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
-                if (auto r = updateValue(key, sample_rate); !r) {
-                    return r;
-                }
-            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
-                if (auto r = updateValue(key, signal_name); !r) {
-                    return r;
-                }
-            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
-                if (auto r = updateValue(key, signal_quantity); !r) {
-                    return r;
-                }
-            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
-                if (auto r = updateValue(key, signal_unit); !r) {
-                    return r;
-                }
-            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
-                if (auto r = updateValue(key, signal_min); !r) {
-                    return r;
-                }
-            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
-                if (auto r = updateValue(key, signal_max); !r) {
-                    return r;
-                }
-            }
-        }
         return {};
     }
 
