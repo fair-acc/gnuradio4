@@ -72,6 +72,8 @@ struct Edge {
     std::int32_t _weight = 0;
     std::string  _name   = "unnamed edge"; // custom edge name
 
+    property_map _uiConstraints{};
+
     Edge() = delete;
 
     explicit Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition,               //
@@ -95,10 +97,12 @@ struct Edge {
     constexpr void setWeight(std::int32_t weight) { _weight = weight; }
     constexpr void setName(std::string name) { _name = std::move(name); }
 
-    constexpr std::size_t bufferSize() const { return _actualBufferSize; }
-    constexpr std::size_t nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
-    constexpr std::size_t nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
-    constexpr PortType    edgeType() const { return _edgeType; }
+    constexpr std::size_t             bufferSize() const { return _actualBufferSize; }
+    constexpr std::size_t             nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
+    constexpr std::size_t             nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
+    constexpr PortType                edgeType() const { return _edgeType; }
+    [[nodiscard]] property_map&       uiConstraints() noexcept { return _uiConstraints; }
+    [[nodiscard]] const property_map& uiConstraints() const { return _uiConstraints; }
 
     constexpr bool hasSameSourcePort(const Edge& other) const noexcept { return sourceBlock() == other.sourceBlock() && sourcePortDefinition().definition == other.sourcePortDefinition().definition; }
 
@@ -109,7 +113,44 @@ struct Edge {
                && destinationPortDefinition().definition == other.destinationPortDefinition().definition; //
     }
 };
+static_assert(std::is_copy_constructible_v<Edge>);
+static_assert(std::is_move_constructible_v<Edge>);
+} // namespace gr
 
+namespace std {
+template<>
+struct hash<gr::Edge> {
+#if SIZE_MAX > 0xFFFFFFFF
+    static constexpr std::size_t kPhi = 0x9e3779b97f4a7c15ULL;
+#else
+    static constexpr std::size_t kPhi = 0x9e3779b9UL;
+#endif
+
+    static void combine(std::size_t& seed, std::size_t v) noexcept { seed ^= v + kPhi + (seed << 6) + (seed >> 2); }
+
+    static constexpr std::size_t forbid_zero_max(std::size_t x) noexcept {
+        if (x == 0) {
+            return kPhi;
+        }
+        if (x == std::numeric_limits<std::size_t>::max()) {
+            return std::numeric_limits<std::size_t>::max() - kPhi;
+        }
+        return x;
+    }
+
+    std::size_t operator()(const gr::Edge& e) const noexcept {
+        std::size_t seed = 0;
+        combine(seed, std::hash<std::shared_ptr<gr::BlockModel>>{}(e.sourceBlock()));
+        combine(seed, std::hash<gr::PortDefinition>{}(e.sourcePortDefinition()));
+        combine(seed, std::hash<std::shared_ptr<gr::BlockModel>>{}(e.destinationBlock()));
+        combine(seed, std::hash<gr::PortDefinition>{}(e.destinationPortDefinition()));
+        combine(seed, kPhi); // one more stir
+        return forbid_zero_max(seed);
+    }
+};
+} // namespace std
+
+namespace gr {
 class BlockModel {
 public:
     struct NamedPortCollection {
@@ -300,9 +341,9 @@ public:
         }
     }
 
-    std::size_t dynamicInputPortIndex(const std::string& name) const {
+    std::size_t dynamicInputPortIndex(const std::string& name, std::source_location location = std::source_location::current()) const {
         initDynamicPorts();
-        for (std::size_t i = 0; i < _dynamicInputPorts.size(); ++i) {
+        for (std::size_t i = 0UZ; i < _dynamicInputPorts.size(); ++i) {
             if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(i))) {
                 if (portCollection->name == name) {
                     return i;
@@ -314,12 +355,12 @@ public:
             }
         }
 
-        throw gr::exception(std::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name), location);
     }
 
-    std::size_t dynamicOutputPortIndex(const std::string& name) const {
+    std::size_t dynamicOutputPortIndex(const std::string& name, std::source_location location = std::source_location::current()) const {
         initDynamicPorts();
-        for (std::size_t i = 0; i < _dynamicOutputPorts.size(); ++i) {
+        for (std::size_t i = 0UZ; i < _dynamicOutputPorts.size(); ++i) {
             if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(i))) {
                 if (portCollection->name == name) {
                     return i;
@@ -331,7 +372,7 @@ public:
             }
         }
 
-        throw gr::exception(std::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name), location);
     }
 
     virtual ~BlockModel() = default;
@@ -839,6 +880,111 @@ public:
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 };
+
+namespace detail {
+[[nodiscard]] constexpr inline std::pair<std::string_view, std::size_t> portBaseNameAndOffset(std::string_view portName, const gr::PortDefinition& portDefinition) noexcept {
+    // split "name#n" -> { "name", n }, else { "name", nullopt }
+    constexpr auto splitPortNameAtHash = [](std::string_view s) -> std::pair<std::string_view, std::optional<std::size_t>> {
+        const auto hash = std::ranges::find(s, '#');
+        const auto head = s.substr(0UZ, static_cast<std::size_t>(hash - s.begin()));
+        if (hash == s.end()) {
+            return {head, std::nullopt};
+        }
+        const auto tail = s.substr(head.size() + 1UZ);
+
+        std::size_t v{};
+        const char* first = std::to_address(tail.cbegin());
+        const char* last  = std::to_address(tail.cend());
+        if (auto [ptr, ec] = std::from_chars(first, last, v); ec == std::errc{} && ptr == last) {
+            return {head, v};
+        }
+        return {head, std::nullopt};
+    };
+
+    auto [baseName, idx]        = splitPortNameAtHash(portName);
+    std::size_t localPortOffset = idx.value_or(0UZ);
+
+    if (auto* d = std::get_if<gr::PortDefinition::IndexBased>(&portDefinition.definition)) {
+        if (d->subIndex != gr::meta::invalid_index) {
+            localPortOffset = d->subIndex;
+        }
+        return {baseName, localPortOffset};
+    }
+
+    if (const auto* d = std::get_if<gr::PortDefinition::StringBased>(&portDefinition.definition)) {
+        auto [b2, idx2] = splitPortNameAtHash(d->name);
+
+        if (std::ranges::find(d->name, '#') != d->name.end()) {
+            if (idx2.has_value()) { // clean "#n"
+                baseName        = b2;
+                localPortOffset = *idx2;
+            } else {
+                baseName        = b2;
+                localPortOffset = gr::meta::invalid_index; // found '#' but failed to parse tail (e.g. "in2#1 ", "in2#abc") -> poison offset
+            }
+            return {baseName, localPortOffset};
+        }
+        return {baseName, localPortOffset}; // no '#' in portName
+    }
+    return {baseName, localPortOffset}; // fallback
+}
+} // namespace detail
+
+template<gr::PortDirection direction>
+[[nodiscard]] std::size_t absolutePortIndex(const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& portDefinition, std::source_location loc = std::source_location::current()) {
+    constexpr bool        isInput            = direction == gr::PortDirection::INPUT;
+    constexpr static auto portCollectionSize = [](const std::shared_ptr<gr::BlockModel>& b, std::size_t idx = gr::meta::invalid_index) -> std::size_t {
+        if constexpr (isInput) {
+            return b->dynamicInputPortsSize(idx);
+        } else {
+            return b->dynamicOutputPortsSize(idx);
+        }
+    };
+    constexpr static auto countPortsPrior = [](const std::shared_ptr<gr::BlockModel>& b, std::size_t idx) -> std::size_t {
+        const std::size_t nTopLevel = portCollectionSize(b);
+        if (idx >= nTopLevel) {
+            throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", b->uniqueName(), idx, nTopLevel));
+        }
+        std::size_t nPortsPrior = 0UZ;
+        for (std::size_t i = 0UZ; i < idx; ++i) { // count all ports in collections before idx
+            std::size_t nPortsInCollection = 0UZ;
+            if constexpr (isInput) {
+                nPortsInCollection = b->dynamicInputPortsSize(i);
+            } else {
+                nPortsInCollection = b->dynamicOutputPortsSize(i);
+            }
+            const bool isNonCollectionPort = nPortsInCollection == gr::meta::invalid_index;
+            nPortsPrior += isNonCollectionPort ? 1UZ : nPortsInCollection; //
+        }
+        return nPortsPrior;
+    };
+
+    if (const auto* idx = std::get_if<gr::PortDefinition::IndexBased>(&portDefinition.definition)) {
+        if (idx->subIndex != gr::meta::invalid_index) {
+            if (idx->subIndex >= portCollectionSize(block, idx->topLevel)) {
+                throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", block->uniqueName(), idx->subIndex, portCollectionSize(block)), loc);
+            }
+            return countPortsPrior(block, idx->topLevel) + idx->subIndex;
+        }
+        // no subIndex -> first element of the group (scalar or collection)
+        return idx->topLevel == 0UZ ? 0UZ : (countPortsPrior(block, idx->topLevel));
+    }
+
+    if (const auto idx = std::get_if<gr::PortDefinition::StringBased>(&portDefinition.definition); idx) {                                 // portDefinition is StringBased, e.g. "in#1";
+        const auto& port                  = isInput ? block->dynamicInputPort(idx->name, loc) : block->dynamicOutputPort(idx->name, loc); // N.B. can throw if name not present
+        const auto [baseName, portOffset] = detail::portBaseNameAndOffset(port.portName(), portDefinition);
+        const std::size_t baseIdx         = isInput ? block->dynamicInputPortIndex(std::string(baseName), loc) : block->dynamicOutputPortIndex(std::string(baseName), loc);
+        if (baseIdx == gr::meta::invalid_index) {
+            return gr::meta::invalid_index;
+        }
+        if (portOffset >= portCollectionSize(block, baseIdx)) {
+            throw gr::exception(std::format("Block {} port offset {} out of bounds [0, {}]", block->uniqueName(), portOffset, portCollectionSize(block)), loc);
+        }
+        return countPortsPrior(block, baseIdx) + portOffset;
+    }
+
+    return gr::meta::invalid_index;
+}
 
 } // namespace gr
 

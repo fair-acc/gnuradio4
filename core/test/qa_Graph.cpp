@@ -159,6 +159,28 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         expect(!graph::findBlock(graph, bogus).has_value());
     };
 
+    "blockIndex by name"_test = [] {
+        Graph              graph;
+        NullSource<float>& block1 = graph.emplaceBlock<NullSource<float>>();
+        NullSource<float>& block2 = graph.emplaceBlock<NullSource<float>>();
+        expect(eq(graph::blockIndex(graph, block1.unique_name).value(), 0UZ));
+        expect(eq(graph::blockIndex(graph, block2.unique_name).value(), 1UZ));
+        expect(!graph::blockIndex(graph, "unknownBlock").has_value());
+    };
+
+    "blockIndex by shared_ptr<BlockModel>"_test = [] {
+        Graph                       graph;
+        NullSource<float>&          block1    = graph.emplaceBlock<NullSource<float>>();
+        NullSource<float>&          block2    = graph.emplaceBlock<NullSource<float>>();
+        std::shared_ptr<BlockModel> blockPtr1 = graph::findBlock(graph, block1).value();
+        std::shared_ptr<BlockModel> blockPtr2 = graph::findBlock(graph, block2).value();
+        expect(eq(graph::blockIndex(graph, blockPtr1).value(), 0UZ));
+        expect(eq(graph::blockIndex(graph, blockPtr2).value(), 1UZ));
+
+        std::shared_ptr<BlockModel> bogus = std::make_shared<BlockWrapper<NullSource<float>>>();
+        expect(!graph::blockIndex(graph, bogus).has_value());
+    };
+
     "containsEdge returns true after connection"_test = [] {
         Graph              graph;
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
