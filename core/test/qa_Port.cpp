@@ -417,6 +417,15 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(+1.f, portMetaInfo.signal_max.value));
     };
 
+    "initializer list ctor throw"_test = [] { //
+        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}}); }));
+    };
+
+    "property_map ctor throw"_test = [] {
+        property_map props = {{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}};
+        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo(props); }));
+    };
+
     "update & get roundtrip"_test = [] {
         PortMetaInfo metaInfo{"f32"};
         property_map props;
