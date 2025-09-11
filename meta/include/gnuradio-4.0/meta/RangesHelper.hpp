@@ -1,6 +1,7 @@
 #ifndef GNURADIO_RANGESHELPER_HPP
 #define GNURADIO_RANGESHELPER_HPP
 
+#include <functional>
 #include <ranges>
 
 namespace gr {
