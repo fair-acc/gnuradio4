@@ -37,6 +37,35 @@ struct AdjacentDeduplicateView : std::ranges::range_adaptor_closure<AdjacentDedu
 template<class Eq>
 AdjacentDeduplicateView(Eq) -> AdjacentDeduplicateView<std::decay_t<Eq>>;
 
+/**
+ * @brief View adaptor that removes non-adjacent duplicates *within each group*, keeping the first occurrence per group.
+ *
+ * Groups the input with `std::views::chunk_by(eq1)` (e.g. by `first`) and, inside each chunk, drops later elements that are equal under `eq2` (e.g. same
+ * `{first, second}`), preserving the original order of the first occurrences.
+ *
+ * This lets you deduplicate interleaved values such as `A, B, A, B` **per group** without reordering the range.
+ *
+ * @tparam Eq1 Equality relation used to form chunks (groups). Elements that are adjacent and `eq1`-equal belong to the same chunk (e.g. same `first`).
+ * @tparam Eq2 Equality relation used to deduplicate inside a chunk (e.g. same `second`, or same `{first, second}`).
+ *
+ * @note The range is not reordered. For correctness, all elements that are equal under `eq1` should be adjacent in the input (e.g. pre-sorted by the
+ *       grouping key). This adaptor is **stateless** and runs in ~O(k²) per chunk (k = elements in the chunk); fine when chunks are small.
+ *
+ * @example
+ * // Example with Tag { index, map }
+ * struct Tag { std::size_t index; std::map<std::string,int> map; };
+ * auto same_index      = [](const Tag& a, const Tag& b){ return a.index == b.index; };
+ * auto same_index_map  = [](const Tag& a, const Tag& b){ return a.index == b.index && a.map == b.map; };
+ *
+ * std::vector<Tag> tags{
+ *   {1,{{"a",1}}}, {1,{{"b",1}}}, {1,{{"a",1}}}, {1,{{"b",1}}},
+ *   {2,{{"b",2}}}, {2,{{"c",2}}}, {2,{{"c",2}}}, {2,{{"b",2}}}
+ * };
+ *
+ * // Group by index, dedup by (index,map) -> keep first map per index
+ * auto out = tags | PairDeduplicateView{same_index, same_index_map};
+ * // Result: (1,{"a"}), (1,{"b"}), (2,{"b"}), (2,{"c"})
+ */
 template<class Eq1 = std::ranges::equal_to, class Eq2 = Eq1>
 struct PairDeduplicateView : std::ranges::range_adaptor_closure<PairDeduplicateView<Eq1, Eq2>> {
     Eq1 eq1{};

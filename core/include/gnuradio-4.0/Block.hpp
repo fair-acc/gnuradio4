@@ -1081,10 +1081,12 @@ public:
         if constexpr (!backwardTagForwarding) {
             untilLocalIndexAdjusted = 1UZ;
         }
+        const auto isSame1 = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; };
+        const auto isSame2 = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); };
         for_each_reader_span(
-            [this, untilLocalIndexAdjusted](auto& in) {
+            [this, untilLocalIndexAdjusted, isSame1, isSame2](auto& in) {
                 if (in.isSync) {
-                    auto inTags = in.tags(untilLocalIndexAdjusted) | AdjacentDeduplicateView([](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); });
+                    auto inTags = in.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isSame1, isSame2);
                     for (const auto& [_, tagMap] : inTags) {
                         for (const auto& [key, value] : tagMap.get()) {
                             _mergedInputTag.map.insert_or_assign(key, value);
@@ -1095,8 +1097,8 @@ public:
             inputSpans);
 
         for_each_port_and_reader_span(
-            [this, &untilLocalIndexAdjusted]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
-                auto inTags = span.tags(untilLocalIndexAdjusted) | AdjacentDeduplicateView([](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); });
+            [this, &untilLocalIndexAdjusted, isSame1, isSame2]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
+                auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isSame1, isSame2);
                 for (const auto& [_, tagMap] : inTags) {
                     emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
                 }
