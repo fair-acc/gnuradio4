@@ -1083,8 +1083,11 @@ public:
         for_each_reader_span(
             [this, untilLocalIndexAdjusted](auto& in) {
                 if (in.isSync) {
-                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndexAdjusted).map) {
-                        _mergedInputTag.map.insert_or_assign(key, value);
+                    const auto& inTags = in.tags(untilLocalIndexAdjusted);
+                    for (const auto& [_, tagMap] : inTags) {
+                        for (const auto& [key, value] : tagMap.get()) {
+                            _mergedInputTag.map.insert_or_assign(key, value);
+                        }
                     }
                 }
             },
@@ -1092,7 +1095,10 @@ public:
 
         for_each_port_and_reader_span(
             [&]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
-                emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(span.getMergedTag(untilLocalIndexAdjusted).map));
+                const auto& inTags = span.tags(untilLocalIndexAdjusted);
+                for (const auto& [_, tagMap] : inTags) {
+                    emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
+                }
             },
             inputPorts<PortType::STREAM>(&self()), inputSpans);
 
