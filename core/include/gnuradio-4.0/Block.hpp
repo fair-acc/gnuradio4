@@ -9,6 +9,7 @@
 
 #include <format>
 
+#include <gnuradio-4.0/meta/RangesHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -1083,7 +1084,7 @@ public:
         for_each_reader_span(
             [this, untilLocalIndexAdjusted](auto& in) {
                 if (in.isSync) {
-                    const auto& inTags = in.tags(untilLocalIndexAdjusted);
+                    auto inTags = in.tags(untilLocalIndexAdjusted) | AdjacentDeduplicateView([](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); });
                     for (const auto& [_, tagMap] : inTags) {
                         for (const auto& [key, value] : tagMap.get()) {
                             _mergedInputTag.map.insert_or_assign(key, value);
@@ -1095,7 +1096,7 @@ public:
 
         for_each_port_and_reader_span(
             [this, &untilLocalIndexAdjusted]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
-                const auto& inTags = span.tags(untilLocalIndexAdjusted);
+                auto inTags = span.tags(untilLocalIndexAdjusted) | AdjacentDeduplicateView([](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); });
                 for (const auto& [_, tagMap] : inTags) {
                     emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
                 }

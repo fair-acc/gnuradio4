@@ -625,9 +625,11 @@ struct Port {
         [[nodiscard]] auto tags(std::size_t untilLocalIndex) {
             using PairRefType            = std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>;
             const std::size_t untilIndex = streamIndex + untilLocalIndex;
-            return rawTags | std::views::take_while([untilIndex](const Tag& t) { return t.index < untilIndex; }) | std::views::transform([this](const Tag& tag) -> PairRefType { //
-                return PairRefType{relIndex(tag.index, streamIndex), std::cref(tag.map)};
-            });
+            // Note: Use lower_bound + subrange over take_while
+            // take_while downgrades to input_range, but AdjacentDeduplicateView (and chunk_by) needs a forward_range.
+            auto last        = std::ranges::lower_bound(rawTags, untilIndex, std::ranges::less{}, &Tag::index); // First element with index >= untilIndex
+            auto prefixRange = std::ranges::subrange(std::ranges::begin(rawTags), last);
+            return prefixRange | std::views::transform([this](const Tag& tag) -> PairRefType { return {relIndex(tag.index, streamIndex), std::cref(tag.map)}; });
         }
 
         void consumeTags(std::size_t untilLocalIndex) {

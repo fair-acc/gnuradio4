@@ -984,19 +984,21 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
         Graph            testGraph;
 
         auto createSrcTags = [](std::size_t srcNum) -> std::vector<Tag> {
-            const property_map srcParams1 = {                                            //
-                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum)},                    //
-                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum)},         //
+            const property_map srcParams1 = {                         //
+                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum)}, //
+                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum)}};
+
+            const property_map srcParams2 = {                                            //
                 {SIGNAL_QUANTITY.shortKey(), std::format("SIGNAL_QUANTITY_{}", srcNum)}, //
                 {SIGNAL_UNIT.shortKey(), std::format("SIGNAL_UNIT_{}", srcNum)},         //
                 {SIGNAL_MIN.shortKey(), static_cast<float>(srcNum)},                     //
                 {SIGNAL_MAX.shortKey(), static_cast<float>(srcNum)}};
 
-            const property_map srcParams2 = {                                //
+            const property_map srcParams3 = {                                //
                 {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum) + 10.f}, //
                 {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum + 10)}};
 
-            return std::vector<Tag>{Tag{10 + 5 * srcNum, srcParams1}, Tag{50 + 5 * srcNum, srcParams2}};
+            return std::vector<Tag>{Tag{10 + 5 * srcNum, srcParams1}, Tag{12 + 5 * srcNum, srcParams2}, Tag{50 + 5 * srcNum, srcParams3}};
         };
 
         auto& src1 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource1"}, {"n_samples_max", nSamples}});
