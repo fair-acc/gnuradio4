@@ -9,19 +9,6 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
-template<>
-struct std::formatter<gr::Tag> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template<typename FormatContext>
-    constexpr auto format(const gr::Tag& tag, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "  {}->{{ {} }}\n", tag.index, tag.map);
-    }
-};
-
 /**
  * std::ranges::equal does not work correctly in gcc < 14.2 because InputSpan::tags() contains references to the tag property maps, while in the expected vector we have values
  */
