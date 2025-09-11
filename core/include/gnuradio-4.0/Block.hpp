@@ -1094,7 +1094,7 @@ public:
             inputSpans);
 
         for_each_port_and_reader_span(
-            [&]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
+            [this, &untilLocalIndexAdjusted]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
                 const auto& inTags = span.tags(untilLocalIndexAdjusted);
                 for (const auto& [_, tagMap] : inTags) {
                     emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
