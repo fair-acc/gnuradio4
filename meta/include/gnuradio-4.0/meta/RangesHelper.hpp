@@ -36,6 +36,31 @@ struct AdjacentDeduplicateView : std::ranges::range_adaptor_closure<AdjacentDedu
 
 template<class Eq>
 AdjacentDeduplicateView(Eq) -> AdjacentDeduplicateView<std::decay_t<Eq>>;
+
+template<class Eq1 = std::ranges::equal_to, class Eq2 = Eq1>
+struct PairDeduplicateView : std::ranges::range_adaptor_closure<PairDeduplicateView<Eq1, Eq2>> {
+    Eq1 eq1{};
+    Eq2 eq2{};
+
+    PairDeduplicateView() = default;
+
+    template<class T1, class T2>
+    requires std::constructible_from<Eq1, T1> && std::constructible_from<Eq2, T2>
+    explicit constexpr PairDeduplicateView(T1&& e1, T2&& e2) : eq1(std::forward<T1>(e1)), eq2(std::forward<T2>(e2)) {}
+
+    template<ViewableForwardRange Range>
+    constexpr auto operator()(Range&& r) const {
+        return std::forward<Range>(r) | std::views::chunk_by(eq1) | std::views::transform([&eq2 = this->eq2](auto chunk) {
+            const auto chunkBegin = std::ranges::begin(chunk);
+            const auto n          = static_cast<std::size_t>(std::ranges::distance(chunk));
+            const auto iters      = std::views::iota(std::size_t{0}, n) | std::views::transform([chunkBegin](std::size_t i) { return std::ranges::next(chunkBegin, static_cast<std::ptrdiff_t>(i)); });
+            auto       filtered   = iters | std::views::filter([chunkBegin, &eq2](auto it) { return std::ranges::find_if(chunkBegin, it, [&](auto const& y) { return std::invoke(eq2, y, *it); }) == it; });
+            return filtered | std::views::transform([](auto it) -> decltype(auto) { return *it; });
+        }) | std::views::join;
+    }
+};
+template<class Eq1, class Eq2>
+PairDeduplicateView(Eq1, Eq2) -> PairDeduplicateView<std::decay_t<Eq1>, std::decay_t<Eq2>>;
 } // namespace gr
 
 #endif // GNURADIO_RANGESHELPER_HPP
