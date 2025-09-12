@@ -409,11 +409,26 @@ protected:
     }
 
     bool connectPendingEdges() {
+        auto primeFeedbackPorts = [&](const gr::Graph& graph) {
+            std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
+            for (auto& loop : feedbackLoops) {
+                if (std::expected<std::size_t, Error> nPrimeSamples = gr::graph::calculateLoopPrimingSize(loop); nPrimeSamples) {
+                    if (auto ret = gr::graph::primeLoop(loop, nPrimeSamples.value()); !ret) {
+                        this->emitErrorMessage("connectPendingEdges()", std::format("failed to prime feedback loop: {}\nloop: {}", ret.error(), loop.edges));
+                    }
+                } else {
+                    this->emitErrorMessage("connectPendingEdges()", std::format("failed to prime feedback loop: {}\nloop: {}", nPrimeSamples.error(), loop.edges));
+                }
+            }
+        };
+
         bool result = _graph.connectPendingEdges();
+        primeFeedbackPorts(gr::graph::flatten(_graph)); // need to flatten graph due to potential loops from within the subgraph to blocks in the parents.
         graph::forEachBlock<TransparentBlockGroup>(_graph, [&](auto& block) {
             if (block->blockCategory() == TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 result      = result && graph->blockRef().connectPendingEdges();
+                primeFeedbackPorts(gr::graph::flatten(graph->blockRef()));
             }
         });
         return result;

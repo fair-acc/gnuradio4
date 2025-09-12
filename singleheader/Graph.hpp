@@ -10952,7 +10952,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     Annotated<float, "signal min", Doc<"minimum expected signal value">>                                             signal_min = std::numeric_limits<float>::lowest();
     Annotated<float, "signal max", Doc<"maximum expected signal value">>                                             signal_max = std::numeric_limits<float>::max();
 
-    GR_MAKE_REFLECTABLE(PortMetaInfo, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+    GR_MAKE_REFLECTABLE(PortMetaInfo, data_type, name, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
 
     // controls automatic (if set) or manual update of above parameters
     std::set<std::string, std::less<>> auto_update{gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()};
@@ -22324,6 +22324,8 @@ struct Edge {
     std::int32_t _weight = 0;
     std::string  _name   = "unnamed edge"; // custom edge name
 
+    property_map _uiConstraints{};
+
     Edge() = delete;
 
     explicit Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition,               //
@@ -22347,10 +22349,12 @@ struct Edge {
     constexpr void setWeight(std::int32_t weight) { _weight = weight; }
     constexpr void setName(std::string name) { _name = std::move(name); }
 
-    constexpr std::size_t bufferSize() const { return _actualBufferSize; }
-    constexpr std::size_t nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
-    constexpr std::size_t nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
-    constexpr PortType    edgeType() const { return _edgeType; }
+    constexpr std::size_t             bufferSize() const { return _actualBufferSize; }
+    constexpr std::size_t             nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
+    constexpr std::size_t             nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
+    constexpr PortType                edgeType() const { return _edgeType; }
+    [[nodiscard]] property_map&       uiConstraints() noexcept { return _uiConstraints; }
+    [[nodiscard]] const property_map& uiConstraints() const { return _uiConstraints; }
 
     constexpr bool hasSameSourcePort(const Edge& other) const noexcept { return sourceBlock() == other.sourceBlock() && sourcePortDefinition().definition == other.sourcePortDefinition().definition; }
 
@@ -22361,7 +22365,44 @@ struct Edge {
                && destinationPortDefinition().definition == other.destinationPortDefinition().definition; //
     }
 };
+static_assert(std::is_copy_constructible_v<Edge>);
+static_assert(std::is_move_constructible_v<Edge>);
+} // namespace gr
 
+namespace std {
+template<>
+struct hash<gr::Edge> {
+#if SIZE_MAX > 0xFFFFFFFF
+    static constexpr std::size_t kPhi = 0x9e3779b97f4a7c15ULL;
+#else
+    static constexpr std::size_t kPhi = 0x9e3779b9UL;
+#endif
+
+    static void combine(std::size_t& seed, std::size_t v) noexcept { seed ^= v + kPhi + (seed << 6) + (seed >> 2); }
+
+    static constexpr std::size_t forbid_zero_max(std::size_t x) noexcept {
+        if (x == 0) {
+            return kPhi;
+        }
+        if (x == std::numeric_limits<std::size_t>::max()) {
+            return std::numeric_limits<std::size_t>::max() - kPhi;
+        }
+        return x;
+    }
+
+    std::size_t operator()(const gr::Edge& e) const noexcept {
+        std::size_t seed = 0;
+        combine(seed, std::hash<std::shared_ptr<gr::BlockModel>>{}(e.sourceBlock()));
+        combine(seed, std::hash<gr::PortDefinition>{}(e.sourcePortDefinition()));
+        combine(seed, std::hash<std::shared_ptr<gr::BlockModel>>{}(e.destinationBlock()));
+        combine(seed, std::hash<gr::PortDefinition>{}(e.destinationPortDefinition()));
+        combine(seed, kPhi); // one more stir
+        return forbid_zero_max(seed);
+    }
+};
+} // namespace std
+
+namespace gr {
 class BlockModel {
 public:
     struct NamedPortCollection {
@@ -22552,9 +22593,9 @@ public:
         }
     }
 
-    std::size_t dynamicInputPortIndex(const std::string& name) const {
+    std::size_t dynamicInputPortIndex(const std::string& name, std::source_location location = std::source_location::current()) const {
         initDynamicPorts();
-        for (std::size_t i = 0; i < _dynamicInputPorts.size(); ++i) {
+        for (std::size_t i = 0UZ; i < _dynamicInputPorts.size(); ++i) {
             if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicInputPorts.at(i))) {
                 if (portCollection->name == name) {
                     return i;
@@ -22566,12 +22607,12 @@ public:
             }
         }
 
-        throw gr::exception(std::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name), location);
     }
 
-    std::size_t dynamicOutputPortIndex(const std::string& name) const {
+    std::size_t dynamicOutputPortIndex(const std::string& name, std::source_location location = std::source_location::current()) const {
         initDynamicPorts();
-        for (std::size_t i = 0; i < _dynamicOutputPorts.size(); ++i) {
+        for (std::size_t i = 0UZ; i < _dynamicOutputPorts.size(); ++i) {
             if (auto* portCollection = std::get_if<NamedPortCollection>(&_dynamicOutputPorts.at(i))) {
                 if (portCollection->name == name) {
                     return i;
@@ -22583,7 +22624,7 @@ public:
             }
         }
 
-        throw gr::exception(std::format("Port {} does not exist", name));
+        throw gr::exception(std::format("Port {} does not exist", name), location);
     }
 
     virtual ~BlockModel() = default;
@@ -23091,6 +23132,111 @@ public:
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 };
+
+namespace detail {
+[[nodiscard]] constexpr inline std::pair<std::string_view, std::size_t> portBaseNameAndOffset(std::string_view portName, const gr::PortDefinition& portDefinition) noexcept {
+    // split "name#n" -> { "name", n }, else { "name", nullopt }
+    constexpr auto splitPortNameAtHash = [](std::string_view s) -> std::pair<std::string_view, std::optional<std::size_t>> {
+        const auto hash = std::ranges::find(s, '#');
+        const auto head = s.substr(0UZ, static_cast<std::size_t>(hash - s.begin()));
+        if (hash == s.end()) {
+            return {head, std::nullopt};
+        }
+        const auto tail = s.substr(head.size() + 1UZ);
+
+        std::size_t v{};
+        const char* first = std::to_address(tail.cbegin());
+        const char* last  = std::to_address(tail.cend());
+        if (auto [ptr, ec] = std::from_chars(first, last, v); ec == std::errc{} && ptr == last) {
+            return {head, v};
+        }
+        return {head, std::nullopt};
+    };
+
+    auto [baseName, idx]        = splitPortNameAtHash(portName);
+    std::size_t localPortOffset = idx.value_or(0UZ);
+
+    if (auto* d = std::get_if<gr::PortDefinition::IndexBased>(&portDefinition.definition)) {
+        if (d->subIndex != gr::meta::invalid_index) {
+            localPortOffset = d->subIndex;
+        }
+        return {baseName, localPortOffset};
+    }
+
+    if (const auto* d = std::get_if<gr::PortDefinition::StringBased>(&portDefinition.definition)) {
+        auto [b2, idx2] = splitPortNameAtHash(d->name);
+
+        if (std::ranges::find(d->name, '#') != d->name.end()) {
+            if (idx2.has_value()) { // clean "#n"
+                baseName        = b2;
+                localPortOffset = *idx2;
+            } else {
+                baseName        = b2;
+                localPortOffset = gr::meta::invalid_index; // found '#' but failed to parse tail (e.g. "in2#1 ", "in2#abc") -> poison offset
+            }
+            return {baseName, localPortOffset};
+        }
+        return {baseName, localPortOffset}; // no '#' in portName
+    }
+    return {baseName, localPortOffset}; // fallback
+}
+} // namespace detail
+
+template<gr::PortDirection direction>
+[[nodiscard]] std::size_t absolutePortIndex(const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& portDefinition, std::source_location loc = std::source_location::current()) {
+    constexpr bool        isInput            = direction == gr::PortDirection::INPUT;
+    constexpr static auto portCollectionSize = [](const std::shared_ptr<gr::BlockModel>& b, std::size_t idx = gr::meta::invalid_index) -> std::size_t {
+        if constexpr (isInput) {
+            return b->dynamicInputPortsSize(idx);
+        } else {
+            return b->dynamicOutputPortsSize(idx);
+        }
+    };
+    constexpr static auto countPortsPrior = [](const std::shared_ptr<gr::BlockModel>& b, std::size_t idx) -> std::size_t {
+        const std::size_t nTopLevel = portCollectionSize(b);
+        if (idx >= nTopLevel) {
+            throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", b->uniqueName(), idx, nTopLevel));
+        }
+        std::size_t nPortsPrior = 0UZ;
+        for (std::size_t i = 0UZ; i < idx; ++i) { // count all ports in collections before idx
+            std::size_t nPortsInCollection = 0UZ;
+            if constexpr (isInput) {
+                nPortsInCollection = b->dynamicInputPortsSize(i);
+            } else {
+                nPortsInCollection = b->dynamicOutputPortsSize(i);
+            }
+            const bool isNonCollectionPort = nPortsInCollection == gr::meta::invalid_index;
+            nPortsPrior += isNonCollectionPort ? 1UZ : nPortsInCollection; //
+        }
+        return nPortsPrior;
+    };
+
+    if (const auto* idx = std::get_if<gr::PortDefinition::IndexBased>(&portDefinition.definition)) {
+        if (idx->subIndex != gr::meta::invalid_index) {
+            if (idx->subIndex >= portCollectionSize(block, idx->topLevel)) {
+                throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", block->uniqueName(), idx->subIndex, portCollectionSize(block)), loc);
+            }
+            return countPortsPrior(block, idx->topLevel) + idx->subIndex;
+        }
+        // no subIndex -> first element of the group (scalar or collection)
+        return idx->topLevel == 0UZ ? 0UZ : (countPortsPrior(block, idx->topLevel));
+    }
+
+    if (const auto idx = std::get_if<gr::PortDefinition::StringBased>(&portDefinition.definition); idx) {                                 // portDefinition is StringBased, e.g. "in#1";
+        const auto& port                  = isInput ? block->dynamicInputPort(idx->name, loc) : block->dynamicOutputPort(idx->name, loc); // N.B. can throw if name not present
+        const auto [baseName, portOffset] = detail::portBaseNameAndOffset(port.portName(), portDefinition);
+        const std::size_t baseIdx         = isInput ? block->dynamicInputPortIndex(std::string(baseName), loc) : block->dynamicOutputPortIndex(std::string(baseName), loc);
+        if (baseIdx == gr::meta::invalid_index) {
+            return gr::meta::invalid_index;
+        }
+        if (portOffset >= portCollectionSize(block, baseIdx)) {
+            throw gr::exception(std::format("Block {} port offset {} out of bounds [0, {}]", block->uniqueName(), portOffset, portCollectionSize(block)), loc);
+        }
+        return countPortsPrior(block, baseIdx) + portOffset;
+    }
+
+    return gr::meta::invalid_index;
+}
 
 } // namespace gr
 
@@ -23765,14 +23911,14 @@ inline std::string format(GraphLike auto const& graph) {
     return os.str();
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto& what, std::source_location location = std::source_location::current()) noexcept {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, BlockLike auto const& what, std::source_location location = std::source_location::current()) noexcept {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block->uniqueName() == what.unique_name; }); it != graph.blocks().end()) {
         return *it;
     }
     return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location));
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::shared_ptr<BlockModel> what, std::source_location location = std::source_location::current()) noexcept {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block.get() == std::addressof(*what); }); it != graph.blocks().end()) {
         return *it;
     }
@@ -23787,6 +23933,19 @@ std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const
     }
     return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
 }
+
+std::expected<std::size_t, Error> blockIndex(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
+    std::size_t index = 0UZ;
+    for (const auto& block : graph.blocks()) {
+        if (block->uniqueName() == uniqueBlockName) {
+            return index;
+        }
+        index++;
+    }
+    return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
+}
+
+std::expected<std::size_t, Error> blockIndex(GraphLike auto const& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept { return blockIndex(graph, what->uniqueName(), location); }
 
 // forward declaration
 template<block::Category traverseCategory, typename Fn>
@@ -24424,7 +24583,6 @@ static_assert(BlockLike<Graph>);
 /*******************************************************************************************************/
 
 namespace graph {
-
 namespace detail {
 template<block::Category traverseCategory, typename Fn>
 void traverseSubgraphs(GraphLike auto const& root, Fn&& visitGraph) {
@@ -24506,18 +24664,113 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
 }
 
 using AdjacencyList = std::unordered_map<std::shared_ptr<gr::BlockModel>, //
-    std::unordered_map<gr::PortDefinition, std::vector<gr::Edge*>>>;
+    std::unordered_map<gr::PortDefinition, std::vector<const gr::Edge*>>>;
 
-inline AdjacencyList computeAdjacencyList(GraphLike auto& root) {
+AdjacencyList computeAdjacencyList(const GraphLike auto& root) {
     AdjacencyList result;
-    for (gr::Edge& edge : root.edges()) {
-        std::vector<gr::Edge*>& srcMapPort = result[edge.sourceBlock()][edge.sourcePortDefinition()];
+    for (const gr::Edge& edge : root.edges()) {
+        std::vector<const gr::Edge*>& srcMapPort = result[edge.sourceBlock()][edge.sourcePortDefinition()];
         srcMapPort.push_back(std::addressof(edge));
     }
     return result;
 }
 
-inline std::span<gr::Edge* const> outgoingEdges(const AdjacencyList& adj, const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& port) {
+inline std::vector<gr::Graph> weaklyConnectedComponents(const gr::Graph& graph) {
+    const auto        blocksSpan = graph.blocks();
+    const std::size_t N          = blocksSpan.size();
+
+    std::unordered_map<const gr::BlockModel*, std::size_t> indexOf;
+    indexOf.reserve(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        indexOf.emplace(blocksSpan[i].get(), i);
+    }
+
+    std::vector<std::vector<std::size_t>> adjacencyList(N);
+    adjacencyList.reserve(N);
+    for (const gr::Edge& e : graph.edges()) {
+        const auto* sb  = e.sourceBlock().get();
+        const auto* db  = e.destinationBlock().get();
+        auto        sit = indexOf.find(sb);
+        auto        dit = indexOf.find(db);
+        if (sit != indexOf.end() && dit != indexOf.end()) {
+            const auto s = sit->second;
+            const auto d = dit->second;
+            adjacencyList[s].push_back(d);
+            adjacencyList[d].push_back(s);
+        }
+    }
+
+    // BFS component labelling and collecting node lists
+    std::vector<int>                      compId(N, -1);
+    std::vector<std::vector<std::size_t>> comps;
+    comps.reserve(N);
+
+    for (std::size_t s = 0; s < N; ++s) {
+        if (compId[s] != -1) {
+            continue;
+        }
+
+        std::vector<std::size_t> comp;
+        comp.reserve(8);
+        std::deque<std::size_t> q;
+        q.push_back(s);
+        compId[s] = static_cast<int>(comps.size());
+
+        while (!q.empty()) {
+            const auto v = q.front();
+            q.pop_front();
+            comp.push_back(v);
+
+            for (auto u : adjacencyList[v]) {
+                if (compId[u] == -1) {
+                    compId[u] = compId[v];
+                    q.push_back(u);
+                }
+            }
+        }
+        comps.push_back(std::move(comp));
+    }
+
+    // sort components according to size (i.e. number of blocks)
+    std::vector<std::size_t> order(comps.size());
+    std::iota(order.begin(), order.end(), 0UZ);
+    std::ranges::sort(order, [&](std::size_t a, std::size_t b) { return comps[a].size() > comps[b].size(); });
+
+    std::vector<std::size_t> compRank(comps.size());
+    for (std::size_t rank = 0; rank < order.size(); ++rank) {
+        compRank[order[rank]] = rank;
+    }
+
+    std::vector<gr::Graph> result(order.size());
+    for (std::size_t rank = 0; rank < order.size(); ++rank) {
+        const auto cid = order[rank];
+        auto&      g   = result[rank];
+        g.clear();
+        for (auto idx : comps[cid]) {
+            g.addBlock(blocksSpan[idx], /*initBlock=*/false);
+        }
+    }
+
+    // add only edges that are exclusively in the same component
+    for (const gr::Edge& e : graph.edges()) {
+        const auto itS = indexOf.find(e.sourceBlock().get());
+        const auto itD = indexOf.find(e.destinationBlock().get());
+        if (itS == indexOf.end() || itD == indexOf.end()) {
+            continue;
+        }
+
+        const auto cidS = compId[itS->second];
+        const auto cidD = compId[itD->second];
+        if (cidS >= 0 && cidS == cidD) {
+            const auto rank = compRank[static_cast<std::size_t>(cidS)];
+            result[rank].addEdge(e); // shallow edge copy: same blocks/ports
+        }
+    }
+
+    return result;
+}
+
+inline std::span<const gr::Edge* const> outgoingEdges(const AdjacencyList& adj, const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& port) {
     if (auto it = adj.find(block); it != adj.end()) {
         if (auto pit = it->second.find(port); pit != it->second.end()) {
             return std::span(pit->second);
@@ -24542,6 +24795,159 @@ inline std::vector<std::shared_ptr<BlockModel>> findSourceBlocks(const Adjacency
     sources.erase(std::remove_if(sources.begin(), sources.end(), [&](const auto& b) { return destinations.contains(b); }), sources.end());
     std::sort(sources.begin(), sources.end(), [](const auto& a, const auto& b) { return a->name() < b->name(); });
     return sources;
+}
+
+struct FeedbackLoop {
+    std::vector<Edge> edges;
+};
+
+template<GraphLike TGraph>
+std::vector<FeedbackLoop> detectFeedbackLoops(const TGraph& graph) {
+    enum class VisitState { Unvisited, Gray, Black };
+
+    std::unordered_map<std::shared_ptr<BlockModel>, VisitState> visited;
+    std::vector<FeedbackLoop>                                   loops;
+    std::vector<std::shared_ptr<BlockModel>>                    path;
+    std::vector<Edge>                                           pathEdges;
+
+    const AdjacencyList adjList = computeAdjacencyList(graph);
+
+    forEachBlock<block::Category::All>(graph, [&](const auto& block) { visited[block] = VisitState::Unvisited; });
+
+    auto dfs = [&](this auto&& self, auto& current) -> void {
+        visited[current] = VisitState::Gray;
+        path.push_back(current);
+
+        if (auto it = adjList.find(current); it != adjList.end()) {
+            for (const auto& [_, edges] : it->second) {
+                for (const Edge* edge : edges) {
+                    auto next = edge->destinationBlock();
+                    pathEdges.push_back(*edge);
+
+                    if (visited[next] == VisitState::Gray) { // back-edge found - extract cycle
+                        auto cycleStart = std::ranges::find(path, next);
+                        if (cycleStart != path.end()) {
+                            FeedbackLoop loop;
+                            auto         startIdx = std::distance(path.begin(), cycleStart);
+
+                            // copy cycle edges in order
+                            std::ranges::copy(pathEdges | std::views::drop(startIdx), std::back_inserter(loop.edges));
+                            loops.push_back(std::move(loop));
+                        }
+                    } else if (visited[next] == VisitState::Unvisited) {
+                        self(next);
+                    }
+
+                    pathEdges.pop_back();
+                }
+            }
+        }
+
+        path.pop_back();
+        visited[current] = VisitState::Black;
+    };
+
+    forEachBlock<block::Category::All>(graph, [&](auto& block) {
+        if (visited[block] == VisitState::Unvisited) {
+            dfs(block);
+        }
+    });
+
+    return loops;
+}
+
+[[nodiscard]] inline std::expected<std::size_t, Error> calculateLoopPrimingSize(const FeedbackLoop& loop, std::source_location location = std::source_location::current()) {
+    if (loop.edges.empty()) {
+        return 0UZ;
+    }
+
+    // step 1: check for feedback loop rate consistency
+    std::int32_t cumulativeNumerator{1};
+    std::int32_t cumulativeDenominator{1};
+    for (const auto& edge : loop.edges) {
+        auto ratio = edge.destinationBlock()->resamplingRatio();
+        cumulativeNumerator *= ratio.numerator;
+        cumulativeDenominator *= ratio.denominator;
+    }
+    if (cumulativeNumerator != cumulativeDenominator) { // stable feedback, net transformation must be 1:1
+        return std::unexpected(Error(std::format("feedback loop has unstable rate transformation: {}:{} (net gain: {:.3f})", cumulativeNumerator, cumulativeDenominator, static_cast<double>(cumulativeDenominator) / cumulativeNumerator), location));
+    }
+
+    // step 2: calculate minimum samples needed
+    std::size_t samplesNeeded = 1UZ;
+
+    std::size_t edgeIdx = 0UZ;
+    for (const auto& edge : loop.edges) {
+        auto destBlock   = edge.destinationBlock();
+        auto destPortDef = edge.destinationPortDefinition();
+
+        std::size_t destPortIdx = std::visit(
+            [&destBlock](const auto& portDef) -> std::size_t {
+                using T = std::decay_t<decltype(portDef)>;
+                if constexpr (std::is_same_v<T, PortDefinition::IndexBased>) {
+                    return portDef.topLevel;
+                } else {
+                    return destBlock->dynamicInputPortIndex(portDef.name);
+                }
+            },
+            destPortDef.definition);
+
+        // known invariant at this stage: loop is rate-stable
+        if (edgeIdx == 0UZ) {
+            auto sourceRatio = edge.sourceBlock()->resamplingRatio();
+            if (sourceRatio.denominator > 0) {
+                std::size_t sourceInputNeeded = (samplesNeeded * static_cast<std::size_t>(sourceRatio.numerator)) / static_cast<std::size_t>(sourceRatio.denominator);
+                samplesNeeded                 = std::max(samplesNeeded, sourceInputNeeded);
+            }
+
+            if (edge.sourceBlock()->stride() > 0) {
+                samplesNeeded = std::max(samplesNeeded, static_cast<std::size_t>(edge.sourceBlock()->stride()));
+            }
+        }
+        edgeIdx++;
+
+        auto destRatio = destBlock->resamplingRatio();
+        auto destMinIn = destBlock->minInputRequirements();
+
+        if (destPortIdx < destMinIn.size() && destMinIn[destPortIdx] > 0) {
+            samplesNeeded = std::max(samplesNeeded, destMinIn[destPortIdx]);
+        }
+
+        if (destRatio.numerator > 0) {
+            samplesNeeded = std::max(samplesNeeded, static_cast<std::size_t>(destRatio.numerator));
+        }
+
+        if (destBlock->stride() > 0) {
+            samplesNeeded = std::max(samplesNeeded, static_cast<std::size_t>(destBlock->stride()));
+        }
+    }
+
+    return samplesNeeded;
+}
+
+[[nodiscard]] inline std::expected<std::size_t, Error> primeLoop(const FeedbackLoop& loop, std::size_t nSamples, std::source_location location = std::source_location::current()) {
+    if (loop.edges.empty()) {
+        return std::unexpected(Error("empty feedback loop cannot be primed", location));
+    }
+    // need to inject in the last edge where the feedback loop is closed
+    const auto& closingEdge = loop.edges.back();
+    try {
+        std::size_t inputPortIdx = gr::absolutePortIndex<gr::PortDirection::INPUT>(closingEdge.destinationBlock(), closingEdge.destinationPortDefinition());
+        return closingEdge.destinationBlock()->primeInputPort(inputPortIdx, nSamples, location);
+    } catch (const gr::exception& e) {
+        return std::unexpected(Error(std::format("failed to prime loop: {}", e.what()), location));
+    }
+}
+
+inline void printFeedbackLoop(const FeedbackLoop& loop, std::size_t loopIdx = 0UZ, std::source_location location = std::source_location::current()) {
+    std::println("Feedback Loop #{} ({} edges):", loopIdx, loop.edges.size());
+
+    std::size_t edgeIdx = 0UZ;
+    for (const auto& edge : loop.edges) {
+        std::println("  [{}] {} -> {} (buffer: {}, weight: {})", edgeIdx++, edge.sourceBlock()->name(), edge.destinationBlock()->name(), edge.minBufferSize(), edge.weight());
+    }
+
+    std::println("  Recommended priming: {} samples\n", calculateLoopPrimingSize(loop, location));
 }
 
 } // namespace graph

@@ -367,11 +367,11 @@ struct StrideTestData {
 };
 
 template<typename T>
-struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::Resampling<>, gr::Stride<>> {
+struct Resampler : public gr::Block<Resampler<T>, gr::Resampling<>, gr::Stride<>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
-    GR_MAKE_REFLECTABLE(IntDecBlock, in, out);
+    GR_MAKE_REFLECTABLE(Resampler, in, out);
 
     ProcessStatus status{};
     bool          write_to_vector{false};
@@ -549,7 +549,7 @@ void interpolation_decimation_test(const IntDecTestData& data) {
 
     gr::Graph flow;
     auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
+    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -581,7 +581,7 @@ void stride_test(const StrideTestData& data) {
 
     gr::Graph flow;
     auto&     source        = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}, {"stride", data.stride}});
+    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}, {"stride", data.stride}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -783,7 +783,7 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
             {14, {{"key14", "value@14"}}}  //
         };
 
-        auto& intDecBlock = testGraph.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
+        auto& intDecBlock = testGraph.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
         auto& sink        = testGraph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(intDecBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(intDecBlock).to<"in">(sink)));
@@ -1009,7 +1009,7 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
 
         gr::Graph graph;
         auto&     src       = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"disconnect_on_done", false}});
-        auto&     testBlock = graph.emplaceBlock<IntDecBlock<float>>({{"disconnect_on_done", false}});
+        auto&     testBlock = graph.emplaceBlock<Resampler<float>>({{"disconnect_on_done", false}});
         auto&     sink      = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", false}});
 
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(testBlock)));
