@@ -9,32 +9,19 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
-template<>
-struct std::formatter<gr::Tag> {
-    template<typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template<typename FormatContext>
-    constexpr auto format(const gr::Tag& tag, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "  {}->{{ {} }}\n", tag.index, tag.map);
-    }
-};
-
 /**
  * std::ranges::equal does not work correctly in gcc < 14.2 because InputSpan::tags() contains references to the tag property maps, while in the expected vector we have values
  */
 bool equalTags(auto tags, auto expected) {
     // deliberately not using std::ranges::equal (gcc bug)
-    if (tags.size() != expected.size()) {
+    if (static_cast<std::size_t>(std::ranges::distance(tags)) != expected.size()) {
         return false;
     }
     for (const auto& [tag, expectedTag] : std::views::zip(tags, expected)) {
         if (tag.first != expectedTag.first) {
             return false;
         }
-        if (tag.second != expectedTag.second) {
+        if (tag.second.get() != expectedTag.second) {
             return false;
         }
     }
@@ -96,44 +83,44 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         }
         { // partial consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(6UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
-            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, gr::property_map{{"id", "tag@100"}, {"id0", true}}), std::make_pair(1L, gr::property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(3L, gr::property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(4L, gr::property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(5L, gr::property_map{{"id", "tag@105"}, {"id5", true}})}));
+            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
+            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@100"}, {"id0", true}}), std::make_pair(1L, property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(3L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(4L, property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(5L, property_map{{"id", "tag@105"}, {"id5", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(6UZ)));
-            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@100"}, {"id0", true}}});
+            expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@100"}, {"id0", true}})}));
             expect(data.consume(3));
         }
         { // full consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(2);
-            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
-            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, gr::property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, gr::property_map{{"id", "tag@104"}, {"id4", true}})}));
+            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{3UZ, {{"id", "tag@103"}, {"id3", true}}}, {4UZ, {{"id", "tag@104"}, {"id4", true}}}}));
+            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(1L, property_map{{"id", "tag@104"}, {"id4", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(3UZ) | std::views::take(2UZ)));
-            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@103"}, {"id3", true}}});
+            expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@103"}, {"id3", true}})}));
         }
         { // get empty range
             auto data = in.get<SpanReleasePolicy::ProcessAll>(0UZ);
             expect(eq(data.rawTags.size(), 0UZ));
             expect(eq(data.tags().size(), 0UZ));
             expect(std::ranges::equal(data, std::ranges::empty_view<int>()));
-            expect(data.getMergedTag() == gr::Tag{0UZ, {}});
+            expect(eq(std::ranges::distance(data.tags(1)), 0L));
             // consuming nothing must not crash
         }
         { // get consume only first tag
             auto data = in.get<SpanReleasePolicy::ProcessAll, true>(2UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{5UZ, {{"id", "tag@105"}, {"id5", true}}}, {6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}}), std::make_pair(1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(5UZ) | std::views::take(2UZ)));
-            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@105"}, {"id5", true}}});
+            expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@105"}, {"id5", true}})}));
         }
         { // get last sample, last tag is still available
             auto data = in.get<SpanReleasePolicy::ProcessAll>(1UZ);
-            expect(std::ranges::equal(data.rawTags, std::vector<gr::Tag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
+            expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{6UZ, {{"id", "tag@106"}, {"id6", true}}}}));
             expect(equalTags(data.tags(), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::drop(7UZ) | std::views::take(1UZ)));
-            expect(data.getMergedTag() == gr::Tag{0UZ, {{"id", "tag@106"}, {"id6", true}}});
+            expect(equalTags(data.tags(1), std::vector{std::make_pair(-1L, property_map{{"id", "tag@106"}, {"id6", true}})}));
         }
     };
 
-    "InputSpan getMergedTag (multiple merge)"_test = [] { // NOSONAR (N.B. lambda size)
+    "InputSpan tags(untilLocalIndex)"_test = [] { // NOSONAR (N.B. lambda size)
         PortIn<int> in2;
         auto        w  = in2.buffer().streamBuffer.new_writer();
         auto        tw = in2.buffer().tagBuffer.new_writer();
@@ -150,12 +137,11 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             ts.publish(3UZ);
             ws.publish(4UZ);
         }
-        auto span = in2.get<SpanReleasePolicy::ProcessAll>(3);
-        auto tag  = span.getMergedTag(3UZ); // merge tags at indices 0 and 1
-        expect(eq(tag.map.size(), 2UZ));
-        expect(eq(std::get<int>(tag.map.at("a")), 1));
-        expect(eq(std::get<int>(tag.map.at("b")), 2));
-        // ensure consumeTags doesn't throw
+        auto span    = in2.get<SpanReleasePolicy::ProcessAll>(4);
+        auto tagsAll = span.tags();
+        auto tags    = span.tags(3UZ); // tags at indices 0 and 1
+        expect(equalTags(tags, std::vector{std::make_pair(0L, property_map{{"a", 1}}), std::make_pair(1L, property_map{{"b", 2}})}));
+        expect(equalTags(tagsAll, std::vector{std::make_pair(0L, property_map{{"a", 1}}), std::make_pair(1L, property_map{{"b", 2}}), std::make_pair(3L, property_map{{"c", 3}})}));
         span.consumeTags(2);
         expect(span.consume(3));
     };
@@ -167,9 +153,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         {
             auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
-            data.publishTag({{"id", "tag@0"}}, 0UZ);
-            data.publishTag({{"id", "tag@101"}}, 1UZ);
-            data.publishTag({{"id", "tag@104"}}, 4UZ);
+            data.publishTag(property_map{{"id", "tag@0"}}, 0UZ);
+            data.publishTag(property_map{{"id", "tag@101"}}, 1UZ);
+            data.publishTag(property_map{{"id", "tag@104"}}, 4UZ);
             std::iota(data.begin(), data.end(), 100);
             data.publish(5); // should be automatic
         }
@@ -177,14 +163,14 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto data = reader.get<SpanReleasePolicy::ProcessAll>();
             auto tags = tagReader.get<SpanReleasePolicy::ProcessAll>();
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(5UZ)));
-            expect(std::ranges::equal(tags, std::vector<gr::Tag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
+            expect(std::ranges::equal(tags, std::vector<Tag>{{0UZ, {{"id", "tag@0"}}}, {1UZ, {{"id", "tag@101"}}}, {4UZ, {{"id", "tag@104"}}}}));
         }
         {
             auto data = out.tryReserve<SpanReleasePolicy::ProcessAll>(5);
             expect(eq(data.size(), 5UZ));
-            data.publishTag({{"id", "tag@0"}}, 0UZ);
-            data.publishTag({{"id", "tag@106"}}, 1UZ);
-            data.publishTag({{"id", "tag@109"}}, 4UZ);
+            data.publishTag(property_map{{"id", "tag@0"}}, 0UZ);
+            data.publishTag(property_map{{"id", "tag@106"}}, 1UZ);
+            data.publishTag(property_map{{"id", "tag@109"}}, 4UZ);
             std::iota(data.begin(), data.end(), 105);
             data.publish(5); // should be automatic
         }
@@ -192,18 +178,18 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto data = reader.get();
             auto tags = tagReader.get();
             expect(std::ranges::equal(data, std::views::iota(105) | std::views::take(5UZ)));
-            expect(std::ranges::equal(tags, std::vector<gr::Tag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
+            expect(std::ranges::equal(tags, std::vector<Tag>{{5UZ, {{"id", "tag@0"}}}, {6UZ, {{"id", "tag@106"}}}, {9UZ, {{"id", "tag@109"}}}}));
         }
     };
 
-    "publishPendingTags merges same-index tags"_test = [] { // NOSONAR (N.B. lambda size)
+    "publishPendingTags with the same indices"_test = [] { // NOSONAR (N.B. lambda size)
         PortOut<int> out;
         auto         reader    = out.buffer().streamBuffer.new_reader();
         auto         tagReader = out.buffer().tagBuffer.new_reader();
         {
             auto s = out.tryReserve<SpanReleasePolicy::ProcessAll>(2);
             s.publishTag(propMap({{"k1", 1}}), 0UZ);
-            s.publishTag(propMap({{"k2", 2}}), 0UZ); // merged into the same index
+            s.publishTag(propMap({{"k2", 2}}), 0UZ); // same index, but should not be merged
             s[0UZ] = 11;
             s[1UZ] = 22;
             s.publish(2UZ);
@@ -211,16 +197,18 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         {
             auto data = reader.get();
             auto tags = tagReader.get();
-            expect(eq(tags.size(), 1UZ));
+            expect(eq(tags.size(), 2UZ));
+            expect(eq(tags[0].map.size(), 1UZ));
             expect(eq(std::get<int>(tags[0].map.at("k1")), 1));
-            expect(eq(std::get<int>(tags[0].map.at("k2")), 2));
+            expect(eq(tags[1].map.size(), 1UZ));
+            expect(eq(std::get<int>(tags[1].map.at("k2")), 2));
             expect(std::ranges::equal(data, std::vector<int>{11, 22}));
         }
     };
 
     "Async/Optional attribute flags"_test = [] {
-        using OptionalPort = gr::PortIn<int, gr::Optional>;
-        using AsyncPort    = gr::PortIn<int, gr::Async>;
+        using OptionalPort = PortIn<int, gr::Optional>;
+        using AsyncPort    = PortIn<int, gr::Async>;
         static_assert(OptionalPort::kIsOptional);
         static_assert(!OptionalPort::kIsSynch);
         static_assert(!AsyncPort::kIsSynch);
@@ -404,42 +392,130 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(metaInfo.data_type.value, "float32"s));
     };
 
+    "initializer list ctor"_test = [] {
+        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}, //
+            {gr::tag::SIGNAL_QUANTITY.shortKey(), "voltage"}, {gr::tag::SIGNAL_UNIT.shortKey(), "V"},                           //
+            {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
+
+        expect(eq(48000.f, portMetaInfo.sample_rate.value));
+        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
+        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
+        expect(eq("V"s, portMetaInfo.signal_unit.value));
+        expect(eq(-1.f, portMetaInfo.signal_min.value));
+        expect(eq(+1.f, portMetaInfo.signal_max.value));
+    };
+
+    "initializer list ctor throw"_test = [] { //
+        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}}); }));
+    };
+
+    "property_map ctor throw"_test = [] {
+        property_map props = {{gr::tag::SAMPLE_RATE.shortKey(), "WRONG TYPE STRING"s}};
+        expect(throws<std::exception>([&] { PortMetaInfo portMetaInfo(props); }));
+    };
+
     "update & get roundtrip"_test = [] {
         PortMetaInfo metaInfo{"f32"};
+        metaInfo.name = "TestPortName";
         property_map props;
+        props["data_type"]                     = "f32_42";          // this field won't be updated, not in gr::tag::kDefaultTags
+        props["name"]                          = "TestPortName_42"; // this field won't be updated, not in gr::tag::kDefaultTags
         props[tag::SAMPLE_RATE.shortKey()]     = 48000.f;
         props[tag::SIGNAL_NAME.shortKey()]     = std::string("IF");
         props[tag::SIGNAL_QUANTITY.shortKey()] = std::string("voltage");
         props[tag::SIGNAL_UNIT.shortKey()]     = std::string("[V]");
         props[tag::SIGNAL_MIN.shortKey()]      = -1.f;
         props[tag::SIGNAL_MAX.shortKey()]      = 1.f;
-        metaInfo.update(props);
+        expect(metaInfo.update(props).has_value());
         expect(eq(metaInfo.sample_rate.value, 48000.f));
         expect(eq(metaInfo.signal_name.value, "IF"s));
+        expect(eq(metaInfo.signal_quantity.value, "voltage"s));
+        expect(eq(metaInfo.signal_unit.value, "[V]"s));
+        expect(eq(metaInfo.signal_min.value, -1.f));
+        expect(eq(metaInfo.signal_max.value, +1.f));
 
         const property_map out = metaInfo.get();
+        expect(eq(std::get<std::string>(out.at("data_type")), "f32"s));
+        expect(eq(std::get<std::string>(out.at("name")), "TestPortName"s));
+        expect(eq(std::get<float>(out.at(tag::SAMPLE_RATE.shortKey())), 48000.f));
+        expect(eq(std::get<std::string>(out.at(tag::SIGNAL_NAME.shortKey())), "IF"s));
+        expect(eq(std::get<std::string>(out.at(tag::SIGNAL_QUANTITY.shortKey())), "voltage"s));
         expect(eq(std::get<std::string>(out.at(tag::SIGNAL_UNIT.shortKey())), "[V]"s));
         expect(eq(std::get<float>(out.at(tag::SIGNAL_MIN.shortKey())), -1.f));
         expect(eq(std::get<float>(out.at(tag::SIGNAL_MAX.shortKey())), 1.f));
     };
 
-    "update wrong type throws"_test = [] {
+    "update wrong type"_test = [] {
         PortMetaInfo metaInfo;
         property_map wrong;
         wrong[tag::SAMPLE_RATE.shortKey()] = 123; // int instead of float
-        expect(throws<std::exception>([&metaInfo, &wrong] { metaInfo.update(wrong); }));
+        expect(!metaInfo.update(wrong).has_value());
+    };
+
+    "update partial changes before wrong type"_test = [] {
+        PortMetaInfo metaInfo;
+        property_map p;
+        // to be sure in which order settings are applied
+        metaInfo.auto_update = {gr::tag::SAMPLE_RATE.shortKey(), gr::tag::SIGNAL_MIN.shortKey(), gr::tag::SIGNAL_MAX.shortKey()};
+
+        p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
+        p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
+        p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
+        expect(!metaInfo.update(p).has_value());
+        expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated
+        expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest())); // default value
+        expect(eq(metaInfo.signal_max.value, std::numeric_limits<float>::max()));    // default value, it was not updated after throw
     };
 
     "reset auto_update"_test = [] {
-        PortMetaInfo m;
-        m.auto_update.clear();
+        PortMetaInfo portMetaInfo;
         property_map p;
+        p[tag::SAMPLE_RATE.shortKey()] = 42.f;
+        expect(portMetaInfo.update(p).has_value());
+        expect(eq(portMetaInfo.sample_rate.value, 42.f));
+        portMetaInfo.auto_update.clear();
         p[tag::SAMPLE_RATE.shortKey()] = 99.f;
-        m.update(p); // shouldn't update
-        expect(eq(m.sample_rate.value, 1.f));
-        m.reset();
-        m.update(p);
-        expect(eq(m.sample_rate.value, 99.f));
+        expect(portMetaInfo.update(p).has_value()); // shouldn't update
+        expect(eq(portMetaInfo.sample_rate.value, 42.f));
+        portMetaInfo.reset();
+        expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_NAME.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_QUANTITY.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_UNIT.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
+        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
+        expect(eq(portMetaInfo.sample_rate.value, 42.f)); // shouldn't reset sample_rate
+        expect(portMetaInfo.update(p).has_value());
+        expect(eq(portMetaInfo.sample_rate.value, 99.f));
+    };
+
+    // extra tests
+    "auto_update subset only updates selected keys"_test = [] {
+        PortMetaInfo m;
+        m.sample_rate = 1.0f;
+        m.signal_name = "orig"s;
+        m.auto_update = {gr::tag::SAMPLE_RATE.shortKey()}; // Only SAMPLE_RATE will be updated
+
+        property_map p;
+        p[gr::tag::SAMPLE_RATE.shortKey()] = 12345.f;
+        p[gr::tag::SIGNAL_NAME.shortKey()] = std::string("new-name");
+
+        expect(m.update(p).has_value());
+        expect(eq(m.sample_rate.value, 12345.f));
+        expect(eq(m.signal_name.value, "orig"s)); // unchanged
+    };
+
+    "get() roundtrip after partial update"_test = [] {
+        PortMetaInfo m{"f32"};
+        property_map p;
+        p[gr::tag::SIGNAL_MIN.shortKey()] = -0.5f;
+        p[gr::tag::SIGNAL_MAX.shortKey()] = +0.5f;
+        expect(m.update(p).has_value());
+
+        auto out = m.get();
+        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MIN.shortKey())), -0.5f));
+        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MAX.shortKey())), +0.5f));
+        expect(eq(std::get<std::string>(out.at(gr::tag::SIGNAL_NAME.shortKey())), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 
@@ -676,52 +752,6 @@ const boost::ut::suite<"tag-distance helpers"> _tagdist = [] { // NOSONAR (N.B. 
         auto val  = gr::nSamplesToNextTagConditional(in, pred, 0UZ);
         expect(val.has_value());
         expect(eq(val.value(), 2UZ));
-    };
-};
-
-const boost::ut::suite<"PortMetaInfo extras"> _pmi2 = [] { // NOSONAR (N.B. lambda size)
-    using namespace boost::ut;
-    using namespace gr;
-    using namespace std::string_literals;
-
-    "auto_update subset only updates selected keys"_test = [] {
-        PortMetaInfo m;
-        m.sample_rate = 1.0f;
-        m.signal_name = "orig"s;
-
-        // Only SAMPLE_RATE will be updated
-        m.auto_update = {gr::tag::SAMPLE_RATE.shortKey()};
-
-        property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 12345.f;
-        p[gr::tag::SIGNAL_NAME.shortKey()] = std::string("new-name");
-
-        m.update(p);
-        expect(eq(m.sample_rate.value, 12345.f));
-        expect(eq(m.signal_name.value, "orig"s)); // unchanged
-    };
-
-    "update<true> noexcept overload compiles & updates"_test = [] {
-        PortMetaInfo m{"int16"};
-        property_map p;
-        p[gr::tag::SAMPLE_RATE.shortKey()] = 96000.f;
-        // should not throw (template param = true)
-        m.update<true>(p);
-        expect(eq(m.sample_rate.value, 96000.f));
-        // (Don't feed it wrong types here, since noexcept spec disallows throws)
-    };
-
-    "get() roundtrip after partial update"_test = [] {
-        PortMetaInfo m{"f32"};
-        property_map p;
-        p[gr::tag::SIGNAL_MIN.shortKey()] = -0.5f;
-        p[gr::tag::SIGNAL_MAX.shortKey()] = +0.5f;
-        m.update(p);
-
-        auto out = m.get();
-        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MIN.shortKey())), -0.5f));
-        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MAX.shortKey())), +0.5f));
-        expect(eq(std::get<std::string>(out.at(gr::tag::SIGNAL_NAME.shortKey())), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 
