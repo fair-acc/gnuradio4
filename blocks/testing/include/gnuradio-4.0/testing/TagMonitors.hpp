@@ -104,12 +104,13 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     float          sample_rate     = 1000.0f;
     std::string    signal_name     = "unknown signal";
     std::string    signal_unit     = "unknown unit";
+    std::string    signal_quantity = "unknown quantity";
     float          signal_min      = std::numeric_limits<float>::lowest();
     float          signal_max      = std::numeric_limits<float>::max();
     bool           verbose_console = false;
     bool           mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
 
-    GR_MAKE_REFLECTABLE(TagSource, out, n_samples_max, sample_rate, signal_name, signal_unit, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
+    GR_MAKE_REFLECTABLE(TagSource, out, n_samples_max, sample_rate, signal_name, signal_unit, signal_quantity, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
 
     std::vector<Tag> _tags{};                 // It is expected that Tag.index is in ascending order
     std::size_t      _tagIndex{0};            // current index in tags array
@@ -134,7 +135,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     T processOne() noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                //
+        const auto [nGeneratedTags, tagRepeatStarted] = generateTag(                              //
             [this](const auto& map, std::size_t tagOffset) { this->publishTag(map, tagOffset); }, //
             "processOne(...)");
 
@@ -155,13 +156,13 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             _valueIndex++;
             return currentValue;
         }
-        return mark_tag ? (tagGenerated ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
+        return mark_tag ? (nGeneratedTags > 0 ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
     }
 
     work::Status processBulk(OutputSpanLike auto& outSpan) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                //
+        const auto [nGeneratedTags, tagRepeatStarted] = generateTag(                              //
             [&outSpan](const auto& map, std::size_t offset) { outSpan.publishTag(map, offset); }, //
             "processBulk(...)");
 
@@ -193,7 +194,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             }
         } else {
             if (mark_tag) {
-                outSpan[0] = tagGenerated ? static_cast<T>(1) : static_cast<T>(0);
+                outSpan[0] = nGeneratedTags > 0 ? static_cast<T>(1) : static_cast<T>(0);
             } else {
                 for (std::size_t i = 0; i < nSamples; ++i) {
                     outSpan[i] = static_cast<T>(_nSamplesProduced + i);
@@ -214,12 +215,21 @@ private:
     template<typename TPublishTagFunction>
     [[nodiscard]] auto generateTag(TPublishTagFunction&& publishTagFn, std::string_view processFunctionName) {
         struct {
-            bool tagGenerated     = false;
-            bool tagRepeatStarted = false;
+            std::size_t nGeneratedTags   = 0UZ;
+            bool        tagRepeatStarted = false;
         } result;
 
-        const auto nSamplesRemainder = getNProducedSamplesRemainder();
-        if (_tagIndex < _tags.size() && static_cast<gr::Size_t>(_tags[_tagIndex].index) <= nSamplesRemainder) {
+        if (_tags.empty() || _tagIndex >= _tags.size()) {
+            return result;
+        }
+
+        const std::size_t targetIndex       = _tags[_tagIndex].index;
+        const gr::Size_t  nSamplesRemainder = getNProducedSamplesRemainder();
+        if (static_cast<gr::Size_t>(targetIndex) > nSamplesRemainder) {
+            return result;
+        }
+
+        do {
             if (verbose_console) {
                 print_tag(_tags[_tagIndex], std::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
@@ -229,12 +239,14 @@ private:
             }
             this->_outputTagsChanged = true;
             _tagIndex++;
-            if (repeat_tags && _tagIndex == _tags.size()) {
-                _tagIndex               = 0;
-                result.tagRepeatStarted = true;
-            }
-            result.tagGenerated = true;
+            result.nGeneratedTags++;
+        } while (_tagIndex < _tags.size() && _tags[_tagIndex].index == targetIndex);
+
+        if (repeat_tags && _tagIndex == _tags.size()) {
+            _tagIndex               = 0;
+            result.tagRepeatStarted = true;
         }
+
         return result;
     }
 
