@@ -171,6 +171,17 @@ public:
     requires(storageType != StorageType::ATOMIC)
         : _state(other._state) {} // plain enum
 
+    StateMachine& operator=(StateMachine&& other) noexcept {
+        if (this != &other) {
+            if constexpr (storageType == StorageType::ATOMIC) {
+                _state.store(other._state.load(std::memory_order_acquire), std::memory_order_release);
+            } else {
+                _state = other._state;
+            }
+        }
+        return *this;
+    }
+
     [[nodiscard]] std::expected<void, Error> changeStateTo(State newState, const std::source_location location = std::source_location::current()) {
         State oldState;
         if constexpr (storageType == StorageType::ATOMIC) {

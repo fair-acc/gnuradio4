@@ -838,8 +838,42 @@ public:
           _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
           _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
 
-    // There are a few const or conditionally const member variables, we cannot have a move-assignment that is equivalent to the move constructor
-    Block& operator=(Block&& other) = delete;
+    Block& operator=(Block&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        lifecycle::StateMachine<Derived>::operator=(std::move(other));
+
+        if constexpr (!ResamplingControl::kIsConst) {
+            input_chunk_size  = std::move(other.input_chunk_size);
+            output_chunk_size = std::move(other.output_chunk_size);
+        }
+        if constexpr (!StrideControl::kIsConst) {
+            stride = std::move(other.stride);
+        }
+        disconnect_on_done = std::move(other.disconnect_on_done);
+        compute_domain     = std::move(other.compute_domain);
+        name               = std::move(other.name);
+        ui_constraints     = std::move(other.ui_constraints);
+        meta_information   = std::move(other.meta_information);
+
+        strideCounter         = std::move(other.strideCounter);
+        msgIn                 = std::move(other.msgIn);
+        msgOut                = std::move(other.msgOut);
+        propertySubscriptions = std::move(other.propertySubscriptions);
+
+        // Reset caches (they are not movable due to Derived &_self)
+        new (&inputStreamCache) PortCache<Derived, PortDirection::INPUT, PortType::STREAM>(static_cast<Derived&>(*this));
+        new (&outputStreamCache) PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM>(static_cast<Derived&>(*this));
+
+        _mergedInputTag    = std::move(other._mergedInputTag);
+        _outputTagsChanged = std::move(other._outputTagsChanged);
+        _outputTags        = std::move(other._outputTags);
+        _settings.assignFrom(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)));
+
+        return *this;
+    }
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
