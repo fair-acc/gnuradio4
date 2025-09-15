@@ -1081,12 +1081,12 @@ public:
         if constexpr (!backwardTagForwarding) {
             untilLocalIndexAdjusted = 1UZ;
         }
-        const auto isSame1 = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; };
-        const auto isSame2 = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); };
+        const auto isIndexEqual       = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; };
+        const auto isIndexAndMapEqual = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); };
         for_each_reader_span(
-            [this, untilLocalIndexAdjusted, isSame1, isSame2](auto& in) {
+            [this, untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual](auto& in) {
                 if (in.isSync) {
-                    auto inTags = in.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isSame1, isSame2);
+                    auto inTags = in.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
                     for (const auto& [_, tagMap] : inTags) {
                         for (const auto& [key, value] : tagMap.get()) {
                             _mergedInputTag.map.insert_or_assign(key, value);
@@ -1097,8 +1097,8 @@ public:
             inputSpans);
 
         for_each_port_and_reader_span(
-            [this, &untilLocalIndexAdjusted, isSame1, isSame2]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
-                auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isSame1, isSame2);
+            [this, &untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
+                auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
                 for (const auto& [_, tagMap] : inTags) {
                     emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
                 }
