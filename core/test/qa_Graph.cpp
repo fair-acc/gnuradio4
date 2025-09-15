@@ -45,6 +45,19 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
     using namespace gr;
     using namespace gr::testing;
 
+    "Graph move crash"_test = [] {
+        // Graph crashed if moved-from via move-ctor twice
+
+        Graph g0;
+
+        Graph g1 = std::move(g0);
+
+        Graph g2;
+        g0 = std::move(g2);
+
+        Graph g4 = std::move(g0);
+    };
+
     "Graph connection buffer size test - default"_test = [] {
         Graph graph;
         auto& src  = graph.emplaceBlock<NullSource<float>>();

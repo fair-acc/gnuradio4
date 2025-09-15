@@ -546,6 +546,17 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
     using namespace boost::ut;
     using namespace gr;
 
+    "Scheduler move crash"_test = [] {
+        // Scheduler crashed if exchanged graph twice
+        gr::scheduler::Simple<> s0;
+        gr::Graph               g1;
+        auto                    oldGraph = s0.exchange(std::move(g1));
+        expect(oldGraph.has_value()) << "oldGraph should have a value";
+
+        auto g1Again = s0.exchange(std::move(oldGraph.value()));
+        expect(g1Again.has_value()) << "g1Again should have a value";
+    };
+
     "Direct settings change"_test = [] {
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
         gr::scheduler::Simple<> sched;
