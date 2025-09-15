@@ -205,56 +205,49 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
-    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(true) //
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(false) //
         : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
-    explicit PortMetaInfo(const property_map& metaInfo) noexcept(true) { update<true>(metaInfo); }
+    explicit PortMetaInfo(const property_map& metaInfo) noexcept(false) {
+        if (auto res = update(metaInfo); !res.has_value()) {
+            throw gr::exception(res.error().message, res.error().sourceLocation);
+        }
+    }
 
     void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
 
-    template<bool isNoexcept = false>
-    void update(const property_map& metaInfo) noexcept(isNoexcept) {
-        if (metaInfo.empty()) {
-            return;
+    [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
+        for (const auto& [key, value] : metaInfo) {
+            if (!auto_update.contains(key)) {
+                continue;
+            }
+            std::expected<void, Error> maybeError = {};
+            refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) {
+                using MemberType = refl::data_member_type<PortMetaInfo, kIdx>;
+                using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+
+                const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
+                if (fieldName == key) {
+                    if (std::holds_alternative<Type>(value)) {
+                        auto& member = refl::data_member<kIdx>(*this);
+                        std::ignore  = member.validate_and_set(std::get<Type>(value));
+                    } else {
+                        maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key {} (expected:{}, got:{}, value:{})", key, gr::meta::type_name<Type>(), gr::meta::type_name<std::decay_t<decltype(value)>>(), value), location});
+                    }
+                }
+            });
+            if (!maybeError.has_value()) {
+                return maybeError;
+            }
         }
 
-        auto updateValue = [&metaInfo](const std::string& key, auto& member) {
-            if (!metaInfo.contains(key)) {
-                return;
-            }
-            const auto& value = metaInfo.at(key);
-            using T           = std::decay_t<decltype(member.value)>;
-            if (std::holds_alternative<T>(value)) {
-                member = std::get<T>(value);
-            } else {
-                throw gr::exception("invalid-argument: incorrect type for " + key);
-            }
-        };
-
-        for (const auto& key : auto_update) {
-            if (key == gr::tag::SAMPLE_RATE.shortKey()) {
-                updateValue(key, sample_rate);
-            } else if (key == gr::tag::SIGNAL_NAME.shortKey()) {
-                updateValue(key, signal_name);
-            } else if (key == gr::tag::SIGNAL_QUANTITY.shortKey()) {
-                updateValue(key, signal_quantity);
-            } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
-                updateValue(key, signal_unit);
-            } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
-                updateValue(key, signal_min);
-            } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
-                updateValue(key, signal_max);
-            }
-        }
+        return {};
     }
 
     [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
-        metaInfo[gr::tag::SAMPLE_RATE.shortKey()]     = sample_rate;
-        metaInfo[gr::tag::SIGNAL_NAME.shortKey()]     = signal_name;
-        metaInfo[gr::tag::SIGNAL_QUANTITY.shortKey()] = signal_quantity;
-        metaInfo[gr::tag::SIGNAL_UNIT.shortKey()]     = signal_unit;
-        metaInfo[gr::tag::SIGNAL_MIN.shortKey()]      = signal_min;
-        metaInfo[gr::tag::SIGNAL_MAX.shortKey()]      = signal_max;
+        refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { //
+            metaInfo.insert_or_assign(std::string(refl::data_member_name<PortMetaInfo, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*this)));
+        });
 
         return metaInfo;
     }
@@ -399,10 +392,10 @@ struct Async {};
  *     - For `Synch` ports, all samples are published by default.
  *     - For `Async` ports, no samples are published by default.
  * - Access to Tags:
- *   - Using `tags()`: Returns a `range::view` of input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
+ *   - Using `tags()`: Returns a `range::view` of all input tags. Indices are relative to the first sample in the span and can be negative for unconsumed tags.
+ *   - Using `tags(untilLocalIndex)`: Returns a `range::view` of input tags up to `untilLocalIndex` (exclusively). Indices are relative to the first sample in the span and can be negative for unconsumed tags.
  *   - Using `rawTags`: Provides direct access to the underlying `ReaderSpan<Tag>` for advanced manipulation.
  * - Consuming Tags: By default, tags associated with samples up to and including the first sample are consumed. One can manually consume tags up to a specific sample index using `consumeTags(streamSampleIndex)`.
- * - Merging Tags: Use `getMergedTag(untilLocalIndex)` to obtain a single tag that merges all tags up to `untilLocalIndex` (exclusively).
  */
 template<typename T>
 concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && requires(T& span, std::size_t n) {
@@ -412,8 +405,8 @@ concept InputSpanLike = std::ranges::contiguous_range<T> && ConstSpanLike<T> && 
     { span.rawTags };
     requires ReaderSpanLike<std::remove_cvref_t<decltype(span.rawTags)>> && std::same_as<gr::Tag, std::ranges::range_value_t<decltype(span.rawTags)>>;
     { span.tags() } -> std::ranges::range;
+    { span.tags(n) } -> std::ranges::range;
     { span.consumeTags(n) };
-    { span.getMergedTag(n) } -> std::same_as<gr::Tag>;
 };
 
 /**
@@ -591,7 +584,7 @@ struct Port {
 
         InputSpan(std::size_t nSamples_, ReaderType& reader, TagReaderType& tagReader, bool connected, bool sync) //
             : ReaderSpanType<spanReleasePolicy>(reader.template get<spanReleasePolicy>(nSamples_)),               //
-              rawTags(getTags(nSamples_, tagReader, reader.position())),                                          //
+              rawTags(getTagsInRange(nSamples_, tagReader, reader.position())),                                   //
               streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
         InputSpan(const InputSpan&)            = default;
@@ -625,10 +618,18 @@ struct Port {
         }
 
         [[nodiscard]] auto tags() {
-            return std::views::transform(rawTags, [this](auto& tag) {
-                const auto relIndex = tag.index >= streamIndex ? static_cast<std::ptrdiff_t>(tag.index - streamIndex) : -static_cast<std::ptrdiff_t>(streamIndex - tag.index);
-                return std::make_pair(relIndex, std::ref(tag.map));
-            });
+            using PairRefType = std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>;
+            return std::views::transform(rawTags, [this](const Tag& tag) -> PairRefType { return PairRefType{relIndex(tag.index, streamIndex), std::cref(tag.map)}; });
+        }
+
+        [[nodiscard]] auto tags(std::size_t untilLocalIndex) {
+            using PairRefType            = std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>;
+            const std::size_t untilIndex = streamIndex + untilLocalIndex;
+            // Note: Use lower_bound + subrange over take_while
+            // take_while downgrades to input_range, but AdjacentDeduplicateView (and chunk_by) needs a forward_range.
+            auto last        = std::ranges::lower_bound(rawTags, untilIndex, std::ranges::less{}, &Tag::index); // First element with index >= untilIndex
+            auto prefixRange = std::ranges::subrange(std::ranges::begin(rawTags), last);
+            return prefixRange | std::views::transform([this](const Tag& tag) -> PairRefType { return {relIndex(tag.index, streamIndex), std::cref(tag.map)}; });
         }
 
         void consumeTags(std::size_t untilLocalIndex) {
@@ -636,20 +637,10 @@ struct Port {
             std::ignore               = rawTags.tryConsume(tagsToConsume);
         }
 
-        [[nodiscard]] inline Tag getMergedTag(std::size_t untilLocalIndex = 1UZ) const {
-            auto mergeSrcMapInto = [](const property_map& sourceMap, property_map& destinationMap) {
-                assert(&sourceMap != &destinationMap);
-                for (const auto& [key, value] : sourceMap) {
-                    destinationMap.insert_or_assign(key, value);
-                }
-            };
-            Tag result{0UZ, {}};
-            std::ranges::for_each(rawTags | std::views::take_while([untilLocalIndex, this](auto& t) { return t.index < streamIndex + untilLocalIndex; }), [&mergeSrcMapInto, &result](const Tag& tag) { mergeSrcMapInto(tag.map, result.map); });
-            return result;
-        }
-
     private:
-        auto getTags(std::size_t nSamples, TagReaderType& reader, std::size_t currentStreamOffset) {
+        [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t abs, std::size_t base) noexcept { return abs >= base ? static_cast<std::ptrdiff_t>(abs - base) : -static_cast<std::ptrdiff_t>(base - abs); }
+
+        auto getTagsInRange(std::size_t nSamples, TagReaderType& reader, std::size_t currentStreamOffset) {
             const auto tags = reader.get(reader.available());
             const auto it   = std::ranges::find_if_not(tags, [nSamples, currentStreamOffset](const auto& tag) { return tag.index < currentStreamOffset + nSamples; });
             const auto n    = static_cast<std::size_t>(std::distance(tags.begin(), it));
@@ -693,19 +684,14 @@ struct Port {
             }
         }
 
-        inline constexpr void publishTag(property_map&& tagData, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tagData), tagOffset); }
-
-        inline constexpr void publishTag(const property_map& tagData, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(tagData, tagOffset); }
-
-    private:
-        template<PropertyMapType PropertyMap>
-        inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
+        template<PropertyMapType TPropertyMap>
+        inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
             // Do not publish tags if port is not connected, as it can lead to a tag buffer overflow.
             if (!isConnected) {
                 return;
             }
 
-            if (tagsPublished + 1 >= tags.size()) {
+            if (tagsPublished > tags.size()) {
                 // TODO(error handling): Decide how to surface failures.
                 // Option A: throw an exception, but this function is marked noexcept—either remove noexcept or avoid throwing.
                 // Option B: return an error (or set a port-status flag) that the Scheduler can observe and handle accordingly.
@@ -714,25 +700,16 @@ struct Port {
             }
             const auto index = streamIndex + tagOffset;
 
+#ifndef NDEBUG
             if (tagsPublished > 0) {
                 auto& lastTag = tags[tagsPublished - 1];
-#ifndef NDEBUG
-
                 if (lastTag.index > index) { // check the order of published Tags.index
                     std::println(stderr, "Tag indices are not in the correct order, tagsPublished:{}, lastTag.index:{}, index:{}", tagsPublished, lastTag.index, index);
-                    // std::abort();
+                    std::abort();
                 }
-#endif
-                if (lastTag.index == index) { // -> merge tags with the same index
-                    for (auto&& [key, value] : tagData) {
-                        lastTag.map.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
-                    }
-                } else {
-                    tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
-                }
-            } else {
-                tags[tagsPublished++] = {index, std::forward<PropertyMap>(tagData)};
             }
+#endif
+            tags[tagsPublished++] = {index, std::forward<TPropertyMap>(tagData)};
         }
     }; // end of PortOutputSpan
     static_assert(WriterSpanLike<OutputSpan<gr::SpanReleasePolicy::ProcessAll, WriterSpanReservePolicy::Reserve>>);
@@ -743,19 +720,19 @@ private:
     TagIoType _tagIoHandler = newTagIoHandler();
     Tag       _cachedTag{}; // todo: for now this is only used in the output ports
 
-    [[nodiscard]] constexpr auto newIoHandler(std::size_t buffer_size = kDefaultBufferSize) const noexcept {
+    [[nodiscard]] constexpr auto newIoHandler(std::size_t bufferSize = kDefaultBufferSize) const noexcept {
         if constexpr (kIsInput) {
-            return BufferType(buffer_size).new_reader();
+            return BufferType(bufferSize).new_reader();
         } else {
-            return BufferType(buffer_size).new_writer();
+            return BufferType(bufferSize).new_writer();
         }
     }
 
-    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t buffer_size = kDefaultBufferSize) const noexcept {
+    [[nodiscard]] constexpr auto newTagIoHandler(std::size_t bufferSize = kDefaultBufferSize) const noexcept {
         if constexpr (kIsInput) {
-            return TagBufferType(buffer_size).new_reader();
+            return TagBufferType(bufferSize).new_reader();
         } else {
-            return TagBufferType(buffer_size).new_writer();
+            return TagBufferType(bufferSize).new_writer();
         }
     }
 
@@ -984,63 +961,23 @@ public:
         return OutputSpan<spanReleasePolicy, WriterSpanReservePolicy::TryReserve>(nSamples, streamWriter(), tagWriter(), streamWriter().position(), this->isConnected(), this->isSynchronous());
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept
+    template<PropertyMapType TPropertyMap>
+    inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept
     requires(kIsOutput)
     {
-        processPublishTag(std::move(tag_data), tagOffset);
-    }
-
-    inline constexpr void publishTag(const property_map& tag_data, std::size_t tagOffset = 0UZ) noexcept
-    requires(kIsOutput)
-    {
-        processPublishTag(tag_data, tagOffset);
-    }
-
-    [[maybe_unused]] inline constexpr bool publishPendingTags() noexcept
-    requires(kIsOutput)
-    {
-        if (_cachedTag.map.empty() /*|| streamWriter().buffer().n_readers() == 0UZ*/) {
-            return false;
-        }
-        {
+        if (isConnected()) {
             WriterSpanLike auto outTags = tagWriter().tryReserve(1UZ);
             if (!outTags.empty()) {
-                outTags[0].index = _cachedTag.index;
-                outTags[0].map   = _cachedTag.map;
+                outTags[0].index = streamWriter().position() + tagOffset;
+                outTags[0].map   = std::forward<TPropertyMap>(tagData);
                 outTags.publish(1UZ);
             } else {
-                return false;
+                // TODO(error handling): Decide how to surface failures. Function is noexcept now
             }
         }
-
-        _cachedTag.reset();
-        return true;
     }
 
 private:
-    template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tag_data, std::size_t tagOffset) noexcept
-    requires(kIsOutput)
-    {
-        const auto newTagIndex = streamWriter().position() + tagOffset;
-        if (isConnected() && _cachedTag.index != newTagIndex) {
-            publishPendingTags();
-        }
-        _cachedTag.index = newTagIndex;
-        if constexpr (std::is_rvalue_reference_v<PropertyMap&&>) { // -> move semantics
-            for (auto& [key, value] : tag_data) {
-                _cachedTag.map.insert_or_assign(std::move(key), std::move(value));
-            }
-        } else { // -> copy semantics
-            for (const auto& [key, value] : tag_data) {
-                _cachedTag.map.insert_or_assign(key, value);
-            }
-        }
-        if (isConnected()) {
-            publishPendingTags();
-        }
-    }
-
     friend class DynamicPort;
 };
 
@@ -1173,7 +1110,6 @@ private:
             } else {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             }
-            arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         explicit constexpr PortWrapper(T&& arg) noexcept : _value{std::move(arg)} {
@@ -1182,7 +1118,6 @@ private:
             } else {
                 static_assert(requires { arg.writerHandlerInternal(); }, "'private void* writerHandlerInternal()' not implemented");
             }
-            arg.metaInfo.data_type = gr::meta::type_name<typename T::value_type>();
         }
 
         ~PortWrapper() override = default;
