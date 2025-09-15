@@ -9,6 +9,7 @@
 
 #include <format>
 
+#include <gnuradio-4.0/meta/RangesHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -1076,19 +1077,33 @@ public:
      * Merge tags from all sync ports into one merged tag, apply auto-update parameters
      */
     void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
+        std::size_t untilLocalIndexAdjusted = untilLocalIndex;
+        if constexpr (!backwardTagForwarding) {
+            untilLocalIndexAdjusted = 1UZ;
+        }
+        const auto isIndexEqual       = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; };
+        const auto isIndexAndMapEqual = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); };
         for_each_reader_span(
-            [this, untilLocalIndex](auto& in) {
+            [this, untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual](auto& in) {
                 if (in.isSync) {
-                    std::size_t untilLocalIndexAdjusted = untilLocalIndex;
-                    if constexpr (!backwardTagForwarding) {
-                        untilLocalIndexAdjusted = 1UZ;
-                    }
-                    for (const auto& [key, value] : in.getMergedTag(untilLocalIndexAdjusted).map) {
-                        _mergedInputTag.map.insert_or_assign(key, value);
+                    auto inTags = in.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+                    for (const auto& [_, tagMap] : inTags) {
+                        for (const auto& [key, value] : tagMap.get()) {
+                            _mergedInputTag.map.insert_or_assign(key, value);
+                        }
                     }
                 }
             },
             inputSpans);
+
+        for_each_port_and_reader_span(
+            [this, &untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
+                auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+                for (const auto& [_, tagMap] : inTags) {
+                    emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
+                }
+            },
+            inputPorts<PortType::STREAM>(&self()), inputSpans);
 
         if (inputTagsPresent()) {
             settings().autoUpdate(_mergedInputTag); // apply tags as new settings if matching
@@ -2699,6 +2714,35 @@ inline constexpr auto for_each_writer_span(Function&& function, Tuple&& tuple, T
         std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
 }
 
+template<typename TFunction, typename TPortsTuple, typename TSpansTuple>
+inline constexpr void for_each_port_and_reader_span(TFunction&& function, TPortsTuple&& ports, TSpansTuple&& spans) {
+    static_assert(std::tuple_size_v<std::remove_cvref_t<TPortsTuple>> == std::tuple_size_v<std::remove_cvref_t<TSpansTuple>>, "ports and spans must have the same tuple size");
+
+    gr::meta::tuple_for_each(
+        [&function](auto&& portOrCollection, auto&& spanOrCollection) {
+            using PortArgType = std::decay_t<decltype(portOrCollection)>;
+            using SpanArgType = std::decay_t<decltype(spanOrCollection)>;
+
+            static_assert(traits::port::is_port_v<PortArgType> == ReaderSpanLike<SpanArgType>);
+            static_assert(traits::port::is_port_collection_v<PortArgType> == ReaderSpanLike<typename SpanArgType::value_type>);
+
+            if constexpr (traits::port::is_port_v<PortArgType>) {
+                std::invoke(function, portOrCollection, spanOrCollection);
+            } else if constexpr (traits::port::is_port_collection_v<PortArgType>) {
+                static_assert(traits::port::is_port_v<PortArgType> == traits::port::is_port_v<SpanArgType>);
+
+                assert(std::distance(std::begin(portOrCollection), std::end(portOrCollection)) == std::distance(std::begin(spanOrCollection), std::end(spanOrCollection)));
+
+                std::ranges::for_each(std::views::zip(portOrCollection, spanOrCollection), [&](auto&& portAndSpan) {
+                    auto& [p, s] = portAndSpan;
+                    std::invoke(function, p, s);
+                });
+            } else {
+                static_assert(gr::meta::always_false<PortArgType>, "Not a port or collection of ports");
+            }
+        },
+        std::forward<TPortsTuple>(ports), std::forward<TSpansTuple>(spans));
+}
 } // namespace gr
 
 template<>
