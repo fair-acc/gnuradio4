@@ -651,7 +651,7 @@ class CircularBuffer {
         Reader(Reader&& other) noexcept
             : _readIndex(std::move(other._readIndex)),                                      //
               _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), //
-              _buffer(other._buffer),                                                       //
+              _buffer(std::move(other._buffer)),                                            //
               _nSamplesFirstGet(other._nSamplesFirstGet),                                   //
               _instanceCount(other._instanceCount),                                         //
               _nRequestedSamplesToConsume(other._nRequestedSamplesToConsume),               //
@@ -668,8 +668,10 @@ class CircularBuffer {
             return *this;
         };
         ~Reader() {
-            gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
-            _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+            if (_buffer) {
+                gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
+                _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+            }
         }
 
         [[nodiscard]] constexpr BufferType  buffer() const noexcept { return CircularBuffer(_buffer); };
