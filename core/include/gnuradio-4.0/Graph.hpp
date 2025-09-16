@@ -361,17 +361,24 @@ public:
 
     Graph(Graph&)            = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
-    Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { *this = std::move(other); }
-    Graph& operator=(Graph&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
+    Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { assignFrom(std::move(other)); }
+    Graph& assignFrom(Graph&& other) noexcept {
         compute_domain = std::move(other.compute_domain);
         _progress      = std::move(other._progress);
         _edges         = std::move(other._edges);
         _blocks        = std::move(other._blocks);
 
         return *this;
+    }
+
+    Graph& operator=(Graph&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        Block<Graph>::operator=(std::move(other));
+
+        return assignFrom(std::move(other));
     }
 
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }

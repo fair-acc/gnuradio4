@@ -11562,10 +11562,33 @@ public:
     constexpr Port() noexcept = default;
     explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
     constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
-    Port(const Port&)                       = delete;
-    auto            operator=(const Port&)  = delete;
-    constexpr Port& operator=(Port&& other) = delete;
-    ~Port()                                 = default;
+    Port(const Port&)                      = delete;
+    auto            operator=(const Port&) = delete;
+    constexpr Port& operator=(Port&& other) noexcept
+    requires(!Required::kIsConst)
+    {
+        if (this == &other) {
+            return *this;
+        }
+
+        name          = other.name;
+        priority      = other.priority;
+        default_value = std::move(other.default_value);
+        min_samples   = other.min_samples;
+        max_samples   = other.max_samples;
+        metaInfo      = std::move(other.metaInfo);
+        _ioHandler    = std::move(other._ioHandler);
+        _tagIoHandler = std::move(other._tagIoHandler);
+        _cachedTag    = std::move(other._cachedTag);
+
+        return *this;
+    }
+
+    constexpr Port& operator=(Port&& other)
+    requires(Required::kIsConst)
+    = delete;
+
+    ~Port() = default;
 
     [[nodiscard]] constexpr bool initBuffer(std::size_t nSamples = 0) noexcept {
         if constexpr (kIsOutput) {
@@ -19477,6 +19500,17 @@ public:
     requires(storageType != StorageType::ATOMIC)
         : _state(other._state) {} // plain enum
 
+    StateMachine& operator=(StateMachine&& other) noexcept {
+        if (this != &other) {
+            if constexpr (storageType == StorageType::ATOMIC) {
+                _state.store(other._state.load(std::memory_order_acquire), std::memory_order_release);
+            } else {
+                _state = other._state;
+            }
+        }
+        return *this;
+    }
+
     [[nodiscard]] std::expected<void, Error> changeStateTo(State newState, const std::source_location location = std::source_location::current()) {
         State oldState;
         if constexpr (storageType == StorageType::ATOMIC) {
@@ -20368,8 +20402,42 @@ public:
           _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
           _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
 
-    // There are a few const or conditionally const member variables, we cannot have a move-assignment that is equivalent to the move constructor
-    Block& operator=(Block&& other) = delete;
+    Block& operator=(Block&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        lifecycle::StateMachine<Derived>::operator=(std::move(other));
+
+        if constexpr (!ResamplingControl::kIsConst) {
+            input_chunk_size  = std::move(other.input_chunk_size);
+            output_chunk_size = std::move(other.output_chunk_size);
+        }
+        if constexpr (!StrideControl::kIsConst) {
+            stride = std::move(other.stride);
+        }
+        disconnect_on_done = std::move(other.disconnect_on_done);
+        compute_domain     = std::move(other.compute_domain);
+        name               = std::move(other.name);
+        ui_constraints     = std::move(other.ui_constraints);
+        meta_information   = std::move(other.meta_information);
+
+        strideCounter         = std::move(other.strideCounter);
+        msgIn                 = std::move(other.msgIn);
+        msgOut                = std::move(other.msgOut);
+        propertySubscriptions = std::move(other.propertySubscriptions);
+
+        // Reset caches (they are not movable due to Derived &_self)
+        new (&inputStreamCache) PortCache<Derived, PortDirection::INPUT, PortType::STREAM>(static_cast<Derived&>(*this));
+        new (&outputStreamCache) PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM>(static_cast<Derived&>(*this));
+
+        _mergedInputTag    = std::move(other._mergedInputTag);
+        _outputTagsChanged = std::move(other._outputTagsChanged);
+        _outputTags        = std::move(other._outputTags);
+        _settings.assignFrom(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)));
+
+        return *this;
+    }
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
@@ -24253,17 +24321,24 @@ public:
 
     Graph(Graph&)            = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
-    Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { *this = std::move(other); }
-    Graph& operator=(Graph&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
+    Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { assignFrom(std::move(other)); }
+    Graph& assignFrom(Graph&& other) noexcept {
         compute_domain = std::move(other.compute_domain);
         _progress      = std::move(other._progress);
         _edges         = std::move(other._edges);
         _blocks        = std::move(other._blocks);
 
         return *this;
+    }
+
+    Graph& operator=(Graph&& other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        Block<Graph>::operator=(std::move(other));
+
+        return assignFrom(std::move(other));
     }
 
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
