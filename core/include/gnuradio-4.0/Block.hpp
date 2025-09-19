@@ -1117,6 +1117,8 @@ public:
         }
         const auto isIndexEqual       = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; };
         const auto isIndexAndMapEqual = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); };
+
+        // TODO: we still fill _mergedInputTag, but this will be removed in the one of the next PR
         for_each_reader_span(
             [this, untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual](auto& in) {
                 if (in.isSync) {
@@ -1130,6 +1132,33 @@ public:
             },
             inputSpans);
 
+        // non-duplicated, ordered by index, the last Tag (wih max index) wins
+        using InputSpanT = typename gr::PortIn<float>::InputSpan<SpanReleasePolicy::ProcessNone>;
+        using ViewT      = decltype(std::declval<InputSpanT>().tags(0UZ));
+        std::vector<ViewT> allPairViews;
+        allPairViews.reserve(8);
+        for_each_reader_span(
+            [&allPairViews, untilLocalIndexAdjusted](auto& in) {
+                if (in.isSync) {
+                    auto inTags = in.tags(untilLocalIndexAdjusted);
+                    static_assert(std::ranges::input_range<decltype(inTags)>);
+                    static_assert(std::ranges::forward_range<decltype(inTags)>);
+                    allPairViews.push_back(std::move(inTags));
+                }
+            },
+            inputSpans);
+
+        auto mergedPairsLazy        = allPairViews | Merge{[](const PairRelIndexMapRef& lhs, const PairRelIndexMapRef& rhs) { return lhs.first < rhs.first; }};
+        auto nonDuplicatedInputTags = mergedPairsLazy | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+
+        if (inputTagsPresent()) {
+            for (const auto& tag : nonDuplicatedInputTags) {
+                // TODO: autoUpdate does not really need Tag, it should be changed to accept property_map
+                settings().autoUpdate(Tag{tag.first < 0 ? 0UZ : static_cast<std::size_t>(tag.first), tag.second.get()});
+            }
+        }
+
+        // update PortMetaInfo
         for_each_port_and_reader_span(
             [this, &untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
                 auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
@@ -1138,10 +1167,6 @@ public:
                 }
             },
             inputPorts<PortType::STREAM>(&self()), inputSpans);
-
-        if (inputTagsPresent()) {
-            settings().autoUpdate(_mergedInputTag); // apply tags as new settings if matching
-        }
     }
 
     void applyChangedSettings() {
