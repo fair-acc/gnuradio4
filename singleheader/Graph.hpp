@@ -9835,7 +9835,7 @@ class CircularBuffer {
         Reader(Reader&& other) noexcept
             : _readIndex(std::move(other._readIndex)),                                      //
               _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), //
-              _buffer(other._buffer),                                                       //
+              _buffer(std::move(other._buffer)),                                            //
               _nSamplesFirstGet(other._nSamplesFirstGet),                                   //
               _instanceCount(other._instanceCount),                                         //
               _nRequestedSamplesToConsume(other._nRequestedSamplesToConsume),               //
@@ -9852,8 +9852,10 @@ class CircularBuffer {
             return *this;
         };
         ~Reader() {
-            gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
-            _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+            if (_buffer) {
+                gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
+                _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+            }
         }
 
         [[nodiscard]] constexpr BufferType  buffer() const noexcept { return CircularBuffer(_buffer); };
@@ -19492,20 +19494,17 @@ public:
         }
     }
 
-    StateMachine(StateMachine&& other) noexcept
-    requires(storageType == StorageType::ATOMIC)
-        : _state(other._state.load(std::memory_order_acquire)) {} // atomic, not moving
-
-    StateMachine(StateMachine&& other) noexcept
-    requires(storageType != StorageType::ATOMIC)
-        : _state(other._state) {} // plain enum
+    StateMachine(StateMachine&& other) noexcept { *this = std::move(other); }
 
     StateMachine& operator=(StateMachine&& other) noexcept {
+        // _other's state is put in STOPPED, so that a moved-from ~Block() becomes a no-op
         if (this != &other) {
             if constexpr (storageType == StorageType::ATOMIC) {
                 _state.store(other._state.load(std::memory_order_acquire), std::memory_order_release);
+                other._state.store(State::STOPPED, std::memory_order_release);
             } else {
-                _state = other._state;
+                _state       = other._state;
+                other._state = State::STOPPED;
             }
         }
         return *this;

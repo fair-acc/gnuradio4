@@ -163,20 +163,17 @@ public:
         }
     }
 
-    StateMachine(StateMachine&& other) noexcept
-    requires(storageType == StorageType::ATOMIC)
-        : _state(other._state.load(std::memory_order_acquire)) {} // atomic, not moving
-
-    StateMachine(StateMachine&& other) noexcept
-    requires(storageType != StorageType::ATOMIC)
-        : _state(other._state) {} // plain enum
+    StateMachine(StateMachine&& other) noexcept { *this = std::move(other); }
 
     StateMachine& operator=(StateMachine&& other) noexcept {
+        // _other's state is put in STOPPED, so that a moved-from ~Block() becomes a no-op
         if (this != &other) {
             if constexpr (storageType == StorageType::ATOMIC) {
                 _state.store(other._state.load(std::memory_order_acquire), std::memory_order_release);
+                other._state.store(State::STOPPED, std::memory_order_release);
             } else {
-                _state = other._state;
+                _state       = other._state;
+                other._state = State::STOPPED;
             }
         }
         return *this;
