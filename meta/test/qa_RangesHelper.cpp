@@ -57,4 +57,116 @@ const boost::ut::suite<"PairDeduplicateView tests"> _PairDeduplicateViewTests = 
     };
 };
 
+const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+
+    using Pair       = std::pair<std::ptrdiff_t, char>;
+    auto compByIndex = [](const Pair& a, const Pair& b) { return a.first < b.first; };
+
+    "MergeView - Pair basics"_test = [&]<class T> {
+        T          a{{1, 'a'}, {3, 'a'}, {3, 'a'}, {5, 'a'}};
+        T          b{{2, 'b'}, {3, 'b'}, {4, 'b'}, {6, 'b'}};
+        T          c{{2, 'c'}, {3, 'c'}, {4, 'c'}, {6, 'c'}};
+        std::array inputs{std::views::all(a), std::views::all(b), std::views::all(c)};
+
+        auto out = inputs | Merge{compByIndex};
+
+        static_assert(std::ranges::range<decltype(out)>);
+        static_assert(std::ranges::view<decltype(out)>);
+        static_assert(std::ranges::forward_range<decltype(out)>);
+
+        std::vector<Pair> expected{{1, 'a'}, {2, 'b'}, {2, 'c'}, {3, 'a'}, {3, 'a'}, {3, 'b'}, {3, 'c'}, {4, 'b'}, {4, 'c'}, {5, 'a'}, {6, 'b'}, {6, 'c'}};
+        expect(std::ranges::equal(out, expected));
+    } | std::tuple<std::vector<Pair>, std::forward_list<Pair>>{};
+
+    "MergeView - empty + non-empty inputs"_test = [&] {
+        std::vector<Pair> a{};
+        std::vector<Pair> b{{1, 'b'}, {3, 'b'}};
+        std::vector<Pair> c{};
+        std::vector<Pair> d{{2, 'd'}};
+        std::array        inputs{std::views::all(a), std::views::all(b), std::views::all(c), std::views::all(d)};
+
+        auto out = inputs | Merge{compByIndex};
+
+        std::vector<Pair> expected{{1, 'b'}, {2, 'd'}, {3, 'b'}};
+        expect(std::ranges::equal(out, expected));
+    };
+
+    "MergeView - all inputs empty"_test = [&] {
+        std::vector<Pair> a{}, b{};
+        std::array        inputs{std::views::all(a), std::views::all(b)};
+        auto              out = inputs | Merge{compByIndex};
+
+        expect(std::ranges::equal(out, std::vector<Pair>{}));
+    };
+
+    "MergeView - single input"_test = [&] {
+        std::vector<Pair> a{{1, 'a'}, {2, 'a'}, {5, 'a'}};
+        std::array        inputs{std::views::all(a)};
+        auto              out = inputs | Merge{compByIndex};
+
+        expect(std::ranges::equal(out, a));
+    };
+
+    "MergeView - int + default comparator"_test = [&] {
+        std::vector<int> a{1, 1, 4, 7};
+        std::vector<int> b{2, 3, 5, 6};
+        std::vector<int> c{0, 5, 8};
+        std::array       inputs{std::views::all(a), std::views::all(b), std::views::all(c)};
+
+        auto out = inputs | Merge{}; // default std::ranges::less
+
+        std::vector<int> expected{0, 1, 1, 2, 3, 4, 5, 5, 6, 7, 8};
+        expect(std::ranges::equal(out, expected));
+    };
+
+    "MergeView - multipass/equality preserving"_test = [&] {
+        std::vector<Pair> a{{1, 'a'}, {3, 'a'}};
+        std::vector<Pair> b{{2, 'b'}, {4, 'b'}};
+
+        std::array inputs{std::views::all(a), std::views::all(b)};
+        auto       out = inputs | Merge{compByIndex};
+
+        auto i1 = std::ranges::begin(out);
+        auto i2 = i1;         // copy
+        expect(&*i1 == &*i2); // same value after copy
+        ++i1;                 // advance first iter
+        expect(&*i1 != &*i2); // not equal
+        ++i2;                 // advance second iter
+        expect(*i1 == *i2);   // same value again
+
+        auto& r1 = *i1;
+        auto& r2 = *i1;
+        expect(&r1 == &r2);
+    };
+
+    "MergeView - sentinel test"_test = [&] {
+        std::vector<Pair> a{{1, 'a'}};
+        std::array        inputs{std::views::all(a)};
+        auto              out = inputs | Merge{compByIndex};
+
+        auto it = std::ranges::begin(out);
+        auto ed = std::default_sentinel;
+
+        expect(it != ed);
+        ++it;
+        expect(it == ed);
+        expect(ed == it);
+    };
+
+    "MergeView - double pass invariant"_test = [&] {
+        std::vector<Pair> a{{1, 'a'}, {3, 'a'}};
+        std::vector<Pair> b{{2, 'b'}, {4, 'b'}};
+        std::array        inputs{std::views::all(a), std::views::all(b)};
+        auto              out = inputs | Merge{compByIndex};
+
+        std::vector<Pair> pass1;
+        std::ranges::copy(out, std::back_inserter(pass1));
+        std::vector<Pair> pass2;
+        std::ranges::copy(out, std::back_inserter(pass2));
+        expect(std::ranges::equal(pass1, pass2));
+    };
+};
+
 int main() {}
