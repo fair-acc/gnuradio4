@@ -936,10 +936,11 @@ connections:
   - [test_block, 0, sink, 0]
 )";
         BlockRegistry              registry;
+        SchedulerRegistry          schedulerRegistry;
         gr::registerBlock<Source, double>(registry);
         gr::registerBlock<SettingsChangeRecorder, double>(registry);
         gr::registerBlock<Sink, double>(registry);
-        PluginLoader loader(registry, {});
+        PluginLoader loader(registry, schedulerRegistry, {});
         try {
             gr::scheduler::Simple<> sched;
             if (auto ret = sched.exchange(loadGrc(loader, std::string(grc))); !ret) {
