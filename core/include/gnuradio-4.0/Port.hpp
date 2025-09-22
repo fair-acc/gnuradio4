@@ -453,6 +453,8 @@ struct PortDescriptor {
     static constexpr bool kIsDynamicCollection = Kind == DynamicPortCollection;
     static constexpr bool kIsStaticCollection  = Kind == StaticPortCollection;
 
+    static constexpr std::size_t kStaticCollectionSize = Kind == StaticPortCollection ? KindExtraData : 0UZ;
+
     // tuple-like
     static constexpr bool kPartOfTuple = Kind == TupleOfPorts;
 

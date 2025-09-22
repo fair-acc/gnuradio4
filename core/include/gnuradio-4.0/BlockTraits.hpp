@@ -130,6 +130,39 @@ using all_input_port_names = typename all_input_ports<TBlock>::template transfor
 template<PortReflectable TBlock>
 using all_output_port_names = typename all_output_ports<TBlock>::template transform<detail::port_name>;
 
+template<PortReflectable TBlock>
+inline constexpr bool has_dynamic_input_collections_v = !all_input_ports<TBlock>::template none_of<port::is_dynamic_port_collection>;
+
+template<PortReflectable TBlock>
+inline constexpr bool has_dynamic_output_collections_v = !all_output_ports<TBlock>::template none_of<port::is_dynamic_port_collection>;
+
+namespace detail {
+
+template<class TL, std::size_t I>
+consteval std::size_t static_ports_count_for_index() {
+    using PD = typename TL::template at<I>;
+    if constexpr (PD::kIsDynamicCollection) {
+        return 0UZ; // unknown at compile time
+    } else if constexpr (PD::kIsStaticCollection) {
+        return PD::kStaticCollectionSize; // std::array
+    } else {
+        return 1UZ; // single port
+    }
+}
+
+template<class TL>
+consteval std::size_t static_ports_count() {
+    return []<std::size_t... Is>(std::index_sequence<Is...>) { return (static_ports_count_for_index<TL, Is>() + ... + 0UZ); }(TL::index_sequence);
+}
+
+} // namespace detail
+
+template<PortReflectable TBlock>
+inline constexpr std::size_t static_input_ports_count_v = detail::static_ports_count<all_input_ports<TBlock>>();
+
+template<PortReflectable TBlock>
+inline constexpr std::size_t static_output_ports_count_v = detail::static_ports_count<all_output_ports<TBlock>>();
+
 // TODO: Why is this not done with requires?
 // mkretz: I don't understand the question. "this" in the question is unclear.
 /* Helper to determine the return type of `block.processOne` for the given inputs.
