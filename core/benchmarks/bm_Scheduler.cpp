@@ -9,6 +9,8 @@
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/algorithm/ImGraph.hpp>
+
 using T          = float;
 using TestMarker = benchmark::MarkerMap<"first-out", "last-out", "first-in", "last-in">;
 
@@ -171,9 +173,10 @@ auto& createSource(gr::Graph& graph) {
 }
 
 template<typename T>
-auto& createSink(gr::Graph& graph, bool instrumentalise = true) {
+auto& createSink(gr::Graph& graph, std::size_t idx = gr::meta::invalid_index, bool instrumentalise = true) {
     using namespace gr::testing;
-    auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}});
+    std::string sinkName = idx == gr::meta::invalid_index ? "sink" : std::format("sink#{}", idx);
+    auto&       sink     = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"name", sinkName}});
     if (!instrumentalise) {
         return sink;
     }
@@ -190,22 +193,33 @@ auto& createSink(gr::Graph& graph, bool instrumentalise = true) {
     return sink;
 }
 
-enum class GraphTopology { DEFAULT, LINEAR, FORKED, SPLIT };
+enum class GraphTopology { DEFAULT, LINEAR, FORKED, SPLIT, FEEDBACK };
 
-void printGraphTopology(const gr::Graph& graph, GraphTopology topology) {
+void printGraphTopology(const gr::Graph& graph, GraphTopology topology, bool detailedInfo = false) {
     gr::Graph  flatGraph        = gr::graph::flatten(graph);
     const bool neededFlattening = graph.blocks().size() < flatGraph.blocks().size();
-    std::println("Graph Topology: {}{}:", magic_enum::enum_name(topology), neededFlattening ? "-flattened" : "");
+    for (auto& loop : gr::graph::detectFeedbackLoops(flatGraph)) {
+        gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
+    }
+    std::println("Graph Topology: {}{}:\n{}", magic_enum::enum_name(topology), neededFlattening ? "-flattened" : "", gr::graph::draw(flatGraph));
+    std::println("blocks in order of definition: {}", //
+        [&] -> std::string {
+            std::string s;
+            s.reserve(256); // optional
+            for (const auto& b : flatGraph.blocks()) {
+                s += std::string(!s.empty() ? ", " : b->name());
+            }
+            return s;
+        }());
 
-    for (const auto& block : flatGraph.blocks()) {
-        std::println("  - block: {}", block->name());
+    if (detailedInfo) {
+        for (const auto& edge : flatGraph.edges()) {
+            std::println("  - edge: {}", edge);
+        }
+        const gr::graph::AdjacencyList adjacencyList = gr::graph::computeAdjacencyList(flatGraph);
+        const auto                     sourceBlocks  = gr::graph::findSourceBlocks(adjacencyList);
+        std::println("AdjacencyList - #SrcBlocks {}\n{}", sourceBlocks.size(), adjacencyList);
     }
-    for (const auto& edge : flatGraph.edges()) {
-        std::println("  - edge: {}", edge);
-    }
-    const gr::graph::AdjacencyList adjacencyList = gr::graph::computeAdjacencyList(flatGraph);
-    const auto                     sourceBlocks  = gr::graph::findSourceBlocks(adjacencyList);
-    std::println("AdjacencyList - #SrcBlocks {}\n{}", sourceBlocks.size(), adjacencyList);
 }
 
 template<typename T>
@@ -266,13 +280,36 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
         auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}});
         expect(eq(graph.connect(simBlock3, "out"s, simBlock4, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
 
-        auto& sink1 = createSink<T>(graph, false);
+        auto& sink1 = createSink<T>(graph, 0UZ, false);
         expect(eq(graph.connect(simBlock2, "out"s, sink1, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& sink2 = createSink<T>(graph, true);
+        auto& sink2 = createSink<T>(graph, 1UZ, true);
         expect(eq(graph.connect(simBlock4, "out"s, sink2, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
     } break;
+    case GraphTopology::FEEDBACK: {              // graph with feedback edge
+        constexpr float targetThroughput = 10e9; // 10 GS/s disables CPU rate limit for testing until further improved
+        auto&           src              = createSource<T>(graph);
+        auto&           simBlock1        = graph.emplaceBlock<SimCompute<T>>({{"name", "sim1"}, {"target_throughput", targetThroughput}});
+        expect(eq(graph.connect(src, "out"s, simBlock1, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+        gr::property_map prop_auto{{"layout_pref", "auto"}};
+        auto&            adder = graph.emplaceBlock<gr::blocks::math::Add<T>>({{"name", "Σ"}, {"n_inputs", 2U}, {"ui_constraints", prop_auto}});
+        expect(eq(graph.connect(simBlock1, "out"s, adder, {0UZ, 0UZ}, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS)); // '{0UZ, 0UZ}' is a workaround for broken connect
+        // expect(eq(graph.connect(simBlock1, "out"s, adder, "in#0"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+        auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim2"}, {"target_throughput", targetThroughput}});
+        expect(eq(graph.connect(adder, "out"s, simBlock2, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+        auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim3"}, {"target_throughput", targetThroughput}});
+        expect(eq(graph.connect(simBlock2, "out"s, simBlock3, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+        auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}, {"target_throughput", targetThroughput}});
+        expect(eq(graph.connect(simBlock3, "out"s, simBlock4, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+
+        // feedback edge
+        expect(eq(graph.connect(simBlock4, "out"s, adder, {0UZ, 1UZ}, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+        // expect(eq(graph.connect(simBlock4, "out"s, adder, "in#1"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+
+        auto& sink1 = createSink<T>(graph, gr::meta::invalid_index, false);
+        expect(eq(graph.connect(simBlock3, "out"s, sink1, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
+    } break;
     default: {
-        create_cascade<T>(graph, createSource<T>(graph), createSink<T>(graph), 3UZ);
+        create_cascade<T>(graph, createSource<T>(graph), createSink<T>(graph, 0UZ), 3UZ);
     }
     }
 
@@ -319,7 +356,7 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
         ::benchmark::benchmark(std::format("BFS scheduler - work limited to 1024 - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&breathFirstSched2](TestMarker& marker) { exec_bm(breathFirstSched2, "test case #2", marker); };
 
         ::benchmark::results::add_separator();
-    } | std::vector{GraphTopology::LINEAR, GraphTopology::FORKED, GraphTopology::SPLIT};
+    } | std::vector{GraphTopology::LINEAR, GraphTopology::FORKED, GraphTopology::SPLIT, GraphTopology::FEEDBACK};
 };
 
 int main() { /* not needed by the UT framework */ }
