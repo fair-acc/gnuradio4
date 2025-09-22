@@ -1148,8 +1148,9 @@ public:
             },
             inputSpans);
 
-        auto mergedPairsLazy        = allPairViews | Merge{[](const PairRelIndexMapRef& lhs, const PairRelIndexMapRef& rhs) { return lhs.first < rhs.first; }};
-        auto nonDuplicatedInputTags = mergedPairsLazy | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+        constexpr std::size_t nRanges                = gr::traits::block::has_dynamic_input_collections_v<Derived> ? std::dynamic_extent : gr::traits::block::static_input_ports_count_v<Derived>;
+        auto                  mergedPairsLazy        = allPairViews | Merge<nRanges>([](const PairRelIndexMapRef& lhs, const PairRelIndexMapRef& rhs) { return lhs.first < rhs.first; });
+        auto                  nonDuplicatedInputTags = mergedPairsLazy | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
 
         if (inputTagsPresent()) {
             for (const auto& tag : nonDuplicatedInputTags) {
@@ -2802,6 +2803,7 @@ inline constexpr void for_each_port_and_reader_span(TFunction&& function, TPorts
         },
         std::forward<TPortsTuple>(ports), std::forward<TSpansTuple>(spans));
 }
+
 } // namespace gr
 
 template<>

@@ -70,14 +70,20 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
         T          c{{2, 'c'}, {3, 'c'}, {4, 'c'}, {6, 'c'}};
         std::array inputs{std::views::all(a), std::views::all(b), std::views::all(c)};
 
-        auto out = inputs | Merge{compByIndex};
+        auto outDynamic = inputs | Merge(compByIndex);
+        auto outStatic  = inputs | Merge<3>(compByIndex);
 
-        static_assert(std::ranges::range<decltype(out)>);
-        static_assert(std::ranges::view<decltype(out)>);
-        static_assert(std::ranges::forward_range<decltype(out)>);
+        static_assert(std::ranges::range<decltype(outDynamic)>);
+        static_assert(std::ranges::view<decltype(outDynamic)>);
+        static_assert(std::ranges::forward_range<decltype(outDynamic)>);
+
+        static_assert(std::ranges::range<decltype(outStatic)>);
+        static_assert(std::ranges::view<decltype(outStatic)>);
+        static_assert(std::ranges::forward_range<decltype(outStatic)>);
 
         std::vector<Pair> expected{{1, 'a'}, {2, 'b'}, {2, 'c'}, {3, 'a'}, {3, 'a'}, {3, 'b'}, {3, 'c'}, {4, 'b'}, {4, 'c'}, {5, 'a'}, {6, 'b'}, {6, 'c'}};
-        expect(std::ranges::equal(out, expected));
+        expect(std::ranges::equal(outDynamic, expected));
+        expect(std::ranges::equal(outStatic, expected));
     } | std::tuple<std::vector<Pair>, std::forward_list<Pair>>{};
 
     "MergeView - empty + non-empty inputs"_test = [&] {
@@ -87,7 +93,7 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
         std::vector<Pair> d{{2, 'd'}};
         std::array        inputs{std::views::all(a), std::views::all(b), std::views::all(c), std::views::all(d)};
 
-        auto out = inputs | Merge{compByIndex};
+        auto out = inputs | Merge(compByIndex);
 
         std::vector<Pair> expected{{1, 'b'}, {2, 'd'}, {3, 'b'}};
         expect(std::ranges::equal(out, expected));
@@ -96,7 +102,7 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
     "MergeView - all inputs empty"_test = [&] {
         std::vector<Pair> a{}, b{};
         std::array        inputs{std::views::all(a), std::views::all(b)};
-        auto              out = inputs | Merge{compByIndex};
+        auto              out = inputs | Merge(compByIndex);
 
         expect(std::ranges::equal(out, std::vector<Pair>{}));
     };
@@ -104,7 +110,7 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
     "MergeView - single input"_test = [&] {
         std::vector<Pair> a{{1, 'a'}, {2, 'a'}, {5, 'a'}};
         std::array        inputs{std::views::all(a)};
-        auto              out = inputs | Merge{compByIndex};
+        auto              out = inputs | Merge(compByIndex);
 
         expect(std::ranges::equal(out, a));
     };
@@ -115,7 +121,7 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
         std::vector<int> c{0, 5, 8};
         std::array       inputs{std::views::all(a), std::views::all(b), std::views::all(c)};
 
-        auto out = inputs | Merge{}; // default std::ranges::less
+        auto out = inputs | Merge(); // default std::ranges::less
 
         std::vector<int> expected{0, 1, 1, 2, 3, 4, 5, 5, 6, 7, 8};
         expect(std::ranges::equal(out, expected));
@@ -126,7 +132,7 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
         std::vector<Pair> b{{2, 'b'}, {4, 'b'}};
 
         std::array inputs{std::views::all(a), std::views::all(b)};
-        auto       out = inputs | Merge{compByIndex};
+        auto       out = inputs | Merge(compByIndex);
 
         auto i1 = std::ranges::begin(out);
         auto i2 = i1;         // copy
@@ -144,7 +150,7 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
     "MergeView - sentinel test"_test = [&] {
         std::vector<Pair> a{{1, 'a'}};
         std::array        inputs{std::views::all(a)};
-        auto              out = inputs | Merge{compByIndex};
+        auto              out = inputs | Merge(compByIndex);
 
         auto it = std::ranges::begin(out);
         auto ed = std::default_sentinel;
@@ -159,7 +165,7 @@ const boost::ut::suite<"MergeView tests"> _MergeViewTests = [] {
         std::vector<Pair> a{{1, 'a'}, {3, 'a'}};
         std::vector<Pair> b{{2, 'b'}, {4, 'b'}};
         std::array        inputs{std::views::all(a), std::views::all(b)};
-        auto              out = inputs | Merge{compByIndex};
+        auto              out = inputs | Merge(compByIndex);
 
         std::vector<Pair> pass1;
         std::ranges::copy(out, std::back_inserter(pass1));

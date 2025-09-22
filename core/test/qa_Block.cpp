@@ -448,6 +448,10 @@ struct VectorPortsBlock : gr::Block<VectorPortsBlock<T>> {
     }
 };
 static_assert(gr::HasProcessBulkFunction<VectorPortsBlock<int>>);
+static_assert(gr::traits::block::has_dynamic_input_collections_v<VectorPortsBlock<int>>);
+static_assert(gr::traits::block::has_dynamic_output_collections_v<VectorPortsBlock<int>>);
+static_assert(gr::traits::block::static_input_ports_count_v<VectorPortsBlock<int>> == 0UZ);
+static_assert(gr::traits::block::static_output_ports_count_v<VectorPortsBlock<int>> == 0UZ);
 
 template<typename T>
 struct ArrayPortsBlock : gr::Block<ArrayPortsBlock<T>> {
@@ -484,6 +488,45 @@ struct ArrayPortsBlock : gr::Block<ArrayPortsBlock<T>> {
     }
 };
 static_assert(gr::HasProcessBulkFunction<ArrayPortsBlock<int>>);
+static_assert(!gr::traits::block::has_dynamic_input_collections_v<ArrayPortsBlock<int>>);
+static_assert(!gr::traits::block::has_dynamic_output_collections_v<ArrayPortsBlock<int>>);
+static_assert(gr::traits::block::static_input_ports_count_v<ArrayPortsBlock<int>> == ArrayPortsBlock<int>::nPorts);
+static_assert(gr::traits::block::static_output_ports_count_v<ArrayPortsBlock<int>> == ArrayPortsBlock<int>::nPorts);
+
+template<typename T>
+struct MultiPortBlock : gr::Block<MultiPortBlock<T>> {
+    static constexpr std::size_t nVectorPorts1 = 2;
+    static constexpr std::size_t nArrayPorts1  = 3;
+
+    static constexpr std::size_t nVectorPorts2 = 4;
+    static constexpr std::size_t nArrayPorts2  = 5;
+
+    std::vector<gr::PortIn<T>>               inVec1{nVectorPorts1};
+    std::vector<gr::PortOut<T>>              outVec1{nVectorPorts1};
+    std::array<gr::PortIn<T>, nArrayPorts1>  inAr1;
+    std::array<gr::PortOut<T>, nArrayPorts1> outAr1;
+    gr::PortIn<T>                            in1;
+    gr::PortOut<T>                           out1;
+
+    std::vector<gr::PortIn<T>>               inVec2{nVectorPorts2};
+    std::vector<gr::PortOut<T>>              outVec2{nVectorPorts2};
+    std::array<gr::PortIn<T>, nArrayPorts2>  inAr2;
+    std::array<gr::PortOut<T>, nArrayPorts2> outAr2;
+    gr::PortIn<T>                            in2;
+    gr::PortOut<T>                           out2;
+
+    GR_MAKE_REFLECTABLE(MultiPortBlock, inVec1, outVec1, inAr1, outAr1, in1, out1, inVec2, outVec2, inAr2, outAr2, in2, out2);
+
+    template<typename TIn1, typename TIn2, typename TIn3, typename TIn4, typename TOut1, typename TOut2, typename TOut3, typename TOut4>
+    gr::work::Status processBulk(std::span<TIn1>&, std::span<TIn2>&, std::span<const T>&, std::span<TIn3>&, std::span<TIn4>&, std::span<const T>&, //
+        std::span<TOut1>&, std::span<TOut2>&, std::span<T>&, std::span<TOut3>&, std::span<TOut4>&, std::span<T>&) {
+        return gr::work::Status::OK;
+    }
+};
+static_assert(gr::traits::block::has_dynamic_input_collections_v<MultiPortBlock<int>>);
+static_assert(gr::traits::block::has_dynamic_output_collections_v<MultiPortBlock<int>>);
+static_assert(gr::traits::block::static_input_ports_count_v<MultiPortBlock<int>> == MultiPortBlock<int>::nArrayPorts1 + MultiPortBlock<int>::nArrayPorts2 + 2UZ);
+static_assert(gr::traits::block::static_output_ports_count_v<MultiPortBlock<int>> == MultiPortBlock<int>::nArrayPorts1 + MultiPortBlock<int>::nArrayPorts2 + 2UZ);
 
 const boost::ut::suite<"Block signatures"> _block_signature = [] {
     using namespace boost::ut;
