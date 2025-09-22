@@ -8,6 +8,8 @@
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
+#include <gnuradio-4.0/algorithm/ImGraph.hpp>
+
 #include <chrono>
 
 using TraceVectorType = std::vector<std::string>;
@@ -254,16 +256,17 @@ gr::Graph getGraphScaledSum(std::shared_ptr<Tracer> tracer, std::source_location
 gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location()) {
     using namespace boost::ut;
 
-    gr::Size_t nMaxSamples{2};
+    gr::Size_t       nMaxSamples{2};
+    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
     auto&     source1 = flow.emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer    = tracer;
     auto& scale1      = flow.emplaceBlock<Scale<float>>({{"name", "alpha"}, {"scale_factor", 0.9f}});
     scale1.tracer     = tracer;
-    auto& scale2      = flow.emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}});
+    auto& scale2      = flow.emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}, {"ui_constraints", layout_auto}});
     scale2.tracer     = tracer;
-    auto& sum         = flow.emplaceBlock<Adder<float>>({{"name", "sum"}});
+    auto& sum         = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
     sum.tracer        = tracer;
     auto& sink        = flow.emplaceBlock<ExpectSink<float>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
     sink.tracer       = tracer;
@@ -283,13 +286,14 @@ gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_locat
 gr::Graph getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
     using namespace boost::ut;
 
-    gr::Size_t nMaxSamples{10};
-    gr::Size_t ratio{5};
+    gr::Size_t       nMaxSamples{10};
+    gr::Size_t       ratio{5};
+    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
     auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
     source.tracer    = tracer;
-    auto& adder      = flow.emplaceBlock<Adder<float>>({{"name", "sum"}});
+    auto& adder      = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
     adder.tracer     = tracer;
     auto& sink       = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples / ratio}});
     sink.tracer      = tracer;
@@ -317,26 +321,27 @@ gr::Graph getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_
 gr::Graph getMultipleNestedFeedbackLoops(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
     using namespace boost::ut;
 
-    gr::Size_t nMaxSamples{2};
+    gr::Size_t       nMaxSamples{2};
+    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
     auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
     source.tracer    = tracer;
 
     // feedback loop #1: scale1 ⟷ scale2
-    auto& scale1  = flow.emplaceBlock<Scale<float>>({{"name", "s1"}, {"scale_factor", 0.8f}});
+    auto& scale1  = flow.emplaceBlock<Scale<float>>({{"name", "s1"}, {"scale_factor", 0.8f}, {"ui_constraints", layout_auto}});
     scale1.tracer = tracer;
-    auto& scale2  = flow.emplaceBlock<Scale<float>>({{"name", "s2"}, {"scale_factor", 0.9f}});
+    auto& scale2  = flow.emplaceBlock<Scale<float>>({{"name", "s2"}, {"scale_factor", 0.9f}, {"ui_constraints", layout_auto}});
     scale2.tracer = tracer;
-    auto& adder1  = flow.emplaceBlock<Adder<float>>({{"name", "sum1"}});
+    auto& adder1  = flow.emplaceBlock<Adder<float>>({{"name", "sum1"}, {"ui_constraints", layout_auto}});
     adder1.tracer = tracer;
 
     // feedback loop #2: scale3 ⟷ scale4
-    auto& scale3  = flow.emplaceBlock<Scale<float>>({{"name", "s3"}, {"scale_factor", 0.7f}});
+    auto& scale3  = flow.emplaceBlock<Scale<float>>({{"name", "s3"}, {"scale_factor", 0.7f}, {"ui_constraints", layout_auto}});
     scale3.tracer = tracer;
-    auto& scale4  = flow.emplaceBlock<Scale<float>>({{"name", "s4"}, {"scale_factor", 0.6f}});
+    auto& scale4  = flow.emplaceBlock<Scale<float>>({{"name", "s4"}, {"scale_factor", 0.6f}, {"ui_constraints", layout_auto}});
     scale4.tracer = tracer;
-    auto& adder2  = flow.emplaceBlock<Adder<float>>({{"name", "sum2"}});
+    auto& adder2  = flow.emplaceBlock<Adder<float>>({{"name", "sum2"}, {"ui_constraints", layout_auto}});
     adder2.tracer = tracer;
 
     auto& sink   = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples}});
@@ -416,8 +421,6 @@ gr::Graph getIIRFormII(std::shared_ptr<Tracer> tracer, std::source_location loc 
     outputSum1.tracer = tracer;
     auto& outputSum2  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum2"}}); // combines b1 with (b2+b3)
     outputSum2.tracer = tracer;
-    auto& outputSum3  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum3"}}); // combines b0 with (b1+b2+b3)
-    outputSum3.tracer = tracer;
 
     // main path src -> sum (feedback branches) -> b0 -> sum (feed-forward branches) -> snk
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"addend0">(feedbackSum0)), loc); // src -> feedbackSum0
@@ -1221,6 +1224,30 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(names.contains(blockB.unique_name)) << "didn't find blockB";
         expect(!names.contains(blockC.unique_name)) << "found blockC though nothing is connected to it";
         expect(!names.contains(blockD.unique_name)) << "isolated node should not be in adjacency list";
+    };
+
+    "print topologies"_test = [] {
+        auto runTest = [](std::string name, gr::Graph graph) {
+            for (auto& loop : gr::graph::detectFeedbackLoops(graph)) {
+                gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
+            }
+            std::println("{}:\n{}", name, gr::graph::draw(graph));
+
+            gr::scheduler::Simple<> sched;
+            if (auto ret = sched.exchange(std::move(graph)); !ret) {
+                expect(false) << std::format("couldn't initialise scheduler {}. error: {}", name, ret.error()) << fatal;
+            }
+            expect(sched.runAndWait().has_value());
+        };
+
+        std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
+        runTest("getGraphLinear():\n", getGraphLinear(trace));
+        runTest("getGraphParallel():\n", getGraphParallel(trace));
+        runTest("getGraphScaledSum():\n", getGraphScaledSum(trace));
+        runTest("getBasicFeedBackLoop():\n", getBasicFeedBackLoop(trace));
+        runTest("getResamplingFeedbackLoop():\n", getResamplingFeedbackLoop(trace));
+        runTest("getMultipleNestedFeedbackLoops():\n", getMultipleNestedFeedbackLoops(trace));
+        runTest("getIIRFormII():\n", getIIRFormII(trace));
     };
 
     // TODO: add flatten test for nested graph once they are fully integrated by Ivan & Dantti
