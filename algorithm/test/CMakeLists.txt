@@ -3,6 +3,7 @@ add_ut_test(qa_DataSetEstimators)
 add_ut_test(qa_FilterTool)
 add_ut_test(qa_ImChart)
 add_ut_test(qa_SchmittTrigger)
+add_ut_test(qa_simd_fft)
 target_link_libraries(qa_algorithm_fourier PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_DataSetEstimators PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_FilterTool PRIVATE gnuradio-algorithm)
@@ -11,3 +12,5 @@ target_link_libraries(qa_SchmittTrigger PRIVATE gnuradio-algorithm)
 
 add_executable(example_ImChart example_ImChart.cpp)
 target_link_libraries(example_ImChart PRIVATE gnuradio-algorithm)
+
+add_subdirectory(incubator)
