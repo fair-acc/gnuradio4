@@ -22616,7 +22616,7 @@ struct Edge {
     std::int32_t _weight = 0;
     std::string  _name   = "unnamed edge"; // custom edge name
 
-    property_map _uiConstraints{};
+    std::shared_ptr<property_map> _uiConstraints{std::make_shared<property_map>()}; // used to store UI and other non-dsp related meta-information
 
     Edge() = delete;
 
@@ -22645,8 +22645,8 @@ struct Edge {
     constexpr std::size_t             nReaders() const { return _sourcePort ? _sourcePort->nReaders() : -1UZ; }
     constexpr std::size_t             nWriters() const { return _destinationPort ? _destinationPort->nWriters() : -1UZ; }
     constexpr PortType                edgeType() const { return _edgeType; }
-    [[nodiscard]] property_map&       uiConstraints() noexcept { return _uiConstraints; }
-    [[nodiscard]] const property_map& uiConstraints() const { return _uiConstraints; }
+    [[nodiscard]] property_map&       uiConstraints() noexcept { return *_uiConstraints; }
+    [[nodiscard]] const property_map& uiConstraints() const { return *_uiConstraints; }
 
     constexpr bool hasSameSourcePort(const Edge& other) const noexcept { return sourceBlock() == other.sourceBlock() && sourcePortDefinition().definition == other.sourcePortDefinition().definition; }
 
@@ -23487,7 +23487,7 @@ template<gr::PortDirection direction>
     constexpr static auto countPortsPrior = [](const std::shared_ptr<gr::BlockModel>& b, std::size_t idx) -> std::size_t {
         const std::size_t nTopLevel = portCollectionSize(b);
         if (idx >= nTopLevel) {
-            throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", b->uniqueName(), idx, nTopLevel));
+            throw gr::exception(std::format("Block '{}'({}) has no input port at index {} [0, {}]", b->name(), b->uniqueName(), idx, nTopLevel));
         }
         std::size_t nPortsPrior = 0UZ;
         for (std::size_t i = 0UZ; i < idx; ++i) { // count all ports in collections before idx
@@ -23506,7 +23506,7 @@ template<gr::PortDirection direction>
     if (const auto* idx = std::get_if<gr::PortDefinition::IndexBased>(&portDefinition.definition)) {
         if (idx->subIndex != gr::meta::invalid_index) {
             if (idx->subIndex >= portCollectionSize(block, idx->topLevel)) {
-                throw gr::exception(std::format("Block {} has no input port at index {} [0, {}]", block->uniqueName(), idx->subIndex, portCollectionSize(block)), loc);
+                throw gr::exception(std::format("Block '{}'({}) has no input port at index {} [0, {}]", block->name(), block->uniqueName(), idx->subIndex, portCollectionSize(block, idx->topLevel)), loc);
             }
             return countPortsPrior(block, idx->topLevel) + idx->subIndex;
         }
@@ -24207,26 +24207,35 @@ std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block->uniqueName() == what.unique_name; }); it != graph.blocks().end()) {
         return *it;
     }
-    return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location));
+    return std::unexpected(Error(std::format("Block '{}' ({}) not in this graph:\n{}", what.name, what.unique_name, format(graph)), location));
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(const GraphLike auto& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept {
     if (auto it = std::ranges::find_if(graph.blocks(), [&](const auto& block) { return block.get() == std::addressof(*what); }); it != graph.blocks().end()) {
         return *it;
     }
-    return std::unexpected(Error(std::format("Block {} ({}) not in this graph:\n{}", what->name(), what->uniqueName(), format(graph)), location));
+    return std::unexpected(Error(std::format("Block '{}' ({}) not in this graph:\n{}", what->name(), what->uniqueName(), format(graph)), location));
 }
 
-std::expected<std::shared_ptr<BlockModel>, Error> findBlock(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
+std::expected<std::shared_ptr<BlockModel>, Error> findBlock(const GraphLike auto& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
     for (const auto& block : graph.blocks()) {
         if (block->uniqueName() == uniqueBlockName) {
             return block;
         }
     }
-    return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
+    return std::unexpected(Error(std::format("Block '{}' not found in:\n{}", uniqueBlockName, format(graph)), location));
 }
 
-std::expected<std::size_t, Error> blockIndex(GraphLike auto const& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
+std::expected<gr::Edge, Error> findEdge(const GraphLike auto& graph, std::string_view edgeName, std::source_location location = std::source_location::current()) noexcept {
+    for (const auto& edge : graph.edges()) {
+        if (edge.name() == edgeName) {
+            return edge;
+        }
+    }
+    return std::unexpected(Error(std::format("Edge '{}' not found in:\n{}", edgeName, format(graph)), location));
+}
+
+std::expected<std::size_t, Error> blockIndex(const GraphLike auto& graph, std::string_view uniqueBlockName, std::source_location location = std::source_location::current()) noexcept {
     std::size_t index = 0UZ;
     for (const auto& block : graph.blocks()) {
         if (block->uniqueName() == uniqueBlockName) {
@@ -24237,11 +24246,11 @@ std::expected<std::size_t, Error> blockIndex(GraphLike auto const& graph, std::s
     return std::unexpected(Error(std::format("Block {} not found in:\n{}", uniqueBlockName, format(graph)), location));
 }
 
-std::expected<std::size_t, Error> blockIndex(GraphLike auto const& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept { return blockIndex(graph, what->uniqueName(), location); }
+std::expected<std::size_t, Error> blockIndex(const GraphLike auto& graph, const std::shared_ptr<BlockModel>& what, std::source_location location = std::source_location::current()) noexcept { return blockIndex(graph, what->uniqueName(), location); }
 
 // forward declaration
 template<block::Category traverseCategory, typename Fn>
-void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filterCallable = Edge::EdgeState::Unknown);
+void forEachEdge(const GraphLike auto& root, Fn&& function, Edge::EdgeState filterCallable = Edge::EdgeState::Unknown);
 
 } // namespace graph
 
