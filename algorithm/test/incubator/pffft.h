@@ -36,18 +36,9 @@ enum class fft_transform_t { Real, Complex };
    this struct can be shared by many threads as it contains only
    read-only data.
 */
-template<std::floating_point T, fft_transform_t transform_>
+template<std::floating_point T, fft_transform_t transform_, std::size_t N = std::dynamic_extent>
 struct PFFFT_Setup;
 
-/*
-  prepare for performing transforms of size N -- the returned
-  PFFFT_Setup structure is read-only so it can safely be shared by
-  multiple concurrent threads.
-*/
-template<std::floating_point T, fft_transform_t transform>
-PFFFT_Setup<T, transform>* pffft_new_setup(std::size_t N);
-template<std::floating_point T, fft_transform_t transform>
-void pffft_destroy_setup(PFFFT_Setup<T, transform>*);
 /*
    Perform a Fourier transform , The z-domain data is stored in the
    most efficient order for transforming it back, or using it for
@@ -81,8 +72,8 @@ void pffft_destroy_setup(PFFFT_Setup<T, transform>*);
 
    input and output may alias.
 */
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform>
-void pffft_transform(PFFFT_Setup<T, transform>* setup, const T* input, T* output, T* work);
+template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N>
+void pffft_transform(PFFFT_Setup<T, transform, N>* setup, const T* input, T* output, T* work);
 
 /*
    Similar to pffft_transform, but makes sure that the output is
@@ -91,8 +82,8 @@ void pffft_transform(PFFFT_Setup<T, transform>* setup, const T* input, T* output
 
    input and output may alias.
 */
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform>
-void pffft_transform_ordered(PFFFT_Setup<T, transform>* setup, const T* input, T* output, T* work);
+template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N>
+void pffft_transform_ordered(PFFFT_Setup<T, transform, N>& setup, const T* input, T* output, T* work);
 
 /*
    call pffft_zreorder(.., PFFFT_FORWARD) after pffft_transform(...,

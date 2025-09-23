@@ -25,6 +25,8 @@
 #pragma GCC diagnostic pop
 #endif
 
+
+
 #include <print>
 
 #include <assert.h>
@@ -160,11 +162,46 @@ double show_output(std::string_view name, std::size_t N, bool cplx, double flops
     } else if (haveOps) {
         // Example: N=  512, CPLX          FFT :   1234 MFlops [t=   800 ns, 100 runs]
         using namespace std::literals;
-        std::println("N={:5}, {:4} {:>16} : {:6.0f} MFlops [t={:6.0f} ns, {} runs]", N, cplx ? "CPLX"s : "REAL"s, name, mflops, T_ns, max_iter);
+        std::println("N={:5}, {:4} {:>16} : {:6.0f} MFlops [t={:6.0f} ns, {} runs]", N, cplx ? "CPLX" : "REAL", name, mflops, T_ns, max_iter);
     }
 
     std::fflush(stdout);
     return T_ns;
+}
+
+template<std::floating_point T, fft_transform_t tramsform>
+double cal_benchmark(std::size_t N) {
+    const std::size_t log2N  = Log2(N);
+    std::size_t       Nfloat = (tramsform == fft_transform_t::Complex ? N * 2UZ : N);
+    std::size_t       Nbytes = Nfloat * sizeof(T);
+    T *               X = pffft_aligned_malloc<T>(Nbytes + sizeof(T)), *Y = pffft_aligned_malloc<T>(Nbytes + 2 * sizeof(T)), *Z = pffft_aligned_malloc<T>(Nbytes);
+    double            t0, t1, tstop, timeDiff, nI;
+
+    assert(std::has_single_bit(N));
+    for (std::size_t k = 0UZ; k < Nfloat; ++k) {
+        X[k] = std::sqrt(static_cast<T>(k + 1UZ));
+    }
+
+    /* PFFFT-U (unordered) benchmark */
+    auto        s    = PFFFT_Setup<T, tramsform>(N);
+    std::size_t iter = 0;
+    t0               = uclock_sec();
+    tstop            = t0 + 0.25; /* benchmark duration: 250 ms */
+    do {
+        for (std::size_t k = 0; k < 512; ++k) {
+            pffft_transform<fft_direction_t::Forward>(s, X, Z, Y);
+            pffft_transform<fft_direction_t::Backward>(s, X, Z, Y);
+            ++iter;
+        }
+        t1 = uclock_sec();
+    } while (t1 < tstop);
+    pffft_aligned_free(X);
+    pffft_aligned_free(Y);
+    pffft_aligned_free(Z);
+
+    timeDiff = (t1 - t0);                               /* duration per fft() */
+    nI       = static_cast<double>(iter * (log2N * N)); /* number of iterations "normalized" to O(N) = N*log2(N) */
+    return (nI / timeDiff);                             /* normalized iterations per second */
 }
 
 template<std::floating_point T, fft_transform_t tramsform>
@@ -217,67 +254,59 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
     Nmax    = (isComplex ? pffftPow2N * 2 : pffftPow2N);
     X[Nmax] = checkVal;
     if (pffftPow2N >= pffft_min_fft_size<T>(isComplex ? fft_transform_t::Complex : fft_transform_t::Real)) {
-        te      = uclock_sec();
-        auto* s = pffft_new_setup<T, tramsform>(pffftPow2N);
-        if (s) {
-            t0       = uclock_sec();
-            tstop    = t0 + max_test_duration;
-            max_iter = 0;
-            do {
-                for (std::size_t k = 0UZ; k < step_iter; ++k) {
-                    assert(X[Nmax] == checkVal);
-                    pffft_transform<fft_direction_t::Forward>(s, X, Z, Y);
-                    assert(X[Nmax] == checkVal);
-                    pffft_transform<fft_direction_t::Backward>(s, X, Z, Y);
-                    assert(X[Nmax] == checkVal);
-                    ++max_iter;
-                }
-                t1 = uclock_sec();
-            } while (t1 < tstop);
+        te       = uclock_sec();
+        auto s   = PFFFT_Setup<T, tramsform>(pffftPow2N);
+        t0       = uclock_sec();
+        tstop    = t0 + max_test_duration;
+        max_iter = 0;
+        do {
+            for (std::size_t k = 0UZ; k < step_iter; ++k) {
+                assert(X[Nmax] == checkVal);
+                pffft_transform<fft_direction_t::Forward>(s, X, Z, Y);
+                assert(X[Nmax] == checkVal);
+                pffft_transform<fft_direction_t::Backward>(s, X, Z, Y);
+                assert(X[Nmax] == checkVal);
+                ++max_iter;
+            }
+            t1 = uclock_sec();
+        } while (t1 < tstop);
 
-            pffft_destroy_setup(s);
-
-            flops                             = static_cast<double>(max_iter * 2) * ((isComplex ? 5 : 2.5) * static_cast<double>(N) * log(static_cast<double>(N)) / M_LN2); /* see http://www.fftw.org/speed/method.html */
-            tmeas[TYPE_ITER][ALGO_PFFFT_U]    = static_cast<double>(max_iter);
-            tmeas[TYPE_MFLOPS][ALGO_PFFFT_U]  = flops / 1e6 / (t1 - t0 + 1e-16);
-            tmeas[TYPE_DUR_TOT][ALGO_PFFFT_U] = t1 - t0;
-            tmeas[TYPE_DUR_NS][ALGO_PFFFT_U]  = show_output("PFFFT-U", N, isComplex, flops, t0, t1, max_iter, tableFile);
-            tmeas[TYPE_PREP][ALGO_PFFFT_U]    = (t0 - te) * 1e3;
-            haveAlgo[ALGO_PFFFT_U]            = 1;
-        }
+        flops                             = static_cast<double>(max_iter * 2) * ((isComplex ? 5 : 2.5) * static_cast<double>(N) * log(static_cast<double>(N)) / M_LN2); /* see http://www.fftw.org/speed/method.html */
+        tmeas[TYPE_ITER][ALGO_PFFFT_U]    = static_cast<double>(max_iter);
+        tmeas[TYPE_MFLOPS][ALGO_PFFFT_U]  = flops / 1e6 / (t1 - t0 + 1e-16);
+        tmeas[TYPE_DUR_TOT][ALGO_PFFFT_U] = t1 - t0;
+        tmeas[TYPE_DUR_NS][ALGO_PFFFT_U]  = show_output("PFFFT-U", N, isComplex, flops, t0, t1, max_iter, tableFile);
+        tmeas[TYPE_PREP][ALGO_PFFFT_U]    = (t0 - te) * 1e3;
+        haveAlgo[ALGO_PFFFT_U]            = 1;
     } else {
         show_output("PFFFT-U", N, isComplex, -1, -1, -1, gr::meta::invalid_index, tableFile);
     }
 
     if (pffftPow2N >= pffft_min_fft_size<T>(isComplex ? fft_transform_t::Complex : fft_transform_t::Real)) {
-        te      = uclock_sec();
-        auto* s = pffft_new_setup<T, tramsform>(pffftPow2N);
-        if (s) {
-            t0       = uclock_sec();
-            tstop    = t0 + max_test_duration;
-            max_iter = 0;
-            do {
-                for (std::size_t k = 0; k < step_iter; ++k) {
-                    assert(X[Nmax] == checkVal);
-                    pffft_transform_ordered<fft_direction_t::Forward>(s, X, Z, Y);
-                    assert(X[Nmax] == checkVal);
-                    pffft_transform_ordered<fft_direction_t::Backward>(s, X, Z, Y);
-                    assert(X[Nmax] == checkVal);
-                    ++max_iter;
-                }
-                t1 = uclock_sec();
-            } while (t1 < tstop);
+        te       = uclock_sec();
+        auto s   = PFFFT_Setup<T, tramsform>(pffftPow2N);
+        t0       = uclock_sec();
+        tstop    = t0 + max_test_duration;
+        max_iter = 0;
+        do {
+            for (std::size_t k = 0; k < step_iter; ++k) {
+                assert(X[Nmax] == checkVal);
+                pffft_transform_ordered<fft_direction_t::Forward>(s, X, Z, Y);
+                assert(X[Nmax] == checkVal);
+                pffft_transform_ordered<fft_direction_t::Backward>(s, X, Z, Y);
+                assert(X[Nmax] == checkVal);
+                ++max_iter;
+            }
+            t1 = uclock_sec();
+        } while (t1 < tstop);
 
-            pffft_destroy_setup(s);
-
-            flops                             = static_cast<double>(max_iter * 2) * ((isComplex ? 5 : 2.5) * static_cast<double>(N) * log(static_cast<double>(N)) / M_LN2); /* see http://www.fftw.org/speed/method.html */
-            tmeas[TYPE_ITER][ALGO_PFFFT_O]    = static_cast<double>(max_iter);
-            tmeas[TYPE_MFLOPS][ALGO_PFFFT_O]  = flops / 1e6 / (t1 - t0 + 1e-16);
-            tmeas[TYPE_DUR_TOT][ALGO_PFFFT_O] = t1 - t0;
-            tmeas[TYPE_DUR_NS][ALGO_PFFFT_O]  = show_output("PFFFT", N, isComplex, flops, t0, t1, max_iter, tableFile);
-            tmeas[TYPE_PREP][ALGO_PFFFT_O]    = (t0 - te) * 1e3;
-            haveAlgo[ALGO_PFFFT_O]            = 1;
-        }
+        flops                             = static_cast<double>(max_iter * 2) * ((isComplex ? 5 : 2.5) * static_cast<double>(N) * log(static_cast<double>(N)) / M_LN2); /* see http://www.fftw.org/speed/method.html */
+        tmeas[TYPE_ITER][ALGO_PFFFT_O]    = static_cast<double>(max_iter);
+        tmeas[TYPE_MFLOPS][ALGO_PFFFT_O]  = flops / 1e6 / (t1 - t0 + 1e-16);
+        tmeas[TYPE_DUR_TOT][ALGO_PFFFT_O] = t1 - t0;
+        tmeas[TYPE_DUR_NS][ALGO_PFFFT_O]  = show_output("PFFFT", N, isComplex, flops, t0, t1, max_iter, tableFile);
+        tmeas[TYPE_PREP][ALGO_PFFFT_O]    = (t0 - te) * 1e3;
+        haveAlgo[ALGO_PFFFT_O]            = 1;
     } else {
         show_output("PFFFT", N, isComplex, -1, -1, -1, gr::meta::invalid_index, tableFile);
     }
@@ -395,6 +424,24 @@ constexpr std::size_t NUMNONPOW2LENS = 23UZ;
     */
 
     /* calibrate test duration */
+    int quicktest = 0;
+    if (!quicktest) {
+        double t0, t1, dur;
+        printf("calibrating fft benchmark duration at size N = 512 ..\n");
+        t0 = uclock_sec();
+        if (benchReal) {
+            iterCalReal = cal_benchmark<T, fft_transform_t::Real>(512UZ);
+            printf("real fft iterCal = %f\n", iterCalReal);
+        }
+        if (benchCplx) {
+            iterCalCplx = cal_benchmark<T, fft_transform_t::Complex>(512UZ);
+            printf("cplx fft iterCal = %f\n", iterCalCplx);
+        }
+        t1  = uclock_sec();
+        dur = t1 - t0;
+        printf("calibration done in %f sec.\n\n", dur);
+    }
+
     if (!array_output_format) {
         if (benchReal) {
             for (std::size_t i = 0UZ; Nvalues[i] > 0 && Nvalues[i] <= max_N; ++i) {
@@ -508,8 +555,8 @@ bool test_fft_sine_wave() {
             input[n] = std::sin(T{2} * std::numbers::pi_v<T> * freq_normalized * static_cast<T>(n));
         }
 
-        PFFFT_Setup<T, fft_transform_t::Real>* setup = pffft_new_setup<T, fft_transform_t::Real>(N);
-        pffft_transform_ordered<fft_direction_t::Forward, T>(setup, input, output, work);
+        PFFFT_Setup<T, fft_transform_t::Real> setup(N);
+        pffft_transform_ordered<fft_direction_t::Forward>(setup, input, output, work);
 
         // For real FFT, output format is: [DC, bin1_real, bin1_imag, ..., binN/2-1_real, binN/2-1_imag, Nyquist]
         // Calculate magnitude for each bin
@@ -561,7 +608,6 @@ bool test_fft_sine_wave() {
             }
         }
 
-        pffft_destroy_setup(setup);
         pffft_aligned_free(input);
         pffft_aligned_free(output);
         pffft_aligned_free(work);
@@ -583,7 +629,7 @@ bool test_fft_sine_wave() {
             input[2 * n + 1] = std::sin(phase); // imaginary part
         }
 
-        PFFFT_Setup<T, fft_transform_t::Complex>* setup = pffft_new_setup<T, fft_transform_t::Complex>(N);
+        PFFFT_Setup<T, fft_transform_t::Complex> setup(N);
         pffft_transform_ordered<fft_direction_t::Forward>(setup, input, output, work);
 
         // Calculate magnitude for each bin
@@ -631,7 +677,6 @@ bool test_fft_sine_wave() {
             }
         }
 
-        pffft_destroy_setup(setup);
         pffft_aligned_free(input);
         pffft_aligned_free(output);
         pffft_aligned_free(work);
@@ -653,7 +698,7 @@ bool test_fft_sine_wave() {
             input[2 * n + 1] = std::sin(phase);
         }
 
-        PFFFT_Setup<T, fft_transform_t::Complex>* setup = pffft_new_setup<T, fft_transform_t::Complex>(N);
+        PFFFT_Setup<T, fft_transform_t::Complex> setup(N);
 
         pffft_transform_ordered<fft_direction_t::Forward>(setup, input, spectrum, work);
         pffft_transform_ordered<fft_direction_t::Backward>(setup, spectrum, reconstructed, work);
@@ -678,7 +723,6 @@ bool test_fft_sine_wave() {
             std::println("  PASSED!\n");
         }
 
-        pffft_destroy_setup(setup);
         pffft_aligned_free(input);
         pffft_aligned_free(spectrum);
         pffft_aligned_free(reconstructed);
