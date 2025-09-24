@@ -32,13 +32,21 @@ enum class PortType {
 
 enum class PortSync { SYNCHRONOUS, ASYNCHRONOUS };
 
-using PairRelIndexMapRef = std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>;
+using PairTagRef = std::pair<std::ptrdiff_t, std::reference_wrapper<const property_map>>;
 
-struct ToPairRelIndexMapRef {
-    std::size_t        streamIndex{};
-    PairRelIndexMapRef operator()(const Tag& tag) const noexcept { return {relIndex(tag.index, streamIndex), std::cref(tag.map)}; }
+struct ToPairTagRef {
+    std::size_t streamIndex{};
+    PairTagRef  operator()(const Tag& tag) const noexcept { return {relIndex(tag.index, streamIndex), std::cref(tag.map)}; }
 
     [[nodiscard]] static constexpr std::ptrdiff_t relIndex(std::size_t abs, std::size_t base) noexcept { return abs >= base ? static_cast<std::ptrdiff_t>(abs - base) : -static_cast<std::ptrdiff_t>(base - abs); }
+};
+
+struct PairTagRefEqualIndex {
+    constexpr bool operator()(const PairTagRef& lhs, const PairTagRef& rhs) const noexcept { return lhs.first == rhs.first; }
+};
+
+struct PairTagRefEqualFull {
+    constexpr bool operator()(const PairTagRef& lhs, const PairTagRef& rhs) const noexcept { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); }
 };
 
 namespace port {
@@ -628,7 +636,7 @@ struct Port {
             }
         }
 
-        [[nodiscard]] auto tags() { return std::views::transform(rawTags, ToPairRelIndexMapRef{streamIndex}); }
+        [[nodiscard]] auto tags() { return std::views::transform(rawTags, ToPairTagRef{streamIndex}); }
 
         [[nodiscard]] auto tags(std::size_t untilLocalIndex) {
             const std::size_t untilIndex = streamIndex + untilLocalIndex;
@@ -636,7 +644,7 @@ struct Port {
             // take_while downgrades to input_range, but AdjacentDeduplicateView (and chunk_by) needs a forward_range.
             auto last        = std::ranges::lower_bound(rawTags, untilIndex, std::ranges::less{}, &Tag::index); // First element with index >= untilIndex
             auto prefixRange = std::ranges::subrange(std::ranges::begin(rawTags), last);
-            return prefixRange | std::views::transform(ToPairRelIndexMapRef{streamIndex});
+            return prefixRange | std::views::transform(ToPairTagRef{streamIndex});
         }
 
         void consumeTags(std::size_t untilLocalIndex) {
