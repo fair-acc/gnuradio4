@@ -1086,13 +1086,53 @@ public:
         }
     }
 
-    constexpr void publishMergedInputTag(auto& outputSpanTuple) noexcept {
+    template<typename TFunction>
+    void forEachNonDuplicatedInputTag(auto& inputSpans, std::size_t untilLocalIndex, TFunction&& function) {
+        const std::size_t adjusted = (!backwardTagForwarding) ? 1UZ : untilLocalIndex;
+
+        using InputSpanT = typename gr::PortIn<float>::InputSpan<SpanReleasePolicy::ProcessNone>;
+        using ViewT      = decltype(std::declval<InputSpanT>().tags(0UZ));
+
+        constexpr bool        isDynamic    = gr::traits::block::has_dynamic_input_collections_v<Derived>;
+        constexpr std::size_t nStaticPorts = gr::traits::block::static_input_ports_count_v<Derived>;
+        constexpr std::size_t nRanges      = isDynamic ? std::dynamic_extent : nStaticPorts;
+
+        std::conditional_t<isDynamic, std::vector<ViewT>, std::array<ViewT, nStaticPorts>> views;
+        if constexpr (isDynamic) {
+            views.reserve(inputStreamCache.types().size());
+        }
+        std::size_t nSyncPorts = 0;
+        for_each_reader_span(
+            [&](auto& in) {
+                if (in.isSync) {
+                    if constexpr (isDynamic) {
+                        views.push_back(in.tags(adjusted));
+                    } else {
+                        if constexpr (nStaticPorts > 0) {
+                            assert(nSyncPorts < nStaticPorts);
+                        }
+                        views[nSyncPorts] = in.tags(adjusted);
+                        nSyncPorts++;
+                    }
+                }
+            },
+            inputSpans);
+
+        auto merged = views | Merge<nRanges>([](const PairTagRef& a, const PairTagRef& b) { return a.first < b.first; });
+        auto nondup = merged | PairDeduplicateView(PairTagRefEqualIndex{}, PairTagRefEqualFull{});
+        for (const auto& tag : nondup) {
+            std::forward<TFunction>(function)(tag);
+        }
+    }
+
+    constexpr void publishMergedInputTag(auto& outputSpanTuple, auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
         if constexpr (!noDefaultTagForwarding) {
             if (inputTagsPresent()) {
-                const auto&  autoForwardKeys = settings().autoForwardParameters();
-                property_map onlyAutoForwardMap;
-                std::ranges::copy_if(_mergedInputTag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); });
-                for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
+                const auto& autoForwardKeys = settings().autoForwardParameters();
+                forEachNonDuplicatedInputTag(inputSpans, untilLocalIndex, [&autoForwardKeys, &outputSpanTuple](const auto& tag) {
+                    auto onlyAutoForwardMap = tag.second.get() | std::views::filter([&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); }) | std::ranges::to<property_map>();
+                    for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
+                });
             }
         }
     }
@@ -1102,27 +1142,22 @@ public:
             return;
         }
         for (const auto& tag : _outputTags) {
-            for_each_writer_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, tag.index); }, outputSpanTuple);
+            for_each_writer_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, 0); }, outputSpanTuple);
         }
         _outputTags.clear();
     }
 
-    /**
-     * Merge tags from all sync ports into one merged tag, apply auto-update parameters
-     */
     void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
         std::size_t untilLocalIndexAdjusted = untilLocalIndex;
         if constexpr (!backwardTagForwarding) {
             untilLocalIndexAdjusted = 1UZ;
         }
-        const auto isIndexEqual       = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; };
-        const auto isIndexAndMapEqual = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); };
 
         // TODO: we still fill _mergedInputTag, but this will be removed in the one of the next PR
         for_each_reader_span(
-            [this, untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual](auto& in) {
+            [this, untilLocalIndexAdjusted](auto& in) {
                 if (in.isSync) {
-                    auto inTags = in.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+                    auto inTags = in.tags(untilLocalIndexAdjusted);
                     for (const auto& [_, tagMap] : inTags) {
                         for (const auto& [key, value] : tagMap.get()) {
                             _mergedInputTag.map.insert_or_assign(key, value);
@@ -1132,37 +1167,17 @@ public:
             },
             inputSpans);
 
-        // non-duplicated, ordered by index, the last Tag (wih max index) wins
-        using InputSpanT = typename gr::PortIn<float>::InputSpan<SpanReleasePolicy::ProcessNone>;
-        using ViewT      = decltype(std::declval<InputSpanT>().tags(0UZ));
-        std::vector<ViewT> allPairViews;
-        allPairViews.reserve(8);
-        for_each_reader_span(
-            [&allPairViews, untilLocalIndexAdjusted](auto& in) {
-                if (in.isSync) {
-                    auto inTags = in.tags(untilLocalIndexAdjusted);
-                    static_assert(std::ranges::input_range<decltype(inTags)>);
-                    static_assert(std::ranges::forward_range<decltype(inTags)>);
-                    allPairViews.push_back(std::move(inTags));
-                }
-            },
-            inputSpans);
-
-        constexpr std::size_t nRanges                = gr::traits::block::has_dynamic_input_collections_v<Derived> ? std::dynamic_extent : gr::traits::block::static_input_ports_count_v<Derived>;
-        auto                  mergedPairsLazy        = allPairViews | Merge<nRanges>([](const PairRelIndexMapRef& lhs, const PairRelIndexMapRef& rhs) { return lhs.first < rhs.first; });
-        auto                  nonDuplicatedInputTags = mergedPairsLazy | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
-
         if (inputTagsPresent()) {
-            for (const auto& tag : nonDuplicatedInputTags) {
+            forEachNonDuplicatedInputTag(inputSpans, untilLocalIndex, [this](const auto& tag) {
                 // TODO: autoUpdate does not really need Tag, it should be changed to accept property_map
                 settings().autoUpdate(Tag{tag.first < 0 ? 0UZ : static_cast<std::size_t>(tag.first), tag.second.get()});
-            }
+            });
         }
 
         // update PortMetaInfo
         for_each_port_and_reader_span(
-            [this, &untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
-                auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+            [this, &untilLocalIndexAdjusted]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
+                auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(PairTagRefEqualIndex{}, PairTagRefEqualFull{});
                 for (const auto& [_, tagMap] : inTags) {
                     emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
                 }
@@ -1178,9 +1193,9 @@ public:
             auto applyResult = settings().applyStagedParameters();
             checkBlockParameterConsistency();
 
-            if (!applyResult.forwardParameters.empty()) {
-                for (auto& [key, value] : applyResult.forwardParameters) {
-                    _mergedInputTag.insert_or_assign(key, value);
+            if constexpr (!noDefaultTagForwarding) {
+                if (!applyResult.forwardParameters.empty()) {
+                    publishTag(applyResult.forwardParameters, 0);
                 }
             }
 
@@ -1229,30 +1244,10 @@ public:
             ports);
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
-
-    inline constexpr void publishTag(const property_map& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(tag_data, tagOffset); }
-
-    template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
-        if (_outputTags.empty()) {
-            _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
-        } else {
-            auto& lastTag = _outputTags.back();
-#ifndef NDEBUG
-            if (lastTag.index > tagOffset) { // check the order of published Tags.index
-                std::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
-                // std::abort();
-            }
-#endif
-            if (lastTag.index == tagOffset) { // -> merge tags with the same index
-                for (auto&& [key, value] : tagData) {
-                    lastTag.map.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
-                }
-            } else {
-                _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
-            }
-        }
+    template<PropertyMapType TPropertyMap>
+    inline constexpr void publishTag(TPropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
+        _outputTags.emplace_back(Tag(tagOffset, std::forward<TPropertyMap>(tagData)));
+        std::ranges::sort(_outputTags, std::less<>{}, &Tag::index);
     }
 
     inline constexpr void publishEoS() noexcept {
@@ -2092,6 +2087,7 @@ protected:
         if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
             auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
             updateMergedInputTagAndApplySettings(inputSpans, inputSkipBefore);                        // apply all tags in the skipped data range
+            applyChangedSettings();
             consumeReaders(inputSkipBefore, inputSpans);
         }
         // return if there is no work to be performed // todo: add eos policy
@@ -2118,12 +2114,12 @@ protected:
         auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
         updateMergedInputTagAndApplySettings(inputSpans, processedIn);
-
         applyChangedSettings();
 
         // Actual publishing occurs when outputSpans go out of scope. If processedOut == 0, the Tags will not be published.
+        // publishMergedInputTag(outputSpans);
+        publishMergedInputTag(outputSpans, inputSpans, processedIn);
         publishCachedOutputTags(outputSpans);
-        publishMergedInputTag(outputSpans);
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
