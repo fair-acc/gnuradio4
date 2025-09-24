@@ -45,19 +45,6 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
     using namespace gr;
     using namespace gr::testing;
 
-    "Graph move crash"_test = [] {
-        // Graph crashed if moved-from via move-ctor twice
-
-        Graph g0;
-
-        Graph g1 = std::move(g0);
-
-        Graph g2;
-        g0 = std::move(g2);
-
-        Graph g4 = std::move(g0);
-    };
-
     "Graph connection buffer size test - default"_test = [] {
         Graph graph;
         auto& src  = graph.emplaceBlock<NullSource<float>>();
@@ -104,17 +91,17 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
     };
 
     "Graph connection buffer size test - Multi output ports"_test = [] {
-        Graph graph;
+        meta::indirect<Graph> graph;
 
         const std::size_t       customBufferSize = 8192UZ;
         const std::size_t       nIterations      = 10;
         gr::Size_t              nMaxSamples      = static_cast<gr::Size_t>(nIterations * customBufferSize);
         std::vector<gr::Size_t> activeIndices    = {0};
-        auto&                   src              = graph.emplaceBlock<MultiPortTestSource<float, 3>>({{"n_samples_max", nMaxSamples}, {"active_indices", activeIndices}});
-        auto&                   sink1            = graph.emplaceBlock<NullSink<float>>();
+        auto&                   src              = graph->emplaceBlock<MultiPortTestSource<float, 3>>({{"n_samples_max", nMaxSamples}, {"active_indices", activeIndices}});
+        auto&                   sink1            = graph->emplaceBlock<NullSink<float>>();
 
         // only the first port is connected
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", 0>(src, customBufferSize).to<"in">(sink1)));
+        expect(eq(ConnectionResult::SUCCESS, graph->connect<"out", 0>(src, customBufferSize).to<"in">(sink1)));
 
         scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -230,8 +217,8 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         });
 
         expect(eq(visited.size(), 2UZ));
-        expect(std::ranges::find(visited, src.unique_name) != visited.end());
-        expect(std::ranges::find(visited, snk.unique_name) != visited.end());
+        expect(std::ranges::find(visited, src.unique_name.value()) != visited.end());
+        expect(std::ranges::find(visited, snk.unique_name.value()) != visited.end());
     };
 
     "forEachEdge visits all edges"_test = [] {
@@ -265,9 +252,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit nmanaged sub-graphs"_test = [&] {
@@ -279,9 +266,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit all sub-graphs"_test = [&] {
@@ -293,9 +280,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit top-level Blocks only"_test = [&] {
@@ -307,9 +294,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
     };
 };

@@ -52,11 +52,11 @@ int main(int argc, char* argv[]) {
     std::println("3 optional settings are available: qa_PerformanceMonitor <run_time>[in sec] <test_case_id>[1:no tags,2:moderate,3:1-to-1] <output_file_path>");
     std::println("<run_time>:{} s, <test_case_id>:{}, <output_file_path>:{}", runTime, testCaseId, outFilePath);
 
-    gr::Size_t         nSamples         = 0U;
-    gr::Size_t         evaluatePerfRate = 100'000;
-    Graph              testGraph;
-    const property_map srcParameter = {{"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", true}};
-    auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
+    gr::Size_t                nSamples         = 0U;
+    gr::Size_t                evaluatePerfRate = 100'000;
+    gr::meta::indirect<Graph> testGraph;
+    const property_map        srcParameter = {{"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", true}};
+    auto&                     src          = testGraph->emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
 
     // parameters of generated Tags
     std::size_t nSamplesPerTag    = 10000UZ;
@@ -79,21 +79,21 @@ int main(int argc, char* argv[]) {
         src._tags = {gr::Tag(nSamplesPerTag - 1, {{tagName, 2000.f}})};
     };
 
-    auto& monitorBulk        = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"log_samples", false}, {"log_tags", false}});
-    auto& monitorOne         = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"log_samples", false}, {"log_tags", false}});
-    auto& monitorPerformance = testGraph.emplaceBlock<PerformanceMonitor<float>>( //
+    auto& monitorBulk        = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"log_samples", false}, {"log_tags", false}});
+    auto& monitorOne         = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"log_samples", false}, {"log_tags", false}});
+    auto& monitorPerformance = testGraph->emplaceBlock<PerformanceMonitor<float>>( //
         {{"name", "PerformanceMonitor"}, {"evaluate_perf_rate", evaluatePerfRate}, {"output_csv_file_path", outputCsvFilePath}});
 
     // performance statistics outputs
-    auto& sinkRes  = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRes"}, {"log_samples", false}, {"log_tags", false}});
-    auto& sinkRate = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRate"}, {"log_samples", false}, {"log_tags", false}});
+    auto& sinkRes  = testGraph->emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRes"}, {"log_samples", false}, {"log_tags", false}});
+    auto& sinkRate = testGraph->emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRate"}, {"log_samples", false}, {"log_tags", false}});
 
     // src -> monitorBulk -> monitorOne -> monitorPerformance
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitorBulk)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk).to<"in">(monitorOne)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(monitorPerformance)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outRes">(monitorPerformance).to<"in">(sinkRes)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outRate">(monitorPerformance).to<"in">(sinkRate)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).to<"in">(monitorBulk)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorBulk).to<"in">(monitorOne)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorOne).to<"in">(monitorPerformance)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"outRes">(monitorPerformance).to<"in">(sinkRes)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"outRate">(monitorPerformance).to<"in">(sinkRate)));
 
     gr::scheduler::Simple<> sched;
     if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

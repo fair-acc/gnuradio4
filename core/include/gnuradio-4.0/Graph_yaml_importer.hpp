@@ -3,6 +3,8 @@
 
 #include <ranges>
 
+#include <gnuradio-4.0/meta/indirect.hpp>
+
 #include <gnuradio-4.0/YamlPmt.hpp>
 
 #include "BlockModel.hpp"
@@ -211,7 +213,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
         const std::size_t      nBlocks = gr::graph::countBlocks<gr::block::Category::NormalBlock>(rootGraph);
         std::vector<pmtv::pmt> serializedBlocks;
         serializedBlocks.reserve(nBlocks);
-        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel>& block) {
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph.contents, [&](const std::shared_ptr<BlockModel>& block) {
             property_map map;
             const auto&  fullTypeName = loader.registry().typeName(block);
             if (fullTypeName == "gr::Graph") {
@@ -292,14 +294,14 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
 } // namespace detail
 
-inline gr::Graph loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location = std::source_location::current()) {
-    Graph      resultGraph;
-    const auto yaml = pmtv::yaml::deserialize(yamlSrc);
+inline gr::meta::indirect<gr::Graph> loadGrc(PluginLoader& loader, std::string_view yamlSrc, std::source_location location = std::source_location::current()) {
+    gr::meta::indirect<gr::Graph> resultGraph;
+    const auto                    yaml = pmtv::yaml::deserialize(yamlSrc);
     if (!yaml) {
         throw gr::exception(std::format("Could not parse yaml: {}:{}\n{}", yaml.error().message, yaml.error().line, yamlSrc));
     }
 
-    detail::loadGraphFromMap(loader, resultGraph, *yaml, location);
+    detail::loadGraphFromMap(loader, *resultGraph, *yaml, location);
     return resultGraph;
 }
 

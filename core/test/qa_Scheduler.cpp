@@ -142,7 +142,7 @@ struct Resampler : gr::Block<Resampler<T>, gr::Resampling<>, gr::Stride<>> {
     }
 };
 
-gr::Graph getGraphLinear(std::shared_ptr<Tracer> tracer) {
+gr::meta::indirect<gr::Graph> getGraphLinear(std::shared_ptr<Tracer> tracer) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
     using namespace boost::ut;
@@ -150,26 +150,26 @@ gr::Graph getGraphLinear(std::shared_ptr<Tracer> tracer) {
     gr::Size_t nMaxSamples{100000};
 
     // Blocks need to be alive for as long as the flow is
-    gr::Graph flow;
+    gr::meta::indirect<gr::Graph> flow;
     // Generators
-    auto& source1      = flow.emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
+    auto& source1      = flow->emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer     = tracer;
-    auto& scaleBlock1  = flow.emplaceBlock<Scale<int>>({{"name", "mult1"}, {"scale_factor", 2}});
+    auto& scaleBlock1  = flow->emplaceBlock<Scale<int>>({{"name", "mult1"}, {"scale_factor", 2}});
     scaleBlock1.tracer = tracer;
-    auto& scaleBlock2  = flow.emplaceBlock<Scale<int>>({{"name", "mult2"}, {"scale_factor", 4}});
+    auto& scaleBlock2  = flow->emplaceBlock<Scale<int>>({{"name", "mult2"}, {"scale_factor", 4}});
     scaleBlock2.tracer = tracer;
-    auto& sink         = flow.emplaceBlock<ExpectSink<int>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
+    auto& sink         = flow->emplaceBlock<ExpectSink<int>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
     sink.tracer        = tracer;
     sink.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 8 * count; };
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock2).to<"in">(sink)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock1).to<"original">(scaleBlock2)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scaleBlock2).to<"in">(sink)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scaleBlock1).to<"original">(scaleBlock2)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source1).to<"original">(scaleBlock1)));
 
     return flow;
 }
 
-gr::Graph getGraphParallel(std::shared_ptr<Tracer> tracer) {
+gr::meta::indirect<gr::Graph> getGraphParallel(std::shared_ptr<Tracer> tracer) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
     using namespace boost::ut;
@@ -177,31 +177,31 @@ gr::Graph getGraphParallel(std::shared_ptr<Tracer> tracer) {
     gr::Size_t nMaxSamples{100000};
 
     // Blocks need to be alive for as long as the flow is
-    gr::Graph flow;
+    gr::meta::indirect<gr::Graph> flow;
     // Generators
-    auto& source1       = flow.emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
+    auto& source1       = flow->emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer      = tracer;
-    auto& scaleBlock1a  = flow.emplaceBlock<Scale<int>>({{"name", "mult1a"}, {"scale_factor", 2}});
+    auto& scaleBlock1a  = flow->emplaceBlock<Scale<int>>({{"name", "mult1a"}, {"scale_factor", 2}});
     scaleBlock1a.tracer = tracer;
-    auto& scaleBlock2a  = flow.emplaceBlock<Scale<int>>({{"name", "mult2a"}, {"scale_factor", 3}});
+    auto& scaleBlock2a  = flow->emplaceBlock<Scale<int>>({{"name", "mult2a"}, {"scale_factor", 3}});
     scaleBlock2a.tracer = tracer;
-    auto& sinkA         = flow.emplaceBlock<ExpectSink<int>>({{"name", "outa"}, {"n_samples_max", nMaxSamples}});
+    auto& sinkA         = flow->emplaceBlock<ExpectSink<int>>({{"name", "outa"}, {"n_samples_max", nMaxSamples}});
     sinkA.tracer        = tracer;
     sinkA.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 6 * count; };
-    auto& scaleBlock1b  = flow.emplaceBlock<Scale<int>>({{"name", "mult1b"}, {"scale_factor", 3}});
+    auto& scaleBlock1b  = flow->emplaceBlock<Scale<int>>({{"name", "mult1b"}, {"scale_factor", 3}});
     scaleBlock1b.tracer = tracer;
-    auto& scaleBlock2b  = flow.emplaceBlock<Scale<int>>({{"name", "mult2b"}, {"scale_factor", 5}});
+    auto& scaleBlock2b  = flow->emplaceBlock<Scale<int>>({{"name", "mult2b"}, {"scale_factor", 5}});
     scaleBlock2b.tracer = tracer;
-    auto& sinkB         = flow.emplaceBlock<ExpectSink<int>>({{"name", "outb"}, {"n_samples_max", nMaxSamples}});
+    auto& sinkB         = flow->emplaceBlock<ExpectSink<int>>({{"name", "outb"}, {"n_samples_max", nMaxSamples}});
     sinkB.tracer        = tracer;
     sinkB.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 15 * count; };
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock1a).to<"original">(scaleBlock2a)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock1b).to<"original">(scaleBlock2b)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock2b).to<"in">(sinkB)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock1a)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock2a).to<"in">(sinkA)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock1b)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scaleBlock1a).to<"original">(scaleBlock2a)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scaleBlock1b).to<"original">(scaleBlock2b)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scaleBlock2b).to<"in">(sinkB)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source1).to<"original">(scaleBlock1a)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scaleBlock2a).to<"in">(sinkA)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source1).to<"original">(scaleBlock1b)));
 
     return flow;
 }
@@ -222,7 +222,7 @@ gr::Graph getGraphParallel(std::shared_ptr<Tracer> tracer) {
  * │           │
  * └───────────┘
  */
-gr::Graph getGraphScaledSum(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location()) {
+gr::meta::indirect<gr::Graph> getGraphScaledSum(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location()) {
     using gr::PortDirection::INPUT;
     using gr::PortDirection::OUTPUT;
     using namespace boost::ut;
@@ -230,232 +230,235 @@ gr::Graph getGraphScaledSum(std::shared_ptr<Tracer> tracer, std::source_location
     gr::Size_t nMaxSamples{100000};
 
     // Blocks need to be alive for as long as the flow is
-    gr::Graph flow;
+    gr::meta::indirect<gr::Graph> flow;
 
     // Generators
-    auto& source1     = flow.emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
+    auto& source1     = flow->emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer    = tracer;
-    auto& source2     = flow.emplaceBlock<CountSource<int>>({{"name", "s2"}, {"n_samples_max", nMaxSamples}});
+    auto& source2     = flow->emplaceBlock<CountSource<int>>({{"name", "s2"}, {"n_samples_max", nMaxSamples}});
     source2.tracer    = tracer;
-    auto& scaleBlock  = flow.emplaceBlock<Scale<int>>({{"name", "mult"}, {"scale_factor", 2}});
+    auto& scaleBlock  = flow->emplaceBlock<Scale<int>>({{"name", "mult"}, {"scale_factor", 2}});
     scaleBlock.tracer = tracer;
-    auto& addBlock    = flow.emplaceBlock<Adder<int>>({{"name", "add"}});
+    auto& addBlock    = flow->emplaceBlock<Adder<int>>({{"name", "add"}});
     addBlock.tracer   = tracer;
-    auto& sink        = flow.emplaceBlock<ExpectSink<int>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
+    auto& sink        = flow->emplaceBlock<ExpectSink<int>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
     sink.tracer       = tracer;
     sink.checker      = [](std::uint64_t count, std::uint64_t data) -> bool { return data == (2 * count) + count; };
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock).to<"addend0">(addBlock)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source2).to<"addend1">(addBlock)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(addBlock).to<"in">(sink)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source1).to<"original">(scaleBlock)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scaleBlock).to<"addend0">(addBlock)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source2).to<"addend1">(addBlock)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(addBlock).to<"in">(sink)), loc);
 
     return flow;
 }
 
-gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location()) {
+gr::meta::indirect<gr::Graph> getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location()) {
     using namespace boost::ut;
 
     gr::Size_t       nMaxSamples{2};
     gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
-    gr::Graph flow;
-    auto&     source1 = flow.emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
-    source1.tracer    = tracer;
-    auto& scale1      = flow.emplaceBlock<Scale<float>>({{"name", "alpha"}, {"scale_factor", 0.9f}});
-    scale1.tracer     = tracer;
-    auto& scale2      = flow.emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}, {"ui_constraints", layout_auto}});
-    scale2.tracer     = tracer;
-    auto& sum         = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
-    sum.tracer        = tracer;
-    auto& sink        = flow.emplaceBlock<ExpectSink<float>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
-    sink.tracer       = tracer;
-    sink.checker      = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
+    gr::meta::indirect<gr::Graph> flow;
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale1).to<"addend0">(sum)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(sum).to<"in">(sink)), loc);
+    auto& source1  = flow->emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
+    source1.tracer = tracer;
+    auto& scale1   = flow->emplaceBlock<Scale<float>>({{"name", "alpha"}, {"scale_factor", 0.9f}});
+    scale1.tracer  = tracer;
+    auto& scale2   = flow->emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}, {"ui_constraints", layout_auto}});
+    scale2.tracer  = tracer;
+    auto& sum      = flow->emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
+    sum.tracer     = tracer;
+    auto& sink     = flow->emplaceBlock<ExpectSink<float>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
+    sink.tracer    = tracer;
+    sink.checker   = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
+
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source1).to<"original">(scale1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scale1).to<"addend0">(sum)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(sum).to<"in">(sink)), loc);
 
     // feedback path
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(sum).to<"original">(scale2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale2).to<"addend1">(sum)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(sum).to<"original">(scale2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scale2).to<"addend1">(sum)), loc);
 
     return flow;
 }
 
-gr::Graph getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
+gr::meta::indirect<gr::Graph> getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
     using namespace boost::ut;
 
     gr::Size_t       nMaxSamples{10};
     gr::Size_t       ratio{5};
     gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
-    gr::Graph flow;
-    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
-    source.tracer    = tracer;
-    auto& adder      = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
-    adder.tracer     = tracer;
-    auto& sink       = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples / ratio}});
-    sink.tracer      = tracer;
-    sink.checker     = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
+    gr::meta::indirect<gr::Graph> flow;
+
+    auto& source  = flow->emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
+    source.tracer = tracer;
+    auto& adder   = flow->emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
+    adder.tracer  = tracer;
+    auto& sink    = flow->emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples / ratio}});
+    sink.tracer   = tracer;
+    sink.checker  = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     // Decimator: 5 input samples → 1 output sample
-    auto& decimator  = flow.emplaceBlock<Resampler<float>>({{"name", "dec"}, {"input_chunk_size", ratio}, {"output_chunk_size", 1}});
+    auto& decimator  = flow->emplaceBlock<Resampler<float>>({{"name", "dec"}, {"input_chunk_size", ratio}, {"output_chunk_size", 1}});
     decimator.tracer = tracer;
     // Interpolator: 1 input sample → 5 output samples
-    auto& interpolator  = flow.emplaceBlock<Resampler<float>>({{"name", "int"}, {"input_chunk_size", 1}, {"output_chunk_size", ratio}});
+    auto& interpolator  = flow->emplaceBlock<Resampler<float>>({{"name", "int"}, {"input_chunk_size", 1}, {"output_chunk_size", ratio}});
     interpolator.tracer = tracer;
 
     // forward path: source → decimator → sum → sink
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"addend0">(adder)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder).to<"in">(decimator)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(sink)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"addend0">(adder)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(adder).to<"in">(decimator)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(decimator).to<"in">(sink)), loc);
 
     // feedback path: sum → interpolator → sum (closes the loop)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(interpolator)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(interpolator).to<"addend1">(adder)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(decimator).to<"in">(interpolator)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(interpolator).to<"addend1">(adder)), loc);
 
     return flow;
 }
 
-gr::Graph getMultipleNestedFeedbackLoops(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
+gr::meta::indirect<gr::Graph> getMultipleNestedFeedbackLoops(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
     using namespace boost::ut;
 
     gr::Size_t       nMaxSamples{2};
     gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
-    gr::Graph flow;
-    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
-    source.tracer    = tracer;
+    gr::meta::indirect<gr::Graph> flow;
+
+    auto& source  = flow->emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
+    source.tracer = tracer;
 
     // feedback loop #1: scale1 ⟷ scale2
-    auto& scale1  = flow.emplaceBlock<Scale<float>>({{"name", "s1"}, {"scale_factor", 0.8f}, {"ui_constraints", layout_auto}});
+    auto& scale1  = flow->emplaceBlock<Scale<float>>({{"name", "s1"}, {"scale_factor", 0.8f}, {"ui_constraints", layout_auto}});
     scale1.tracer = tracer;
-    auto& scale2  = flow.emplaceBlock<Scale<float>>({{"name", "s2"}, {"scale_factor", 0.9f}, {"ui_constraints", layout_auto}});
+    auto& scale2  = flow->emplaceBlock<Scale<float>>({{"name", "s2"}, {"scale_factor", 0.9f}, {"ui_constraints", layout_auto}});
     scale2.tracer = tracer;
-    auto& adder1  = flow.emplaceBlock<Adder<float>>({{"name", "sum1"}, {"ui_constraints", layout_auto}});
+    auto& adder1  = flow->emplaceBlock<Adder<float>>({{"name", "sum1"}, {"ui_constraints", layout_auto}});
     adder1.tracer = tracer;
 
     // feedback loop #2: scale3 ⟷ scale4
-    auto& scale3  = flow.emplaceBlock<Scale<float>>({{"name", "s3"}, {"scale_factor", 0.7f}, {"ui_constraints", layout_auto}});
+    auto& scale3  = flow->emplaceBlock<Scale<float>>({{"name", "s3"}, {"scale_factor", 0.7f}, {"ui_constraints", layout_auto}});
     scale3.tracer = tracer;
-    auto& scale4  = flow.emplaceBlock<Scale<float>>({{"name", "s4"}, {"scale_factor", 0.6f}, {"ui_constraints", layout_auto}});
+    auto& scale4  = flow->emplaceBlock<Scale<float>>({{"name", "s4"}, {"scale_factor", 0.6f}, {"ui_constraints", layout_auto}});
     scale4.tracer = tracer;
-    auto& adder2  = flow.emplaceBlock<Adder<float>>({{"name", "sum2"}, {"ui_constraints", layout_auto}});
+    auto& adder2  = flow->emplaceBlock<Adder<float>>({{"name", "sum2"}, {"ui_constraints", layout_auto}});
     adder2.tracer = tracer;
 
-    auto& sink   = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples}});
+    auto& sink   = flow->emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples}});
     sink.tracer  = tracer;
     sink.checker = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     // forward path: src → scale1 → sum1 → scale3 → sum2 → snk
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"original">(scale1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale1).to<"addend0">(adder1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder1).to<"original">(scale3)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale3).to<"addend0">(adder2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder2).to<"in">(sink)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"original">(scale1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scale1).to<"addend0">(adder1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(adder1).to<"original">(scale3)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scale3).to<"addend0">(adder2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(adder2).to<"in">(sink)), loc);
 
     // feedback loop #1: sum1 → scale2 → sum1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder1).to<"original">(scale2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale2).to<"addend1">(adder1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(adder1).to<"original">(scale2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scale2).to<"addend1">(adder1)), loc);
 
     // feedback loop #2: sum2 → scale4 → sum2
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder2).to<"original">(scale4)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale4).to<"addend1">(adder2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(adder2).to<"original">(scale4)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(scale4).to<"addend1">(adder2)), loc);
 
     return flow;
 }
 
-gr::Graph getIIRFormII(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
+gr::meta::indirect<gr::Graph> getIIRFormII(std::shared_ptr<Tracer> tracer, std::source_location loc = std::source_location::current()) {
     using namespace boost::ut;
 
     gr::Size_t nMaxSamples{5};
 
-    gr::Graph flow;
+    gr::meta::indirect<gr::Graph> flow;
 
     // source and sink
-    auto& source  = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
+    auto& source  = flow->emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
     source.tracer = tracer;
-    auto& sink    = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples}});
+    auto& sink    = flow->emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples}});
     sink.tracer   = tracer;
     sink.checker  = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     // delay block (mocks)
-    auto& d1  = flow.emplaceBlock<Scale<float>>({{"name", "d1"}, {"scale_factor", 1.0f}}); // z^-1
+    auto& d1  = flow->emplaceBlock<Scale<float>>({{"name", "d1"}, {"scale_factor", 1.0f}}); // z^-1
     d1.tracer = tracer;
-    auto& d2  = flow.emplaceBlock<Scale<float>>({{"name", "d2"}, {"scale_factor", 1.0f}}); // z^-1
+    auto& d2  = flow->emplaceBlock<Scale<float>>({{"name", "d2"}, {"scale_factor", 1.0f}}); // z^-1
     d2.tracer = tracer;
-    auto& d3  = flow.emplaceBlock<Scale<float>>({{"name", "d3"}, {"scale_factor", 1.0f}}); // z^-1
+    auto& d3  = flow->emplaceBlock<Scale<float>>({{"name", "d3"}, {"scale_factor", 1.0f}}); // z^-1
     d3.tracer = tracer;
 
     // feed-forward coefficients
-    auto& b0  = flow.emplaceBlock<Scale<float>>({{"name", "b0"}, {"scale_factor", 1.0f}});
+    auto& b0  = flow->emplaceBlock<Scale<float>>({{"name", "b0"}, {"scale_factor", 1.0f}});
     b0.tracer = tracer;
-    auto& b1  = flow.emplaceBlock<Scale<float>>({{"name", "b1"}, {"scale_factor", 1.0f}});
+    auto& b1  = flow->emplaceBlock<Scale<float>>({{"name", "b1"}, {"scale_factor", 1.0f}});
     b1.tracer = tracer;
-    auto& b2  = flow.emplaceBlock<Scale<float>>({{"name", "b2"}, {"scale_factor", 1.0f}});
+    auto& b2  = flow->emplaceBlock<Scale<float>>({{"name", "b2"}, {"scale_factor", 1.0f}});
     b2.tracer = tracer;
-    auto& b3  = flow.emplaceBlock<Scale<float>>({{"name", "b3"}, {"scale_factor", 1.0f}});
+    auto& b3  = flow->emplaceBlock<Scale<float>>({{"name", "b3"}, {"scale_factor", 1.0f}});
     b3.tracer = tracer;
 
     // feedback coefficients
-    auto& a1  = flow.emplaceBlock<Scale<float>>({{"name", "a1"}, {"scale_factor", -1.0f}});
+    auto& a1  = flow->emplaceBlock<Scale<float>>({{"name", "a1"}, {"scale_factor", -1.0f}});
     a1.tracer = tracer;
-    auto& a2  = flow.emplaceBlock<Scale<float>>({{"name", "a2"}, {"scale_factor", -1.0f}});
+    auto& a2  = flow->emplaceBlock<Scale<float>>({{"name", "a2"}, {"scale_factor", -1.0f}});
     a2.tracer = tracer;
-    auto& a3  = flow.emplaceBlock<Scale<float>>({{"name", "a3"}, {"scale_factor", -1.0f}});
+    auto& a3  = flow->emplaceBlock<Scale<float>>({{"name", "a3"}, {"scale_factor", -1.0f}});
     a3.tracer = tracer;
 
     // adders for cascaded feedback signal summation
-    auto& feedbackSum0  = flow.emplaceBlock<Adder<float>>({{"name", "fbSum0"}});
+    auto& feedbackSum0  = flow->emplaceBlock<Adder<float>>({{"name", "fbSum0"}});
     feedbackSum0.tracer = tracer;
-    auto& feedbackSum1  = flow.emplaceBlock<Adder<float>>({{"name", "fbSum1"}}); // combines a2 and a3
+    auto& feedbackSum1  = flow->emplaceBlock<Adder<float>>({{"name", "fbSum1"}}); // combines a2 and a3
     feedbackSum1.tracer = tracer;
-    auto& feedbackSum2  = flow.emplaceBlock<Adder<float>>({{"name", "fbSum2"}}); // combines a1 with (a2+a3)
+    auto& feedbackSum2  = flow->emplaceBlock<Adder<float>>({{"name", "fbSum2"}}); // combines a1 with (a2+a3)
     feedbackSum2.tracer = tracer;
 
     // adders for cascaded feed-forward signal summation
-    auto& outputSum0  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum0"}}); // combines b0 and sum(b1,b2,b3)
+    auto& outputSum0  = flow->emplaceBlock<Adder<float>>({{"name", "ffSum0"}}); // combines b0 and sum(b1,b2,b3)
     outputSum0.tracer = tracer;
-    auto& outputSum1  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum1"}}); // combines b2 and b3
+    auto& outputSum1  = flow->emplaceBlock<Adder<float>>({{"name", "ffSum1"}}); // combines b2 and b3
     outputSum1.tracer = tracer;
-    auto& outputSum2  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum2"}}); // combines b1 with (b2+b3)
+    auto& outputSum2  = flow->emplaceBlock<Adder<float>>({{"name", "ffSum2"}}); // combines b1 with (b2+b3)
     outputSum2.tracer = tracer;
 
     // main path src -> sum (feedback branches) -> b0 -> sum (feed-forward branches) -> snk
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"addend0">(feedbackSum0)), loc); // src -> feedbackSum0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum0).to<"original">(b0)), loc);    // b0 * v(n)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b0).to<"addend0">(outputSum0)), loc);    // b0 -> outputSum0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(outputSum0).to<"in">(sink)), loc);          // outputSum0 -> snk
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"addend0">(feedbackSum0)), loc); // src -> feedbackSum0
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(feedbackSum0).to<"original">(b0)), loc);    // b0 * v(n)
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(b0).to<"addend0">(outputSum0)), loc);    // b0 -> outputSum0
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(outputSum0).to<"in">(sink)), loc);          // outputSum0 -> snk
 
     // delay line: v(n) → v(n-1) → v(n-2) → v(n-3)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum0).to<"original">(d1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d1).to<"original">(d2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d2).to<"original">(d3)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(feedbackSum0).to<"original">(d1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d1).to<"original">(d2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d2).to<"original">(d3)), loc);
 
     // feedback path
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d1).to<"original">(a1)), loc); // -a1 * v(n-1)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d2).to<"original">(a2)), loc); // -a2 * v(n-2)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d3).to<"original">(a3)), loc); // -a3 * v(n-3)
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d1).to<"original">(a1)), loc); // -a1 * v(n-1)
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d2).to<"original">(a2)), loc); // -a2 * v(n-2)
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d3).to<"original">(a3)), loc); // -a3 * v(n-3)
 
     // cascaded feedback summation: a3 + a2 -> feedbackSum2, then + a1 -> feedbackSum1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(a2).to<"addend0">(feedbackSum2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(a3).to<"addend1">(feedbackSum2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(a1).to<"addend0">(feedbackSum1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum2).to<"addend1">(feedbackSum1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum1).to<"addend1">(feedbackSum0)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(a2).to<"addend0">(feedbackSum2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(a3).to<"addend1">(feedbackSum2)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(a1).to<"addend0">(feedbackSum1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(feedbackSum2).to<"addend1">(feedbackSum1)), loc);
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(feedbackSum1).to<"addend1">(feedbackSum0)), loc);
 
     // feed-forward path
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d1).to<"original">(b1)), loc); // b1 * v(n-1)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d2).to<"original">(b2)), loc); // b2 * v(n-2)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d3).to<"original">(b3)), loc); // b3 * v(n-3)
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d1).to<"original">(b1)), loc); // b1 * v(n-1)
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d2).to<"original">(b2)), loc); // b2 * v(n-2)
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(d3).to<"original">(b3)), loc); // b3 * v(n-3)
 
     // cascaded feed-forward summation: b3 + b2 -> outputSum1, then + b1 -> outputSum2
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b2).to<"addend0">(outputSum1)), loc);      // FIXED: b2 -> addend0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b3).to<"addend1">(outputSum1)), loc);      // b3 -> addend1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b1).to<"addend0">(outputSum2)), loc);      // FIXED: b1 -> addend0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(outputSum1).to<"addend1">(outputSum2)), loc); // outputSum1 -> addend1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(outputSum2).to<"addend1">(outputSum0)), loc); // FIXED: complete chain to outputSum0
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(b2).to<"addend0">(outputSum1)), loc);      // FIXED: b2 -> addend0
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(b3).to<"addend1">(outputSum1)), loc);      // b3 -> addend1
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"scaled">(b1).to<"addend0">(outputSum2)), loc);      // FIXED: b1 -> addend0
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(outputSum1).to<"addend1">(outputSum2)), loc); // outputSum1 -> addend1
+    expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"sum">(outputSum2).to<"addend1">(outputSum0)), loc); // FIXED: complete chain to outputSum0
 
     return flow;
 }
@@ -551,9 +554,9 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
 
     "Scheduler move crash"_test = [] {
         // Scheduler crashed if exchanged graph twice
-        gr::scheduler::Simple<> s0;
-        gr::Graph               g1;
-        auto                    oldGraph = s0.exchange(std::move(g1));
+        gr::scheduler::Simple<>       s0;
+        gr::meta::indirect<gr::Graph> g1;
+        auto                          oldGraph = s0.exchange(std::move(g1));
         expect(oldGraph.has_value()) << "oldGraph should have a value";
 
         auto g1Again = s0.exchange(std::move(oldGraph.value()));
@@ -785,8 +788,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "Basic Feedback Loop"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        Graph                            graph         = getBasicFeedBackLoop(trace);
-        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
+        gr::meta::indirect<Graph>        graph         = getBasicFeedBackLoop(trace);
+        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(*graph);
         expect(eq(feedbackLoops.size(), 1UZ));
         gr::graph::printFeedbackLoop(feedbackLoops.at(0UZ));
         auto priming = gr::graph::calculateLoopPrimingSize(feedbackLoops.at(0UZ));
@@ -806,8 +809,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "Resampling Feedback Loop"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        Graph                            graph         = getResamplingFeedbackLoop(trace);
-        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
+        gr::meta::indirect<Graph>        graph         = getResamplingFeedbackLoop(trace);
+        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(*graph);
         expect(eq(feedbackLoops.size(), 1UZ));
         gr::graph::printFeedbackLoop(feedbackLoops.at(0UZ));
         auto priming = gr::graph::calculateLoopPrimingSize(feedbackLoops.at(0UZ));
@@ -828,8 +831,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "Multiple Nested Feedback Loops"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        Graph                            graph         = getMultipleNestedFeedbackLoops(trace);
-        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
+        gr::meta::indirect<Graph>        graph         = getMultipleNestedFeedbackLoops(trace);
+        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(*graph);
         for (const auto& loop : feedbackLoops) {
             gr::graph::printFeedbackLoop(loop);
         }
@@ -856,8 +859,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "IIR Form II Feedback Loops"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        Graph                            graph         = getIIRFormII(trace);
-        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
+        gr::meta::indirect<Graph>        graph         = getIIRFormII(trace);
+        std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(*graph);
         for (const auto& loop : feedbackLoops) {
             gr::graph::printFeedbackLoop(loop);
         }
@@ -882,11 +885,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "LifecycleBlock"_test = [] {
-        gr::Graph flow;
+        gr::meta::indirect<gr::Graph> flow;
 
-        auto& lifecycleSource = flow.emplaceBlock<LifecycleSource<float>>();
-        auto& lifecycleBlock  = flow.emplaceBlock<LifecycleBlock<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(lifecycleSource).to<"in">(lifecycleBlock)));
+        auto& lifecycleSource = flow->emplaceBlock<LifecycleSource<float>>();
+        auto& lifecycleBlock  = flow->emplaceBlock<LifecycleBlock<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(lifecycleSource).to<"in">(lifecycleBlock)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -908,13 +911,13 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate DONE check-infinite loop"_test = [] {
         using namespace gr::testing;
-        gr::Graph flow;
+        gr::meta::indirect<gr::Graph> flow;
 
-        auto& source  = flow.emplaceBlock<CountingSource<float>>();
-        auto& monitor = flow.emplaceBlock<Copy<float>>();
-        auto& sink    = flow.emplaceBlock<NullSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        auto& source  = flow->emplaceBlock<CountingSource<float>>();
+        auto& monitor = flow->emplaceBlock<Copy<float>>();
+        auto& sink    = flow->emplaceBlock<NullSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(monitor).to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -969,13 +972,13 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate source DONE state: down-stream using EOS tag"_test = [&createWatchdog] {
         using namespace gr::testing;
-        gr::Graph flow;
+        gr::meta::indirect<gr::Graph> flow;
 
-        auto& source  = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", 1024U}});
-        auto& monitor = flow.emplaceBlock<Copy<float>>();
-        auto& sink    = flow.emplaceBlock<CountingSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        auto& source  = flow->emplaceBlock<ConstantSource<float>>({{"n_samples_max", 1024U}});
+        auto& monitor = flow->emplaceBlock<Copy<float>>();
+        auto& sink    = flow->emplaceBlock<CountingSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(monitor).to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -994,13 +997,13 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate monitor DONE status: down-stream using EOS tag, upstream via disconnecting ports"_test = [&createWatchdog] {
         using namespace gr::testing;
-        gr::Graph flow;
+        gr::meta::indirect<gr::Graph> flow;
 
-        auto& source  = flow.emplaceBlock<NullSource<float>>();
-        auto& monitor = flow.emplaceBlock<HeadBlock<float>>({{"n_samples_max", 1024U}});
-        auto& sink    = flow.emplaceBlock<CountingSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        auto& source  = flow->emplaceBlock<NullSource<float>>();
+        auto& monitor = flow->emplaceBlock<HeadBlock<float>>({{"n_samples_max", 1024U}});
+        auto& sink    = flow->emplaceBlock<CountingSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(monitor).to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -1019,13 +1022,13 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "propagate sink DONE status: upstream via disconnecting ports"_test = [&createWatchdog] {
         using namespace gr::testing;
-        gr::Graph flow;
+        gr::meta::indirect<gr::Graph> flow;
 
-        auto& source  = flow.emplaceBlock<NullSource<float>>();
-        auto& monitor = flow.emplaceBlock<Copy<float>>();
-        auto& sink    = flow.emplaceBlock<CountingSink<float>>({{"n_samples_max", 1024U}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        auto& source  = flow->emplaceBlock<NullSource<float>>();
+        auto& monitor = flow->emplaceBlock<Copy<float>>();
+        auto& sink    = flow->emplaceBlock<CountingSink<float>>({{"n_samples_max", 1024U}});
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(monitor).to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -1045,12 +1048,12 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         using namespace gr;
         using namespace gr::testing;
 
-        Graph flow;
-        auto& source  = flow.emplaceBlock<NullSource<float>>();
-        auto& monitor = flow.emplaceBlock<BusyLoopBlock<float>>();
-        auto& sink    = flow.emplaceBlock<NullSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        gr::meta::indirect<Graph> flow;
+        auto&                     source  = flow->emplaceBlock<NullSource<float>>();
+        auto&                     monitor = flow->emplaceBlock<BusyLoopBlock<float>>();
+        auto&                     sink    = flow->emplaceBlock<NullSink<float>>();
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(source).to<"in">(monitor)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow->connect<"out">(monitor).to<"in">(sink)));
 
         scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking> scheduler;
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
@@ -1119,23 +1122,23 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     "AdjacencyList_basic_linear_graph"_test = [] {
         using namespace gr;
         using TBlock = Scale<int>;
-        gr::Graph graph;
+        gr::meta::indirect<gr::Graph> graph;
 
-        TBlock& A = graph.emplaceBlock<TBlock>({{"name", "A"}});
-        TBlock& B = graph.emplaceBlock<TBlock>({{"name", "B"}});
-        TBlock& C = graph.emplaceBlock<TBlock>({{"name", "C"}});
+        TBlock& A = graph->emplaceBlock<TBlock>({{"name", "A"}});
+        TBlock& B = graph->emplaceBlock<TBlock>({{"name", "B"}});
+        TBlock& C = graph->emplaceBlock<TBlock>({{"name", "C"}});
 
-        expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
-        expect(eq(graph.connect<"scaled">(B).to<"original">(C), ConnectionResult::SUCCESS));
+        expect(eq(graph->connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
+        expect(eq(graph->connect<"scaled">(B).to<"original">(C), ConnectionResult::SUCCESS));
 
-        gr::Graph                                flat       = gr::graph::flatten(graph);
+        gr::graph::Contents                      flat       = gr::graph::flatten(*graph);
         gr::graph::AdjacencyList                 acencyList = gr::graph::computeAdjacencyList(flat);
         std::vector<std::shared_ptr<BlockModel>> sources    = gr::graph::findSourceBlocks(acencyList);
 
         expect(eq(sources.size(), 1UZ));
         expect(eq(sources[0UZ]->name(), "A"sv));
 
-        std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
+        std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(graph->contents, A.unique_name).value();
         std::span<const Edge* const>    edges    = gr::graph::outgoingEdges(acencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
         expect(eq(edges.size(), 1UZ)) << fatal;
         expect(eq(edges[0UZ]->_destinationBlock->name(), "B"sv));
@@ -1153,14 +1156,14 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
         expect(eq(graph.connect<"scaled">(A).to<"original">(C), ConnectionResult::SUCCESS));
 
-        gr::Graph                                flat          = gr::graph::flatten(graph);
+        gr::graph::Contents                      flat          = gr::graph::flatten(graph);
         gr::graph::AdjacencyList                 adjacencyList = gr::graph::computeAdjacencyList(flat);
         std::vector<std::shared_ptr<BlockModel>> srcs          = gr::graph::findSourceBlocks(adjacencyList);
 
         expect(eq(srcs.size(), 1UZ));
         expect(eq(srcs[0UZ]->name(), "A"sv));
 
-        std::shared_ptr<gr::BlockModel>  srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
+        std::shared_ptr<gr::BlockModel>  srcBlock = gr::graph::findBlock(graph.contents, A.unique_name).value();
         std::span<const gr::Edge* const> edges    = gr::graph::outgoingEdges(adjacencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
         expect(eq(edges.size(), 2UZ)) << fatal;
         std::set<std::string_view> targets{edges[0UZ]->_destinationBlock->name(), edges[1UZ]->_destinationBlock->name()};
@@ -1203,7 +1206,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(graph.connect<"scaled">(blockA).to<"original">(blockB), ConnectionResult::SUCCESS));
         expect(eq(graph.connect<"scaled">(blockB).to<"original">(blockC), ConnectionResult::SUCCESS));
 
-        gr::Graph                flattened     = gr::graph::flatten(graph);
+        gr::graph::Contents      flattened     = gr::graph::flatten(graph);
         gr::graph::AdjacencyList adjacencyList = gr::graph::computeAdjacencyList(flattened);
 
         std::set<std::string_view> srcNames;
@@ -1227,11 +1230,11 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "print topologies"_test = [] {
-        auto runTest = [](std::string name, gr::Graph graph) {
+        auto runTest = [](std::string name, gr::Graph& graph) {
             for (auto& loop : gr::graph::detectFeedbackLoops(graph)) {
                 gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
             }
-            std::println("{}:\n{}", name, gr::graph::draw(graph));
+            std::println("{}:\n{}", name, gr::graph::draw(graph.contents));
 
             gr::scheduler::Simple<> sched;
             if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -1241,13 +1244,13 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         };
 
         std::shared_ptr<Tracer> trace = std::make_shared<Tracer>();
-        runTest("getGraphLinear():\n", getGraphLinear(trace));
-        runTest("getGraphParallel():\n", getGraphParallel(trace));
-        runTest("getGraphScaledSum():\n", getGraphScaledSum(trace));
-        runTest("getBasicFeedBackLoop():\n", getBasicFeedBackLoop(trace));
-        runTest("getResamplingFeedbackLoop():\n", getResamplingFeedbackLoop(trace));
-        runTest("getMultipleNestedFeedbackLoops():\n", getMultipleNestedFeedbackLoops(trace));
-        runTest("getIIRFormII():\n", getIIRFormII(trace));
+        runTest("getGraphLinear():\n", *getGraphLinear(trace));
+        runTest("getGraphParallel():\n", *getGraphParallel(trace));
+        runTest("getGraphScaledSum():\n", *getGraphScaledSum(trace));
+        runTest("getBasicFeedBackLoop():\n", *getBasicFeedBackLoop(trace));
+        runTest("getResamplingFeedbackLoop():\n", *getResamplingFeedbackLoop(trace));
+        runTest("getMultipleNestedFeedbackLoops():\n", *getMultipleNestedFeedbackLoops(trace));
+        runTest("getIIRFormII():\n", *getIIRFormII(trace));
     };
 
     // TODO: add flatten test for nested graph once they are fully integrated by Ivan & Dantti

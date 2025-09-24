@@ -20,17 +20,17 @@ const boost::ut::suite DynamicBlocktests = [] {
         // const gr::Size_t nAdditionalInputs = 10; // total inputs = nInputs + nAdditionalInputs
         const gr::Size_t nSamples = 5;
 
-        gr::Graph graph;
+        gr::meta::indirect<gr::Graph> graph;
 
-        auto& adder = graph.emplaceBlock<gr::blocks::math::Add<double>>({{"n_inputs", nInputs}});
-        auto& sink  = graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({});
+        auto& adder = graph->emplaceBlock<gr::blocks::math::Add<double>>({{"n_inputs", nInputs}});
+        auto& sink  = graph->emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({});
 
         std::vector<TagSource<double>*> sources;
         for (std::size_t i = 0; i < nInputs; ++i) {
-            sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"mark_tag", false}})));
-            expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), "out"s, adder, "in#"s + std::to_string(sources.size() - 1)));
+            sources.push_back(std::addressof(graph->emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"mark_tag", false}})));
+            expect(gr::ConnectionResult::SUCCESS == graph->connect(*sources.back(), "out"s, adder, "in#"s + std::to_string(sources.size() - 1)));
         }
-        expect(gr::ConnectionResult::SUCCESS == graph.connect<"out">(adder).to<"in">(sink));
+        expect(gr::ConnectionResult::SUCCESS == graph->connect<"out">(adder).to<"in">(sink));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {

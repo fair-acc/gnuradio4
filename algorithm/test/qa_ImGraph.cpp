@@ -215,11 +215,11 @@ inline static gr::Graph example_large() {
 }
 
 int main() {
-    std::println("=== Base example 1 ===\n{}", gr::graph::draw(example_base1()));
-    std::println("=== Base example 2 ===\n{}", gr::graph::draw(example_base2()));
-    std::println("=== Cyclic example A ===\n{}", gr::graph::draw(example_cyclic_A()));
-    std::println("=== Cyclic example B (vertical) ===\n{}", gr::graph::draw(example_cyclic_B()));
-    std::println("=== AUTO layout example ===\n{}", gr::graph::draw(example_auto()));
-    std::println("=== Larger example ===\n{}", gr::graph::draw(example_large()));
+    std::println("=== Base example 1 ===\n{}", gr::graph::draw(example_base1().contents));
+    std::println("=== Base example 2 ===\n{}", gr::graph::draw(example_base2().contents));
+    std::println("=== Cyclic example A ===\n{}", gr::graph::draw(example_cyclic_A().contents));
+    std::println("=== Cyclic example B (vertical) ===\n{}", gr::graph::draw(example_cyclic_B().contents));
+    std::println("=== AUTO layout example ===\n{}", gr::graph::draw(example_auto().contents));
+    std::println("=== Larger example ===\n{}", gr::graph::draw(example_large().contents));
     return 0;
 }

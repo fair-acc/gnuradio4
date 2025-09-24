@@ -176,21 +176,21 @@ const boost::ut::suite PortApiTests = [] {
         using PortDirection::OUTPUT;
 
         // Block need to be alive for as long as the flow is
-        gr::Graph flow;
+        gr::meta::indirect<gr::Graph> flow;
 
         // Generators
-        auto& answer = flow.emplaceBlock<repeater_source<int, 42>>();
-        auto& number = flow.emplaceBlock<repeater_source<int, 6>>();
+        auto& answer = flow->emplaceBlock<repeater_source<int, 42>>();
+        auto& number = flow->emplaceBlock<repeater_source<int, 6>>();
 
-        auto& scaled = flow.emplaceBlock<scale<int, 2>>();
-        auto& added  = flow.emplaceBlock<adder<int>>();
-        auto& out    = flow.emplaceBlock<cout_sink<int>>();
+        auto& scaled = flow->emplaceBlock<scale<int, 2>>();
+        auto& added  = flow->emplaceBlock<adder<int>>();
+        auto& out    = flow->emplaceBlock<cout_sink<int>>();
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
+        expect(eq(ConnectionResult::SUCCESS, flow->connect<"value">(number).to<"original">(scaled)));
+        expect(eq(ConnectionResult::SUCCESS, flow->connect<"scaled">(scaled).to<"addend0">(added)));
+        expect(eq(ConnectionResult::SUCCESS, flow->connect<"value">(answer).to<"addend1">(added)));
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
+        expect(eq(ConnectionResult::SUCCESS, flow->connect<"sum">(added).to<"sink">(out)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
