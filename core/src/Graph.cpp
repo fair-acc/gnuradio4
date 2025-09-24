@@ -3,7 +3,7 @@
 
 namespace gr {
 
-Graph::Graph(property_map settings) : gr::Block<Graph>(std::move(settings)) {
+Graph::Graph(property_map settings) : gr::Block<Graph>(std::move(settings)), _pluginLoader(std::addressof(gr::globalPluginLoader())) {
     _blocks.reserve(100); // TODO: remove
 
     propertyCallbacks[graph::property::kInspectBlock]       = std::mem_fn(&Graph::propertyCallbackInspectBlock);
