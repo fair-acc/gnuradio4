@@ -748,7 +748,7 @@ T incidentCost(const std::span<const gr::Edge>& edges, std::shared_ptr<gr::Block
 }
 
 template<gr::arithmetic_or_complex_like T>
-[[maybe_unused]] std::size_t optimiseSideFlips(gr::graph::Contents& graph, std::size_t maxIters = 0, double improveEps = 0.10, std::source_location loc = std::source_location::current()) {
+[[maybe_unused]] std::size_t optimiseSideFlips(gr::Graph& graph, std::size_t maxIters = 0, double improveEps = 0.10, std::source_location loc = std::source_location::current()) {
     using enum Side;
 
     if (maxIters == 0) {
@@ -901,7 +901,7 @@ template<gr::arithmetic_or_complex_like T>
 // and take the maximum over all outgoing edges (side branches don’t inflate).
 // Cycles are skipped via an 'onStack' mask.
 // -----------------------------------------------------------------------------
-inline std::vector<double> computeEffectiveWeights(const gr::graph::Contents& graph, const std::span<const gr::Edge>& edges) {
+inline std::vector<double> computeEffectiveWeights(const gr::Graph& graph, const std::span<const gr::Edge>& edges) {
     std::vector<std::vector<std::size_t>> out(graph.blocks().size());
     std::vector<std::size_t>              connectedChildren(graph.blocks().size(), 0UZ);
 
@@ -1055,7 +1055,7 @@ inline std::vector<double> computeEffectiveWeights(const gr::graph::Contents& gr
  *   W. T. Tutte, “How to draw a graph,” Proc. London Math. Soc.,
  *   s3-13(1), pp. 743–767, 1963. PDF: https://londmathsoc.onlinelibrary.wiley.com/doi/pdf/10.1112/plms/s3-13.1.743
  */
-inline static void layoutSpringModel(gr::graph::Contents& graph, const LayoutPreference& cfg = {}, std::source_location loc = std::source_location::current()) {
+inline static void layoutSpringModel(gr::Graph& graph, const LayoutPreference& cfg = {}, std::source_location loc = std::source_location::current()) {
     using T = double;
     using enum Side;
 
@@ -1386,7 +1386,7 @@ inline static void layoutSpringModel(gr::graph::Contents& graph, const LayoutPre
 }
 
 template<typename T = double>
-static void layoutSugiyama(gr::graph::Contents& graph, const LayoutPreference& config = {}, std::source_location loc = std::source_location::current()) {
+static void layoutSugiyama(gr::Graph& graph, const LayoutPreference& config = {}, std::source_location loc = std::source_location::current()) {
     if (graph.blocks().empty()) {
         return;
     }
@@ -2258,14 +2258,14 @@ std::vector<Point<T>> routeDijkstra(const gr::utf8::ImCanvasLike auto& canvas, c
 //------------------------------------------------------
 
 template<typename TGraph, gr::arithmetic_or_complex_like T = std::size_t>
-requires(std::is_same_v<std::remove_reference_t<TGraph>, gr::graph::Contents>)
+requires(std::is_same_v<std::remove_reference_t<TGraph>, gr::Graph>)
 [[nodiscard]] static std::string draw(TGraph&& graph, const LayoutPreference& config = {}) {
-    std::vector<gr::graph::Contents> graphs = gr::graph::weaklyConnectedComponents(std::forward<TGraph>(graph));
+    std::vector<gr::meta::indirect<gr::Graph>> graphs = gr::graph::weaklyConnectedComponents(std::forward<TGraph>(graph));
     if (graphs.size() > 1UZ) {
         std::string      ret;
         LayoutPreference subGraphConfig = config;
         for (auto& g : graphs) {
-            ret += draw(g, subGraphConfig);
+            ret += draw(*g, subGraphConfig);
             subGraphConfig.minMargin = 0UZ; // ignore margins for subsequent graphs
         }
         return ret;

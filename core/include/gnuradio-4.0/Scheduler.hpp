@@ -409,7 +409,7 @@ protected:
     }
 
     bool connectPendingEdges() {
-        auto primeFeedbackPorts = [&](const gr::graph::Contents& graph) {
+        auto primeFeedbackPorts = [&](const gr::Graph& graph) {
             std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
             for (auto& loop : feedbackLoops) {
                 if (std::expected<std::size_t, Error> nPrimeSamples = gr::graph::calculateLoopPrimingSize(loop); nPrimeSamples) {
@@ -1007,8 +1007,8 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
         [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("scheduler_simple.init");
 
         // generate job list
-        const gr::graph::Contents flatGraph = graph::flatten(*this->_graph);
-        const std::size_t         nBlocks   = flatGraph.blocks().size();
+        const gr::Graph   flatGraph = graph::flatten(*this->_graph);
+        const std::size_t nBlocks   = flatGraph.blocks().size();
 
         std::size_t n_batches = 1UZ;
         switch (this->executionPolicy()) {
@@ -1085,7 +1085,7 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
         using block_t                  = std::shared_ptr<BlockModel>;
         [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("breadth_first.init");
 
-        gr::graph::Contents            flatGraph     = gr::graph::flatten(*this->_graph);
+        gr::Graph                      flatGraph     = gr::graph::flatten(*this->_graph);
         const gr::graph::AdjacencyList adjacencyList = graph::computeAdjacencyList(flatGraph);
         const std::vector<block_t>     sourceBlocks  = graph::findSourceBlocks(adjacencyList);
 
@@ -1158,7 +1158,7 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
         using block_t                  = std::shared_ptr<BlockModel>;
         [[maybe_unused]] const auto pe = this->_profilerHandler->startCompleteEvent("depth_first.init");
 
-        gr::graph::Contents        flatGraph     = gr::graph::flatten(*this->_graph);
+        gr::Graph                  flatGraph     = gr::graph::flatten(*this->_graph);
         const graph::AdjacencyList adjacencyList = graph::computeAdjacencyList(flatGraph);
         const std::vector<block_t> sourceBlocks  = graph::findSourceBlocks(adjacencyList);
 

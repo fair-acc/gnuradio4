@@ -196,8 +196,8 @@ auto& createSink(gr::Graph& graph, std::size_t idx = gr::meta::invalid_index, bo
 enum class GraphTopology { DEFAULT, LINEAR, FORKED, SPLIT, FEEDBACK };
 
 void printGraphTopology(const gr::Graph& graph, GraphTopology topology, bool detailedInfo = false) {
-    gr::graph::Contents flatGraph        = gr::graph::flatten(graph);
-    const bool          neededFlattening = graph.blocks().size() < flatGraph.blocks().size();
+    gr::Graph  flatGraph        = gr::graph::flatten(graph);
+    const bool neededFlattening = graph.blocks().size() < flatGraph.blocks().size();
     for (auto& loop : gr::graph::detectFeedbackLoops(flatGraph)) {
         gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
     }

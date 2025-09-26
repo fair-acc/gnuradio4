@@ -213,7 +213,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
         const std::size_t      nBlocks = gr::graph::countBlocks<gr::block::Category::NormalBlock>(rootGraph);
         std::vector<pmtv::pmt> serializedBlocks;
         serializedBlocks.reserve(nBlocks);
-        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph.contents, [&](const std::shared_ptr<BlockModel>& block) {
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel>& block) {
             property_map map;
             const auto&  fullTypeName = loader.registry().typeName(block);
             if (fullTypeName == "gr::Graph") {

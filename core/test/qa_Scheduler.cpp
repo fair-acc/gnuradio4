@@ -1131,14 +1131,14 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(graph->connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
         expect(eq(graph->connect<"scaled">(B).to<"original">(C), ConnectionResult::SUCCESS));
 
-        gr::graph::Contents                      flat       = gr::graph::flatten(*graph);
+        gr::Graph                                flat       = gr::graph::flatten(*graph);
         gr::graph::AdjacencyList                 acencyList = gr::graph::computeAdjacencyList(flat);
         std::vector<std::shared_ptr<BlockModel>> sources    = gr::graph::findSourceBlocks(acencyList);
 
         expect(eq(sources.size(), 1UZ));
         expect(eq(sources[0UZ]->name(), "A"sv));
 
-        std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(graph->contents, A.unique_name).value();
+        std::shared_ptr<gr::BlockModel> srcBlock = gr::graph::findBlock(*graph, A.unique_name).value();
         std::span<const Edge* const>    edges    = gr::graph::outgoingEdges(acencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
         expect(eq(edges.size(), 1UZ)) << fatal;
         expect(eq(edges[0UZ]->_destinationBlock->name(), "B"sv));
@@ -1156,14 +1156,14 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
         expect(eq(graph.connect<"scaled">(A).to<"original">(C), ConnectionResult::SUCCESS));
 
-        gr::graph::Contents                      flat          = gr::graph::flatten(graph);
+        gr::Graph                                flat          = gr::graph::flatten(graph);
         gr::graph::AdjacencyList                 adjacencyList = gr::graph::computeAdjacencyList(flat);
         std::vector<std::shared_ptr<BlockModel>> srcs          = gr::graph::findSourceBlocks(adjacencyList);
 
         expect(eq(srcs.size(), 1UZ));
         expect(eq(srcs[0UZ]->name(), "A"sv));
 
-        std::shared_ptr<gr::BlockModel>  srcBlock = gr::graph::findBlock(graph.contents, A.unique_name).value();
+        std::shared_ptr<gr::BlockModel>  srcBlock = gr::graph::findBlock(graph, A.unique_name).value();
         std::span<const gr::Edge* const> edges    = gr::graph::outgoingEdges(adjacencyList, srcBlock, 0UZ /* first port - resolved to number in Edge through connection */);
         expect(eq(edges.size(), 2UZ)) << fatal;
         std::set<std::string_view> targets{edges[0UZ]->_destinationBlock->name(), edges[1UZ]->_destinationBlock->name()};
@@ -1206,7 +1206,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         expect(eq(graph.connect<"scaled">(blockA).to<"original">(blockB), ConnectionResult::SUCCESS));
         expect(eq(graph.connect<"scaled">(blockB).to<"original">(blockC), ConnectionResult::SUCCESS));
 
-        gr::graph::Contents      flattened     = gr::graph::flatten(graph);
+        gr::Graph                flattened     = gr::graph::flatten(graph);
         gr::graph::AdjacencyList adjacencyList = gr::graph::computeAdjacencyList(flattened);
 
         std::set<std::string_view> srcNames;
@@ -1234,7 +1234,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             for (auto& loop : gr::graph::detectFeedbackLoops(graph)) {
                 gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
             }
-            std::println("{}:\n{}", name, gr::graph::draw(graph.contents));
+            std::println("{}:\n{}", name, gr::graph::draw(graph));
 
             gr::scheduler::Simple<> sched;
             if (auto ret = sched.exchange(std::move(graph)); !ret) {
