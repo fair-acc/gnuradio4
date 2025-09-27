@@ -1184,12 +1184,14 @@ struct PFFFT_Setup {
     }
 
     constexpr void computeTwiddle() { // not performance critical, computed once
+        const T base = (-T{2} * std::numbers::pi_v<T>) / static_cast<T>(size());
         if constexpr (kIsRealValued) {
             for (std::size_t k = 0UZ; k < simdVectorSize(); ++k) {
+                const T kf = base * static_cast<T>(k);
                 std::size_t i = k / simdSize();
                 std::size_t j = k % simdSize();
                 for (std::size_t m = 0; m < simdSize() - 1; ++m) {
-                    T A                                       = -2 * std::numbers::pi_v<T> * static_cast<T>(m + 1) * static_cast<T>(k) / static_cast<T>(size());
+                    const T A = kf * static_cast<T>(m + 1);
                     e[(2 * (i * 3 + m) + 0) * simdSize() + j] = std::cos(A);
                     e[(2 * (i * 3 + m) + 1) * simdSize() + j] = std::sin(A);
                 }
@@ -1197,10 +1199,11 @@ struct PFFFT_Setup {
             rffti1_ps(size() / simdSize(), twiddle, ifac);
         } else {
             for (std::size_t k = 0; k < simdVectorSize(); ++k) {
+                const T kf = base * static_cast<T>(k);
                 std::size_t i = k / simdSize();
                 std::size_t j = k % simdSize();
                 for (std::size_t m = 0; m < simdSize() - 1; ++m) {
-                    T A                                       = -2 * std::numbers::pi_v<T> * static_cast<T>(m + 1UZ) * static_cast<T>(k) / static_cast<T>(size());
+                    const T A = kf * static_cast<T>(m + 1);
                     e[(2 * (i * 3 + m) + 0) * simdSize() + j] = std::cos(A);
                     e[(2 * (i * 3 + m) + 1) * simdSize() + j] = std::sin(A);
                 }
@@ -1640,7 +1643,7 @@ constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, co
         if (vinput == buff[ib]) {
             ib = !ib; /* may happen when finput == foutput */
         }
-        if (ordered) {
+        if constexpr (order == fft_order_t::Ordered) {
             pffft_zreorder<fft_direction_t::Backward>(setup, reinterpret_cast<const T*>(vinput), reinterpret_cast<T*>(buff[ib]));
             vinput = buff[ib];
             ib     = !ib;
