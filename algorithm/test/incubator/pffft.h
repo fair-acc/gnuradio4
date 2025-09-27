@@ -25,6 +25,8 @@
 #endif
 
 /* direction of the transform */
+enum class fft_order_t { Ordered, Unordered };
+
 enum class fft_direction_t { Forward, Backward };
 
 /* type of transform */
@@ -68,20 +70,16 @@ struct PFFFT_Setup;
    obvious, that the result for negative frequencies are not output,
    cause of symmetry.
 
-   input and output may alias.
-*/
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N>
-void pffft_transform(PFFFT_Setup<T, transform, N>* setup, const T* input, T* output, T* work);
-
-/*
-   Similar to pffft_transform, but makes sure that the output is
+   @param order
+    * fft_order_t::Unordered -- better performance (notably for back-and-forth transforms
+    * fft_order_t::Ordered makes sure that the output is
    ordered as expected (interleaved complex numbers).  This is
    similar to calling pffft_transform and then pffft_zreorder.
 
    input and output may alias.
 */
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N>
-void pffft_transform_ordered(PFFFT_Setup<T, transform, N>& setup, const T* input, T* output, T* work);
+template<fft_direction_t direction, fft_order_t order, std::floating_point T, fft_transform_t transform, std::size_t N>
+void pffft_transform(PFFFT_Setup<T, transform, N>& setup, const T* input, T* output, T* work);
 
 /*
    call pffft_zreorder(.., PFFFT_FORWARD) after pffft_transform(...,

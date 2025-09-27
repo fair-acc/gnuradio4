@@ -184,8 +184,8 @@ double cal_benchmark(std::size_t N) {
     tstop            = t0 + 0.25; /* benchmark duration: 250 ms */
     do {
         for (std::size_t k = 0; k < 512; ++k) {
-            pffft_transform<fft_direction_t::Forward>(s, X, Z, Y);
-            pffft_transform<fft_direction_t::Backward>(s, X, Z, Y);
+            pffft_transform<fft_direction_t::Forward, fft_order_t::Unordered>(s, X, Z, Y);
+            pffft_transform<fft_direction_t::Backward, fft_order_t::Unordered>(s, X, Z, Y);
             ++iter;
         }
         t1 = uclock_sec();
@@ -257,9 +257,9 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         do {
             for (std::size_t k = 0UZ; k < step_iter; ++k) {
                 assert(X[Nmax] == checkVal);
-                pffft_transform<fft_direction_t::Forward>(s, X, Z, Y);
+                pffft_transform<fft_direction_t::Forward, fft_order_t::Unordered>(s, X, Z, Y);
                 assert(X[Nmax] == checkVal);
-                pffft_transform<fft_direction_t::Backward>(s, X, Z, Y);
+                pffft_transform<fft_direction_t::Backward, fft_order_t::Unordered>(s, X, Z, Y);
                 assert(X[Nmax] == checkVal);
                 ++max_iter;
             }
@@ -286,9 +286,9 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         do {
             for (std::size_t k = 0; k < step_iter; ++k) {
                 assert(X[Nmax] == checkVal);
-                pffft_transform_ordered<fft_direction_t::Forward>(s, X, Z, Y);
+                pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(s, X, Z, Y);
                 assert(X[Nmax] == checkVal);
-                pffft_transform_ordered<fft_direction_t::Backward>(s, X, Z, Y);
+                pffft_transform<fft_direction_t::Backward, fft_order_t::Ordered>(s, X, Z, Y);
                 assert(X[Nmax] == checkVal);
                 ++max_iter;
             }
@@ -551,7 +551,7 @@ bool test_fft_sine_wave() {
         }
 
         PFFFT_Setup<T, fft_transform_t::Real> setup(N);
-        pffft_transform_ordered<fft_direction_t::Forward>(setup, input, output, work);
+        pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(setup, input, output, work);
 
         // For real FFT, output format is: [DC, bin1_real, bin1_imag, ..., binN/2-1_real, binN/2-1_imag, Nyquist]
         // Calculate magnitude for each bin
@@ -625,7 +625,7 @@ bool test_fft_sine_wave() {
         }
 
         PFFFT_Setup<T, fft_transform_t::Complex> setup(N);
-        pffft_transform_ordered<fft_direction_t::Forward>(setup, input, output, work);
+        pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(setup, input, output, work);
 
         // Calculate magnitude for each bin
         std::vector<T> magnitudes(N, T(0));
@@ -695,8 +695,8 @@ bool test_fft_sine_wave() {
 
         PFFFT_Setup<T, fft_transform_t::Complex> setup(N);
 
-        pffft_transform_ordered<fft_direction_t::Forward>(setup, input, spectrum, work);
-        pffft_transform_ordered<fft_direction_t::Backward>(setup, spectrum, reconstructed, work);
+        pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(setup, input, spectrum, work);
+        pffft_transform<fft_direction_t::Backward, fft_order_t::Ordered>(setup, spectrum, reconstructed, work);
 
         // scale by 1/N (this FFT doesn't normalize the inverse)
         for (std::size_t i = 0; i < 2 * N; ++i) {

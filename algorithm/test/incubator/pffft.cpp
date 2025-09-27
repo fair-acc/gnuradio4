@@ -156,12 +156,11 @@ constexpr bool pffft_is_valid_size(std::size_t N, fft_transform_t cplx) {
 
 template<std::floating_point T>
 constexpr std::size_t pffft_nearest_transform_size(std::size_t N, fft_transform_t cplx, bool higher) {
-    std::size_t       d;
     const std::size_t N_min = pffft_min_fft_size<T>(cplx);
     if (N < N_min) {
         N = N_min;
     }
-    d = higher ? N_min : -N_min;
+    const std::size_t d = higher ? N_min : -N_min;
     if (d > 0) {
         N = N_min * ((N + N_min - 1) / N_min); /* round up */
     } else {
@@ -178,10 +177,10 @@ constexpr std::size_t pffft_nearest_transform_size(std::size_t N, fft_transform_
 /*
   passf2 and passb2 has been merged here, fsign = -1 for passf2, +1 for passb2
 */
-template<std::floating_point T>
-static NEVER_INLINE(void) passf2_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, T fsign) {
-    std::size_t l1ido = l1 * ido;
+template<int sign, std::floating_point T>
+static NEVER_INLINE(void) passf2_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1) {
     if (ido <= 2) {
+        const std::size_t l1ido = l1 * ido;
         for (std::size_t k = 0; k < l1ido; k += ido, ch += ido, cc += 2 * ido) {
             ch[0]         = cc[0] + cc[ido + 0];
             ch[l1ido]     = cc[0] - cc[ido + 0];
@@ -189,11 +188,12 @@ static NEVER_INLINE(void) passf2_ps(std::size_t ido, std::size_t l1, const vec<T
             ch[l1ido + 1] = cc[1] - cc[ido + 1];
         }
     } else {
+        const std::size_t l1ido = l1 * ido;
         for (std::size_t k = 0UZ; k < l1ido; k += ido, ch += ido, cc += 2 * ido) {
             for (std::size_t i = 0UZ; i < ido - 1UZ; i += 2UZ) {
                 vec<T> tr2 = cc[i + 0] - cc[i + ido + 0];
                 vec<T> ti2 = cc[i + 1] - cc[i + ido + 1];
-                vec<T> wr = wa1[i], wi = fsign * wa1[i + 1];
+                vec<T> wr = wa1[i], wi = T{sign} * wa1[i + 1];
                 ch[i]     = cc[i + 0] + cc[i + ido + 0];
                 ch[i + 1] = cc[i + 1] + cc[i + ido + 1];
                 complex_multiply(tr2, ti2, wr, wi);
@@ -207,28 +207,28 @@ static NEVER_INLINE(void) passf2_ps(std::size_t ido, std::size_t l1, const vec<T
 /*
   passf3 and passb3 has been merged here, fsign = -1 for passf3, +1 for passb3
 */
-template<std::floating_point T>
-static NEVER_INLINE(void) passf3_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, const T* wa2, T fsign) {
-    const T     taui = 0.866025403784439f * fsign;
-    vec<T>      tr2, ti2, cr2, ci2, cr3, ci3, dr2, di2, dr3, di3;
-    std::size_t l1ido = l1 * ido;
-    T           wr1, wi1, wr2, wi2;
+template<int sign, std::floating_point T>
+static NEVER_INLINE(void) passf3_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, const T* wa2) {
+    constexpr T taui = 0.866025403784439f * T(sign);
+
+    // T           wr1, wi1, wr2, wi2;
     assert(ido > 2);
+    const std::size_t l1ido = l1 * ido;
     for (std::size_t k = 0UZ; k < l1ido; k += ido, cc += 3 * ido, ch += ido) {
         for (std::size_t i = 0UZ; i < ido - 1; i += 2) {
-            tr2       = cc[i + ido] + cc[i + 2 * ido];
-            cr2       = cc[i] + FFTConstants<T>::taur * tr2;
-            ch[i]     = cc[i] + tr2;
-            ti2       = cc[i + ido + 1] + cc[i + 2 * ido + 1];
-            ci2       = cc[i + 1] + FFTConstants<T>::taur * ti2;
-            ch[i + 1] = cc[i + 1] + ti2;
-            cr3       = taui * (cc[i + ido] - cc[i + 2 * ido]);
-            ci3       = taui * (cc[i + ido + 1] - cc[i + 2 * ido + 1]);
-            dr2       = cr2 - ci3;
-            dr3       = cr2 + ci3;
-            di2       = ci2 + cr3;
-            di3       = ci2 - cr3;
-            wr1 = wa1[i], wi1 = fsign * wa1[i + 1], wr2 = wa2[i], wi2 = fsign * wa2[i + 1];
+            vec<T> tr2  = cc[i + ido] + cc[i + 2 * ido];
+            vec<T> cr2  = cc[i] + FFTConstants<T>::taur * tr2;
+            ch[i]       = cc[i] + tr2;
+            vec<T> ti2  = cc[i + ido + 1] + cc[i + 2 * ido + 1];
+            vec<T> ci2  = cc[i + 1] + FFTConstants<T>::taur * ti2;
+            ch[i + 1]   = cc[i + 1] + ti2;
+            vec<T>  cr3 = taui * (cc[i + ido] - cc[i + 2 * ido]);
+            vec<T>  ci3 = taui * (cc[i + ido + 1] - cc[i + 2 * ido + 1]);
+            vec<T>  dr2 = cr2 - ci3;
+            vec<T>  dr3 = cr2 + ci3;
+            vec<T>  di2 = ci2 + cr3;
+            vec<T>  di3 = ci2 - cr3;
+            const T wr1 = wa1[i], wi1 = T(sign) * wa1[i + 1], wr2 = wa2[i], wi2 = T(sign) * wa2[i + 1];
             complex_multiply(dr2, di2, wr1, wi1);
             ch[i + l1ido]     = dr2;
             ch[i + l1ido + 1] = di2;
@@ -239,10 +239,9 @@ static NEVER_INLINE(void) passf3_ps(std::size_t ido, std::size_t l1, const vec<T
     }
 } /* passf3 */
 
-template<std::floating_point T>
-static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, const T* wa2, const T* wa3, T fsign) {
+template<int sign, std::floating_point T>
+static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, const T* wa2, const T* wa3) {
     /* isign == -1 for forward transform and +1 for backward transform */
-    // vec<T>      ci2, ci3, ci4, cr2, cr3, cr4, ti1, ti2, ti3, ti4, tr1, tr2, tr3, tr4;
     std::size_t l1ido = l1 * ido;
     if (ido == 2) {
         for (std::size_t k = 0; k < l1ido; k += ido, ch += ido, cc += 4 * ido) {
@@ -250,8 +249,8 @@ static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T
             const vec<T> tr2 = cc[0] + cc[2 * ido + 0];
             const vec<T> ti1 = cc[1] - cc[2 * ido + 1];
             const vec<T> ti2 = cc[1] + cc[2 * ido + 1];
-            const vec<T> ti4 = (cc[1 * ido + 0] - cc[3 * ido + 0]) * fsign;
-            const vec<T> tr4 = (cc[3 * ido + 1] - cc[1 * ido + 1]) * fsign;
+            const vec<T> ti4 = (cc[1 * ido + 0] - cc[3 * ido + 0]) * T{sign};
+            const vec<T> tr4 = (cc[3 * ido + 1] - cc[1 * ido + 1]) * T{sign};
             const vec<T> tr3 = cc[ido + 0] + cc[3 * ido + 0];
             const vec<T> ti3 = cc[ido + 1] + cc[3 * ido + 1];
 
@@ -272,8 +271,8 @@ static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T
                 const vec<T> tr2 = cc[i + 0] + cc[i + 2 * ido + 0];
                 const vec<T> ti1 = cc[i + 1] - cc[i + 2 * ido + 1];
                 const vec<T> ti2 = cc[i + 1] + cc[i + 2 * ido + 1];
-                const vec<T> tr4 = (cc[i + 3 * ido + 1] - cc[i + 1 * ido + 1]) * fsign;
-                const vec<T> ti4 = (cc[i + 1 * ido + 0] - cc[i + 3 * ido + 0]) * fsign;
+                const vec<T> tr4 = (cc[i + 3 * ido + 1] - cc[i + 1 * ido + 1]) * T{sign};
+                const vec<T> ti4 = (cc[i + 1 * ido + 0] - cc[i + 3 * ido + 0]) * T{sign};
                 const vec<T> tr3 = cc[i + ido + 0] + cc[i + 3 * ido + 0];
                 const vec<T> ti3 = cc[i + ido + 1] + cc[i + 3 * ido + 1];
 
@@ -286,14 +285,14 @@ static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T
                 vec<T> cr4 = tr1 - tr4;
                 vec<T> ci2 = ti1 + ti4;
                 vec<T> ci4 = ti1 - ti4;
-                wr1 = wa1[i], wi1 = fsign * wa1[i + 1];
+                wr1 = wa1[i], wi1 = T{sign} * wa1[i + 1];
                 complex_multiply(cr2, ci2, wr1, wi1);
-                wr2 = wa2[i], wi2 = fsign * wa2[i + 1];
+                wr2 = wa2[i], wi2 = T{sign} * wa2[i + 1];
                 ch[i + l1ido]     = cr2;
                 ch[i + l1ido + 1] = ci2;
 
                 complex_multiply(cr3, ci3, wr2, wi2);
-                wr3 = wa3[i], wi3 = fsign * wa3[i + 1];
+                wr3 = wa3[i], wi3 = T{sign} * wa3[i + 1];
                 ch[i + 2 * l1ido]     = cr3;
                 ch[i + 2 * l1ido + 1] = ci3;
 
@@ -308,53 +307,47 @@ static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T
 /*
   passf5 and passb5 has been merged here, fsign = -1 for passf5, +1 for passb5
 */
-template<std::floating_point T>
-static NEVER_INLINE(void) passf5_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, const T* wa2, const T* wa3, const T* wa4, T fsign) {
+template<int sign, std::floating_point T>
+static NEVER_INLINE(void) passf5_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, const T* wa2, const T* wa3, const T* wa4) {
+    assert(ido > 2);
     constexpr T tr11 = .309016994374947f;
-    const T     ti11 = .951056516295154f * fsign;
+    constexpr T ti11 = .951056516295154f * T{sign};
     constexpr T tr12 = -.809016994374947f;
-    const T     ti12 = .587785252292473f * fsign;
-
-    /* Local variables */
-    vec<T> ci2, ci3, ci4, ci5, di3, di4, di5, di2, cr2, cr3, cr5, cr4, ti2, ti3, ti4, ti5, dr3, dr4, dr5, dr2, tr2, tr3, tr4, tr5;
-
-    T wr1, wi1, wr2, wi2, wr3, wi3, wr4, wi4;
+    constexpr T ti12 = .587785252292473f * T{sign};
 
     constexpr auto cc_ref = [](const vec<T>* cc_, std::size_t ido_, std::size_t a_1, std::size_t a_2) -> const vec<T>& { return cc_[(a_2 - 1) * ido_ + a_1 + 1]; };
+    constexpr auto ch_ref = [](vec<T>* ch_, std::size_t l1_, std::size_t ido_, std::size_t a_1, std::size_t a_3) -> vec<T>& { return ch_[(a_3 - 1) * l1_ * ido_ + a_1 + 1]; };
 
-    auto ch_ref = [](vec<T>* ch_, std::size_t l1_, std::size_t ido_, std::size_t a_1, std::size_t a_3) -> vec<T>& { return ch_[(a_3 - 1) * l1_ * ido_ + a_1 + 1]; };
-
-    assert(ido > 2);
     for (std::size_t k = 0; k < l1; ++k, cc += 5 * ido, ch += ido) {
         for (std::size_t i = 0; i < ido - 1; i += 2) {
-            ti5                           = cc_ref(cc, ido, i, 2) - cc_ref(cc, ido, i, 5);
-            ti2                           = cc_ref(cc, ido, i, 2) + cc_ref(cc, ido, i, 5);
-            ti4                           = cc_ref(cc, ido, i, 3) - cc_ref(cc, ido, i, 4);
-            ti3                           = cc_ref(cc, ido, i, 3) + cc_ref(cc, ido, i, 4);
-            tr5                           = cc_ref(cc, ido, i - 1, 2) - cc_ref(cc, ido, i - 1, 5);
-            tr2                           = cc_ref(cc, ido, i - 1, 2) + cc_ref(cc, ido, i - 1, 5);
-            tr4                           = cc_ref(cc, ido, i - 1, 3) - cc_ref(cc, ido, i - 1, 4);
-            tr3                           = cc_ref(cc, ido, i - 1, 3) + cc_ref(cc, ido, i - 1, 4);
+            vec<T> ti5                           = cc_ref(cc, ido, i, 2) - cc_ref(cc, ido, i, 5);
+            vec<T> ti2                           = cc_ref(cc, ido, i, 2) + cc_ref(cc, ido, i, 5);
+            vec<T> ti4                           = cc_ref(cc, ido, i, 3) - cc_ref(cc, ido, i, 4);
+            vec<T> ti3                           = cc_ref(cc, ido, i, 3) + cc_ref(cc, ido, i, 4);
+            vec<T> tr5                           = cc_ref(cc, ido, i - 1, 2) - cc_ref(cc, ido, i - 1, 5);
+            vec<T> tr2                           = cc_ref(cc, ido, i - 1, 2) + cc_ref(cc, ido, i - 1, 5);
+            vec<T> tr4                           = cc_ref(cc, ido, i - 1, 3) - cc_ref(cc, ido, i - 1, 4);
+            vec<T> tr3                           = cc_ref(cc, ido, i - 1, 3) + cc_ref(cc, ido, i - 1, 4);
             ch_ref(ch, l1, ido, i - 1, 1) = cc_ref(cc, ido, i - 1, 1) + (tr2 + tr3);
             ch_ref(ch, l1, ido, i, 1)     = cc_ref(cc, ido, i, 1) + (ti2 + ti3);
-            cr2                           = cc_ref(cc, ido, i - 1, 1) + (tr11 * tr2 + tr12 * tr3);
-            ci2                           = cc_ref(cc, ido, i, 1) + (tr11 * ti2 + tr12 * ti3);
-            cr3                           = cc_ref(cc, ido, i - 1, 1) + (tr12 * tr2 + tr11 * tr3);
-            ci3                           = cc_ref(cc, ido, i, 1) + (tr12 * ti2 + tr11 * ti3);
-            cr5                           = (ti11 * tr5) + ti12 * tr4;
-            ci5                           = (ti11 * ti5) + ti12 * ti4;
-            cr4                           = (ti12 * tr5) - ti11 * tr4;
-            ci4                           = (ti12 * ti5) - ti11 * ti4;
-            dr3                           = cr3 - ci4;
-            dr4                           = cr3 + ci4;
-            di3                           = ci3 + cr4;
-            di4                           = ci3 - cr4;
-            dr5                           = cr2 + ci5;
-            dr2                           = cr2 - ci5;
-            di5                           = ci2 - cr5;
-            di2                           = ci2 + cr5;
-            wr1 = wa1[i], wi1 = fsign * wa1[i + 1], wr2 = wa2[i], wi2 = fsign * wa2[i + 1];
-            wr3 = wa3[i], wi3 = fsign * wa3[i + 1], wr4 = wa4[i], wi4 = fsign * wa4[i + 1];
+            vec<T> cr2                           = cc_ref(cc, ido, i - 1, 1) + (tr11 * tr2 + tr12 * tr3);
+            vec<T> ci2                           = cc_ref(cc, ido, i, 1) + (tr11 * ti2 + tr12 * ti3);
+            vec<T> cr3                           = cc_ref(cc, ido, i - 1, 1) + (tr12 * tr2 + tr11 * tr3);
+            vec<T> ci3                           = cc_ref(cc, ido, i, 1) + (tr12 * ti2 + tr11 * ti3);
+            vec<T> cr5                           = (ti11 * tr5) + ti12 * tr4;
+            vec<T> ci5                           = (ti11 * ti5) + ti12 * ti4;
+            vec<T> cr4                           = (ti12 * tr5) - ti11 * tr4;
+            vec<T> ci4                           = (ti12 * ti5) - ti11 * ti4;
+            vec<T> dr3                           = cr3 - ci4;
+            vec<T> dr4                           = cr3 + ci4;
+            vec<T> di3                           = ci3 + cr4;
+            vec<T> di4                           = ci3 - cr4;
+            vec<T> dr5                           = cr2 + ci5;
+            vec<T> dr2                           = cr2 - ci5;
+            vec<T> di5                           = ci2 - cr5;
+            vec<T> di2                           = ci2 + cr5;
+            const T wr1 = wa1[i], wi1 = T{sign} * wa1[i + 1], wr2 = wa2[i], wi2 = T{sign} * wa2[i + 1];
+            const T wr3 = wa3[i], wi3 = T{sign} * wa3[i + 1], wr4 = wa4[i], wi4 = T{sign} * wa4[i + 1];
             complex_multiply(dr2, di2, wr1, wi1);
             ch_ref(ch, l1, ido, i - 1, 2) = dr2;
             ch_ref(ch, l1, ido, i, 2)     = di2;
@@ -538,8 +531,8 @@ static void radb3_ps(std::size_t ido, std::size_t l1, const vec<T>* RESTRICT cc,
 
 template<std::floating_point T>
 static NEVER_INLINE(void) radf4_ps(std::size_t ido, std::size_t l1, const vec<T>* RESTRICT cc, vec<T>* RESTRICT ch, const T* RESTRICT wa1, const T* RESTRICT wa2, const T* RESTRICT wa3) {
-    constexpr T minus_hsqt2 = -0.7071067811865475f;
-    std::size_t l1ido       = l1 * ido;
+    constexpr T       minus_hsqt2 = -0.7071067811865475f;
+    const std::size_t l1ido       = l1 * ido;
     {
         const vec<T>*RESTRICT cc_ = cc, *RESTRICT cc_end = cc + l1ido;
         vec<T>* RESTRICT ch_ = ch;
@@ -891,17 +884,17 @@ static void radb5_ps(std::size_t ido, std::size_t l1, const vec<T>* RESTRICT cc,
 
 template<std::floating_point T>
 static NEVER_INLINE(vec<T>*) rfftf1_ps(std::size_t n, const vec<T>* input_readonly, vec<T>* work1, vec<T>* work2, const T* wa, const std::size_t* ifac) {
-    vec<T>*     in  = const_cast<vec<T>*>(input_readonly);
-    vec<T>*     out = in == work2 ? work1 : work2;
-    std::size_t nf  = ifac[1];
-    std::size_t l2  = n;
-    std::size_t iw  = n - 1UZ;
+    vec<T>*           in  = const_cast<vec<T>*>(input_readonly);
+    vec<T>*           out = in == work2 ? work1 : work2;
+    const std::size_t nf  = ifac[1];
+    std::size_t       l2  = n;
+    std::size_t       iw  = n - 1UZ;
     assert(in != out && work1 != work2);
     for (std::size_t k1 = 1; k1 <= nf; ++k1) {
-        std::size_t kh  = nf - k1;
-        std::size_t ip  = ifac[kh + 2];
-        std::size_t l1  = l2 / ip;
-        std::size_t ido = n / l2;
+        const std::size_t kh  = nf - k1;
+        const std::size_t ip  = ifac[kh + 2];
+        const std::size_t l1  = l2 / ip;
+        const std::size_t ido = n / l2;
         iw -= (ip - 1) * ido;
         switch (ip) {
         case 5: {
@@ -979,10 +972,11 @@ static NEVER_INLINE(vec<T>*) rfftb1_ps(std::size_t n, const vec<T>* input_readon
     return in; /* this is in fact the output .. */
 }
 
-static std::size_t decompose(std::size_t n, std::size_t* ifac, const std::size_t* ntryh) {
+template<std::array<std::size_t, 5UZ> ntryh>
+static constexpr std::size_t decompose(std::size_t n, std::size_t* ifac) {
     std::size_t nl = n, nf = 0;
     for (std::size_t j = 0; ntryh[j]; ++j) {
-        std::size_t ntry = ntryh[j];
+        const std::size_t ntry = ntryh[j];
         while (nl != 1) {
             std::size_t nq = nl / ntry;
             std::size_t nr = nl - ntry * nq;
@@ -1008,9 +1002,7 @@ static std::size_t decompose(std::size_t n, std::size_t* ifac, const std::size_t
 
 template<typename T>
 static void rffti1_ps(std::size_t n, T* wa, std::size_t* ifac) {
-    constexpr std::size_t ntryh[] = {4, 2, 3, 5, 0};
-
-    std::size_t nf   = decompose(n, ifac, ntryh);
+    std::size_t nf   = decompose<{4, 2, 3, 5, 0}>(n, ifac);
     T           argh = (2 * std::numbers::pi_v<T>) / static_cast<T>(n);
     std::size_t is   = 0;
     std::size_t nfm1 = nf - 1;
@@ -1040,9 +1032,7 @@ static void rffti1_ps(std::size_t n, T* wa, std::size_t* ifac) {
 
 template<typename T>
 static void cffti1_ps(std::size_t n, T* wa, std::size_t* ifac) {
-    constexpr std::size_t ntryh[] = {5, 3, 4, 2, 0};
-
-    const std::size_t nf   = decompose(n, ifac, ntryh);
+    const std::size_t nf   = decompose<{5, 3, 4, 2, 0}>(n, ifac);
     const T           argh = (2 * std::numbers::pi_v<T>) / static_cast<T>(n);
     std::size_t       i    = 1;
     std::size_t       l1   = 1;
@@ -1074,8 +1064,8 @@ static void cffti1_ps(std::size_t n, T* wa, std::size_t* ifac) {
     }
 } /* cffti1 */
 
-template<std::floating_point T>
-static vec<T>* cfftf1_ps(std::size_t n, const vec<T>* input_readonly, vec<T>* work1, vec<T>* work2, const T* wa, const std::size_t* ifac, bool isign) {
+template<int isign, std::floating_point T>
+static vec<T>* cfftf1_ps(std::size_t n, const vec<T>* input_readonly, vec<T>* work1, vec<T>* work2, const T* wa, const std::size_t* ifac) {
     vec<T>*     in  = const_cast<vec<T>*>(input_readonly);
     vec<T>*     out = in == work2 ? work1 : work2;
     std::size_t nf  = ifac[1];
@@ -1092,19 +1082,19 @@ static vec<T>* cfftf1_ps(std::size_t n, const vec<T>* input_readonly, vec<T>* wo
             std::size_t ix2 = iw + idot;
             std::size_t ix3 = ix2 + idot;
             std::size_t ix4 = ix3 + idot;
-            passf5_ps(idot, l1, in, out, &wa[iw], &wa[ix2], &wa[ix3], &wa[ix4], static_cast<T>(isign));
+            passf5_ps<isign>(idot, l1, in, out, &wa[iw], &wa[ix2], &wa[ix3], &wa[ix4]);
         } break;
         case 4: {
             std::size_t ix2 = iw + idot;
             std::size_t ix3 = ix2 + idot;
-            passf4_ps(idot, l1, in, out, &wa[iw], &wa[ix2], &wa[ix3], static_cast<T>(isign));
+            passf4_ps<isign>(idot, l1, in, out, &wa[iw], &wa[ix2], &wa[ix3]);
         } break;
         case 2: {
-            passf2_ps(idot, l1, in, out, &wa[iw], static_cast<T>(isign));
+            passf2_ps<isign>(idot, l1, in, out, &wa[iw]);
         } break;
         case 3: {
             std::size_t ix2 = iw + idot;
-            passf3_ps(idot, l1, in, out, &wa[iw], &wa[ix2], static_cast<T>(isign));
+            passf3_ps<isign>(idot, l1, in, out, &wa[iw], &wa[ix2]);
         } break;
         default: assert(0);
         }
@@ -1252,9 +1242,10 @@ static void reversed_copy(std::size_t N, const vec<T>* in, std::size_t in_stride
 
 template<std::floating_point T>
 static void unreversed_copy(std::size_t N, const vec<T>* in, vec<T>* out, int out_stride) {
-    vec<T> g0, g1, h0, h1;
-    g0 = g1 = in[0];
+    const vec<T> g0 = in[0];
+    vec<T>       g1 = in[0];
     ++in;
+    vec<T> h0, h1;
     for (std::size_t k = 1; k < N; ++k) {
         h0 = *in++;
         h1 = *in++;
@@ -1274,21 +1265,22 @@ static void unreversed_copy(std::size_t N, const vec<T>* in, vec<T>* out, int ou
 template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N_>
 void pffft_zreorder(PFFFT_Setup<T, transform, N_>& setup, const T* in, T* out) {
     constexpr std::size_t simdSize = PFFFT_Setup<T, transform, N_>::simdSize();
-    std::size_t           N = setup.size(), Ncvec = setup.simdVectorSize();
-    const vec<T>*         vin  = reinterpret_cast<const vec<T>*>(in);
-    vec<T>*               vout = reinterpret_cast<vec<T>*>(out);
+    const std::size_t     N        = setup.size();
+    const std::size_t     Ncvec    = setup.simdVectorSize();
+    const vec<T>*         vin      = reinterpret_cast<const vec<T>*>(in);
+    vec<T>*               vout     = reinterpret_cast<vec<T>*>(out);
     assert(in != out);
     if constexpr (PFFFT_Setup<T, transform, N_>::kIsRealValued) {
-        std::size_t k, dk = N / 32;
+        const std::size_t dk = N / 32;
         if constexpr (direction == fft_direction_t::Forward) {
-            for (k = 0; k < dk; ++k) {
+            for (std::size_t k = 0; k < dk; ++k) {
                 interleave(vin[k * 8 + 0], vin[k * 8 + 1], vout[2 * (0 * dk + k) + 0], vout[2 * (0 * dk + k) + 1]);
                 interleave(vin[k * 8 + 4], vin[k * 8 + 5], vout[2 * (2 * dk + k) + 0], vout[2 * (2 * dk + k) + 1]);
             }
             reversed_copy(dk, vin + 2, 8, reinterpret_cast<vec<T>*>(out + N / 2));
             reversed_copy(dk, vin + 6, 8, reinterpret_cast<vec<T>*>(out + N));
         } else {
-            for (k = 0; k < dk; ++k) {
+            for (std::size_t k = 0; k < dk; ++k) {
                 uninterleave(vin[2 * (0 * dk + k) + 0], vin[2 * (0 * dk + k) + 1], vout[k * 8 + 0], vout[k * 8 + 1]);
                 uninterleave(vin[2 * (2 * dk + k) + 0], vin[2 * (2 * dk + k) + 1], vout[k * 8 + 4], vout[k * 8 + 5]);
             }
@@ -1312,33 +1304,31 @@ void pffft_zreorder(PFFFT_Setup<T, transform, N_>& setup, const T* in, T* out) {
 
 template<std::floating_point T>
 void pffft_cplx_finalize(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const vec<T>* e) {
-    std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
-    vec<T>      r0, i0, r1, i1, r2, i2, r3, i3;
-    vec<T>      sr0, dr0, sr1, dr1, si0, di0, si1, di1;
     assert(in != out);
+    const std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
     for (std::size_t k = 0; k < dk; ++k) {
-        r0 = in[8 * k + 0];
-        i0 = in[8 * k + 1];
-        r1 = in[8 * k + 2];
-        i1 = in[8 * k + 3];
-        r2 = in[8 * k + 4];
-        i2 = in[8 * k + 5];
-        r3 = in[8 * k + 6];
-        i3 = in[8 * k + 7];
+        vec<T> r0 = in[8 * k + 0];
+        vec<T> i0 = in[8 * k + 1];
+        vec<T> r1 = in[8 * k + 2];
+        vec<T> i1 = in[8 * k + 3];
+        vec<T> r2 = in[8 * k + 4];
+        vec<T> i2 = in[8 * k + 5];
+        vec<T> r3 = in[8 * k + 6];
+        vec<T> i3 = in[8 * k + 7];
         transpose(r0, r1, r2, r3);
         transpose(i0, i1, i2, i3);
         complex_multiply(r1, i1, e[k * 6 + 0], e[k * 6 + 1]);
         complex_multiply(r2, i2, e[k * 6 + 2], e[k * 6 + 3]);
         complex_multiply(r3, i3, e[k * 6 + 4], e[k * 6 + 5]);
 
-        sr0 = r0 + r2;
-        dr0 = r0 - r2;
-        sr1 = r1 + r3;
-        dr1 = r1 - r3;
-        si0 = i0 + i2;
-        di0 = i0 - i2;
-        si1 = i1 + i3;
-        di1 = i1 - i3;
+        vec<T> sr0 = r0 + r2;
+        vec<T> dr0 = r0 - r2;
+        vec<T> sr1 = r1 + r3;
+        vec<T> dr1 = r1 - r3;
+        vec<T> si0 = i0 + i2;
+        vec<T> di0 = i0 - i2;
+        vec<T> si1 = i1 + i3;
+        vec<T> di1 = i1 - i3;
 
         /*
           transformation for each column is:
@@ -1375,28 +1365,26 @@ void pffft_cplx_finalize(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const
 
 template<std::floating_point T>
 void pffft_cplx_preprocess(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const vec<T>* e) {
-    std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
-    vec<T>      r0, i0, r1, i1, r2, i2, r3, i3;
-    vec<T>      sr0, dr0, sr1, dr1, si0, di0, si1, di1;
     assert(in != out);
+    const std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
     for (std::size_t k = 0; k < dk; ++k) {
-        r0 = in[8 * k + 0];
-        i0 = in[8 * k + 1];
-        r1 = in[8 * k + 2];
-        i1 = in[8 * k + 3];
-        r2 = in[8 * k + 4];
-        i2 = in[8 * k + 5];
-        r3 = in[8 * k + 6];
-        i3 = in[8 * k + 7];
+        vec<T> r0 = in[8 * k + 0];
+        vec<T> i0 = in[8 * k + 1];
+        vec<T> r1 = in[8 * k + 2];
+        vec<T> i1 = in[8 * k + 3];
+        vec<T> r2 = in[8 * k + 4];
+        vec<T> i2 = in[8 * k + 5];
+        vec<T> r3 = in[8 * k + 6];
+        vec<T> i3 = in[8 * k + 7];
 
-        sr0 = r0 + r2;
-        dr0 = r0 - r2;
-        sr1 = r1 + r3;
-        dr1 = r1 - r3;
-        si0 = i0 + i2;
-        di0 = i0 - i2;
-        si1 = i1 + i3;
-        di1 = i1 - i3;
+        vec<T> sr0 = r0 + r2;
+        vec<T> dr0 = r0 - r2;
+        vec<T> sr1 = r1 + r3;
+        vec<T> dr1 = r1 - r3;
+        vec<T> si0 = i0 + i2;
+        vec<T> di0 = i0 - i2;
+        vec<T> si1 = i1 + i3;
+        vec<T> di1 = i1 - i3;
 
         r0 = sr0 + sr1;
         i0 = si0 + si1;
@@ -1427,16 +1415,14 @@ void pffft_cplx_preprocess(std::size_t Ncvec, const vec<T>* in, vec<T>* out, con
 
 template<std::floating_point T>
 static ALWAYS_INLINE(void) pffft_real_finalize_4x4(const vec<T>* in0, const vec<T>* in1, const vec<T>* in, const vec<T>* e, vec<T>* out) {
-    vec<T> r0, i0, r1, i1, r2, i2, r3, i3;
-    vec<T> sr0, dr0, sr1, dr1, si0, di0, si1, di1;
-    r0 = *in0;
-    i0 = *in1;
-    r1 = *in++;
-    i1 = *in++;
-    r2 = *in++;
-    i2 = *in++;
-    r3 = *in++;
-    i3 = *in++;
+    vec<T> r0 = *in0;
+    vec<T> i0 = *in1;
+    vec<T> r1 = *in++;
+    vec<T> i1 = *in++;
+    vec<T> r2 = *in++;
+    vec<T> i2 = *in++;
+    vec<T> r3 = *in++;
+    vec<T> i3 = *in++;
     transpose(r0, r1, r2, r3);
     transpose(i0, i1, i2, i3);
 
@@ -1463,14 +1449,14 @@ static ALWAYS_INLINE(void) pffft_real_finalize_4x4(const vec<T>* in0, const vec<
     /* cerr << "matrix initial, real part:\n 1: " << r0 << "\n 1: " << r1 << "\n 1: " << r2 << "\n 1: " << r3 << "\n"; */
     /* cerr << "matrix initial, imag part:\n 1: " << i0 << "\n 1: " << i1 << "\n 1: " << i2 << "\n 1: " << i3 << "\n"; */
 
-    sr0 = r0 + r2;
-    dr0 = r0 - r2;
-    sr1 = r1 + r3;
-    dr1 = r3 - r1;
-    si0 = i0 + i2;
-    di0 = i0 - i2;
-    si1 = i1 + i3;
-    di1 = i3 - i1;
+    vec<T> sr0 = r0 + r2;
+    vec<T> dr0 = r0 - r2;
+    vec<T> sr1 = r1 + r3;
+    vec<T> dr1 = r3 - r1;
+    vec<T> si0 = i0 + i2;
+    vec<T> di0 = i0 - i2;
+    vec<T> si1 = i1 + i3;
+    vec<T> di1 = i3 - i1;
 
     r0 = sr0 + sr1;
     r3 = sr0 - sr1;
@@ -1495,8 +1481,8 @@ template<std::floating_point T>
 static NEVER_INLINE(void) pffft_real_finalize(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const vec<T>* e) {
     assert(in != out);
 
-    vec<T> cr = in[0];
-    vec<T> ci = in[Ncvec * 2 - 1];
+    const vec<T> cr = in[0];
+    const vec<T> ci = in[Ncvec * 2 - 1];
 
     constexpr vec<T> zero      = {};
     constexpr T      inv_sqrt2 = std::numbers::sqrt2_v<T> / 2;
@@ -1535,7 +1521,6 @@ static NEVER_INLINE(void) pffft_real_finalize(std::size_t Ncvec, const vec<T>* i
 
 template<std::floating_point T>
 static ALWAYS_INLINE(void) pffft_real_preprocess_4x4(const vec<T>* in, const vec<T>* e, vec<T>* out, std::size_t first) {
-    vec<T> r0 = in[0], i0 = in[1], r1 = in[2], i1 = in[3], r2 = in[4], i2 = in[5], r3 = in[6], i3 = in[7];
     /*
       transformation for each column is:
 
@@ -1548,7 +1533,7 @@ static ALWAYS_INLINE(void) pffft_real_preprocess_4x4(const vec<T>* in, const vec
       [0   0   0   0   1   1  -1  -1]   [i2]
       [0   1  -1   0   1   0   0   1]   [i3]
     */
-
+    vec<T> r0 = in[0], i0 = in[1], r1 = in[2], i1 = in[3], r2 = in[4], i2 = in[5], r3 = in[6], i3 = in[7];
     vec<T> sr0 = r0 + r3, dr0 = r0 - r3;
     vec<T> sr1 = r1 + r2, dr1 = r1 - r2;
     vec<T> si0 = i0 + i3, di0 = i0 - i3;
@@ -1584,8 +1569,6 @@ static ALWAYS_INLINE(void) pffft_real_preprocess_4x4(const vec<T>* in, const vec
 
 template<std::floating_point T>
 static NEVER_INLINE(void) pffft_real_preprocess(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const vec<T>* e) {
-    std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
-
     assert(in != out);
     vec<T> Xr, Xi;
     for (std::size_t k = 0; k < 4; ++k) {
@@ -1607,6 +1590,7 @@ static NEVER_INLINE(void) pffft_real_preprocess(std::size_t Ncvec, const vec<T>*
       [ci2] [0   0   0   0   0  -2   0   2]
       [ci3] [0  -s   0   s   0  -s   0  -s]
     */
+    const std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
     for (std::size_t k = 1; k < dk; ++k) {
         pffft_real_preprocess_4x4<T>(in + 8 * k, e + k * 6, out - 1 + k * 8, 0);
     }
@@ -1621,20 +1605,16 @@ static NEVER_INLINE(void) pffft_real_preprocess(std::size_t Ncvec, const vec<T>*
     out[2 * Ncvec - 1][3] = -std::numbers::sqrt2_v<T> * (Xr[1] - Xr[3]) - std::numbers::sqrt2_v<T> * (Xi[1] + Xi[3]);
 }
 
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N_>
-constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, const T* finput, T* foutput, vec<T>* scratch, int ordered) {
-    std::size_t k, Ncvec = setup.simdVectorSize();
-    int         nf_odd = setup.ifac[1] & 1;
-
-    /* temporary buffer is allocated on the stack if the scratch pointer is NULL */
-    std::size_t stack_allocate = scratch == nullptr ? Ncvec * 2 : 1;
-    VLA_ARRAY_ON_STACK(vec<T>, scratch_on_stack, stack_allocate); // TODO: this is ugly and not portable (however, an efficiency hack -> local stack storage)
-    // alignas(64) std::array<vec<T>, 2048UZ> scratch_storage; // max reasonable size
-    // vec<T>* scratch_ptr = scratch ? scratch : scratch_storage.data();
+template<fft_direction_t direction, fft_order_t order, std::floating_point T, fft_transform_t transform, std::size_t N_>
+constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, const T* finput, T* foutput, vec<T>* scratch) {
+    assert(scratch != nullptr);
+    const std::size_t Ncvec  = setup.simdVectorSize();
+    const int         nf_odd = setup.ifac[1] & 1;
 
     const vec<T>* vinput  = reinterpret_cast<const vec<T>*>(finput);
     vec<T>*       voutput = reinterpret_cast<vec<T>*>(foutput);
-    vec<T>*       buff[2] = {voutput, scratch ? scratch : scratch_on_stack};
+    vec<T>*       buff[2] = {voutput, scratch};
+    constexpr int ordered = order == fft_order_t::Ordered ? 1 : 0;
     std::size_t   ib      = nf_odd ^ ordered ? 1 : 0;
 
     /* assert(finput != foutput); */
@@ -1645,13 +1625,13 @@ constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, co
             pffft_real_finalize<T>(Ncvec, buff[ib], buff[!ib], reinterpret_cast<vec<T>*>(setup.e));
         } else {
             vec<T>* tmp = buff[ib];
-            for (k = 0; k < Ncvec; ++k) {
+            for (std::size_t k = 0; k < Ncvec; ++k) {
                 uninterleave(vinput[k * 2], vinput[k * 2 + 1], tmp[k * 2], tmp[k * 2 + 1]);
             }
-            ib = (cfftf1_ps(Ncvec, buff[ib], buff[!ib], buff[ib], setup.twiddle, &setup.ifac[0], -1) == buff[0] ? 0 : 1);
+            ib = (cfftf1_ps<-1>(Ncvec, buff[ib], buff[!ib], buff[ib], setup.twiddle, &setup.ifac[0]) == buff[0] ? 0 : 1);
             pffft_cplx_finalize(Ncvec, buff[ib], buff[!ib], reinterpret_cast<vec<T>*>(setup.e));
         }
-        if (ordered) {
+        if constexpr (order == fft_order_t::Ordered) {
             pffft_zreorder<fft_direction_t::Forward>(setup, reinterpret_cast<T*>(buff[!ib]), reinterpret_cast<T*>(buff[ib]));
         } else {
             ib = !ib;
@@ -1670,8 +1650,8 @@ constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, co
             ib = (rfftb1_ps(Ncvec * 2, buff[ib], buff[0], buff[1], setup.twiddle, &setup.ifac[0]) == buff[0] ? 0 : 1);
         } else {
             pffft_cplx_preprocess(Ncvec, vinput, buff[ib], reinterpret_cast<vec<T>*>(setup.e));
-            ib = (cfftf1_ps(Ncvec, buff[ib], buff[0], buff[1], setup.twiddle, &setup.ifac[0], +1) == buff[0] ? 0 : 1);
-            for (k = 0; k < Ncvec; ++k) {
+            ib = (cfftf1_ps<+1>(Ncvec, buff[ib], buff[0], buff[1], setup.twiddle, &setup.ifac[0]) == buff[0] ? 0 : 1);
+            for (std::size_t k = 0; k < Ncvec; ++k) {
                 interleave(buff[ib][k * 2], buff[ib][k * 2 + 1], buff[ib][k * 2], buff[ib][k * 2 + 1]);
             }
         }
@@ -1680,7 +1660,7 @@ constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, co
     if (buff[ib] != voutput) {
         /* extra copy required -- this situation should only happen when finput == foutput */
         assert(finput == foutput);
-        for (k = 0; k < Ncvec; ++k) {
+        for (std::size_t k = 0; k < Ncvec; ++k) {
             vec<T> a = buff[ib][2 * k], b = buff[ib][2 * k + 1];
             voutput[2 * k]     = a;
             voutput[2 * k + 1] = b;
@@ -1728,22 +1708,20 @@ void pffft_zconvolve_accumulate(PFFFT_Setup<T, transform, N_>& s, const T* a, co
 
 template<std::floating_point T, fft_transform_t transform, std::size_t N_>
 void pffft_zconvolve_no_accu(PFFFT_Setup<T, transform, N_>& s, const T* a, const T* b, T* ab, T scaling) {
-    vec<T>            vscal = scaling;
-    T                 sar, sai, sbr, sbi;
+    const vec<T>      vscal       = scaling;
     const std::size_t NcvecMulTwo = 2 * s.simdVectorSize(); /* std::size_t Ncvec = s.simdVectorSize(); */
 
-    sar = a[0];
-    sai = a[vec<T>::size()];
-    sbr = b[0];
-    sbi = b[vec<T>::size()];
+    const T sar = a[0];
+    const T sai = a[vec<T>::size()];
+    const T sbr = b[0];
+    const T sbi = b[vec<T>::size()];
 
     /* default routine, works fine for non-arm cpus with current compilers */
     for (std::size_t k = 0; k < NcvecMulTwo; k += 4) {
-        vec<T> var, vai, vbr, vbi;
-        var = load_unchecked<vec<T>>(a + (k + 0) * vec<T>::size(), stdx::vector_aligned);
-        vai = load_unchecked<vec<T>>(a + (k + 1) * vec<T>::size(), stdx::vector_aligned);
-        vbr = load_unchecked<vec<T>>(b + (k + 0) * vec<T>::size(), stdx::vector_aligned);
-        vbi = load_unchecked<vec<T>>(b + (k + 1) * vec<T>::size(), stdx::vector_aligned);
+        vec<T> var = load_unchecked<vec<T>>(a + (k + 0) * vec<T>::size(), stdx::vector_aligned);
+        vec<T> vai = load_unchecked<vec<T>>(a + (k + 1) * vec<T>::size(), stdx::vector_aligned);
+        vec<T> vbr = load_unchecked<vec<T>>(b + (k + 0) * vec<T>::size(), stdx::vector_aligned);
+        vec<T> vbi = load_unchecked<vec<T>>(b + (k + 1) * vec<T>::size(), stdx::vector_aligned);
         complex_multiply(var, vai, vbr, vbi);
         store_unchecked(var * vscal, ab + (k + 0) * vec<T>::size(), stdx::vector_aligned);
         store_unchecked(vai * vscal, ab + (k + 1) * vec<T>::size(), stdx::vector_aligned);
@@ -1762,12 +1740,7 @@ void pffft_zconvolve_no_accu(PFFFT_Setup<T, transform, N_>& s, const T* a, const
     }
 }
 
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N>
+template<fft_direction_t direction, fft_order_t order, std::floating_point T, fft_transform_t transform, std::size_t N>
 void pffft_transform(PFFFT_Setup<T, transform, N>& setup, const T* input, T* output, T* work) {
-    pffft_transform_internal<direction>(setup, input, output, reinterpret_cast<vec<T>*>(work), 0);
-}
-
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N>
-void pffft_transform_ordered(PFFFT_Setup<T, transform, N>& setup, const T* input, T* output, T* work) {
-    pffft_transform_internal<direction>(setup, input, output, reinterpret_cast<vec<T>*>(work), 1);
+    pffft_transform_internal<direction, order>(setup, input, output, reinterpret_cast<vec<T>*>(work));
 }
