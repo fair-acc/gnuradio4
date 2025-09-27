@@ -1189,7 +1189,7 @@ struct PFFFT_Setup {
                 std::size_t i = k / simdSize();
                 std::size_t j = k % simdSize();
                 for (std::size_t m = 0; m < simdSize() - 1; ++m) {
-                    T A                                       = -2 * std::numbers::pi_v<T> * static_cast<T>(m + 1) * static_cast<T>(k) / static_cast<T>(N);
+                    T A                                       = -2 * std::numbers::pi_v<T> * static_cast<T>(m + 1) * static_cast<T>(k) / static_cast<T>(size());
                     e[(2 * (i * 3 + m) + 0) * simdSize() + j] = std::cos(A);
                     e[(2 * (i * 3 + m) + 1) * simdSize() + j] = std::sin(A);
                 }
@@ -1200,7 +1200,7 @@ struct PFFFT_Setup {
                 std::size_t i = k / simdSize();
                 std::size_t j = k % simdSize();
                 for (std::size_t m = 0; m < simdSize() - 1; ++m) {
-                    T A                                       = -2 * std::numbers::pi_v<T> * static_cast<T>(m + 1UZ) * static_cast<T>(k) / static_cast<T>(N);
+                    T A                                       = -2 * std::numbers::pi_v<T> * static_cast<T>(m + 1UZ) * static_cast<T>(k) / static_cast<T>(size());
                     e[(2 * (i * 3 + m) + 0) * simdSize() + j] = std::cos(A);
                     e[(2 * (i * 3 + m) + 1) * simdSize() + j] = std::sin(A);
                 }
