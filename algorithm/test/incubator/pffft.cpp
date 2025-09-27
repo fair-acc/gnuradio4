@@ -58,53 +58,57 @@ template<std::floating_point T, int N = 4> // inspired by future C++26 definitio
 using vec = stdx::simd<T, stdx::simd_abi::deduce_t<T, static_cast<std::size_t>(N)>>;
 
 template<typename T>
-[[nodiscard]] inline constexpr T load_unchecked(const typename T::value_type* ptr, auto flags = stdx::element_aligned) {
+[[nodiscard]] constexpr ALWAYS_INLINE(T) load_unchecked(const typename T::value_type* ptr, auto flags = stdx::element_aligned) {
     return T(ptr, flags);
 }
 
 template<typename T>
-inline constexpr void store_unchecked(const T& v, typename T::value_type* ptr, auto flags = stdx::element_aligned) {
+constexpr ALWAYS_INLINE(void) store_unchecked(const T& v, typename T::value_type* ptr, auto flags = stdx::element_aligned) {
     v.copy_to(ptr, flags);
 }
 
-#define SIMD_SZ 4
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) VSWAPHL(const Vec& a, const Vec& b) noexcept { // find a better name
+    constexpr int size = Vec::size();
+    return vir::simd_permute<size>(stdx::concat(b, a), [](int i) { return i < 2 ? i : i + size; });
+}
 
-#define VARCH           "stdx::simd"
-#define VREQUIRES_ALIGN 1
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) interleave(const Vec& in1, const Vec& in2, Vec& out1, Vec& out2) noexcept {
+    constexpr int size   = Vec::size();
+    std::tie(out1, out2) = stdx::split<Vec>(vir::simd_permute(stdx::concat(in1, in2), [](int i) { return (i >> 1) + size * (i & 1); }));
+}
 
-#define INTERLEAVE2(in1, in2, out1, out2) std::tie(out1, out2) = stdx::split<vec<T>>(vir::simd_permute(stdx::concat(in1, in2), [](int i) { return (i >> 1) + 4 * (i & 1); }))
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) uninterleave(const Vec& in1, const Vec& in2, Vec& out1, Vec& out2) noexcept {
+    constexpr int size   = Vec::size();
+    std::tie(out1, out2) = stdx::split<Vec>(vir::simd_permute(stdx::concat(in1, in2), [](int i) noexcept -> int { return (i % size) * 2 + (i / size); }));
+}
 
-#define UNINTERLEAVE2(in1, in2, out1, out2) std::tie(out1, out2) = stdx::split<vec<T>>(vir::simd_permute(stdx::concat(in1, in2), [](int i) { return (i % 4) * 2 + (i / 4); }))
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) transpose(Vec& x0, Vec& x1, Vec& x2, Vec& x3) noexcept {
+    constexpr int size          = Vec::size();
+    const auto [y0, y1, y2, y3] = stdx::split<Vec>(vir::simd_permute(stdx::concat(x0, x1, x2, x3), [](int i) noexcept -> int { return (i % size) * size + (i / size); }));
+    x0                          = y0;
+    x1                          = y1;
+    x2                          = y2;
+    x3                          = y3;
+}
 
-#define VTRANSPOSE4(x0, x1, x2, x3) std::tie(x0, x1, x2, x3) = stdx::split<vec<T>>(vir::simd_permute(stdx::concat(x0, x1, x2, x3), [](int i) { return (i % 4) * 4 + (i / 4); }))
+/* shortcuts for complex multiplications */
+template<typename Vec, typename T>
+constexpr static ALWAYS_INLINE(auto) complex_multiply(Vec& ar, Vec& ai, const T& br, const T& bi) noexcept {
+    const Vec tmp = ar * bi;
+    ar            = ar * br - ai * bi;
+    ai            = ai * br + tmp; // TODO: Q for Matthias... does std::fma(..) exist for simd?
+}
 
-#define VSWAPHL(a, b) vir::simd_permute<4>(stdx::concat(b, a), [](int i) { return i < 2 ? i : i + 4; })
-
-/* reverse/flip all floats */
-#define VREV_S(a) vir::simd_permute(a, vir::simd_permutations::reverse)
-
-/* reverse/flip complex floats */
-#define VREV_C(a) vir::simd_permute(a, vir::simd_permutations::swap_neighbors<2>)
-
-#define VALIGNED(ptr) ((((uintptr_t)(ptr)) & 0xF) == 0)
-
-/* shortcuts for complex multiplcations */
-#define VCPLXMUL(ar, ai, br, bi)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
-    {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
-        vec tmp = ar * bi;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
-        ar *= br;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-        ar -= ai * bi;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
-        ai *= br;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-        ai += tmp;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
-    }
-#define VCPLXMULCONJ(ar, ai, br, bi)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           \
-    {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
-        vec tmp = ar * bi;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
-        ar *= br;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-        ar += ai * bi;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
-        ai *= br;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-        ai -= tmp;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
-    }
+template<typename Vec, typename T>
+constexpr static ALWAYS_INLINE(auto) complex_multiply_conj(Vec& ar, Vec& ai, const T& br, const T& bi) noexcept {
+    const Vec tmp = ar * bi;
+    ar            = ar * br + ai * bi;
+    ai            = ai * br - tmp;
+}
 
 template<std::floating_point T>
 struct FFTConstants {
@@ -120,8 +124,8 @@ struct FFTConstants {
 };
 
 template<std::floating_point T>
-consteval std::size_t pffft_simd_size(void) {
-    return SIMD_SZ;
+consteval std::size_t pffft_simd_size(void) { // TODO: eliminate function in favoour of vector_type::size()
+    return 4;
 }
 
 template<std::floating_point T>
@@ -192,7 +196,7 @@ static NEVER_INLINE(void) passf2_ps(std::size_t ido, std::size_t l1, const vec<T
                 vec<T> wr = wa1[i], wi = fsign * wa1[i + 1];
                 ch[i]     = cc[i + 0] + cc[i + ido + 0];
                 ch[i + 1] = cc[i + 1] + cc[i + ido + 1];
-                VCPLXMUL(tr2, ti2, wr, wi);
+                complex_multiply(tr2, ti2, wr, wi);
                 ch[i + l1ido]     = tr2;
                 ch[i + l1ido + 1] = ti2;
             }
@@ -225,10 +229,10 @@ static NEVER_INLINE(void) passf3_ps(std::size_t ido, std::size_t l1, const vec<T
             di2       = ci2 + cr3;
             di3       = ci2 - cr3;
             wr1 = wa1[i], wi1 = fsign * wa1[i + 1], wr2 = wa2[i], wi2 = fsign * wa2[i + 1];
-            VCPLXMUL(dr2, di2, wr1, wi1);
+            complex_multiply(dr2, di2, wr1, wi1);
             ch[i + l1ido]     = dr2;
             ch[i + l1ido + 1] = di2;
-            VCPLXMUL(dr3, di3, wr2, wi2);
+            complex_multiply(dr3, di3, wr2, wi2);
             ch[i + 2 * l1ido]     = dr3;
             ch[i + 2 * l1ido + 1] = di3;
         }
@@ -238,18 +242,18 @@ static NEVER_INLINE(void) passf3_ps(std::size_t ido, std::size_t l1, const vec<T
 template<std::floating_point T>
 static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T>* cc, vec<T>* ch, const T* wa1, const T* wa2, const T* wa3, T fsign) {
     /* isign == -1 for forward transform and +1 for backward transform */
-    vec<T>      ci2, ci3, ci4, cr2, cr3, cr4, ti1, ti2, ti3, ti4, tr1, tr2, tr3, tr4;
+    // vec<T>      ci2, ci3, ci4, cr2, cr3, cr4, ti1, ti2, ti3, ti4, tr1, tr2, tr3, tr4;
     std::size_t l1ido = l1 * ido;
     if (ido == 2) {
         for (std::size_t k = 0; k < l1ido; k += ido, ch += ido, cc += 4 * ido) {
-            tr1 = cc[0] - cc[2 * ido + 0];
-            tr2 = cc[0] + cc[2 * ido + 0];
-            ti1 = cc[1] - cc[2 * ido + 1];
-            ti2 = cc[1] + cc[2 * ido + 1];
-            ti4 = (cc[1 * ido + 0] - cc[3 * ido + 0]) * fsign;
-            tr4 = (cc[3 * ido + 1] - cc[1 * ido + 1]) * fsign;
-            tr3 = cc[ido + 0] + cc[3 * ido + 0];
-            ti3 = cc[ido + 1] + cc[3 * ido + 1];
+            const vec<T> tr1 = cc[0] - cc[2 * ido + 0];
+            const vec<T> tr2 = cc[0] + cc[2 * ido + 0];
+            const vec<T> ti1 = cc[1] - cc[2 * ido + 1];
+            const vec<T> ti2 = cc[1] + cc[2 * ido + 1];
+            const vec<T> ti4 = (cc[1 * ido + 0] - cc[3 * ido + 0]) * fsign;
+            const vec<T> tr4 = (cc[3 * ido + 1] - cc[1 * ido + 1]) * fsign;
+            const vec<T> tr3 = cc[ido + 0] + cc[3 * ido + 0];
+            const vec<T> ti3 = cc[ido + 1] + cc[3 * ido + 1];
 
             ch[0 * l1ido + 0] = tr2 + tr3;
             ch[0 * l1ido + 1] = ti2 + ti3;
@@ -263,37 +267,37 @@ static NEVER_INLINE(void) passf4_ps(std::size_t ido, std::size_t l1, const vec<T
     } else {
         for (std::size_t k = 0; k < l1ido; k += ido, ch += ido, cc += 4 * ido) {
             for (std::size_t i = 0; i < ido - 1; i += 2) {
-                T wr1, wi1, wr2, wi2, wr3, wi3;
-                tr1 = cc[i + 0] - cc[i + 2 * ido + 0];
-                tr2 = cc[i + 0] + cc[i + 2 * ido + 0];
-                ti1 = cc[i + 1] - cc[i + 2 * ido + 1];
-                ti2 = cc[i + 1] + cc[i + 2 * ido + 1];
-                tr4 = (cc[i + 3 * ido + 1] - cc[i + 1 * ido + 1]) * fsign;
-                ti4 = (cc[i + 1 * ido + 0] - cc[i + 3 * ido + 0]) * fsign;
-                tr3 = cc[i + ido + 0] + cc[i + 3 * ido + 0];
-                ti3 = cc[i + ido + 1] + cc[i + 3 * ido + 1];
+                T            wr1, wi1, wr2, wi2, wr3, wi3;
+                const vec<T> tr1 = cc[i + 0] - cc[i + 2 * ido + 0];
+                const vec<T> tr2 = cc[i + 0] + cc[i + 2 * ido + 0];
+                const vec<T> ti1 = cc[i + 1] - cc[i + 2 * ido + 1];
+                const vec<T> ti2 = cc[i + 1] + cc[i + 2 * ido + 1];
+                const vec<T> tr4 = (cc[i + 3 * ido + 1] - cc[i + 1 * ido + 1]) * fsign;
+                const vec<T> ti4 = (cc[i + 1 * ido + 0] - cc[i + 3 * ido + 0]) * fsign;
+                const vec<T> tr3 = cc[i + ido + 0] + cc[i + 3 * ido + 0];
+                const vec<T> ti3 = cc[i + ido + 1] + cc[i + 3 * ido + 1];
 
-                ch[i]     = tr2 + tr3;
-                cr3       = tr2 - tr3;
-                ch[i + 1] = ti2 + ti3;
-                ci3       = ti2 - ti3;
+                ch[i]      = tr2 + tr3;
+                vec<T> cr3 = tr2 - tr3;
+                ch[i + 1]  = ti2 + ti3;
+                vec<T> ci3 = ti2 - ti3;
 
-                cr2 = tr1 + tr4;
-                cr4 = tr1 - tr4;
-                ci2 = ti1 + ti4;
-                ci4 = ti1 - ti4;
+                vec<T> cr2 = tr1 + tr4;
+                vec<T> cr4 = tr1 - tr4;
+                vec<T> ci2 = ti1 + ti4;
+                vec<T> ci4 = ti1 - ti4;
                 wr1 = wa1[i], wi1 = fsign * wa1[i + 1];
-                VCPLXMUL(cr2, ci2, wr1, wi1);
+                complex_multiply(cr2, ci2, wr1, wi1);
                 wr2 = wa2[i], wi2 = fsign * wa2[i + 1];
                 ch[i + l1ido]     = cr2;
                 ch[i + l1ido + 1] = ci2;
 
-                VCPLXMUL(cr3, ci3, wr2, wi2);
+                complex_multiply(cr3, ci3, wr2, wi2);
                 wr3 = wa3[i], wi3 = fsign * wa3[i + 1];
                 ch[i + 2 * l1ido]     = cr3;
                 ch[i + 2 * l1ido + 1] = ci3;
 
-                VCPLXMUL(cr4, ci4, wr3, wi3);
+                complex_multiply(cr4, ci4, wr3, wi3);
                 ch[i + 3 * l1ido]     = cr4;
                 ch[i + 3 * l1ido + 1] = ci4;
             }
@@ -351,16 +355,16 @@ static NEVER_INLINE(void) passf5_ps(std::size_t ido, std::size_t l1, const vec<T
             di2                           = ci2 + cr5;
             wr1 = wa1[i], wi1 = fsign * wa1[i + 1], wr2 = wa2[i], wi2 = fsign * wa2[i + 1];
             wr3 = wa3[i], wi3 = fsign * wa3[i + 1], wr4 = wa4[i], wi4 = fsign * wa4[i + 1];
-            VCPLXMUL(dr2, di2, wr1, wi1);
+            complex_multiply(dr2, di2, wr1, wi1);
             ch_ref(ch, l1, ido, i - 1, 2) = dr2;
             ch_ref(ch, l1, ido, i, 2)     = di2;
-            VCPLXMUL(dr3, di3, wr2, wi2);
+            complex_multiply(dr3, di3, wr2, wi2);
             ch_ref(ch, l1, ido, i - 1, 3) = dr3;
             ch_ref(ch, l1, ido, i, 3)     = di3;
-            VCPLXMUL(dr4, di4, wr3, wi3);
+            complex_multiply(dr4, di4, wr3, wi3);
             ch_ref(ch, l1, ido, i - 1, 4) = dr4;
             ch_ref(ch, l1, ido, i, 4)     = di4;
-            VCPLXMUL(dr5, di5, wr4, wi4);
+            complex_multiply(dr5, di5, wr4, wi4);
             ch_ref(ch, l1, ido, i - 1, 5) = dr5;
             ch_ref(ch, l1, ido, i, 5)     = di5;
         }
@@ -384,7 +388,7 @@ static NEVER_INLINE(void) radf2_ps(std::size_t ido, std::size_t l1, const vec<T>
             for (std::size_t i = 2; i < ido; i += 2) {
                 vec<T> tr2 = cc[i - 1 + k + l1ido], ti2 = cc[i + k + l1ido];
                 vec<T> br = cc[i - 1 + k], bi = cc[i + k];
-                VCPLXMULCONJ(tr2, ti2, wa1[i - 2], wa1[i - 1]);
+                complex_multiply_conj(tr2, ti2, wa1[i - 2], wa1[i - 1]);
                 ch[i + 2 * k]             = bi + ti2;
                 ch[2 * (k + ido) - i]     = ti2 - bi;
                 ch[i - 1 + 2 * k]         = br + tr2;
@@ -426,7 +430,7 @@ static NEVER_INLINE(void) radb2_ps(std::size_t ido, std::size_t l1, const vec<T>
                 tr2           = a - b;
                 ch[i + 0 + k] = c - d;
                 ti2           = c + d;
-                VCPLXMUL(tr2, ti2, wa1[i - 2], wa1[i - 1]);
+                complex_multiply(tr2, ti2, wa1[i - 2], wa1[i - 1]);
                 ch[i - 1 + k + l1ido] = tr2;
                 ch[i + 0 + k + l1ido] = ti2;
             }
@@ -464,13 +468,13 @@ static void radf3_ps(std::size_t ido, std::size_t l1, const vec<T>* RESTRICT cc,
             wi1 = wa1[i - 1];
             dr2 = cc[i - 1 + (k + l1) * ido];
             di2 = cc[i + (k + l1) * ido];
-            VCPLXMULCONJ(dr2, di2, wr1, wi1);
+            complex_multiply_conj(dr2, di2, wr1, wi1);
 
             wr2 = wa2[i - 2];
             wi2 = wa2[i - 1];
             dr3 = cc[i - 1 + (k + l1 * 2) * ido];
             di3 = cc[i + (k + l1 * 2) * ido];
-            VCPLXMULCONJ(dr3, di3, wr2, wi2);
+            complex_multiply_conj(dr3, di3, wr2, wi2);
 
             cr2                            = dr2 + dr3;
             ci2                            = di2 + di3;
@@ -522,10 +526,10 @@ static void radb3_ps(std::size_t ido, std::size_t l1, const vec<T>* RESTRICT cc,
             dr3                 = cr2 + ci3;
             di2                 = ci2 + cr3;
             di3                 = ci2 - cr3;
-            VCPLXMUL(dr2, di2, wa1[i - 2], wa1[i - 1]);
+            complex_multiply(dr2, di2, wa1[i - 2], wa1[i - 1]);
             ch[i - 1 + (k + l1) * ido] = dr2;
             ch[i + (k + l1) * ido]     = di2;
-            VCPLXMUL(dr3, di3, wa2[i - 2], wa2[i - 1]);
+            complex_multiply(dr3, di3, wa2[i - 2], wa2[i - 1]);
             ch[i - 1 + (k + 2 * l1) * ido] = dr3;
             ch[i + (k + 2 * l1) * ido]     = di3;
         }
@@ -570,19 +574,19 @@ static NEVER_INLINE(void) radf4_ps(std::size_t ido, std::size_t l1, const vec<T>
                 ci2 = pc[1 * l1ido + 1];
                 wr  = wa1[i - 2];
                 wi  = wa1[i - 1];
-                VCPLXMULCONJ(cr2, ci2, wr, wi);
+                complex_multiply_conj(cr2, ci2, wr, wi);
 
                 cr3 = pc[2 * l1ido + 0];
                 ci3 = pc[2 * l1ido + 1];
                 wr  = wa2[i - 2];
                 wi  = wa2[i - 1];
-                VCPLXMULCONJ(cr3, ci3, wr, wi);
+                complex_multiply_conj(cr3, ci3, wr, wi);
 
                 cr4 = pc[3 * l1ido];
                 ci4 = pc[3 * l1ido + 1];
                 wr  = wa3[i - 2];
                 wi  = wa3[i - 1];
-                VCPLXMULCONJ(cr4, ci4, wr, wi);
+                complex_multiply_conj(cr4, ci4, wr, wi);
 
                 /* at this point, on SSE, five of "cr2 cr3 cr4 ci2 ci3 ci4" should be loaded in registers */
 
@@ -676,15 +680,15 @@ static NEVER_INLINE(void) radb4_ps(std::size_t ido, std::size_t l1, const vec<T>
                 ci3 = ti2 - ti3;
                 ci2 = ti1 + ti4;
                 ci4 = ti1 - ti4;
-                VCPLXMUL(cr2, ci2, wa1[i - 2], wa1[i - 1]);
+                complex_multiply(cr2, ci2, wa1[i - 2], wa1[i - 1]);
                 ph[0] = cr2;
                 ph[1] = ci2;
                 ph += l1ido;
-                VCPLXMUL(cr3, ci3, wa2[i - 2], wa2[i - 1]);
+                complex_multiply(cr3, ci3, wa2[i - 2], wa2[i - 1]);
                 ph[0] = cr3;
                 ph[1] = ci3;
                 ph += l1ido;
-                VCPLXMUL(cr4, ci4, wa3[i - 2], wa3[i - 1]);
+                complex_multiply(cr4, ci4, wa3[i - 2], wa3[i - 1]);
                 ph[0] = cr4;
                 ph[1] = ci4;
                 ph    = ph - 3 * l1ido + 2;
@@ -761,10 +765,10 @@ static void radf5_ps(std::size_t ido, std::size_t l1, const vec<T>* RESTRICT cc,
             di4 = wa3[i - 2];
             dr5 = wa4[i - 3];
             di5 = wa4[i - 2];
-            VCPLXMULCONJ(dr2, di2, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 2), cc_ref(cc, ido, l1, cc_offset, i, k, 2));
-            VCPLXMULCONJ(dr3, di3, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 3), cc_ref(cc, ido, l1, cc_offset, i, k, 3));
-            VCPLXMULCONJ(dr4, di4, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 4), cc_ref(cc, ido, l1, cc_offset, i, k, 4));
-            VCPLXMULCONJ(dr5, di5, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 5), cc_ref(cc, ido, l1, cc_offset, i, k, 5));
+            complex_multiply_conj(dr2, di2, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 2), cc_ref(cc, ido, l1, cc_offset, i, k, 2));
+            complex_multiply_conj(dr3, di3, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 3), cc_ref(cc, ido, l1, cc_offset, i, k, 3));
+            complex_multiply_conj(dr4, di4, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 4), cc_ref(cc, ido, l1, cc_offset, i, k, 4));
+            complex_multiply_conj(dr5, di5, cc_ref(cc, ido, l1, cc_offset, i - 1, k, 5), cc_ref(cc, ido, l1, cc_offset, i, k, 5));
             cr2                                      = dr2 + dr5;
             ci5                                      = dr5 - dr2;
             cr5                                      = di2 - di5;
@@ -868,10 +872,10 @@ static void radb5_ps(std::size_t ido, std::size_t l1, const vec<T>* RESTRICT cc,
             dr2                                         = cr2 - ci5;
             di5                                         = ci2 - cr5;
             di2                                         = ci2 + cr5;
-            VCPLXMUL(dr2, di2, wa1[i - 3], wa1[i - 2]);
-            VCPLXMUL(dr3, di3, wa2[i - 3], wa2[i - 2]);
-            VCPLXMUL(dr4, di4, wa3[i - 3], wa3[i - 2]);
-            VCPLXMUL(dr5, di5, wa4[i - 3], wa4[i - 2]);
+            complex_multiply(dr2, di2, wa1[i - 3], wa1[i - 2]);
+            complex_multiply(dr3, di3, wa2[i - 3], wa2[i - 2]);
+            complex_multiply(dr4, di4, wa3[i - 3], wa3[i - 2]);
+            complex_multiply(dr5, di5, wa4[i - 3], wa4[i - 2]);
 
             ch_ref(ch, ido, l1, ch_offset, i - 1, k, 2) = dr2;
             ch_ref(ch, ido, l1, ch_offset, i, k, 2)     = di2;
@@ -1038,10 +1042,10 @@ template<typename T>
 static void cffti1_ps(std::size_t n, T* wa, std::size_t* ifac) {
     constexpr std::size_t ntryh[] = {5, 3, 4, 2, 0};
 
-    std::size_t nf   = decompose(n, ifac, ntryh);
-    T           argh = (2 * std::numbers::pi_v<T>) / static_cast<T>(n);
-    std::size_t i    = 1;
-    std::size_t l1   = 1;
+    const std::size_t nf   = decompose(n, ifac, ntryh);
+    const T           argh = (2 * std::numbers::pi_v<T>) / static_cast<T>(n);
+    std::size_t       i    = 1;
+    std::size_t       l1   = 1;
     for (std::size_t k1 = 1; k1 <= nf; k1++) {
         std::size_t ip   = ifac[k1 + 1];
         std::size_t ld   = 0UZ;
@@ -1050,12 +1054,11 @@ static void cffti1_ps(std::size_t n, T* wa, std::size_t* ifac) {
         std::size_t idot = ido + ido + 2;
         std::size_t ipm  = ip - 1;
         for (std::size_t j = 1; j <= ipm; j++) {
-            T           argld;
             std::size_t i1 = i, fi = 0;
             wa[i - 1] = 1;
             wa[i]     = 0;
             ld += l1;
-            argld = static_cast<T>(ld) * argh;
+            const T argld = static_cast<T>(ld) * argh;
             for (std::size_t ii = 4; ii <= idot; ii += 2) {
                 i += 2;
                 fi += 1;
@@ -1080,10 +1083,10 @@ static vec<T>* cfftf1_ps(std::size_t n, const vec<T>* input_readonly, vec<T>* wo
     std::size_t iw  = 0;
     assert(in != out && work1 != work2);
     for (std::size_t k1 = 2; k1 <= nf + 1; k1++) {
-        std::size_t ip   = ifac[k1];
-        std::size_t l2   = ip * l1;
-        std::size_t ido  = n / l2;
-        std::size_t idot = ido + ido;
+        const std::size_t ip   = ifac[k1];
+        const std::size_t l2   = ip * l1;
+        const std::size_t ido  = n / l2;
+        const std::size_t idot = ido + ido;
         switch (ip) {
         case 5: {
             std::size_t ix2 = iw + idot;
@@ -1190,7 +1193,7 @@ struct PFFFT_Setup {
         }
     }
 
-    constexpr void computeTwiddle() {
+    constexpr void computeTwiddle() { // not performance critical, computed once
         if constexpr (kIsRealValued) {
             for (std::size_t k = 0UZ; k < simdVectorSize(); ++k) {
                 std::size_t i = k / simdSize();
@@ -1232,13 +1235,13 @@ struct PFFFT_Setup {
 template<std::floating_point T>
 static void reversed_copy(std::size_t N, const vec<T>* in, std::size_t in_stride, vec<T>* out) {
     vec<T> g0, g1;
-    INTERLEAVE2(in[0], in[1], g0, g1);
+    interleave(in[0], in[1], g0, g1);
     in += in_stride;
 
     *--out = VSWAPHL(g0, g1); /* [g0l, g0h], [g1l g1h] -> [g1l, g0h] */
     for (std::size_t k = 1UZ; k < N; ++k) {
         vec<T> h0, h1;
-        INTERLEAVE2(in[0], in[1], h0, h1);
+        interleave(in[0], in[1], h0, h1);
         in += in_stride;
         *--out = VSWAPHL(g1, h0);
         *--out = VSWAPHL(h0, h1);
@@ -1257,7 +1260,7 @@ static void unreversed_copy(std::size_t N, const vec<T>* in, vec<T>* out, int ou
         h1 = *in++;
         g1 = VSWAPHL(g1, h0);
         h0 = VSWAPHL(h0, h1);
-        UNINTERLEAVE2(h0, g1, out[0], out[1]);
+        uninterleave(h0, g1, out[0], out[1]);
         out += out_stride;
         g1 = h1;
     }
@@ -1265,42 +1268,43 @@ static void unreversed_copy(std::size_t N, const vec<T>* in, vec<T>* out, int ou
     h1 = g0;
     g1 = VSWAPHL(g1, h0);
     h0 = VSWAPHL(h0, h1);
-    UNINTERLEAVE2(h0, g1, out[0], out[1]);
+    uninterleave(h0, g1, out[0], out[1]);
 }
 
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform>
-void pffft_zreorder(PFFFT_Setup<T, transform>& setup, const T* in, T* out) {
-    std::size_t   N = setup.size(), Ncvec = setup.simdVectorSize();
-    const vec<T>* vin  = reinterpret_cast<const vec<T>*>(in);
-    vec<T>*       vout = reinterpret_cast<vec<T>*>(out);
+template<fft_direction_t direction, std::floating_point T, fft_transform_t transform, std::size_t N_>
+void pffft_zreorder(PFFFT_Setup<T, transform, N_>& setup, const T* in, T* out) {
+    constexpr std::size_t simdSize = PFFFT_Setup<T, transform, N_>::simdSize();
+    std::size_t           N = setup.size(), Ncvec = setup.simdVectorSize();
+    const vec<T>*         vin  = reinterpret_cast<const vec<T>*>(in);
+    vec<T>*               vout = reinterpret_cast<vec<T>*>(out);
     assert(in != out);
-    if constexpr (PFFFT_Setup<T, transform>::kIsRealValued) {
+    if constexpr (PFFFT_Setup<T, transform, N_>::kIsRealValued) {
         std::size_t k, dk = N / 32;
         if constexpr (direction == fft_direction_t::Forward) {
             for (k = 0; k < dk; ++k) {
-                INTERLEAVE2(vin[k * 8 + 0], vin[k * 8 + 1], vout[2 * (0 * dk + k) + 0], vout[2 * (0 * dk + k) + 1]);
-                INTERLEAVE2(vin[k * 8 + 4], vin[k * 8 + 5], vout[2 * (2 * dk + k) + 0], vout[2 * (2 * dk + k) + 1]);
+                interleave(vin[k * 8 + 0], vin[k * 8 + 1], vout[2 * (0 * dk + k) + 0], vout[2 * (0 * dk + k) + 1]);
+                interleave(vin[k * 8 + 4], vin[k * 8 + 5], vout[2 * (2 * dk + k) + 0], vout[2 * (2 * dk + k) + 1]);
             }
             reversed_copy(dk, vin + 2, 8, reinterpret_cast<vec<T>*>(out + N / 2));
             reversed_copy(dk, vin + 6, 8, reinterpret_cast<vec<T>*>(out + N));
         } else {
             for (k = 0; k < dk; ++k) {
-                UNINTERLEAVE2(vin[2 * (0 * dk + k) + 0], vin[2 * (0 * dk + k) + 1], vout[k * 8 + 0], vout[k * 8 + 1]);
-                UNINTERLEAVE2(vin[2 * (2 * dk + k) + 0], vin[2 * (2 * dk + k) + 1], vout[k * 8 + 4], vout[k * 8 + 5]);
+                uninterleave(vin[2 * (0 * dk + k) + 0], vin[2 * (0 * dk + k) + 1], vout[k * 8 + 0], vout[k * 8 + 1]);
+                uninterleave(vin[2 * (2 * dk + k) + 0], vin[2 * (2 * dk + k) + 1], vout[k * 8 + 4], vout[k * 8 + 5]);
             }
-            unreversed_copy(dk, reinterpret_cast<const vec<T>*>(in + N / 4), reinterpret_cast<vec<T>*>(out + N - 6 * SIMD_SZ), -8);
-            unreversed_copy(dk, reinterpret_cast<const vec<T>*>(in + 3 * N / 4), reinterpret_cast<vec<T>*>(out + N - 2 * SIMD_SZ), -8);
+            unreversed_copy(dk, reinterpret_cast<const vec<T>*>(in + N / 4), reinterpret_cast<vec<T>*>(out + N - 6 * simdSize), -8);
+            unreversed_copy(dk, reinterpret_cast<const vec<T>*>(in + 3 * N / 4), reinterpret_cast<vec<T>*>(out + N - 2 * simdSize), -8);
         }
     } else {
         if constexpr (direction == fft_direction_t::Forward) {
             for (std::size_t k = 0UZ; k < Ncvec; ++k) {
                 std::size_t kk = (k / 4) + (k % 4) * (Ncvec / 4);
-                INTERLEAVE2(vin[k * 2], vin[k * 2 + 1], vout[kk * 2], vout[kk * 2 + 1]);
+                interleave(vin[k * 2], vin[k * 2 + 1], vout[kk * 2], vout[kk * 2 + 1]);
             }
         } else {
             for (std::size_t k = 0UZ; k < Ncvec; ++k) {
                 std::size_t kk = (k / 4) + (k % 4) * (Ncvec / 4);
-                UNINTERLEAVE2(vin[kk * 2], vin[kk * 2 + 1], vout[k * 2], vout[k * 2 + 1]);
+                uninterleave(vin[kk * 2], vin[kk * 2 + 1], vout[k * 2], vout[k * 2 + 1]);
             }
         }
     }
@@ -1308,7 +1312,7 @@ void pffft_zreorder(PFFFT_Setup<T, transform>& setup, const T* in, T* out) {
 
 template<std::floating_point T>
 void pffft_cplx_finalize(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const vec<T>* e) {
-    std::size_t dk = Ncvec / SIMD_SZ; /* number of 4x4 matrix blocks */
+    std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
     vec<T>      r0, i0, r1, i1, r2, i2, r3, i3;
     vec<T>      sr0, dr0, sr1, dr1, si0, di0, si1, di1;
     assert(in != out);
@@ -1321,11 +1325,11 @@ void pffft_cplx_finalize(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const
         i2 = in[8 * k + 5];
         r3 = in[8 * k + 6];
         i3 = in[8 * k + 7];
-        VTRANSPOSE4(r0, r1, r2, r3);
-        VTRANSPOSE4(i0, i1, i2, i3);
-        VCPLXMUL(r1, i1, e[k * 6 + 0], e[k * 6 + 1]);
-        VCPLXMUL(r2, i2, e[k * 6 + 2], e[k * 6 + 3]);
-        VCPLXMUL(r3, i3, e[k * 6 + 4], e[k * 6 + 5]);
+        transpose(r0, r1, r2, r3);
+        transpose(i0, i1, i2, i3);
+        complex_multiply(r1, i1, e[k * 6 + 0], e[k * 6 + 1]);
+        complex_multiply(r2, i2, e[k * 6 + 2], e[k * 6 + 3]);
+        complex_multiply(r3, i3, e[k * 6 + 4], e[k * 6 + 5]);
 
         sr0 = r0 + r2;
         dr0 = r0 - r2;
@@ -1371,7 +1375,7 @@ void pffft_cplx_finalize(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const
 
 template<std::floating_point T>
 void pffft_cplx_preprocess(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const vec<T>* e) {
-    std::size_t dk = Ncvec / SIMD_SZ; /* number of 4x4 matrix blocks */
+    std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
     vec<T>      r0, i0, r1, i1, r2, i2, r3, i3;
     vec<T>      sr0, dr0, sr1, dr1, si0, di0, si1, di1;
     assert(in != out);
@@ -1403,12 +1407,12 @@ void pffft_cplx_preprocess(std::size_t Ncvec, const vec<T>* in, vec<T>* out, con
         r3 = dr0 + di1;
         i3 = di0 - dr1;
 
-        VCPLXMULCONJ(r1, i1, e[k * 6 + 0], e[k * 6 + 1]);
-        VCPLXMULCONJ(r2, i2, e[k * 6 + 2], e[k * 6 + 3]);
-        VCPLXMULCONJ(r3, i3, e[k * 6 + 4], e[k * 6 + 5]);
+        complex_multiply_conj(r1, i1, e[k * 6 + 0], e[k * 6 + 1]);
+        complex_multiply_conj(r2, i2, e[k * 6 + 2], e[k * 6 + 3]);
+        complex_multiply_conj(r3, i3, e[k * 6 + 4], e[k * 6 + 5]);
 
-        VTRANSPOSE4(r0, r1, r2, r3);
-        VTRANSPOSE4(i0, i1, i2, i3);
+        transpose(r0, r1, r2, r3);
+        transpose(i0, i1, i2, i3);
 
         *out++ = r0;
         *out++ = i0;
@@ -1433,8 +1437,8 @@ static ALWAYS_INLINE(void) pffft_real_finalize_4x4(const vec<T>* in0, const vec<
     i2 = *in++;
     r3 = *in++;
     i3 = *in++;
-    VTRANSPOSE4(r0, r1, r2, r3);
-    VTRANSPOSE4(i0, i1, i2, i3);
+    transpose(r0, r1, r2, r3);
+    transpose(i0, i1, i2, i3);
 
     /*
       transformation for each column is:
@@ -1452,9 +1456,9 @@ static ALWAYS_INLINE(void) pffft_real_finalize_4x4(const vec<T>* in0, const vec<
     /* cerr << "matrix initial, before e , REAL:\n 1: " << r0 << "\n 1: " << r1 << "\n 1: " << r2 << "\n 1: " << r3 << "\n"; */
     /* cerr << "matrix initial, before e, IMAG :\n 1: " << i0 << "\n 1: " << i1 << "\n 1: " << i2 << "\n 1: " << i3 << "\n"; */
 
-    VCPLXMUL(r1, i1, e[0], e[1]);
-    VCPLXMUL(r2, i2, e[2], e[3]);
-    VCPLXMUL(r3, i3, e[4], e[5]);
+    complex_multiply(r1, i1, e[0], e[1]);
+    complex_multiply(r2, i2, e[2], e[3]);
+    complex_multiply(r3, i3, e[4], e[5]);
 
     /* cerr << "matrix initial, real part:\n 1: " << r0 << "\n 1: " << r1 << "\n 1: " << r2 << "\n 1: " << r3 << "\n"; */
     /* cerr << "matrix initial, imag part:\n 1: " << i0 << "\n 1: " << i1 << "\n 1: " << i2 << "\n 1: " << i3 << "\n"; */
@@ -1520,7 +1524,7 @@ static NEVER_INLINE(void) pffft_real_finalize(std::size_t Ncvec, const vec<T>* i
     out[6][0] = ci[0] - inv_sqrt2 * (ci[1] - ci[3]);
     out[7][0] = ci[2] - inv_sqrt2 * (ci[1] + ci[3]);
 
-    const std::size_t dx   = Ncvec / SIMD_SZ; /* number of 4x4 matrix blocks */
+    const std::size_t dx   = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
     vec<T>            save = in[7];
     for (std::size_t k = 1UZ; k < dx; ++k) {
         vec<T> save_next = in[8 * k + 7];
@@ -1559,12 +1563,12 @@ static ALWAYS_INLINE(void) pffft_real_preprocess_4x4(const vec<T>* in, const vec
     i1 = si0 - dr1;
     i3 = si0 + dr1;
 
-    VCPLXMULCONJ(r1, i1, e[0], e[1]);
-    VCPLXMULCONJ(r2, i2, e[2], e[3]);
-    VCPLXMULCONJ(r3, i3, e[4], e[5]);
+    complex_multiply_conj(r1, i1, e[0], e[1]);
+    complex_multiply_conj(r2, i2, e[2], e[3]);
+    complex_multiply_conj(r3, i3, e[4], e[5]);
 
-    VTRANSPOSE4(r0, r1, r2, r3);
-    VTRANSPOSE4(i0, i1, i2, i3);
+    transpose(r0, r1, r2, r3);
+    transpose(i0, i1, i2, i3);
 
     if (!first) {
         *out++ = r0;
@@ -1580,7 +1584,7 @@ static ALWAYS_INLINE(void) pffft_real_preprocess_4x4(const vec<T>* in, const vec
 
 template<std::floating_point T>
 static NEVER_INLINE(void) pffft_real_preprocess(std::size_t Ncvec, const vec<T>* in, vec<T>* out, const vec<T>* e) {
-    std::size_t dk = Ncvec / SIMD_SZ; /* number of 4x4 matrix blocks */
+    std::size_t dk = Ncvec / vec<T>::size(); /* number of 4x4 matrix blocks */
 
     assert(in != out);
     vec<T> Xr, Xi;
@@ -1633,8 +1637,6 @@ constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, co
     vec<T>*       buff[2] = {voutput, scratch ? scratch : scratch_on_stack};
     std::size_t   ib      = nf_odd ^ ordered ? 1 : 0;
 
-    assert(VALIGNED(finput) && VALIGNED(foutput));
-
     /* assert(finput != foutput); */
     if constexpr (direction == fft_direction_t::Forward) {
         ib = !ib;
@@ -1644,7 +1646,7 @@ constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, co
         } else {
             vec<T>* tmp = buff[ib];
             for (k = 0; k < Ncvec; ++k) {
-                UNINTERLEAVE2(vinput[k * 2], vinput[k * 2 + 1], tmp[k * 2], tmp[k * 2 + 1]);
+                uninterleave(vinput[k * 2], vinput[k * 2 + 1], tmp[k * 2], tmp[k * 2 + 1]);
             }
             ib = (cfftf1_ps(Ncvec, buff[ib], buff[!ib], buff[ib], setup.twiddle, &setup.ifac[0], -1) == buff[0] ? 0 : 1);
             pffft_cplx_finalize(Ncvec, buff[ib], buff[!ib], reinterpret_cast<vec<T>*>(setup.e));
@@ -1670,7 +1672,7 @@ constexpr void pffft_transform_internal(PFFFT_Setup<T, transform, N_>& setup, co
             pffft_cplx_preprocess(Ncvec, vinput, buff[ib], reinterpret_cast<vec<T>*>(setup.e));
             ib = (cfftf1_ps(Ncvec, buff[ib], buff[0], buff[1], setup.twiddle, &setup.ifac[0], +1) == buff[0] ? 0 : 1);
             for (k = 0; k < Ncvec; ++k) {
-                INTERLEAVE2(buff[ib][k * 2], buff[ib][k * 2 + 1], buff[ib][k * 2], buff[ib][k * 2 + 1]);
+                interleave(buff[ib][k * 2], buff[ib][k * 2 + 1], buff[ib][k * 2], buff[ib][k * 2 + 1]);
             }
         }
     }
@@ -1692,7 +1694,6 @@ template<std::floating_point T, fft_transform_t transform, std::size_t N_>
 void pffft_zconvolve_accumulate(PFFFT_Setup<T, transform, N_>& s, const T* a, const T* b, T* ab, T scaling) {
     std::size_t Ncvec = s.simdVectorSize();
 
-    assert(VALIGNED(a) && VALIGNED(b) && VALIGNED(ab));
     const T ar  = a[0];
     const T ai  = a[4];
     const T br  = b[0];
@@ -1711,7 +1712,7 @@ void pffft_zconvolve_accumulate(PFFFT_Setup<T, transform, N_>& s, const T* a, co
             auto [ar_, ai_]   = split<4, 4>(va);
             auto [br_, bi_]   = split<4, 4>(vb);
             auto [abr_, abi_] = split<4, 4>(vab);
-            VCPLXMUL(ar_, ai_, br_, bi_);
+            complex_multiply(ar_, ai_, br_, bi_);
             return concat((ar * vscal + abr_), (ai * vscal + abi_));
         } else {
             __builtin_trap(); // this should be impossible
@@ -1731,7 +1732,6 @@ void pffft_zconvolve_no_accu(PFFFT_Setup<T, transform, N_>& s, const T* a, const
     T                 sar, sai, sbr, sbi;
     const std::size_t NcvecMulTwo = 2 * s.simdVectorSize(); /* std::size_t Ncvec = s.simdVectorSize(); */
 
-    assert(VALIGNED(a) && VALIGNED(b) && VALIGNED(ab));
     sar = a[0];
     sai = a[vec<T>::size()];
     sbr = b[0];
@@ -1744,14 +1744,14 @@ void pffft_zconvolve_no_accu(PFFFT_Setup<T, transform, N_>& s, const T* a, const
         vai = load_unchecked<vec<T>>(a + (k + 1) * vec<T>::size(), stdx::vector_aligned);
         vbr = load_unchecked<vec<T>>(b + (k + 0) * vec<T>::size(), stdx::vector_aligned);
         vbi = load_unchecked<vec<T>>(b + (k + 1) * vec<T>::size(), stdx::vector_aligned);
-        VCPLXMUL(var, vai, vbr, vbi);
+        complex_multiply(var, vai, vbr, vbi);
         store_unchecked(var * vscal, ab + (k + 0) * vec<T>::size(), stdx::vector_aligned);
         store_unchecked(vai * vscal, ab + (k + 1) * vec<T>::size(), stdx::vector_aligned);
         var = load_unchecked<vec<T>>(a + (k + 2) * vec<T>::size(), stdx::vector_aligned);
         vai = load_unchecked<vec<T>>(a + (k + 3) * vec<T>::size(), stdx::vector_aligned);
         vbr = load_unchecked<vec<T>>(b + (k + 2) * vec<T>::size(), stdx::vector_aligned);
         vbi = load_unchecked<vec<T>>(b + (k + 3) * vec<T>::size(), stdx::vector_aligned);
-        VCPLXMUL(var, vai, vbr, vbi);
+        complex_multiply(var, vai, vbr, vbi);
         store_unchecked(var * vscal, ab + (k + 2) * vec<T>::size(), stdx::vector_aligned);
         store_unchecked(vai * vscal, ab + (k + 3) * vec<T>::size(), stdx::vector_aligned);
     }

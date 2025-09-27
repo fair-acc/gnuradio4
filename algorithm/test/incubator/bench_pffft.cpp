@@ -1,7 +1,4 @@
 
-#define CONCAT_TOKENS(A, B)          A##B
-#define CONCAT_THREE_TOKENS(A, B, C) A##B##C
-
 #include "gnuradio-4.0/meta/utils.hpp"
 
 #if defined(__clang__)
@@ -24,8 +21,6 @@
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
-
-
 
 #include <print>
 
@@ -412,7 +407,7 @@ constexpr std::size_t NUMNONPOW2LENS = 23UZ;
     }
 
     using T = float;
-    printf("pffft architecture:    '%s'\n", VARCH);
+    printf("pffft architecture:    '%s'\n", "stdx::simd");
     printf("pffft SIMD size:       %lu\n", pffft_simd_size<T>());
     printf("pffft min real fft:    %lu\n", pffft_min_fft_size<T>(fft_transform_t::Real));
     printf("pffft min complex fft: %lu\n", pffft_min_fft_size<T>(fft_transform_t::Complex));

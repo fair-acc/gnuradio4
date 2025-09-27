@@ -14,8 +14,6 @@
 #pragma GCC diagnostic ignored "-Wsign-conversion" // error in vir/simd
 #endif
 
-#include "pf_stdx_simd.h"
-
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
