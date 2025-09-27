@@ -1,5 +1,5 @@
-
 #include "gnuradio-4.0/meta/utils.hpp"
+#include <boost/ut.hpp>
 
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -164,17 +164,17 @@ double show_output(std::string_view name, std::size_t N, bool cplx, double flops
     return T_ns;
 }
 
-template<std::floating_point T, fft_transform_t tramsform>
+template<std::floating_point T, Transform tramsform>
 double cal_benchmark(std::size_t N) {
-    const std::size_t log2N  = Log2(N);
-    std::size_t       Nfloat = (tramsform == fft_transform_t::Complex ? N * 2UZ : N);
-    std::size_t       Nbytes = Nfloat * sizeof(T);
-    T *               X = pffft_aligned_malloc<T>(Nbytes + sizeof(T)), *Y = pffft_aligned_malloc<T>(Nbytes + 2 * sizeof(T)), *Z = pffft_aligned_malloc<T>(Nbytes);
-    double            t0, t1, tstop, timeDiff, nI;
+    const std::size_t                         log2N  = Log2(N);
+    std::size_t                               Nfloat = (tramsform == Transform::Complex ? N * 2UZ : N);
+    std::vector<T, gr::allocator::Aligned<T>> input(Nfloat);
+    std::vector<T, gr::allocator::Aligned<T>> output(Nfloat);
+    double                                    t0, t1, tstop, timeDiff, nI;
 
     assert(std::has_single_bit(N));
     for (std::size_t k = 0UZ; k < Nfloat; ++k) {
-        X[k] = std::sqrt(static_cast<T>(k + 1UZ));
+        input[k] = std::sqrt(static_cast<T>(k + 1UZ));
     }
 
     /* PFFFT-U (unordered) benchmark */
@@ -184,35 +184,30 @@ double cal_benchmark(std::size_t N) {
     tstop            = t0 + 0.25; /* benchmark duration: 250 ms */
     do {
         for (std::size_t k = 0; k < 512; ++k) {
-            pffft_transform<fft_direction_t::Forward, fft_order_t::Unordered>(s, X, Z, Y);
-            pffft_transform<fft_direction_t::Backward, fft_order_t::Unordered>(s, X, Z, Y);
+            pffft_transform<Direction::Forward, Order::Unordered>(s, input, output);
+            pffft_transform<Direction::Backward, Order::Unordered>(s, input, output);
             ++iter;
         }
         t1 = uclock_sec();
     } while (t1 < tstop);
-    pffft_aligned_free(X);
-    pffft_aligned_free(Y);
-    pffft_aligned_free(Z);
 
     timeDiff = (t1 - t0);                               /* duration per fft() */
     nI       = static_cast<double>(iter * (log2N * N)); /* number of iterations "normalized" to O(N) = N*log2(N) */
     return (nI / timeDiff);                             /* normalized iterations per second */
 }
 
-template<std::floating_point T, fft_transform_t tramsform>
+template<std::floating_point T, Transform tramsform>
 void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, double tmeas[NUM_TYPES][NUM_FFT_ALGOS], int haveAlgo[NUM_FFT_ALGOS], FILE* tableFile) {
-    constexpr bool               isComplex  = (tramsform == fft_transform_t::Complex);
+    constexpr bool               isComplex  = (tramsform == Transform::Complex);
     const std::size_t            log2N      = Log2(N);
     std::size_t                  nextPow2N  = std::bit_ceil(N);
     [[maybe_unused]] std::size_t log2NextN  = Log2(nextPow2N);
     std::size_t                  pffftPow2N = nextPow2N;
 
-    std::size_t Nfloat = (isComplex ? MAX(nextPow2N, pffftPow2N) * 2UZ : MAX(nextPow2N, pffftPow2N));
-    std::size_t Nmax;
-    std::size_t Nbytes = Nfloat * sizeof(T);
-
-    T *    X = pffft_aligned_malloc<T>(Nbytes + sizeof(T)), *Y = pffft_aligned_malloc<T>(Nbytes + 2 * sizeof(T)), *Z = pffft_aligned_malloc<T>(Nbytes);
-    double te, t0, t1, tstop, flops, Tfastest;
+    std::size_t                               Nfloat = (isComplex ? MAX(nextPow2N, pffftPow2N) * 2UZ : MAX(nextPow2N, pffftPow2N));
+    std::vector<T, gr::allocator::Aligned<T>> input(Nfloat);
+    std::vector<T, gr::allocator::Aligned<T>> output(Nfloat);
+    double                                    te, t0, t1, tstop, flops, Tfastest;
 
     const double      max_test_duration = 0.150;                                                                /* test duration 150 ms */
     double            numIter           = max_test_duration * iterCal / static_cast<double>(log2N * N);         /* number of iteration for max_test_duration */
@@ -220,18 +215,14 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
     std::size_t       max_iter          = std::max<std::size_t>(1UZ, static_cast<std::size_t>(numIter));        /* minimum 1 iteration */
     max_iter                            = std::max(1UZ, static_cast<std::size_t>(numIter));
 
-    constexpr float checkVal = 12345.0F;
-
-    /* printf("benchmark_ffts(N = %d, cplx = %d): Nfloat = %d, X_mem = 0x%p, X = %p\n", N, cplx, Nfloat, X_mem, X); */
-
-    memset(X, 0UZ, Nfloat * sizeof(T));
+    memset(input.data(), 0UZ, Nfloat * sizeof(T));
     if (Nfloat < 32UZ) {
         for (std::size_t k = 0UZ; k < Nfloat; k += 4) {
-            X[k] = sqrtf(static_cast<T>(k + 1UZ));
+            input[k] = sqrtf(static_cast<T>(k + 1UZ));
         }
     } else {
         for (std::size_t k = 0UZ; k < Nfloat; k += (Nfloat / 16)) {
-            X[k] = std::sqrt(static_cast<T>(k + 1UZ));
+            input[k] = std::sqrt(static_cast<T>(k + 1UZ));
         }
     }
 
@@ -241,14 +232,7 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         }
     }
 
-    /* FFTPack benchmark */
-    Nmax    = (isComplex ? N * 2 : N);
-    X[Nmax] = checkVal;
-
-    /* PFFFT-U (unordered) benchmark */
-    Nmax    = (isComplex ? pffftPow2N * 2 : pffftPow2N);
-    X[Nmax] = checkVal;
-    if (pffftPow2N >= pffft_min_fft_size<T>(isComplex ? fft_transform_t::Complex : fft_transform_t::Real)) {
+    if (pffftPow2N >= PFFFT_Setup<T, tramsform>::minSize()) {
         te       = uclock_sec();
         auto s   = PFFFT_Setup<T, tramsform>(pffftPow2N);
         t0       = uclock_sec();
@@ -256,11 +240,8 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         max_iter = 0;
         do {
             for (std::size_t k = 0UZ; k < step_iter; ++k) {
-                assert(X[Nmax] == checkVal);
-                pffft_transform<fft_direction_t::Forward, fft_order_t::Unordered>(s, X, Z, Y);
-                assert(X[Nmax] == checkVal);
-                pffft_transform<fft_direction_t::Backward, fft_order_t::Unordered>(s, X, Z, Y);
-                assert(X[Nmax] == checkVal);
+                pffft_transform<Direction::Forward, Order::Unordered>(s, input, output);
+                pffft_transform<Direction::Backward, Order::Unordered>(s, input, output);
                 ++max_iter;
             }
             t1 = uclock_sec();
@@ -277,7 +258,7 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         show_output("PFFFT-U", N, isComplex, -1, -1, -1, gr::meta::invalid_index, tableFile);
     }
 
-    if (pffftPow2N >= pffft_min_fft_size<T>(isComplex ? fft_transform_t::Complex : fft_transform_t::Real)) {
+    if (pffftPow2N >= PFFFT_Setup<T, tramsform>::minSize()) {
         te       = uclock_sec();
         auto s   = PFFFT_Setup<T, tramsform>(pffftPow2N);
         t0       = uclock_sec();
@@ -285,11 +266,8 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
         max_iter = 0;
         do {
             for (std::size_t k = 0; k < step_iter; ++k) {
-                assert(X[Nmax] == checkVal);
-                pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(s, X, Z, Y);
-                assert(X[Nmax] == checkVal);
-                pffft_transform<fft_direction_t::Backward, fft_order_t::Ordered>(s, X, Z, Y);
-                assert(X[Nmax] == checkVal);
+                pffft_transform<Direction::Forward, Order::Ordered>(s, input, output);
+                pffft_transform<Direction::Backward, Order::Ordered>(s, input, output);
                 ++max_iter;
             }
             t1 = uclock_sec();
@@ -358,10 +336,6 @@ void benchmark_ffts(std::size_t N, int /*withFFTWfullMeas*/, double iterCal, dou
     if (!array_output_format) {
         printf("--\n");
     }
-
-    pffft_aligned_free(X);
-    pffft_aligned_free(Y);
-    pffft_aligned_free(Z);
 }
 
 template<std::floating_point T>
@@ -407,10 +381,8 @@ constexpr std::size_t NUMNONPOW2LENS = 23UZ;
     }
 
     using T = float;
-    printf("pffft architecture:    '%s'\n", "stdx::simd");
-    printf("pffft SIMD size:       %lu\n", pffft_simd_size<T>());
-    printf("pffft min real fft:    %lu\n", pffft_min_fft_size<T>(fft_transform_t::Real));
-    printf("pffft min complex fft: %lu\n", pffft_min_fft_size<T>(fft_transform_t::Complex));
+    printf("pffft min real fft:    %lu\n", PFFFT_Setup<T, Transform::Real>::minSize());
+    printf("pffft min complex fft: %lu\n", PFFFT_Setup<T, Transform::Complex>::minSize());
     printf("\n");
 
     clock();
@@ -425,11 +397,11 @@ constexpr std::size_t NUMNONPOW2LENS = 23UZ;
         printf("calibrating fft benchmark duration at size N = 512 ..\n");
         t0 = uclock_sec();
         if (benchReal) {
-            iterCalReal = cal_benchmark<T, fft_transform_t::Real>(512UZ);
+            iterCalReal = cal_benchmark<T, Transform::Real>(512UZ);
             printf("real fft iterCal = %f\n", iterCalReal);
         }
         if (benchCplx) {
-            iterCalCplx = cal_benchmark<T, fft_transform_t::Complex>(512UZ);
+            iterCalCplx = cal_benchmark<T, Transform::Complex>(512UZ);
             printf("cplx fft iterCal = %f\n", iterCalCplx);
         }
         t1  = uclock_sec();
@@ -440,12 +412,12 @@ constexpr std::size_t NUMNONPOW2LENS = 23UZ;
     if (!array_output_format) {
         if (benchReal) {
             for (std::size_t i = 0UZ; Nvalues[i] > 0 && Nvalues[i] <= max_N; ++i) {
-                benchmark_ffts<T, fft_transform_t::Real>(Nvalues[i], withFFTWfullMeas, iterCalReal, tmeas[0][i], haveAlgo, nullptr);
+                benchmark_ffts<T, Transform::Real>(Nvalues[i], withFFTWfullMeas, iterCalReal, tmeas[0][i], haveAlgo, nullptr);
             }
         }
         if (benchCplx) {
             for (std::size_t i = 0UZ; Nvalues[i] > 0 && Nvalues[i] <= max_N; ++i) {
-                benchmark_ffts<T, fft_transform_t::Complex>(Nvalues[i], withFFTWfullMeas, iterCalCplx, tmeas[1][i], haveAlgo, nullptr);
+                benchmark_ffts<T, Transform::Complex>(Nvalues[i], withFFTWfullMeas, iterCalCplx, tmeas[1][i], haveAlgo, nullptr);
             }
         }
 
@@ -492,10 +464,10 @@ constexpr std::size_t NUMNONPOW2LENS = 23UZ;
             print_table_fftsize(Nvalues[i], tableFile);
             t0 = uclock_sec();
             if (benchReal) {
-                benchmark_ffts<T, fft_transform_t::Real>(Nvalues[i], withFFTWfullMeas, iterCalReal, tmeas[0][i], haveAlgo, tableFile);
+                benchmark_ffts<T, Transform::Real>(Nvalues[i], withFFTWfullMeas, iterCalReal, tmeas[0][i], haveAlgo, tableFile);
             }
             if (benchCplx) {
-                benchmark_ffts<T, fft_transform_t::Complex>(Nvalues[i], withFFTWfullMeas, iterCalCplx, tmeas[1][i], haveAlgo, tableFile);
+                benchmark_ffts<T, Transform::Complex>(Nvalues[i], withFFTWfullMeas, iterCalCplx, tmeas[1][i], haveAlgo, tableFile);
             }
             t1 = uclock_sec();
             print_table("|\n", tableFile);
@@ -525,6 +497,13 @@ constexpr std::size_t NUMNONPOW2LENS = 23UZ;
 #include <string_view>
 #include <vector>
 
+template<bool isComplex, bool isOrdered>
+struct Flags {
+    constexpr static bool complex                        = isComplex;
+    constexpr static bool ordered                        = isOrdered;
+    constexpr bool        operator==(const Flags&) const = default;
+};
+
 template<std::floating_point T>
 bool test_fft_sine_wave() {
     constexpr std::size_t N = 128UZ;
@@ -532,26 +511,25 @@ bool test_fft_sine_wave() {
     constexpr std::size_t expected_bin = static_cast<std::size_t>(freq_normalized * N);
     constexpr T           tolerance{static_cast<T>(1e-7f) * N};
 
-    constexpr std::string_view kRed             = "\033[31m";
-    constexpr std::string_view kGreen           = "\033[32m";
-    constexpr std::string_view kReset           = "\033[0m";
-    bool                       all_tests_passed = true;
+    constexpr static std::string_view kRed             = "\033[31m";
+    constexpr static std::string_view kGreen           = "\033[32m";
+    constexpr static std::string_view kReset           = "\033[0m";
+    bool                              all_tests_passed = true;
 
     // Test 1: Real-valued FFT with pure sine wave
     {
         std::println("Testing REAL FFT with pure sine wave at f={}*fs (bin: {})...", freq_normalized, expected_bin);
 
-        T* input  = pffft_aligned_malloc<T>(N * sizeof(T));
-        T* output = pffft_aligned_malloc<T>(N * sizeof(T));
-        T* work   = pffft_aligned_malloc<T>(N * sizeof(T));
+        std::vector<T, gr::allocator::Aligned<T>> input(N);
+        std::vector<T, gr::allocator::Aligned<T>> output(N);
 
         // generate pure sine wave: sin(2*pi*f*n/N)
         for (std::size_t n = 0; n < N; ++n) {
             input[n] = std::sin(T{2} * std::numbers::pi_v<T> * freq_normalized * static_cast<T>(n));
         }
 
-        PFFFT_Setup<T, fft_transform_t::Real> setup(N);
-        pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(setup, input, output, work);
+        PFFFT_Setup<T, Transform::Real> setup(N);
+        pffft_transform<Direction::Forward, Order::Ordered>(setup, input, output);
 
         // For real FFT, output format is: [DC, bin1_real, bin1_imag, ..., binN/2-1_real, binN/2-1_imag, Nyquist]
         // Calculate magnitude for each bin
@@ -597,15 +575,10 @@ bool test_fft_sine_wave() {
             }
             if (noise_floor > tolerance) {
                 std::println("  WARNING: High noise floor: {}", noise_floor);
-                ;
             } else {
                 std::println("  PASSED! Noise floor: {}", noise_floor);
             }
         }
-
-        pffft_aligned_free(input);
-        pffft_aligned_free(output);
-        pffft_aligned_free(work);
     }
 
     // Test 2: Complex-valued FFT with complex exponential
@@ -613,9 +586,8 @@ bool test_fft_sine_wave() {
         std::println("\nTesting COMPLEX FFT with complex exponential at f=0.25*fs (bin {})...", expected_bin);
 
         // allocate aligned memory (2x size for complex)
-        T* input  = pffft_aligned_malloc<T>(2 * N * sizeof(T));
-        T* output = pffft_aligned_malloc<T>(2 * N * sizeof(T));
-        T* work   = pffft_aligned_malloc<T>(2 * N * sizeof(T));
+        std::vector<T, gr::allocator::Aligned<T>> input(2UZ * N);
+        std::vector<T, gr::allocator::Aligned<T>> output(2UZ * N);
 
         // generate complex exponential: exp(j*2*pi*f*n/N)
         for (std::size_t n = 0; n < N; ++n) {
@@ -624,8 +596,8 @@ bool test_fft_sine_wave() {
             input[2 * n + 1] = std::sin(phase); // imaginary part
         }
 
-        PFFFT_Setup<T, fft_transform_t::Complex> setup(N);
-        pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(setup, input, output, work);
+        PFFFT_Setup<T, Transform::Complex> setup(N);
+        pffft_transform<Direction::Forward, Order::Ordered>(setup, input, output);
 
         // Calculate magnitude for each bin
         std::vector<T> magnitudes(N, T(0));
@@ -671,64 +643,62 @@ bool test_fft_sine_wave() {
                 std::println("  PASSED! Noise floor: {}", noise_floor);
             }
         }
-
-        pffft_aligned_free(input);
-        pffft_aligned_free(output);
-        pffft_aligned_free(work);
     }
 
     // Test 3: Inverse FFT reconstruction test (complex)
-    {
-        std::println("\nTesting COMPLEX FFT forward-inverse reconstruction...");
+    using namespace boost::ut;
+    std::size_t testCount                                                      = 0;
+    test(std::format("FFT forward-inverse reconstruction {}...", testCount++)) = [&all_tests_passed]<typename F>(F) {
+        using flag = std::remove_cvref_t<F>;
+        std::println("\nTesting {} FFT forward-inverse {} reconstruction...", flag::complex ? "COMPLEX" : "REAL", flag::ordered ? "ordered" : "unordered");
 
-        T* input         = pffft_aligned_malloc<T>(2 * N * sizeof(T));
-        T* spectrum      = pffft_aligned_malloc<T>(2 * N * sizeof(T));
-        T* reconstructed = pffft_aligned_malloc<T>(2 * N * sizeof(T));
-        T* work          = pffft_aligned_malloc<T>(2 * N * sizeof(T));
+        std::size_t                               nSamples = flag::complex ? 2UZ * N : N;
+        std::vector<T, gr::allocator::Aligned<T>> input(nSamples);
+        std::vector<T, gr::allocator::Aligned<T>> spectrum(nSamples);
+        std::vector<T, gr::allocator::Aligned<T>> reconstructed(nSamples);
 
         // Generate complex test signal
         for (std::size_t n = 0; n < N; ++n) {
-            T phase          = T{2} * std::numbers::pi_v<T> * freq_normalized * static_cast<T>(n);
-            input[2 * n]     = std::cos(phase);
-            input[2 * n + 1] = std::sin(phase);
+            T phase = T{2} * std::numbers::pi_v<T> * freq_normalized * static_cast<T>(n);
+            if constexpr (flag::complex) {
+                input[2 * n]     = std::cos(phase);
+                input[2 * n + 1] = std::sin(phase);
+            } else {
+                input[n] = std::cos(phase);
+            }
         }
 
-        PFFFT_Setup<T, fft_transform_t::Complex> setup(N);
+        PFFFT_Setup<T, flag::complex ? Transform::Complex : Transform::Real> setup(N);
 
-        pffft_transform<fft_direction_t::Forward, fft_order_t::Ordered>(setup, input, spectrum, work);
-        pffft_transform<fft_direction_t::Backward, fft_order_t::Ordered>(setup, spectrum, reconstructed, work);
+        pffft_transform<Direction::Forward, flag::ordered ? Order::Ordered : Order::Unordered>(setup, input, spectrum);
+        pffft_transform<Direction::Backward, flag::ordered ? Order::Ordered : Order::Unordered>(setup, spectrum, reconstructed);
 
         // scale by 1/N (this FFT doesn't normalize the inverse)
-        for (std::size_t i = 0; i < 2 * N; ++i) {
+        for (std::size_t i = 0; i < nSamples; ++i) {
             reconstructed[i] /= N;
         }
 
         // check reconstruction error
         T max_error{0};
-        for (std::size_t i = 0; i < 2 * N; ++i) {
+        for (std::size_t i = 0; i < nSamples; ++i) {
             T error   = std::abs(input[i] - reconstructed[i]);
             max_error = std::max(max_error, error);
         }
 
         std::println("  Max reconstruction error: {}", max_error);
         if (max_error > tolerance) {
-            std::println("{}  ERROR: Reconstruction error too large!{}", kRed, kReset);
+            std::println("{}  ERROR: Reconstruction error for {} sorting {} too large!{}", kRed, flag::complex ? "COMPLEX" : "REAL", flag::ordered ? "ordered" : "unordered", kReset);
             all_tests_passed = false;
         } else {
             std::println("  PASSED!\n");
         }
-
-        pffft_aligned_free(input);
-        pffft_aligned_free(spectrum);
-        pffft_aligned_free(reconstructed);
-        pffft_aligned_free(work);
-    }
+    } | std::tuple{Flags<true, true>{}, Flags<true, false>{}, Flags<false, true>{}, Flags<false, false>{}};
 
     using namespace std::literals;
     if (all_tests_passed) {
-        std::println("{}  ALL {} TESTS PASSED!{}", kGreen, gr::meta::type_name<T>(), kReset);
+        std::println("{}  ALL {} TESTS PASSED!{}\n", kGreen, gr::meta::type_name<T>(), kReset);
     } else {
-        std::println("{}  SOME  {} TESTS FAILED!{}", kRed, gr::meta::type_name<T>(), kReset);
+        std::println("{}  SOME  {} TESTS FAILED!{}\n", kRed, gr::meta::type_name<T>(), kReset);
     }
     return all_tests_passed;
 }

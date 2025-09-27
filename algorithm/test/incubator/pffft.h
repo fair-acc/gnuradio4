@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstddef>
 #include <new>
+#include <source_location>
 
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -25,18 +26,18 @@
 #endif
 
 /* direction of the transform */
-enum class fft_order_t { Ordered, Unordered };
+enum class Order { Ordered, Unordered };
 
-enum class fft_direction_t { Forward, Backward };
+enum class Direction { Forward, Backward };
 
 /* type of transform */
-enum class fft_transform_t { Real, Complex };
+enum class Transform { Real, Complex };
 
 /* struct holding internal stuff (precomputed twiddle factors)
    this struct can be shared by many threads as it contains only
    read-only data.
 */
-template<std::floating_point T, fft_transform_t transform_, std::size_t N = std::dynamic_extent>
+template<std::floating_point T, Transform transform_, std::size_t N = std::dynamic_extent>
 struct PFFFT_Setup;
 
 /*
@@ -78,8 +79,13 @@ struct PFFFT_Setup;
 
    input and output may alias.
 */
-template<fft_direction_t direction, fft_order_t order, std::floating_point T, fft_transform_t transform, std::size_t N>
-void pffft_transform(PFFFT_Setup<T, transform, N>& setup, const T* input, T* output, T* work);
+template<class R, class T>
+concept InBuf = std::ranges::borrowed_range<R> && std::ranges::contiguous_range<R> && std::convertible_to<decltype(std::ranges::data(std::declval<R&>())), const T*>;
+template<class R, class T>
+concept OutBuf = std::ranges::borrowed_range<R> && std::ranges::contiguous_range<R> && std::same_as<decltype(std::ranges::data(std::declval<R&>())), T*>;
+
+template<Direction direction, Order order, std::floating_point T, Transform transform, std::size_t N, InBuf<T> Rin, OutBuf<T> Rout>
+void pffft_transform(PFFFT_Setup<T, transform, N>& setup, Rin&& in, Rout&& out, std::source_location loc = std::source_location::current());
 
 /*
    call pffft_zreorder(.., PFFFT_FORWARD) after pffft_transform(...,
@@ -93,8 +99,8 @@ void pffft_transform(PFFFT_Setup<T, transform, N>& setup, const T* input, T* out
 
    input and output should not alias.
 */
-template<fft_direction_t direction, std::floating_point T, fft_transform_t transform>
-void pffft_zreorder(PFFFT_Setup<T, transform>* setup, const T* input, T* output);
+template<Direction direction, std::floating_point T, Transform transform, std::size_t N>
+void pffft_zreorder(PFFFT_Setup<T, transform, N>& setup, std::span<const T> input, std::span<T> output);
 
 /*
    Perform a multiplication of the frequency components of dft_a and
@@ -108,8 +114,8 @@ void pffft_zreorder(PFFFT_Setup<T, transform>* setup, const T* input, T* output)
 
    The dft_a, dft_b and dft_ab pointers may alias.
 */
-template<std::floating_point T, fft_transform_t transform>
-void pffft_zconvolve_accumulate(PFFFT_Setup<T, transform>* setup, const T* dft_a, const T* dft_b, T* dft_ab, T scaling);
+template<std::floating_point T, Transform transform>
+void zconvolve_accumulate(PFFFT_Setup<T, transform>* setup, const T* dft_a, const T* dft_b, T* dft_ab, T scaling);
 
 /*
    Perform a multiplication of the frequency components of dft_a and
@@ -123,35 +129,22 @@ void pffft_zconvolve_accumulate(PFFFT_Setup<T, transform>* setup, const T* dft_a
 
    The dft_a, dft_b and dft_ab pointers may alias.
 */
-template<std::floating_point T, fft_transform_t transform>
+template<std::floating_point T, Transform transform>
 void pffft_zconvolve_no_accu(PFFFT_Setup<T, transform>* setup, const T* dft_a, const T* dft_b, T* dft_ab, T scaling);
-
-/* return 4 or 1 wether support SSE/NEON/Altivec instructions was enabled when building pffft.c */
-template<std::floating_point T>
-consteval std::size_t pffft_simd_size(void);
-
-/* return string identifier of used architecture (SSE/NEON/Altivec/..) */
-const char* pffft_simd_arch(void);
-
-/* following functions are identical to the pffftd_ functions */
-
-/* simple helper to get minimum possible fft size */
-template<std::floating_point T>
-std::size_t pffft_min_fft_size(fft_transform_t transform);
 
 /* simple helper to determine size N is valid
    - factorizable to pffft_min_fft_size() with factors 2, 3, 5
    returns bool
 */
 template<std::floating_point T>
-constexpr bool pffft_is_valid_size(std::size_t N, fft_transform_t cplx);
+constexpr bool pffft_is_valid_size(std::size_t N, Transform cplx);
 
 /* determine nearest valid transform size  (by brute-force testing)
    - factorizable to pffft_min_fft_size() with factors 2, 3, 5.
    higher: bool-flag to find nearest higher value; else lower.
 */
 template<std::floating_point T>
-constexpr std::size_t pffft_nearest_transform_size(std::size_t N, fft_transform_t cplx, bool higher);
+constexpr std::size_t pffft_nearest_transform_size(std::size_t N, Transform cplx, bool higher);
 
 /*
   the float buffers must have the correct alignment (16-byte boundary
