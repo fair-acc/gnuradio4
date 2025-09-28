@@ -91,7 +91,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
     };
 
     "Graph connection buffer size test - Multi output ports"_test = [] {
-        gr::Graph graph;
+        Graph graph;
 
         const std::size_t       customBufferSize = 8192UZ;
         const std::size_t       nIterations      = 10;

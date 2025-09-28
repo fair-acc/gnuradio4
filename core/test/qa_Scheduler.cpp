@@ -260,18 +260,17 @@ gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_locat
     gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
-
-    auto& source1  = flow.emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
-    source1.tracer = tracer;
-    auto& scale1   = flow.emplaceBlock<Scale<float>>({{"name", "alpha"}, {"scale_factor", 0.9f}});
-    scale1.tracer  = tracer;
-    auto& scale2   = flow.emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}, {"ui_constraints", layout_auto}});
-    scale2.tracer  = tracer;
-    auto& sum      = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
-    sum.tracer     = tracer;
-    auto& sink     = flow.emplaceBlock<ExpectSink<float>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
-    sink.tracer    = tracer;
-    sink.checker   = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
+    auto&     source1 = flow.emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
+    source1.tracer    = tracer;
+    auto& scale1      = flow.emplaceBlock<Scale<float>>({{"name", "alpha"}, {"scale_factor", 0.9f}});
+    scale1.tracer     = tracer;
+    auto& scale2      = flow.emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}, {"ui_constraints", layout_auto}});
+    scale2.tracer     = tracer;
+    auto& sum         = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
+    sum.tracer        = tracer;
+    auto& sink        = flow.emplaceBlock<ExpectSink<float>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
+    sink.tracer       = tracer;
+    sink.checker      = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale1)), loc);
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale1).to<"addend0">(sum)), loc);
@@ -292,14 +291,13 @@ gr::Graph getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_
     gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
-
-    auto& source  = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
-    source.tracer = tracer;
-    auto& adder   = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
-    adder.tracer  = tracer;
-    auto& sink    = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples / ratio}});
-    sink.tracer   = tracer;
-    sink.checker  = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
+    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
+    source.tracer    = tracer;
+    auto& adder      = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
+    adder.tracer     = tracer;
+    auto& sink       = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples / ratio}});
+    sink.tracer      = tracer;
+    sink.checker     = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     // Decimator: 5 input samples → 1 output sample
     auto& decimator  = flow.emplaceBlock<Resampler<float>>({{"name", "dec"}, {"input_chunk_size", ratio}, {"output_chunk_size", 1}});
@@ -327,9 +325,8 @@ gr::Graph getMultipleNestedFeedbackLoops(std::shared_ptr<Tracer> tracer, std::so
     gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
-
-    auto& source  = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
-    source.tracer = tracer;
+    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
+    source.tracer    = tracer;
 
     // feedback loop #1: scale1 ⟷ scale2
     auto& scale1  = flow.emplaceBlock<Scale<float>>({{"name", "s1"}, {"scale_factor", 0.8f}, {"ui_constraints", layout_auto}});
@@ -788,7 +785,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "Basic Feedback Loop"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        gr::Graph                        graph         = getBasicFeedBackLoop(trace);
+        Graph                            graph         = getBasicFeedBackLoop(trace);
         std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
         expect(eq(feedbackLoops.size(), 1UZ));
         gr::graph::printFeedbackLoop(feedbackLoops.at(0UZ));
@@ -809,7 +806,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "Resampling Feedback Loop"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        gr::Graph                        graph         = getResamplingFeedbackLoop(trace);
+        Graph                            graph         = getResamplingFeedbackLoop(trace);
         std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
         expect(eq(feedbackLoops.size(), 1UZ));
         gr::graph::printFeedbackLoop(feedbackLoops.at(0UZ));
@@ -831,7 +828,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "Multiple Nested Feedback Loops"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        gr::Graph                        graph         = getMultipleNestedFeedbackLoops(trace);
+        Graph                            graph         = getMultipleNestedFeedbackLoops(trace);
         std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
         for (const auto& loop : feedbackLoops) {
             gr::graph::printFeedbackLoop(loop);
@@ -859,7 +856,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
     "IIR Form II Feedback Loops"_test = [] {
         std::shared_ptr<Tracer>          trace         = std::make_shared<Tracer>();
-        gr::Graph                        graph         = getIIRFormII(trace);
+        Graph                            graph         = getIIRFormII(trace);
         std::vector<graph::FeedbackLoop> feedbackLoops = gr::graph::detectFeedbackLoops(graph);
         for (const auto& loop : feedbackLoops) {
             gr::graph::printFeedbackLoop(loop);
@@ -1048,10 +1045,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         using namespace gr;
         using namespace gr::testing;
 
-        gr::Graph flow;
-        auto&     source  = flow.emplaceBlock<NullSource<float>>();
-        auto&     monitor = flow.emplaceBlock<BusyLoopBlock<float>>();
-        auto&     sink    = flow.emplaceBlock<NullSink<float>>();
+        Graph flow;
+        auto& source  = flow.emplaceBlock<NullSource<float>>();
+        auto& monitor = flow.emplaceBlock<BusyLoopBlock<float>>();
+        auto& sink    = flow.emplaceBlock<NullSink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
@@ -1230,7 +1227,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "print topologies"_test = [] {
-        auto runTest = [](std::string name, auto&& graph) {
+        auto runTest = [](std::string name, gr::Graph&& graph) {
             for (auto& loop : gr::graph::detectFeedbackLoops(graph)) {
                 gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
             }

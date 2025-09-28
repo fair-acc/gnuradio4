@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
 
     gr::Size_t         nSamples         = 0U;
     gr::Size_t         evaluatePerfRate = 100'000;
-    gr::Graph          testGraph;
+    Graph              testGraph;
     const property_map srcParameter = {{"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", true}};
     auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
 

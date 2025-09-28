@@ -116,7 +116,7 @@ const boost::ut::suite SettingsTests = [] {
     using namespace gr::test;
 
     "basic node settings tag"_test = [] {
-        gr::Graph            testGraph;
+        Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->SettingsChangeRecorder->Sink flow graph
         auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
@@ -398,7 +398,7 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "basic decimation test"_test = []() {
-        gr::Graph            testGraph;
+        Graph                testGraph;
         constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         auto&                src       = testGraph.emplaceBlock<Source<float>>({{"n_samples_max", n_samples}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.0f}});
         auto&                block1    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate1"}, {"input_chunk_size", gr::Size_t(2)}});
@@ -812,7 +812,7 @@ const boost::ut::suite CtxSettingsTests = [] {
 
         gr::Size_t         n_samples      = 20;
         bool               verboseConsole = true;
-        gr::Graph          testGraph;
+        Graph              testGraph;
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", verboseConsole}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
         const auto         timeNow      = std::chrono::system_clock::now();

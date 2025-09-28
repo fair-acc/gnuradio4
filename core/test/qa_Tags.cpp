@@ -227,7 +227,7 @@ const boost::ut::suite TagPropagation = [] {
         using namespace gr::testing;
         using namespace gr::tag;
         const gr::Size_t nSamples = 10;
-        gr::Graph        testGraph;
+        Graph            testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
         const property_map srcParametersOnlyAutoForward = {{SAMPLE_RATE.shortKey(), 42.f},    //
@@ -289,7 +289,7 @@ const boost::ut::suite TagPropagation = [] {
         using namespace gr::tag;
 
         const gr::Size_t nSamples = 100;
-        gr::Graph        testGraph;
+        Graph            testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
         const std::vector<Tag> tagsOnlyAutoForward = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 42.f}}),          //
@@ -389,7 +389,7 @@ const boost::ut::suite TagPropagation = [] {
 
     "CustomTagHandling"_test = []() {
         gr::Size_t         n_samples = 1024;
-        gr::Graph          testGraph;
+        Graph              testGraph;
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
         src._tags                       = {
@@ -425,9 +425,9 @@ const boost::ut::suite TagPropagation = [] {
         gr::Size_t nSamples = 45;
         gr::Size_t decim    = 10;
 
-        gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
-        src._tags     = {
+        Graph testGraph;
+        auto& src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
+        src._tags = {
             {0, {{"key", "value@0"}, {"key0", "value@0"}}},     //
             {4, {{"key", "value@4"}, {"key4", "value@4"}}},     //
             {5, {{"key", "value@5"}, {"key5", "value@5"}}},     //
@@ -485,7 +485,7 @@ const boost::ut::suite RepeatedTags = [] {
 
     auto runTest = []<auto srcType>(bool verbose = true) {
         gr::Size_t         n_samples = 30U;
-        gr::Graph          testGraph;
+        Graph              testGraph;
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
         src._tags                       = {{2, {{SAMPLE_RATE.shortKey(), 2.f}}}, {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, {8, {{SAMPLE_RATE.shortKey(), 8.f}}}};

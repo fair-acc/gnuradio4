@@ -385,8 +385,8 @@ public:
     [[nodiscard]] std::span<Edge>                              edges() noexcept { return _edges; }
 
     void clear() {
-        _edges.clear();
         _blocks.clear();
+        _edges.clear();
     }
 
     /**

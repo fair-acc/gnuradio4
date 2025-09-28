@@ -617,7 +617,7 @@ void syncOrAsyncTest() {
 
     using BlockType = SyncOrAsyncBlock<float, isInputAsync, isOutputAsync>;
 
-    gr::Graph         testGraph;
+    Graph             testGraph;
     auto&             tagSrc     = testGraph.emplaceBlock<TagSource<float>>({{"n_samples_max", n_samples}});
     auto&             asyncBlock = testGraph.emplaceBlock<BlockType>();
     auto&             sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
@@ -979,7 +979,7 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
         using namespace gr::tag;
 
         const gr::Size_t nSamples = 100;
-        gr::Graph        testGraph;
+        Graph            testGraph;
 
         auto createSrcTags = [](std::size_t srcNum) -> std::vector<Tag> {
             const property_map srcParams1 = {                         //

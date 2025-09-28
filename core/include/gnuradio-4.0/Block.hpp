@@ -703,7 +703,6 @@ public:
         return std::get<T>(*this);
     }
 
-    // TODO: These are not involved in move operations, might be a problem later
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{std::numeric_limits<std::size_t>::max()};
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{work::Status::OK};
@@ -723,7 +722,6 @@ public:
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
-    // TODO: These are not involved in move operations, might be a problem later
     gr::meta::immutable<std::size_t> unique_id   = _uniqueIdCounter++;
     gr::meta::immutable<std::string> unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
@@ -818,7 +816,6 @@ protected:
 public:
     Block() : Block(gr::property_map()) {}
     Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
-
     Block(property_map initParameters) noexcept(false)                                                     // N.B. throws in case of on contract violations
         : lifecycle::StateMachine<Derived>(),                                                              //
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //

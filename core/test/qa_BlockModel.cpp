@@ -267,9 +267,9 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
         auto& sinkBlock   = nestedGraph.emplaceBlock<NullSink<float>>();
 
         "find blocks in flattened graph"_test = [rootGraph, &sourceBlock, &sinkBlock] {
-            auto flatGraph = graph::flatten(*rootGraph);
-            auto src       = graph::findBlock(flatGraph, sourceBlock);
-            auto dst       = graph::findBlock(flatGraph, sinkBlock);
+            Graph flatGraph = graph::flatten(*rootGraph);
+            auto  src       = graph::findBlock(flatGraph, sourceBlock);
+            auto  dst       = graph::findBlock(flatGraph, sinkBlock);
             expect(src.has_value()) << [&src] { return std::format("sourceBlock not found in flattened graph: {}", src.error()); };
             expect(dst.has_value()) << [&dst] { return std::format("sinkBlock not found in flattened graph: {}", dst.error()); };
         };
