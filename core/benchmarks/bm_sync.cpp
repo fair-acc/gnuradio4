@@ -26,7 +26,7 @@ void runTest() {
     using namespace gr::basic;
     using namespace gr::testing;
 
-    gr::meta::indirect<gr::Graph> graph;
+    gr::Graph graph;
 
     const std::size_t nTags = 1; // we need at least 1 tag to synchronize samples
 
@@ -41,26 +41,26 @@ void runTest() {
         throw std::invalid_argument("incorrect TBlock type");
     }
 
-    auto& perfBlock = graph->emplaceBlock<TBlock>(perfBlockProperties);
+    auto& perfBlock = graph.emplaceBlock<TBlock>(perfBlockProperties);
 
     std::vector<TagSource<int, ProcessFunction::USE_PROCESS_BULK>*> sources;
     std::vector<TagSink<int, ProcessFunction::USE_PROCESS_BULK>*>   sinks;
 
     for (std::size_t i = 0; i < nPorts; i++) {
         property_map srcParams = {{"n_samples_max", nSamples}, {"verbose_console", false}, {"disconnect_on_done", false}};
-        sources.push_back(std::addressof(graph->emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
+        sources.push_back(std::addressof(graph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
         for (std::size_t iT = 0; iT < nTags; iT++) {
             const std::size_t   index = iT * nSamples / nTags + 1;
             const std::uint64_t time  = iT * 100;
             sources[i]->_tags.push_back(genSyncTag(index, time));
         }
-        expect(gr::ConnectionResult::SUCCESS == graph->connect(*sources[i], "out"s, perfBlock, "inputs#"s + std::to_string(i)));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, perfBlock, "inputs#"s + std::to_string(i)));
     }
 
     for (std::size_t i = 0; i < nPorts; i++) {
         property_map sinkParams = {{"log_samples", false}, {"log_tags", false}, {"verbose_console", false}, {"disconnect_on_done", false}};
-        sinks.push_back(std::addressof(graph->emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
-        expect(gr::ConnectionResult::SUCCESS == graph->connect(perfBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
+        sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(perfBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
     }
 
     gr::scheduler::Simple sched;
@@ -80,7 +80,7 @@ void runTestPureCopy() {
     using namespace gr::basic;
     using namespace gr::testing;
 
-    gr::meta::indirect<gr::Graph> graph;
+    gr::Graph graph;
 
     std::vector<TagSource<int, ProcessFunction::USE_PROCESS_BULK>*> sources;
     std::vector<TagSink<int, ProcessFunction::USE_PROCESS_BULK>*>   sinks;
@@ -88,13 +88,13 @@ void runTestPureCopy() {
 
     for (std::size_t i = 0; i < nPorts; i++) {
         property_map srcParams = {{"n_samples_max", nSamples}, {"verbose_console", false}, {"disconnect_on_done", false}};
-        sources.push_back(std::addressof(graph->emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
-        copies.push_back(std::addressof(graph->emplaceBlock<Copy<int>>()));
+        sources.push_back(std::addressof(graph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
+        copies.push_back(std::addressof(graph.emplaceBlock<Copy<int>>()));
         property_map sinkParams = {{"log_samples", false}, {"log_tags", false}, {"verbose_console", false}, {"disconnect_on_done", false}};
-        sinks.push_back(std::addressof(graph->emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
+        sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
 
-        expect(gr::ConnectionResult::SUCCESS == graph->connect(*sources[i], "out"s, *copies[i], "in"s));
-        expect(gr::ConnectionResult::SUCCESS == graph->connect(*copies[i], "out"s, *sinks[i], "in"s));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, *copies[i], "in"s));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*copies[i], "out"s, *sinks[i], "in"s));
     }
 
     gr::scheduler::Simple sched;

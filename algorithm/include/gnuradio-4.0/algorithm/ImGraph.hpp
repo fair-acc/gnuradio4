@@ -2260,12 +2260,12 @@ std::vector<Point<T>> routeDijkstra(const gr::utf8::ImCanvasLike auto& canvas, c
 template<typename TGraph, gr::arithmetic_or_complex_like T = std::size_t>
 requires(std::is_same_v<std::remove_reference_t<TGraph>, gr::Graph>)
 [[nodiscard]] static std::string draw(TGraph&& graph, const LayoutPreference& config = {}) {
-    std::vector<gr::meta::indirect<gr::Graph>> graphs = gr::graph::weaklyConnectedComponents(std::forward<TGraph>(graph));
+    std::vector<gr::Graph> graphs = gr::graph::weaklyConnectedComponents(std::forward<TGraph>(graph));
     if (graphs.size() > 1UZ) {
         std::string      ret;
         LayoutPreference subGraphConfig = config;
         for (auto& g : graphs) {
-            ret += draw(*g, subGraphConfig);
+            ret += draw(g, subGraphConfig);
             subGraphConfig.minMargin = 0UZ; // ignore margins for subsequent graphs
         }
         return ret;

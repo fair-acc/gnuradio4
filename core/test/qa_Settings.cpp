@@ -116,10 +116,10 @@ const boost::ut::suite SettingsTests = [] {
     using namespace gr::test;
 
     "basic node settings tag"_test = [] {
-        gr::meta::indirect<Graph> testGraph;
-        constexpr gr::Size_t      n_samples = gr::util::round_up(1'000'000, 1024);
+        gr::Graph            testGraph;
+        constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
         // define basic Sink->SettingsChangeRecorder->Sink flow graph
-        auto& src = testGraph->emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
+        auto& src = testGraph.emplaceBlock<Source<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 42.f}, {"n_samples_max", n_samples}});
         expect(eq(src.settings().defaultParameters().size(), 10UZ)); // 7 base + 2 derived
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
         expect(eq(src.settings().getStored().value().size(), 10UZ));
@@ -130,8 +130,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(src.settings().autoUpdateParameters().size(), 4UL)); // 3 base + 0 derived
         expect(eq(src.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
 
-        auto& block1 = testGraph->emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#1"}});
-        auto& block2 = testGraph->emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#2"}});
+        auto& block1 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#1"}});
+        auto& block2 = testGraph.emplaceBlock<SettingsChangeRecorder<float>>({{"name", "SettingsChangeRecorder#2"}});
         expect(eq(block1.settings().defaultParameters().size(), 16UZ));
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
         expect(eq(block1.settings().getStored().value().size(), 16UZ));
@@ -140,7 +140,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().autoUpdateParameters().size(), 11UL));
         expect(eq(block1.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
 
-        auto& sink = testGraph->emplaceBlock<Sink<float>>();
+        auto& sink = testGraph.emplaceBlock<Sink<float>>();
         expect(eq(sink.settings().defaultParameters().size(), 10UZ)); // 8 base + 2 derived
         expect(eq(sink.settings().getNStoredParameters(), 1UZ));
         expect(eq(sink.settings().getStored().value().size(), 10UZ));
@@ -193,9 +193,9 @@ const boost::ut::suite SettingsTests = [] {
         block1.settings().updateActiveParameters();
 
         // src -> block1 -> block2 -> sink
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).to<"in">(block1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(block1).to<"in">(block2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(block2).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         expect(!src.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "manual setting disable auto-update";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
@@ -398,21 +398,21 @@ const boost::ut::suite SettingsTests = [] {
     };
 
     "basic decimation test"_test = []() {
-        gr::meta::indirect<Graph> testGraph;
-        constexpr gr::Size_t      n_samples = gr::util::round_up(1'000'000, 1024);
-        auto&                     src       = testGraph->emplaceBlock<Source<float>>({{"n_samples_max", n_samples}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.0f}});
-        auto&                     block1    = testGraph->emplaceBlock<Decimate<float>>({{"name", "Decimate1"}, {"input_chunk_size", gr::Size_t(2)}});
-        auto&                     block2    = testGraph->emplaceBlock<Decimate<float>>({{"name", "Decimate2"}, {"input_chunk_size", gr::Size_t(5)}});
-        auto&                     sink      = testGraph->emplaceBlock<Sink<float>>();
+        gr::Graph            testGraph;
+        constexpr gr::Size_t n_samples = gr::util::round_up(1'000'000, 1024);
+        auto&                src       = testGraph.emplaceBlock<Source<float>>({{"n_samples_max", n_samples}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.0f}});
+        auto&                block1    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate1"}, {"input_chunk_size", gr::Size_t(2)}});
+        auto&                block2    = testGraph.emplaceBlock<Decimate<float>>({{"name", "Decimate2"}, {"input_chunk_size", gr::Size_t(5)}});
+        auto&                sink      = testGraph.emplaceBlock<Sink<float>>();
 
         // check input_chunk_size
         expect(eq(block1.input_chunk_size, std::size_t(2)));
         expect(eq(block2.input_chunk_size, std::size_t(5)));
 
         // src -> block1 -> block2 -> sink
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).to<"in">(block1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(block1).to<"in">(block2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(block2).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -810,12 +810,12 @@ const boost::ut::suite CtxSettingsTests = [] {
     "CtxSettings autoUpdateParameters"_test = [&] {
         using namespace gr::testing;
 
-        gr::Size_t                n_samples      = 20;
-        bool                      verboseConsole = true;
-        gr::meta::indirect<Graph> testGraph;
-        const property_map        srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", verboseConsole}};
-        auto&                     src          = testGraph->emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
-        const auto                timeNow      = std::chrono::system_clock::now();
+        gr::Size_t         n_samples      = 20;
+        bool               verboseConsole = true;
+        gr::Graph          testGraph;
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", verboseConsole}};
+        auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
+        const auto         timeNow      = std::chrono::system_clock::now();
 
         for (std::size_t i = 0; i < 10; i++) {
             src._tags.push_back(gr::Tag(i, {{gr::tag::SAMPLE_RATE.shortKey(), static_cast<float>(i)}}));
@@ -826,17 +826,17 @@ const boost::ut::suite CtxSettingsTests = [] {
         src._tags.push_back({18, {{gr::tag::SAMPLE_RATE.shortKey(), 18.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
                                      {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name10"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
 
-        auto& monitorBulk = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
-        auto& monitorOne  = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
-        auto& sinkBulk    = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
-        auto& sinkOne     = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& sinkBulk    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& sinkOne     = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
 
         //                                  -> sinkOne
         // src -> monitorBulk -> monitorOne -> sinkBulk
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).to<"in">(monitorBulk)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorBulk).to<"in">(monitorOne)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorOne).to<"in">(sinkBulk)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorOne).to<"in">(sinkOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitorBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk).to<"in">(monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

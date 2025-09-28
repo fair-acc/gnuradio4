@@ -29,9 +29,9 @@ class TestScheduler {
     using TScheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>;
     std::future<std::expected<void, gr::Error>> schedulerRet_;
 
-    auto&& withTestingSourceAndSink(gr::meta::indirect<gr::Graph>&& graph) const noexcept {
-        graph->emplaceBlock<gr::testing::SlowSource<float>>();
-        graph->emplaceBlock<gr::testing::CountingSink<float>>();
+    auto&& withTestingSourceAndSink(gr::Graph&& graph) const noexcept {
+        graph.emplaceBlock<gr::testing::SlowSource<float>>();
+        graph.emplaceBlock<gr::testing::CountingSink<float>>();
         return graph;
     }
 
@@ -40,7 +40,7 @@ public:
     gr::MsgPortOut toScheduler;
     gr::MsgPortIn  fromScheduler;
 
-    TestScheduler(gr::meta::indirect<gr::Graph> graph, bool addTestSourceAndSink = true) {
+    TestScheduler(gr::Graph&& graph, bool addTestSourceAndSink = true) {
         if (auto ret = scheduler_.exchange(addTestSourceAndSink ? std::move(withTestingSourceAndSink(std::move(graph))) : std::move(graph)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
@@ -100,7 +100,7 @@ const boost::ut::suite TopologyGraphTests = [] {
     expect(fatal(gt(context->registry.keys().size(), 0UZ))) << "didn't register any blocks";
 
     "Block addition tests"_test = [] {
-        TestScheduler scheduler(gr::meta::indirect<gr::Graph>(context->loader));
+        TestScheduler scheduler(gr::Graph(context->loader));
 
         "Add a valid block"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, //

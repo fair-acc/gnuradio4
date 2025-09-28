@@ -226,8 +226,8 @@ const boost::ut::suite TagPropagation = [] {
     "TagPropagation autoForwardParameters constructor"_test = [&] {
         using namespace gr::testing;
         using namespace gr::tag;
-        const gr::Size_t          nSamples = 10;
-        gr::meta::indirect<Graph> testGraph;
+        const gr::Size_t nSamples = 10;
+        gr::Graph        testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
         const property_map srcParametersOnlyAutoForward = {{SAMPLE_RATE.shortKey(), 42.f},    //
@@ -247,14 +247,14 @@ const boost::ut::suite TagPropagation = [] {
         property_map srcParameter = srcParametersOnlyAutoForward;
         srcParameter.insert({"not_auto_forward_parameter", 42.f});
         //
-        auto& src              = testGraph->emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}});
-        auto& autoForwardBlock = testGraph->emplaceBlock<AutoForwardParametersBlock<float>>(srcParameter);
-        auto& monitor          = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitor"}});
-        auto& sink             = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
+        auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}});
+        auto& autoForwardBlock = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>(srcParameter);
+        auto& monitor          = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitor"}});
+        auto& sink             = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).to<"in">(autoForwardBlock)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(autoForwardBlock).to<"in">(monitor)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitor).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(autoForwardBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(autoForwardBlock).to<"in">(monitor)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor).to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -288,8 +288,8 @@ const boost::ut::suite TagPropagation = [] {
         using namespace gr::testing;
         using namespace gr::tag;
 
-        const gr::Size_t          nSamples = 100;
-        gr::meta::indirect<Graph> testGraph;
+        const gr::Size_t nSamples = 100;
+        gr::Graph        testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
         const std::vector<Tag> tagsOnlyAutoForward = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 42.f}}),          //
@@ -309,26 +309,26 @@ const boost::ut::suite TagPropagation = [] {
         std::vector<Tag> tags = tagsOnlyAutoForward;
         tags.push_back(gr::Tag(14UZ, {{"not_auto_forward_parameter", 42.f}}));
 
-        auto& src              = testGraph->emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}, {"verbose_console", true && verbose}});
+        auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}, {"verbose_console", true && verbose}});
         src._tags              = tags;
-        auto& monitorOne       = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"verbose_console", true && verbose}});
-        auto& monitorBulk1     = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk1"}, {"verbose_console", true && verbose}});
-        auto& autoForwardBlock = testGraph->emplaceBlock<AutoForwardParametersBlock<float>>({{"name", "AutoForwardParametersBlock"}});
-        auto& monitorBulk2     = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk2"}, {"verbose_console", true && verbose}});
-        auto& sinkOne          = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"verbose_console", true && verbose}});
-        auto& sinkBulk         = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkBulk"}, {"verbose_console", true && verbose}});
+        auto& monitorOne       = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"verbose_console", true && verbose}});
+        auto& monitorBulk1     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk1"}, {"verbose_console", true && verbose}});
+        auto& autoForwardBlock = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>({{"name", "AutoForwardParametersBlock"}});
+        auto& monitorBulk2     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk2"}, {"verbose_console", true && verbose}});
+        auto& sinkOne          = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"verbose_console", true && verbose}});
+        auto& sinkBulk         = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkBulk"}, {"verbose_console", true && verbose}});
 
         // - monitorOne receives *all* Tags from src, but only publishes autoForward Tags.
         // - monitorBulk1 receives 'autoForward' Tags and republishes them.
         // - autoForwardBlock then receives the 'autoForward' Tags and performs applyStagedSettings and republish applied/forward settings, `not_auto_forward_parameter` is not changed
         // src -> monitorOne -> monitorBulk1 -> autoForwardBlock -> monitorBulk2 ┬─> sinkOne
         //                                                                       └─> sinkOne
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).to<"in">(monitorOne)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorOne).to<"in">(monitorBulk1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorBulk1).to<"in">(autoForwardBlock)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(autoForwardBlock).to<"in">(monitorBulk2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorBulk2).to<"in">(sinkOne)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorBulk2).to<"in">(sinkBulk)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(monitorBulk1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk1).to<"in">(autoForwardBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(autoForwardBlock).to<"in">(monitorBulk2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk2).to<"in">(sinkOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk2).to<"in">(sinkBulk)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -388,11 +388,11 @@ const boost::ut::suite TagPropagation = [] {
     "TagPropagation autoForwardParameters tags from TagSource<float, USE_PROCESS_ONE>"_test  = [&] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
 
     "CustomTagHandling"_test = []() {
-        gr::Size_t                n_samples = 1024;
-        gr::meta::indirect<Graph> testGraph;
-        const property_map        srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
-        auto&                     src          = testGraph->emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
-        src._tags                              = {
+        gr::Size_t         n_samples = 1024;
+        gr::Graph          testGraph;
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
+        auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
+        src._tags                       = {
             {0, {{"key", "value@0"}, {"key0", "value@0"}}},          //
             {1, {{"key", "value@1"}, {"key1", "value@1"}}},          //
             {100, {{"key", "value@100"}, {"key2", "value@100"}}},    //
@@ -403,12 +403,12 @@ const boost::ut::suite TagPropagation = [] {
             {1023, {{"key", "value@1023"}, {"key7", "value@1023"}}}  //
         };
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
-        auto& realign = testGraph->emplaceBlock<RealignTagsToChunks<float>>();
-        auto& sink    = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true}});
+        auto& realign = testGraph.emplaceBlock<RealignTagsToChunks<float>>();
+        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true}});
 
         // [ TagSource ] -> [ tag realign block ] -> [ TagSink ]
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).template to<"inPort">(realign)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"outPort">(realign).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"inPort">(realign)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outPort">(realign).to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -425,9 +425,9 @@ const boost::ut::suite TagPropagation = [] {
         gr::Size_t nSamples = 45;
         gr::Size_t decim    = 10;
 
-        gr::meta::indirect<Graph> testGraph;
-        auto&                     src = testGraph->emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
-        src._tags                     = {
+        gr::Graph testGraph;
+        auto&     src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
+        src._tags     = {
             {0, {{"key", "value@0"}, {"key0", "value@0"}}},     //
             {4, {{"key", "value@4"}, {"key4", "value@4"}}},     //
             {5, {{"key", "value@5"}, {"key5", "value@5"}}},     //
@@ -437,13 +437,13 @@ const boost::ut::suite TagPropagation = [] {
             {35, {{"key", "value@35"}, {"key35", "value@35"}}}  //
         };
 
-        auto&                    decimator             = testGraph->emplaceBlock<TDecimator>({{"decim", decim}});
+        auto&                    decimator             = testGraph.emplaceBlock<TDecimator>({{"decim", decim}});
         std::vector<std::string> customAutoForwardKeys = {"key", "key0", "key4", "key5", "key15", "key20", "key25", "key35"};
         decimator.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
-        auto& sink = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", true}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", true}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).template to<"in">(decimator)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(decimator).template to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(decimator)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(decimator).template to<"in">(sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -484,18 +484,18 @@ const boost::ut::suite RepeatedTags = [] {
     using namespace gr::testing;
 
     auto runTest = []<auto srcType>(bool verbose = true) {
-        gr::Size_t                n_samples = 30U;
-        gr::meta::indirect<Graph> testGraph;
-        const property_map        srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
-        auto&                     src          = testGraph->emplaceBlock<TagSource<float, srcType>>(srcParameter);
-        src._tags                              = {{2, {{SAMPLE_RATE.shortKey(), 2.f}}}, {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, {8, {{SAMPLE_RATE.shortKey(), 8.f}}}};
+        gr::Size_t         n_samples = 30U;
+        gr::Graph          testGraph;
+        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
+        auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
+        src._tags                       = {{2, {{SAMPLE_RATE.shortKey(), 2.f}}}, {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, {8, {{SAMPLE_RATE.shortKey(), 8.f}}}};
 
-        auto& monitorOne = testGraph->emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
-        auto& sinkOne    = testGraph->emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+        auto& monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+        auto& sinkOne    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
 
         // src -> monitorOne -> sinkOne
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(src).template to<"in">(monitorOne)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph->connect<"out">(monitorOne).to<"in">(sinkOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

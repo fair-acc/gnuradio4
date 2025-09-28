@@ -296,17 +296,17 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
             // sub-graph#3 -- only one block, no connections
             std::ignore = graph.emplaceBlock<gr::testing::NullSource<float>>();
 
-            std::vector<gr::meta::indirect<gr::Graph>> subgraphs = gr::graph::weaklyConnectedComponents(graph);
+            std::vector<gr::Graph> subgraphs = gr::graph::weaklyConnectedComponents(graph);
 
             using std::views::transform;
             using std::ranges::to;
-            const auto sizes = subgraphs | transform([](const auto& sg) { return sg->blocks().size(); }) | to<std::vector<std::size_t>>();
+            const auto sizes = subgraphs | transform([](const auto& sg) { return sg.blocks().size(); }) | to<std::vector<std::size_t>>();
 
             expect(eq(sizes.size(), 3UZ));
             expect(std::ranges::is_sorted(sizes, std::greater{}));
             expect(eq(sizes, std::vector{2UZ, 2UZ, 1UZ}));
 
-            const auto esz = subgraphs | transform([](const auto& sg) { return sg->edges().size(); }) | to<std::vector<std::size_t>>();
+            const auto esz = subgraphs | transform([](const auto& sg) { return sg.edges().size(); }) | to<std::vector<std::size_t>>();
             expect(eq(esz, std::vector{1UZ, 1UZ, 0UZ}));
         };
     };

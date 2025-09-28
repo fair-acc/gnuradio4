@@ -8,7 +8,6 @@
 #include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Sequence.hpp>
-#include <gnuradio-4.0/meta/indirect.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
@@ -836,7 +835,7 @@ AdjacencyList computeAdjacencyList(const GraphLike auto& root) {
     return result;
 }
 
-std::vector<gr::meta::indirect<gr::Graph>> weaklyConnectedComponents(const GraphLike auto& graph) {
+std::vector<gr::Graph> weaklyConnectedComponents(const GraphLike auto& graph) {
     const auto        blocksSpan = graph.blocks();
     const std::size_t N          = blocksSpan.size();
 
@@ -902,13 +901,13 @@ std::vector<gr::meta::indirect<gr::Graph>> weaklyConnectedComponents(const Graph
         compRank[order[rank]] = rank;
     }
 
-    std::vector<gr::meta::indirect<gr::Graph>> result(order.size());
+    std::vector<gr::Graph> result(order.size());
     for (std::size_t rank = 0; rank < order.size(); ++rank) {
         const auto cid = order[rank];
         auto&      g   = result[rank];
-        g->clear();
+        g.clear();
         for (auto idx : comps[cid]) {
-            g->addBlock(blocksSpan[idx], /*initBlock=*/false);
+            g.addBlock(blocksSpan[idx], /*initBlock=*/false);
         }
     }
 
@@ -924,7 +923,7 @@ std::vector<gr::meta::indirect<gr::Graph>> weaklyConnectedComponents(const Graph
         const auto cidD = compId[itD->second];
         if (cidS >= 0 && cidS == cidD) {
             const auto rank = compRank[static_cast<std::size_t>(cidS)];
-            result[rank]->addEdge(e); // shallow edge copy: same blocks/ports
+            result[rank].addEdge(e); // shallow edge copy: same blocks/ports
         }
     }
 
