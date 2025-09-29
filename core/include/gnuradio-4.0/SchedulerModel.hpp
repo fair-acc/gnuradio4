@@ -74,6 +74,13 @@ public:
     }
 
     void stop() override {
+        if (this->blockRef().changeStateTo(gr::lifecycle::State::REQUESTED_STOP)) {
+            // transitions to stopped/error do not fail
+            std::ignore = this->blockRef().changeStateTo(gr::lifecycle::State::STOPPED);
+        } else {
+            std::ignore = this->blockRef().changeStateTo(gr::lifecycle::State::ERROR);
+        }
+
         if (_schedulerThread.joinable()) {
             _schedulerThread.join();
         }

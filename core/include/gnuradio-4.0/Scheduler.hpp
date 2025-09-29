@@ -494,21 +494,21 @@ protected:
         }
 
         std::lock_guard lock(_executionOrderMutex);
+
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { //
-            if (block.blockCategory() == TransparentBlockGroup) {
+            if (block->blockCategory() == ScheduledBlockGroup) {
+                // We don't simply move to RUNNING, as schedulers block. This code path
+                // uses a separate thread.
+                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
+                if (schedulerModel) {
+                    schedulerModel->start();
+                } else {
+                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block.uniqueName()));
+                }
+            } else {
                 this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
             }
         });
-
-        graph::forEachBlock<ScheduledBlockGroup>(
-            _graph,
-            [](auto& block) { //
-                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
-                assert(schedulerModel);
-                schedulerModel->start();
-
-            },
-            block::Category::ScheduledBlockGroup);
 
         // start watchdog
         auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
@@ -670,15 +670,18 @@ protected:
     void stop() {
         using enum lifecycle::State;
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) {
-            this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(REQUESTED_STOP));
-            if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
-                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(STOPPED));
-            }
-
             if (block->blockCategory() == ScheduledBlockGroup) {
                 auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
-                assert(schedulerModel);
-                schedulerModel->stop();
+                if (schedulerModel) {
+                    schedulerModel->stop();
+                } else {
+                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block.uniqueName()));
+                }
+            } else {
+                this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(REQUESTED_STOP));
+                if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
+                    this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(STOPPED));
+                }
             }
         });
 
