@@ -495,8 +495,20 @@ protected:
 
         std::lock_guard lock(_executionOrderMutex);
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { //
-            this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
+            if (block.blockCategory() == TransparentBlockGroup) {
+                this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
+            }
         });
+
+        graph::forEachBlock<ScheduledBlockGroup>(
+            _graph,
+            [](auto& block) { //
+                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
+                assert(schedulerModel);
+                schedulerModel->start();
+
+            },
+            block::Category::ScheduledBlockGroup);
 
         // start watchdog
         auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
@@ -661,6 +673,12 @@ protected:
             this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(REQUESTED_STOP));
             if (!block->isBlocking()) { // N.B. no other thread/constraint to consider before shutting down
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(STOPPED));
+            }
+
+            if (block->blockCategory() == ScheduledBlockGroup) {
+                auto* schedulerModel = dynamic_cast<SchedulerModel*>(block.get());
+                assert(schedulerModel);
+                schedulerModel->stop();
             }
         });
 

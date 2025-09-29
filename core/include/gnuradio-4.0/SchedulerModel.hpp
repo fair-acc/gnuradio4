@@ -4,6 +4,8 @@
 #include <gnuradio-4.0/BlockModel.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 
+#include <thread>
+
 namespace gr {
 
 class SchedulerModel {
@@ -28,6 +30,9 @@ public:
 
         return std::shared_ptr<BlockModel>(ptr, ptr->asBlockModel());
     }
+
+    virtual void start() = 0;
+    virtual void stop()  = 0;
 };
 
 template<BlockLike TScheduler>
@@ -48,6 +53,33 @@ public:
     void setGraph(gr::Graph&& graph) final { std::ignore = this->blockRef().exchange(std::move(graph)); }
 
     BlockModel* asBlockModel() final { return static_cast<BlockModel*>(this); }
+
+    void start() override {
+        auto& sched = this->blockRef();
+
+        if (sched.state() == gr::lifecycle::State::IDLE) {
+            std::ignore = sched.changeStateTo(gr::lifecycle::State::INITIALISED);
+        }
+
+        if (sched.state() != gr::lifecycle::State::INITIALISED) {
+            return;
+        }
+
+        _schedulerThread = std::thread([&sched] {
+            // this will invoke scheduler's start(), which blocks
+            if (!sched.changeStateTo(gr::lifecycle::State::RUNNING)) {
+                std::ignore = sched.changeStateTo(gr::lifecycle::State::ERROR);
+            }
+        });
+    }
+
+    void stop() override {
+        if (_schedulerThread.joinable()) {
+            _schedulerThread.join();
+        }
+    }
+
+    std::thread _schedulerThread;
 };
 
 } // namespace gr
