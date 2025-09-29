@@ -236,7 +236,7 @@ public:
 
     std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
         if (auto result = _schedulerRegistry->create(name, {})) {
-            return std::shared_ptr<gr::SchedulerModel>(reinterpret_cast<gr::SchedulerModel*>(result.release()));
+            return std::shared_ptr<gr::SchedulerModel>(result.release());
         }
 
         auto* plugin = pluginForSchedulerName(name);

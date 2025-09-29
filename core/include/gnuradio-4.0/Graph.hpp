@@ -130,7 +130,6 @@ protected:
 public:
     template<typename... Args>
     GraphWrapper(Args&&... args) : BlockWrapper<TSelf>(std::forward<Args>(args)...) {
-
         // We need to make sure nobody touches our dynamic ports
         // as this class will handle them
         this->_dynamicPortsLoader.instance = nullptr;
