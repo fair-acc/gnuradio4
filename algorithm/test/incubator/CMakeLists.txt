@@ -1,4 +1,7 @@
-add_ut_test(bench_pffft bench_pffft.cpp pffft.h) # pffft.cpp
+add_ut_test(bench_pffft bench_pffft.cpp SimdFFT.hpp) # pffft.cpp
 target_link_libraries(bench_pffft PUBLIC gnuradio-core vir)
-#target_compile_definitions(bench_pffft PRIVATE _USE_MATH_DEFINES)
-#target_compile_definitions(bench_pffft PRIVATE PFFFT_ENABLE_FLOAT)
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+    target_compile_options(bench_pffft PRIVATE -O0 -g)
+elseif(CMAKE_BUILD_TYPE MATCHES Release)
+    target_compile_options(bench_pffft PRIVATE -O3 -march=native)
+endif()
