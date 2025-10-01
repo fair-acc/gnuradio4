@@ -2258,6 +2258,7 @@ std::vector<Point<T>> routeDijkstra(const gr::utf8::ImCanvasLike auto& canvas, c
 //------------------------------------------------------
 
 template<typename TGraph, gr::arithmetic_or_complex_like T = std::size_t>
+requires(std::is_same_v<std::remove_reference_t<TGraph>, gr::Graph>)
 [[nodiscard]] static std::string draw(TGraph&& graph, const LayoutPreference& config = {}) {
     std::vector<gr::Graph> graphs = gr::graph::weaklyConnectedComponents(graph);
     if (graphs.size() > 1UZ) {

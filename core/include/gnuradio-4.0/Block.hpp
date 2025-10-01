@@ -11,6 +11,7 @@
 
 #include <gnuradio-4.0/meta/RangesHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/meta/immutable.hpp>
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
@@ -479,7 +480,7 @@ concept HasWork = requires(T t, std::size_t requested_work) {
 
 template<typename T>
 concept BlockLike = requires(T t, std::size_t requested_work) {
-    { t.unique_name } -> std::same_as<const std::string&>;
+    { t.unique_name } -> std::convertible_to<const std::string&>;
     { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
     { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
     { t.description } noexcept -> std::same_as<const std::string_view&>;
@@ -702,7 +703,6 @@ public:
         return std::get<T>(*this);
     }
 
-    // TODO: These are not involved in move operations, might be a problem later
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{std::numeric_limits<std::size_t>::max()};
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{work::Status::OK};
@@ -722,9 +722,8 @@ public:
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
-    // TODO: These are not involved in move operations, might be a problem later
-    const std::size_t unique_id   = _uniqueIdCounter++;
-    const std::string unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    gr::meta::immutable<std::size_t> unique_id   = _uniqueIdCounter++;
+    gr::meta::immutable<std::string> unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
@@ -831,50 +830,21 @@ public:
     }
 
     Block(Block&& other) noexcept
-        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
-          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
-          stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)),                                         //
-          msgOut(std::move(other.msgOut)), propertySubscriptions(std::move(other.propertySubscriptions)),                                                        //
-          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
-          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
-          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                                                                                    //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                                                                                            //
+          stride(std::move(other.stride)),                                                                                                                                                                                       //
+          disconnect_on_done(other.disconnect_on_done),                                                                                                                                                                          //
+          compute_domain(std::move(other.compute_domain)),                                                                                                                                                                       //
+          strideCounter(other.strideCounter),                                                                                                                                                                                    //
+          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                                                                                         //
+          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                                                                                  //
+          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                                                                                        //
+          propertyCallbacks(std::move(other.propertyCallbacks)), propertySubscriptions(std::move(other.propertySubscriptions)), inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
+          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)),                                                                 //
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                                                                                              //
+    {}
 
-    Block& operator=(Block&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
-        lifecycle::StateMachine<Derived>::operator=(std::move(other));
-
-        if constexpr (!ResamplingControl::kIsConst) {
-            input_chunk_size  = std::move(other.input_chunk_size);
-            output_chunk_size = std::move(other.output_chunk_size);
-        }
-        if constexpr (!StrideControl::kIsConst) {
-            stride = std::move(other.stride);
-        }
-        disconnect_on_done = std::move(other.disconnect_on_done);
-        compute_domain     = std::move(other.compute_domain);
-        name               = std::move(other.name);
-        ui_constraints     = std::move(other.ui_constraints);
-        meta_information   = std::move(other.meta_information);
-
-        strideCounter         = std::move(other.strideCounter);
-        msgIn                 = std::move(other.msgIn);
-        msgOut                = std::move(other.msgOut);
-        propertySubscriptions = std::move(other.propertySubscriptions);
-
-        // Reset caches (they are not movable due to Derived &_self)
-        new (&inputStreamCache) PortCache<Derived, PortDirection::INPUT, PortType::STREAM>(static_cast<Derived&>(*this));
-        new (&outputStreamCache) PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM>(static_cast<Derived&>(*this));
-
-        _mergedInputTag    = std::move(other._mergedInputTag);
-        _outputTagsChanged = std::move(other._outputTagsChanged);
-        _outputTags        = std::move(other._outputTags);
-        _settings.assignFrom(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)));
-
-        return *this;
-    }
+    Block& operator=(Block&& other) noexcept = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {

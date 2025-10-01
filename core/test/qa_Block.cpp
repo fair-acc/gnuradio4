@@ -561,7 +561,6 @@ void interpolation_decimation_test(const IntDecTestData& data) {
     }
 
     gr::scheduler::Simple<> sched;
-    ;
     if (auto ret = sched.exchange(std::move(flow)); !ret) {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }
@@ -594,7 +593,6 @@ void stride_test(const StrideTestData& data) {
     }
 
     gr::scheduler::Simple<> sched;
-    ;
     if (auto ret = sched.exchange(std::move(flow)); !ret) {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }

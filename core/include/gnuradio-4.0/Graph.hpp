@@ -242,9 +242,10 @@ private:
 };
 
 struct Graph : Block<Graph> {
-    std::shared_ptr<gr::Sequence>            _progress = std::make_shared<gr::Sequence>();
     std::vector<Edge>                        _edges;
     std::vector<std::shared_ptr<BlockModel>> _blocks;
+
+    std::shared_ptr<gr::Sequence> _progress = std::make_shared<gr::Sequence>();
 
     gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
 
@@ -368,32 +369,20 @@ public:
 
     Graph(gr::PluginLoader& pluginLoader) : Graph(property_map{}) { _pluginLoader = std::addressof(pluginLoader); }
 
-    Graph(Graph&)            = delete; // there can be only one owner of Graph
-    Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
-    Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { assignFrom(std::move(other)); }
-    Graph& assignFrom(Graph&& other) noexcept {
-        compute_domain = std::move(other.compute_domain);
-        _progress      = std::move(other._progress);
-        _edges         = std::move(other._edges);
-        _blocks        = std::move(other._blocks);
+    Graph(Graph&& other)
+        : gr::Block<gr::Graph>(std::move(other)),                             //
+          _edges(std::move(other._edges)), _blocks(std::move(other._blocks)), //
+          _progress(std::move(other._progress)),                              //
+          _pluginLoader(std::exchange(other._pluginLoader, nullptr)) {}
 
-        return *this;
-    }
+    Graph(Graph&)                   = delete; // there can be only one owner of Graph
+    Graph& operator=(Graph&)        = delete; // there can be only one owner of Graph
+    Graph& operator=(Graph&& other) = delete;
 
-    Graph& operator=(Graph&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
-        Block<Graph>::operator=(std::move(other));
-
-        return assignFrom(std::move(other));
-    }
-
-    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
-    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return {_blocks}; }
-    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return {_edges}; }
-    [[nodiscard]] std::span<Edge>                              edges() noexcept { return {_edges}; }
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _blocks; }
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _blocks; }
+    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return _edges; }
+    [[nodiscard]] std::span<Edge>                              edges() noexcept { return _edges; }
 
     void clear() {
         _blocks.clear();
@@ -760,7 +749,7 @@ template<block::Category traverseCategory, typename Fn>
 void traverseSubgraphs(GraphLike auto const& root, Fn&& visitGraph) {
     using enum block::Category;
 
-    auto recurse = [&visitGraph](GraphLike auto const& graph, auto& self) -> void {
+    auto recurse = [&visitGraph](const GraphLike auto& graph, auto& self) -> void {
         visitGraph(graph);
 
         for (const auto& block : graph.blocks()) {
@@ -783,7 +772,7 @@ template<block::Category traverseCategory, typename Fn>
 void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filter = block::Category::All) {
     using enum block::Category;
 
-    detail::traverseSubgraphs<traverseCategory>(root, [&](GraphLike auto const& graph) {
+    detail::traverseSubgraphs<traverseCategory>(root, [&](const GraphLike auto& graph) {
         for (auto& block : graph.blocks()) {
             const block::Category cat = block->blockCategory();
             if (filter == All || cat == filter) {
@@ -804,7 +793,7 @@ template<block::Category traverseCategory, typename Fn>
 void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
     using enum Edge::EdgeState;
 
-    detail::traverseSubgraphs<traverseCategory>(root, [&](auto const& graph) {
+    detail::traverseSubgraphs<traverseCategory>(root, [&](const GraphLike auto& graph) {
         for (auto& edge : graph.edges()) {
             if (filter == Unknown || edge._state == filter) {
                 function(edge);
@@ -825,7 +814,6 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
     using enum block::Category;
 
     gr::Graph flattenedGraph;
-    flattenedGraph._progress = root._progress;
     gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
     std::ranges::for_each(root.edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); // add edges from root graph
 
@@ -847,7 +835,7 @@ AdjacencyList computeAdjacencyList(const GraphLike auto& root) {
     return result;
 }
 
-inline std::vector<gr::Graph> weaklyConnectedComponents(const gr::Graph& graph) {
+std::vector<gr::Graph> weaklyConnectedComponents(const GraphLike auto& graph) {
     const auto        blocksSpan = graph.blocks();
     const std::size_t N          = blocksSpan.size();
 
@@ -973,8 +961,7 @@ struct FeedbackLoop {
     std::vector<Edge> edges;
 };
 
-template<GraphLike TGraph>
-std::vector<FeedbackLoop> detectFeedbackLoops(const TGraph& graph) {
+std::vector<FeedbackLoop> detectFeedbackLoops(const GraphLike auto& graph) {
     enum class VisitState { Unvisited, Gray, Black };
 
     std::unordered_map<std::shared_ptr<BlockModel>, VisitState> visited;
@@ -1312,7 +1299,7 @@ private:
     }
 
 public:
-    constexpr MergedGraph(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
+    constexpr MergedGraph(Left&& l, Right&& r) : left(std::move(l)), right(std::move(r)) {}
 
     // if the left block (source) implements available_samples (a customization point), then pass the call through
     friend constexpr std::size_t available_samples(const MergedGraph& self) noexcept
@@ -1419,7 +1406,7 @@ constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>,
             gr::meta::message_type<"INPUT_PORTS_ARE:">,                                                                                                                                                                 //
             typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
     }
-    return {std::forward<A>(a), std::forward<B>(b)};
+    return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>(std::forward<A>(a), std::forward<B>(b));
 }
 
 /**

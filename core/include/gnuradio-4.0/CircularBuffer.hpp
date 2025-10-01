@@ -248,6 +248,11 @@ class CircularBuffer {
               _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
               _claimStrategy(ClaimType(_size)) {}
 
+        BufferImpl(const BufferImpl&)            = delete;
+        BufferImpl(BufferImpl&&)                 = delete;
+        BufferImpl& operator=(const BufferImpl&) = delete;
+        BufferImpl& operator=(BufferImpl&&)      = delete;
+
 #ifdef HAS_POSIX_MAP_INTERFACE
         static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
             if (_isMmapAllocated) {
@@ -721,6 +726,13 @@ public:
     CircularBuffer() = delete;
     explicit CircularBuffer(std::size_t minSize, Allocator allocator = DefaultAllocator()) : _sharedBufferPtr(std::make_shared<BufferImpl>(minSize, allocator)) {}
     ~CircularBuffer() = default;
+
+    // CircularBuffer is just a shared pointer over BufferImpl,
+    // it is Ok to have copy and move operations.
+    CircularBuffer(const CircularBuffer&)            = default;
+    CircularBuffer(CircularBuffer&&)                 = default;
+    CircularBuffer& operator=(const CircularBuffer&) = default;
+    CircularBuffer& operator=(CircularBuffer&&)      = default;
 
     [[nodiscard]] std::size_t           size() const noexcept { return _sharedBufferPtr->_size; }
     [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_sharedBufferPtr); }

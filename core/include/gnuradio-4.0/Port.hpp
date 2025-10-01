@@ -745,31 +745,9 @@ public:
     constexpr Port() noexcept = default;
     explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
     constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
-    Port(const Port&)                      = delete;
-    auto            operator=(const Port&) = delete;
-    constexpr Port& operator=(Port&& other) noexcept
-    requires(!Required::kIsConst)
-    {
-        if (this == &other) {
-            return *this;
-        }
-
-        name          = other.name;
-        priority      = other.priority;
-        default_value = std::move(other.default_value);
-        min_samples   = other.min_samples;
-        max_samples   = other.max_samples;
-        metaInfo      = std::move(other.metaInfo);
-        _ioHandler    = std::move(other._ioHandler);
-        _tagIoHandler = std::move(other._tagIoHandler);
-        _cachedTag    = std::move(other._cachedTag);
-
-        return *this;
-    }
-
-    constexpr Port& operator=(Port&& other)
-    requires(Required::kIsConst)
-    = delete;
+    Port(const Port&)                                = delete;
+    auto            operator=(const Port&)           = delete;
+    constexpr Port& operator=(Port&& other) noexcept = delete;
 
     ~Port() = default;
 
