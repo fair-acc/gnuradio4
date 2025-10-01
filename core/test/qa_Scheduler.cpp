@@ -1227,7 +1227,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
     };
 
     "print topologies"_test = [] {
-        auto runTest = [](std::string name, gr::Graph graph) {
+        auto runTest = [](std::string name, gr::Graph&& graph) {
             for (auto& loop : gr::graph::detectFeedbackLoops(graph)) {
                 gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
             }

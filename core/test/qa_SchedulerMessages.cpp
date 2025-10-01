@@ -29,7 +29,7 @@ class TestScheduler {
     using TScheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>;
     std::future<std::expected<void, gr::Error>> schedulerRet_;
 
-    gr::Graph& withTestingSourceAndSink(gr::Graph& graph) const noexcept {
+    auto&& withTestingSourceAndSink(gr::Graph&& graph) const noexcept {
         graph.emplaceBlock<gr::testing::SlowSource<float>>();
         graph.emplaceBlock<gr::testing::CountingSink<float>>();
         return graph;
@@ -40,8 +40,8 @@ public:
     gr::MsgPortOut toScheduler;
     gr::MsgPortIn  fromScheduler;
 
-    TestScheduler(gr::Graph graph, bool addTestSourceAndSink = true) {
-        if (auto ret = scheduler_.exchange(addTestSourceAndSink ? std::move(withTestingSourceAndSink(graph)) : std::move(graph)); !ret) {
+    TestScheduler(gr::Graph&& graph, bool addTestSourceAndSink = true) {
+        if (auto ret = scheduler_.exchange(addTestSourceAndSink ? std::move(withTestingSourceAndSink(std::move(graph))) : std::move(graph)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         using namespace gr::testing;
@@ -361,7 +361,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
                     // verify well formed by loading from yaml
                     auto graphFromYaml = gr::loadGrc(context->loader, yaml);
-                    expect(eq(graphFromYaml.blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks", graphFromYaml.blocks().size());
+                    expect(eq(graphFromYaml->blocks().size(), 4UZ)) << std::format("Expected 4 blocks in loaded graph, got {} blocks", graphFromYaml->blocks().size());
 
                     return true;
                 }

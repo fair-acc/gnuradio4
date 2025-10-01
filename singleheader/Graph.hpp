@@ -6557,18 +6557,18 @@ struct std::formatter<gr::Ratio> : std::formatter<std::string_view> {
 #define GR_REFLECT_LIGHT_DECLTYPES_AGAIN()      GR_REFLECT_LIGHT_DECLTYPES_IMPL
 
 #define GR_MAKE_REFLECTABLE(T, ...)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
-    friend void gr_refl_determine_base_type(T const&, ...) {}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  \
+    friend void* gr_refl_determine_base_type(T const&, ...) { return nullptr; }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
     template<std::derived_from<T> GrRefl_U>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
-    requires(not std::is_same_v<GrRefl_U, T>) and std::is_void_v<decltype(gr_refl_determine_base_type(std::declval<::gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), 0))>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  \
-    friend T gr_refl_determine_base_type(GrRefl_U const&, int) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
-        return std::declval<T>();                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+    requires(not std::is_same_v<GrRefl_U, T>) and std::is_void_v<std::remove_pointer_t<decltype(gr_refl_determine_base_type(std::declval<::gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), 0))>>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           \
+    friend T* gr_refl_determine_base_type(GrRefl_U const&, int) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+        return nullptr;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
     }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
     template<std::derived_from<T> GrRefl_U, typename GrRefl_Not>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
-    requires(not std::is_same_v<GrRefl_U, T>) and (not std::derived_from<GrRefl_Not, T>) and std::is_void_v<decltype(gr_refl_determine_base_type(std::declval<::gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), std::declval<GrRefl_Not>()))>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-    friend T gr_refl_determine_base_type(GrRefl_U const&, GrRefl_Not const&) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
-        return std::declval<T>();                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
+    requires(not std::is_same_v<GrRefl_U, T>) and (not std::derived_from<GrRefl_Not, T>) and std::is_void_v<std::remove_pointer_t<decltype(gr_refl_determine_base_type(std::declval<::gr::refl::detail::make_dependent_t<GrRefl_U, T>>(), std::declval<GrRefl_Not>()))>>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
+    friend T* gr_refl_determine_base_type(GrRefl_U const&, GrRefl_Not const&) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
+        return nullptr;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
     }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
     using gr_refl_class_name = ::gr::meta::constexpr_string<#T>;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
@@ -6604,7 +6604,7 @@ concept class_type = std::is_class_v<T>;
 struct None {};
 
 template<typename T, typename Excluding>
-using find_base = decltype(gr_refl_determine_base_type(std::declval<T>(), std::declval<Excluding>()));
+using find_base = std::remove_pointer_t<decltype(gr_refl_determine_base_type(std::declval<T>(), std::declval<Excluding>()))>;
 
 template<typename T, typename Last = None>
 struct base_type_impl {
@@ -6614,7 +6614,7 @@ struct base_type_impl {
 // if Last is None we're starting the search
 template<class_type T>
 struct base_type_impl<T, None> {
-    using type = typename base_type_impl<T, decltype(gr_refl_determine_base_type(std::declval<T>(), 0))>::type;
+    using type = typename base_type_impl<T, std::remove_pointer_t<decltype(gr_refl_determine_base_type(std::declval<T>(), 0))>>::type;
 };
 
 // if Last is void => there's no base type (void)
@@ -8213,6 +8213,101 @@ struct std::formatter<E, char> {
 
 #endif // GNURADIO_FORMATTER_HPP
 
+// #include <gnuradio-4.0/meta/immutable.hpp>
+#ifndef GNURADIO_IMMUTABLE_HPP
+#define GNURADIO_IMMUTABLE_HPP
+
+#include <format>
+#include <type_traits>
+#include <utility>
+
+namespace gr::meta {
+
+// const disables moved. immutable<T> is const by all means,
+// but it allows the moved-from state.
+template<typename T>
+class immutable {
+private:
+    static_assert(std::is_same_v<T, std::remove_cvref_t<T>>, "T needs to be a value type");
+    static_assert(std::is_move_constructible_v<T>, "T needs to be move-constuctible");
+    static_assert(std::is_default_constructible_v<T>, "T needs to be default-constuctible");
+
+    T _value;
+
+public:
+    using value_type = T;
+
+    template<typename... Args>
+    immutable(Args&&... args) : _value(std::forward<Args>(args)...) {}
+
+    // Only construction is allowed
+    immutable(immutable<T>&& other) : _value(std::move(other._value)) { other._value = T{}; }
+    immutable(const immutable<T>& other) : _value(other._value) {}
+
+    // No assignment, these are const values
+    immutable<T>& operator=(const immutable<T>& other) = delete;
+    immutable<T>& operator=(immutable<T>&& other)      = delete;
+
+    const T& value() const { return _value; }
+    operator const T&() const { return _value; }
+
+    // Explicitly enable immutable<std::string> to std::string_view conversion
+    // as string and string_views' relationship is special
+    operator std::string_view() const
+    requires(std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view>)
+    {
+        return _value;
+    }
+
+    auto operator<=>(const immutable<T>& other) const { return _value <=> other._value; }
+
+    bool operator==(const immutable<T>& other) const = default;
+
+    template<typename U>
+    auto operator<=>(const U& other) const {
+        return _value <=> other;
+    }
+
+    template<typename U>
+    bool operator==(const U& other) const {
+        return _value == other;
+    }
+
+    template<typename U>
+    friend auto operator<=>(const U& other, const immutable<T>& self) {
+        return other <=> self._value;
+    }
+
+    template<typename U>
+    friend bool operator==(const U& other, const immutable<T>& self) {
+        return other == self._value;
+    }
+
+    friend auto& operator<<(std::ostream& out, const immutable<T>& self) { return out << self._value; }
+};
+
+template<typename T>
+struct is_immutable : std::false_type {};
+
+template<typename T>
+struct is_immutable<immutable<T>> : std::true_type {};
+
+} // namespace gr::meta
+
+template<typename T>
+struct std::formatter<gr::meta::immutable<T>> {
+    constexpr auto parse(std::format_parse_context& ctx) {
+        return ctx.begin(); // no format-spec yet
+    }
+
+    template<typename FormatContext>
+    auto format(const gr::meta::immutable<T>& immutable, FormatContext& ctx) const {
+        return std::format_to(ctx.out(), "{}", immutable.value());
+    }
+};
+
+#endif
+
 // #include <gnuradio-4.0/meta/typelist.hpp>
 
 // #include <gnuradio-4.0/meta/utils.hpp>
@@ -9579,6 +9674,11 @@ class CircularBuffer {
               _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
               _claimStrategy(ClaimType(_size)) {}
 
+        BufferImpl(const BufferImpl&)            = delete;
+        BufferImpl(BufferImpl&&)                 = delete;
+        BufferImpl& operator=(const BufferImpl&) = delete;
+        BufferImpl& operator=(BufferImpl&&)      = delete;
+
 #ifdef HAS_POSIX_MAP_INTERFACE
         static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
             if (_isMmapAllocated) {
@@ -10052,6 +10152,13 @@ public:
     CircularBuffer() = delete;
     explicit CircularBuffer(std::size_t minSize, Allocator allocator = DefaultAllocator()) : _sharedBufferPtr(std::make_shared<BufferImpl>(minSize, allocator)) {}
     ~CircularBuffer() = default;
+
+    // CircularBuffer is just a shared pointer over BufferImpl,
+    // it is Ok to have copy and move operations.
+    CircularBuffer(const CircularBuffer&)            = default;
+    CircularBuffer(CircularBuffer&&)                 = default;
+    CircularBuffer& operator=(const CircularBuffer&) = default;
+    CircularBuffer& operator=(CircularBuffer&&)      = default;
 
     [[nodiscard]] std::size_t           size() const noexcept { return _sharedBufferPtr->_size; }
     [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_sharedBufferPtr); }
@@ -11716,31 +11823,9 @@ public:
     constexpr Port() noexcept = default;
     explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
     constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
-    Port(const Port&)                      = delete;
-    auto            operator=(const Port&) = delete;
-    constexpr Port& operator=(Port&& other) noexcept
-    requires(!Required::kIsConst)
-    {
-        if (this == &other) {
-            return *this;
-        }
-
-        name          = other.name;
-        priority      = other.priority;
-        default_value = std::move(other.default_value);
-        min_samples   = other.min_samples;
-        max_samples   = other.max_samples;
-        metaInfo      = std::move(other.metaInfo);
-        _ioHandler    = std::move(other._ioHandler);
-        _tagIoHandler = std::move(other._tagIoHandler);
-        _cachedTag    = std::move(other._cachedTag);
-
-        return *this;
-    }
-
-    constexpr Port& operator=(Port&& other)
-    requires(Required::kIsConst)
-    = delete;
+    Port(const Port&)                                = delete;
+    auto            operator=(const Port&)           = delete;
+    constexpr Port& operator=(Port&& other) noexcept = delete;
 
     ~Port() = default;
 
@@ -18252,6 +18337,8 @@ extern template std::expected<map_t, std::string>                             co
 
 // #include <gnuradio-4.0/meta/formatter.hpp>
 
+// #include <gnuradio-4.0/meta/immutable.hpp>
+
 // #include <gnuradio-4.0/meta/reflection.hpp>
 
 
@@ -18279,13 +18366,21 @@ constexpr bool isSupportedVectorType() {
 
 template<typename T>
 constexpr bool isReadableMember() {
+    auto isReadableImmutable = [] {
+        if constexpr (gr::meta::is_immutable<T>{}) {
+            return isReadableMember<typename T::value_type>();
+
+        } else {
+            return false;
+        }
+    };
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
-           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T>;
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || isReadableImmutable();
 }
 
 template<typename T, typename TMember>
 constexpr bool isWritableMember() {
-    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember>;
+    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember> && !gr::meta::is_immutable<TMember>{};
 }
 
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {
@@ -20193,7 +20288,7 @@ concept HasWork = requires(T t, std::size_t requested_work) {
 
 template<typename T>
 concept BlockLike = requires(T t, std::size_t requested_work) {
-    { t.unique_name } -> std::same_as<const std::string&>;
+    { t.unique_name } -> std::convertible_to<const std::string&>;
     { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
     { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
     { t.description } noexcept -> std::same_as<const std::string_view&>;
@@ -20416,7 +20511,6 @@ public:
         return std::get<T>(*this);
     }
 
-    // TODO: These are not involved in move operations, might be a problem later
     alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{std::numeric_limits<std::size_t>::max()};
     alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
     alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{work::Status::OK};
@@ -20436,9 +20530,8 @@ public:
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
-    // TODO: These are not involved in move operations, might be a problem later
-    const std::size_t unique_id   = _uniqueIdCounter++;
-    const std::string unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
+    gr::meta::immutable<std::size_t> unique_id   = _uniqueIdCounter++;
+    gr::meta::immutable<std::string> unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
     A<std::string, "user-defined name", Doc<"N.B. may not be unique -> ::unique_name">> name = gr::meta::type_name<Derived>();
@@ -20545,50 +20638,21 @@ public:
     }
 
     Block(Block&& other) noexcept
-        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
-          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
-          stride(std::move(other.stride)), strideCounter(std::move(other.strideCounter)), msgIn(std::move(other.msgIn)),                                         //
-          msgOut(std::move(other.msgOut)), propertySubscriptions(std::move(other.propertySubscriptions)),                                                        //
-          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
-          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), ////
-          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings))) {}
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                                                                                    //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                                                                                            //
+          stride(std::move(other.stride)),                                                                                                                                                                                       //
+          disconnect_on_done(other.disconnect_on_done),                                                                                                                                                                          //
+          compute_domain(std::move(other.compute_domain)),                                                                                                                                                                       //
+          strideCounter(other.strideCounter),                                                                                                                                                                                    //
+          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                                                                                         //
+          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                                                                                  //
+          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                                                                                        //
+          propertyCallbacks(std::move(other.propertyCallbacks)), propertySubscriptions(std::move(other.propertySubscriptions)), inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
+          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)),                                                                 //
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                                                                                              //
+    {}
 
-    Block& operator=(Block&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
-        lifecycle::StateMachine<Derived>::operator=(std::move(other));
-
-        if constexpr (!ResamplingControl::kIsConst) {
-            input_chunk_size  = std::move(other.input_chunk_size);
-            output_chunk_size = std::move(other.output_chunk_size);
-        }
-        if constexpr (!StrideControl::kIsConst) {
-            stride = std::move(other.stride);
-        }
-        disconnect_on_done = std::move(other.disconnect_on_done);
-        compute_domain     = std::move(other.compute_domain);
-        name               = std::move(other.name);
-        ui_constraints     = std::move(other.ui_constraints);
-        meta_information   = std::move(other.meta_information);
-
-        strideCounter         = std::move(other.strideCounter);
-        msgIn                 = std::move(other.msgIn);
-        msgOut                = std::move(other.msgOut);
-        propertySubscriptions = std::move(other.propertySubscriptions);
-
-        // Reset caches (they are not movable due to Derived &_self)
-        new (&inputStreamCache) PortCache<Derived, PortDirection::INPUT, PortType::STREAM>(static_cast<Derived&>(*this));
-        new (&outputStreamCache) PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM>(static_cast<Derived&>(*this));
-
-        _mergedInputTag    = std::move(other._mergedInputTag);
-        _outputTagsChanged = std::move(other._outputTagsChanged);
-        _outputTags        = std::move(other._outputTags);
-        _settings.assignFrom(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)));
-
-        return *this;
-    }
+    Block& operator=(Block&& other) noexcept = delete;
 
     ~Block() { // NOSONAR -- need to request the (potentially) running ioThread to stop
         if (lifecycle::isActive(this->state())) {
@@ -24378,9 +24442,10 @@ private:
 };
 
 struct Graph : Block<Graph> {
-    std::shared_ptr<gr::Sequence>            _progress = std::make_shared<gr::Sequence>();
     std::vector<Edge>                        _edges;
     std::vector<std::shared_ptr<BlockModel>> _blocks;
+
+    std::shared_ptr<gr::Sequence> _progress = std::make_shared<gr::Sequence>();
 
     gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
 
@@ -24504,32 +24569,20 @@ public:
 
     Graph(gr::PluginLoader& pluginLoader) : Graph(property_map{}) { _pluginLoader = std::addressof(pluginLoader); }
 
-    Graph(Graph&)            = delete; // there can be only one owner of Graph
-    Graph& operator=(Graph&) = delete; // there can be only one owner of Graph
-    Graph(Graph&& other) noexcept : gr::Block<Graph>(std::move(other)) { assignFrom(std::move(other)); }
-    Graph& assignFrom(Graph&& other) noexcept {
-        compute_domain = std::move(other.compute_domain);
-        _progress      = std::move(other._progress);
-        _edges         = std::move(other._edges);
-        _blocks        = std::move(other._blocks);
+    Graph(Graph&& other)
+        : gr::Block<gr::Graph>(std::move(other)),                             //
+          _edges(std::move(other._edges)), _blocks(std::move(other._blocks)), //
+          _progress(std::move(other._progress)),                              //
+          _pluginLoader(std::exchange(other._pluginLoader, nullptr)) {}
 
-        return *this;
-    }
+    Graph(Graph&)                   = delete; // there can be only one owner of Graph
+    Graph& operator=(Graph&)        = delete; // there can be only one owner of Graph
+    Graph& operator=(Graph&& other) = delete;
 
-    Graph& operator=(Graph&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
-        Block<Graph>::operator=(std::move(other));
-
-        return assignFrom(std::move(other));
-    }
-
-    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return {_blocks}; }
-    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return {_blocks}; }
-    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return {_edges}; }
-    [[nodiscard]] std::span<Edge>                              edges() noexcept { return {_edges}; }
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _blocks; }
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _blocks; }
+    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return _edges; }
+    [[nodiscard]] std::span<Edge>                              edges() noexcept { return _edges; }
 
     void clear() {
         _blocks.clear();
@@ -24896,7 +24949,7 @@ template<block::Category traverseCategory, typename Fn>
 void traverseSubgraphs(GraphLike auto const& root, Fn&& visitGraph) {
     using enum block::Category;
 
-    auto recurse = [&visitGraph](GraphLike auto const& graph, auto& self) -> void {
+    auto recurse = [&visitGraph](const GraphLike auto& graph, auto& self) -> void {
         visitGraph(graph);
 
         for (const auto& block : graph.blocks()) {
@@ -24919,7 +24972,7 @@ template<block::Category traverseCategory, typename Fn>
 void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filter = block::Category::All) {
     using enum block::Category;
 
-    detail::traverseSubgraphs<traverseCategory>(root, [&](GraphLike auto const& graph) {
+    detail::traverseSubgraphs<traverseCategory>(root, [&](const GraphLike auto& graph) {
         for (auto& block : graph.blocks()) {
             const block::Category cat = block->blockCategory();
             if (filter == All || cat == filter) {
@@ -24940,7 +24993,7 @@ template<block::Category traverseCategory, typename Fn>
 void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
     using enum Edge::EdgeState;
 
-    detail::traverseSubgraphs<traverseCategory>(root, [&](auto const& graph) {
+    detail::traverseSubgraphs<traverseCategory>(root, [&](const GraphLike auto& graph) {
         for (auto& edge : graph.edges()) {
             if (filter == Unknown || edge._state == filter) {
                 function(edge);
@@ -24961,7 +25014,6 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
     using enum block::Category;
 
     gr::Graph flattenedGraph;
-    flattenedGraph._progress = root._progress;
     gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
     std::ranges::for_each(root.edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); // add edges from root graph
 
@@ -24983,7 +25035,7 @@ AdjacencyList computeAdjacencyList(const GraphLike auto& root) {
     return result;
 }
 
-inline std::vector<gr::Graph> weaklyConnectedComponents(const gr::Graph& graph) {
+std::vector<gr::Graph> weaklyConnectedComponents(const GraphLike auto& graph) {
     const auto        blocksSpan = graph.blocks();
     const std::size_t N          = blocksSpan.size();
 
@@ -25109,8 +25161,7 @@ struct FeedbackLoop {
     std::vector<Edge> edges;
 };
 
-template<GraphLike TGraph>
-std::vector<FeedbackLoop> detectFeedbackLoops(const TGraph& graph) {
+std::vector<FeedbackLoop> detectFeedbackLoops(const GraphLike auto& graph) {
     enum class VisitState { Unvisited, Gray, Black };
 
     std::unordered_map<std::shared_ptr<BlockModel>, VisitState> visited;
@@ -25448,7 +25499,7 @@ private:
     }
 
 public:
-    constexpr MergedGraph(Left l, Right r) : left(std::move(l)), right(std::move(r)) {}
+    constexpr MergedGraph(Left&& l, Right&& r) : left(std::move(l)), right(std::move(r)) {}
 
     // if the left block (source) implements available_samples (a customization point), then pass the call through
     friend constexpr std::size_t available_samples(const MergedGraph& self) noexcept
@@ -25555,7 +25606,7 @@ constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>,
             gr::meta::message_type<"INPUT_PORTS_ARE:">,                                                                                                                                                                 //
             typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
     }
-    return {std::forward<A>(a), std::forward<B>(b)};
+    return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>(std::forward<A>(a), std::forward<B>(b));
 }
 
 /**

@@ -19,6 +19,7 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/meta/immutable.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #if defined(__clang__)
@@ -45,13 +46,21 @@ constexpr bool isSupportedVectorType() {
 
 template<typename T>
 constexpr bool isReadableMember() {
+    auto isReadableImmutable = [] {
+        if constexpr (gr::meta::is_immutable<T>{}) {
+            return isReadableMember<typename T::value_type>();
+
+        } else {
+            return false;
+        }
+    };
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
-           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T>;
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || isReadableImmutable();
 }
 
 template<typename T, typename TMember>
 constexpr bool isWritableMember() {
-    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember>;
+    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember> && !gr::meta::is_immutable<TMember>{};
 }
 
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {

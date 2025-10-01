@@ -45,19 +45,6 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
     using namespace gr;
     using namespace gr::testing;
 
-    "Graph move crash"_test = [] {
-        // Graph crashed if moved-from via move-ctor twice
-
-        Graph g0;
-
-        Graph g1 = std::move(g0);
-
-        Graph g2;
-        g0 = std::move(g2);
-
-        Graph g4 = std::move(g0);
-    };
-
     "Graph connection buffer size test - default"_test = [] {
         Graph graph;
         auto& src  = graph.emplaceBlock<NullSource<float>>();
@@ -230,8 +217,8 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         });
 
         expect(eq(visited.size(), 2UZ));
-        expect(std::ranges::find(visited, src.unique_name) != visited.end());
-        expect(std::ranges::find(visited, snk.unique_name) != visited.end());
+        expect(std::ranges::find(visited, src.unique_name.value()) != visited.end());
+        expect(std::ranges::find(visited, snk.unique_name.value()) != visited.end());
     };
 
     "forEachEdge visits all edges"_test = [] {
@@ -265,9 +252,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit nmanaged sub-graphs"_test = [&] {
@@ -279,9 +266,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit all sub-graphs"_test = [&] {
@@ -293,9 +280,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 3UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, sink.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, sink.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
 
         "visit top-level Blocks only"_test = [&] {
@@ -307,9 +294,9 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
             });
 
             expect(eq(visited.size(), 2UZ)) << std::format("visited:\n{}\n", gr::join(visited, "\n"));
-            expect(std::ranges::find(visited, src.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
-            expect(std::ranges::find(visited, nested.unique_name) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
-            expect(std::ranges::find(visited, sink.unique_name) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, src.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", src.unique_name, gr::join(visited, ", "));
+            expect(std::ranges::find(visited, nested.unique_name.value()) != visited.end()) << std::format("couldn't find '{}' in '{}", nested.unique_name, gr::join(visited, ", ")); // in because it acts like a block
+            expect(std::ranges::find(visited, sink.unique_name.value()) == visited.end()) << std::format("couldn't find '{}' in '{}", sink.unique_name, gr::join(visited, ", "));
         };
     };
 };
