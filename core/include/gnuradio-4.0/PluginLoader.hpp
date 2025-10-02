@@ -235,7 +235,7 @@ public:
     }
 
     std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
-        if (auto result = _schedulerRegistry->create(name, {})) {
+        if (auto result = _schedulerRegistry->create(name, params)) {
             return std::shared_ptr<gr::SchedulerModel>(result.release());
         }
 
@@ -300,8 +300,8 @@ public:
 
     std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->create(name, params); }
 
-    std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, gr::Graph&& graph, std::string_view defaultPoolName = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& profiling_options = {}) {
-        auto result = _schedulerRegistry->create(name, {});
+    std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
+        auto result = _schedulerRegistry->create(name, params);
         return result ? std::shared_ptr<gr::SchedulerModel>(reinterpret_cast<gr::SchedulerModel*>(result.release())) : nullptr;
     }
 

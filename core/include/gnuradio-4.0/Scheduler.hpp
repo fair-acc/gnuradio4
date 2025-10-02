@@ -503,7 +503,7 @@ protected:
                 if (schedulerModel) {
                     schedulerModel->start();
                 } else {
-                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block.uniqueName()));
+                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
                 }
             } else {
                 this->emitErrorMessageIfAny("LifecycleState -> RUNNING", block->changeStateTo(lifecycle::RUNNING));
@@ -675,7 +675,7 @@ protected:
                 if (schedulerModel) {
                     schedulerModel->stop();
                 } else {
-                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block.uniqueName()));
+                    throw gr::exception(std::format("ScheduledBlockGroup is not a SchedulerModel {}", block->uniqueName()));
                 }
             } else {
                 this->emitErrorMessageIfAny("forEachBlock -> stop() -> LifecycleState", block->changeStateTo(REQUESTED_STOP));
