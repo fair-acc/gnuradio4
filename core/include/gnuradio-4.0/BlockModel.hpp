@@ -773,16 +773,13 @@ protected:
     }
 
 public:
-    BlockWrapper() : BlockWrapper(gr::property_map()) {}
-    explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
+    explicit BlockWrapper(gr::property_map initParameter = {}) : _block(std::move(initParameter)) {
         initMessagePorts();
         _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
         _dynamicPortsLoader.instance = this;
     }
 
-    template<typename Arg, typename... Args>
-    requires(not std::is_same_v<std::remove_cvref_t<Arg>, gr::property_map> or sizeof...(Args) > 0)
-    explicit BlockWrapper(Arg&& arg, Args&&... args) : _block(std::forward<Arg>(arg), std::forward<Args>(args)...) {
+    explicit BlockWrapper(T&& original) : _block(std::move(original)) {
         initMessagePorts();
         _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
         _dynamicPortsLoader.instance = this;

@@ -127,9 +127,7 @@ protected:
     std::unordered_multimap<std::string, std::string> _exportedInputPortsForBlock;
     std::unordered_multimap<std::string, std::string> _exportedOutputPortsForBlock;
 
-public:
-    template<typename... Args>
-    GraphWrapper(Args&&... args) : BlockWrapper<TSelf>(std::forward<Args>(args)...) {
+    void initExportPorts() {
         // We need to make sure nobody touches our dynamic ports
         // as this class will handle them
         this->_dynamicPortsLoader.instance = nullptr;
@@ -147,6 +145,11 @@ public:
             return message;
         };
     }
+
+public:
+    GraphWrapper(gr::property_map params = {}) : BlockWrapper<TSelf>(std::move(params)) { initExportPorts(); }
+
+    GraphWrapper(TSubGraph&& original) : BlockWrapper<TSelf>(std::move(original)) { initExportPorts(); }
 
     void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) override {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
