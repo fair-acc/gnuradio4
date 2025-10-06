@@ -26,21 +26,21 @@ template<typename T>
 struct DemoSubGraphResult {
     using Wrapper = GraphWrapper<Graph>;
 
-    DemoSubGraphResult() {}
-
-    std::unique_ptr<gr::BlockModel> graph;
+    std::shared_ptr<gr::BlockModel> graph;
     std::string                     graphUniqueName;
-
-    void setGraph(gr::Graph&& _graph) {
-        graph           = std::unique_ptr<BlockModel>(std::make_unique<Wrapper>(std::move(_graph)).release());
-        graphUniqueName = graph->uniqueName();
-        wrapper         = static_cast<Wrapper*>(graph.get());
-    }
 
     Wrapper*                                wrapper          = nullptr;
     gr::testing::Copy<T>*                   pass1            = nullptr;
     gr::testing::Copy<T>*                   pass2            = nullptr;
     gr::testing::SettingsChangeRecorder<T>* settingsRecorder = nullptr;
+
+    DemoSubGraphResult() {}
+
+    void setGraph(gr::Graph&& _graph) {
+        graph           = std::static_pointer_cast<BlockModel>(std::make_shared<Wrapper>(std::move(_graph)));
+        graphUniqueName = graph->uniqueName();
+        wrapper         = static_cast<Wrapper*>(graph.get());
+    }
 };
 
 template<typename T>
@@ -172,7 +172,6 @@ const boost::ut::suite ExportPortsTests_ = [] {
     };
 };
 
-#if 0
 const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
     "Test if the blocks in sub-graph get scheduled"_test = [] {
         using namespace std::string_literals;
@@ -186,15 +185,15 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
 
         auto demo = createDemoSubGraph<float>();
-        initGraph.addBlock(std::move(demo.graph));
+        initGraph.addBlock(demo.graph);
 
-        subGraphDirect->exportPort(true, subGraphDirect->blockRef().pass1_unique_id, PortDirection::INPUT, "in");
-        subGraphDirect->exportPort(true, subGraphDirect->blockRef().pass2_unique_id, PortDirection::OUTPUT, "out");
+        demo.graph->exportPort(true, demo.pass1->unique_name, PortDirection::INPUT, "in");
+        demo.graph->exportPort(true, demo.pass2->unique_name, PortDirection::OUTPUT, "out");
 
-        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(source, PortDefinition("out"), subGraph, PortDefinition("in"))));
-        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(subGraph, PortDefinition("out"), sink, PortDefinition("in"))));
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(source, PortDefinition("out"), demo.graph, PortDefinition("in"))));
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(demo.graph, PortDefinition("out"), sink, PortDefinition("in"))));
         expect(eq(initGraph.edges().size(), 2UZ));
-        expect(eq(subGraphDirect->blockRef().edges().size(), 1UZ));
+        expect(eq(demo.graph->edges().size(), 1UZ));
 
         gr::scheduler::Simple scheduler;
         if (auto ret = scheduler.exchange(std::move(initGraph)); !ret) {
@@ -211,8 +210,8 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         expect(source.state() == lifecycle::State::RUNNING);
         expect(sink.state() == lifecycle::State::RUNNING);
-        expect(graph::findBlock(*subGraphDirect, subGraphDirect->blockRef().pass1_unique_id).value()->state() == lifecycle::State::RUNNING);
-        expect(graph::findBlock(*subGraphDirect, subGraphDirect->blockRef().pass2_unique_id).value()->state() == lifecycle::State::RUNNING);
+        expect(graph::findBlock(*demo.graph, demo.pass1->unique_name).value()->state() == lifecycle::State::RUNNING);
+        expect(graph::findBlock(*demo.graph, demo.pass1->unique_name).value()->state() == lifecycle::State::RUNNING);
 
         // Stopping scheduler
         scheduler.requestStop();
@@ -244,9 +243,8 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         [[maybe_unused]] auto& sink   = initGraph.emplaceBlock<CountingSink<float>>();
 
         // Subgraph with a single block inside
-        using SubGraphType                         = GraphWrapper<DemoSubGraphWithSettings<float>>;
-        auto                        subGraphDirect = std::make_shared<SubGraphType>();
-        std::shared_ptr<BlockModel> subGraph       = initGraph.addBlock(subGraphDirect);
+        auto demo = createDemoSubGraphWithSettings<float>();
+        initGraph.addBlock(demo.graph);
 
         // Connecting the message ports
         gr::scheduler::Simple scheduler;
@@ -267,7 +265,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
 
         // Sending messages to blocks in the subgraph
-        sendMessage<Set>(toScheduler, std::string(subGraphDirect->blockRef().settingsRecorder->unique_name) /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"scaling_factor", 42.0f}} /* data  */);
+        sendMessage<Set>(toScheduler, std::string(demo.settingsRecorder->unique_name) /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"scaling_factor", 42.0f}} /* data  */);
 
         // Stopping scheduler
         scheduler.requestStop();
@@ -276,8 +274,8 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
             expect(false) << std::format("scheduler.runAndWait() failed:\n{}\n", schedulerRet.error());
         }
 
-        auto applyResult = subGraphDirect->blockRef().settingsRecorder->settings().applyStagedParameters();
-        expect(eq(subGraphDirect->blockRef().settingsRecorder->scaling_factor, 42.0f)) << "settings didn't change";
+        auto applyResult = demo.settingsRecorder->settings().applyStagedParameters();
+        expect(eq(demo.settingsRecorder->scaling_factor, 42.0f)) << "settings didn't change";
 
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
@@ -285,7 +283,6 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
 };
-#endif
 
 } // namespace gr::subgraph_test
 int main() { /* tests are statically executed */ }
