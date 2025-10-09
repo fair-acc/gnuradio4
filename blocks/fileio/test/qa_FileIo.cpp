@@ -1,158 +1,145 @@
 #include <boost/ut.hpp>
 
-#include <gnuradio-4.0/fileio/BasicFileIo.hpp>
-
-#include <gnuradio-4.0/Scheduler.hpp>
-#include <gnuradio-4.0/testing/NullSources.hpp>
+#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/fileio/FileIo.hpp>
 
 #include <format>
 
-namespace {
-using namespace std::chrono_literals;
-template<typename Scheduler>
-auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::chrono::milliseconds pollingPeriod = 40ms) {
-    auto externalInterventionNeeded = std::make_shared<std::atomic_bool>(false);
+#ifndef __EMSCRIPTEN__
+#include <httplib.h>
+#endif
 
-    std::thread watchdogThread([&sched, externalInterventionNeeded, timeOut, pollingPeriod]() {
-        auto timeout = std::chrono::steady_clock::now() + timeOut;
-        while (std::chrono::steady_clock::now() < timeout) {
-            if (sched.state() == gr::lifecycle::State::STOPPED) {
-                return;
-            }
-            std::this_thread::sleep_for(pollingPeriod);
+template<typename T>
+struct SimpleFileSource : gr::Block<SimpleFileSource<T>> {
+
+    gr::PortOut<T> out;
+
+    gr::Annotated<std::string, "file name"> file_name;
+
+    gr::blocks::fileio::Subscription _subscription;
+
+    GR_MAKE_REFLECTABLE(SimpleFileSource, out, file_name);
+
+    void start() {
+        auto subExp = gr::blocks::fileio::subscribe(file_name, {});
+        if (!subExp.has_value()) {
+            throw gr::exception(subExp.error().message);
         }
-        std::println("watchdog kicked in");
-        externalInterventionNeeded->store(true, std::memory_order_relaxed);
-        sched.requestStop();
-        std::println("requested scheduler to stop");
-    });
+        _subscription = std::move(subExp.value());
+    }
 
-    return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
-}
+    void stop() { _subscription.cancel(); }
 
-template<typename DataType>
-void runTest(const gr::blocks::fileio::Mode mode) {
+    [[nodiscard]] constexpr gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) noexcept {
+        if (_subscription.finished()) {
+            return gr::work::Status::DONE;
+        }
+
+        if (auto chunk = _subscription.poll(outSpan.size())) {
+            if (chunk.size() > outSpan.size()) {
+                std::println("Missing data, buffer is full: {}", chunk.size() - outSpan.size());
+            }
+            std::copy(chunk.begin(), std::next(chunk.begin(), static_cast<std::ptrdiff_t>(outSpan.size())), outSpan.begin());
+        } else if (_subscription.error()) {
+            throw gr::exception(_subscription.error().value().message);
+        }
+
+        return gr::work::Status::OK;
+    }
+};
+
+[[nodiscard]] inline std::string createTestFile(std::string_view strFilePath, std::source_location srcLocation = std::source_location::current()) {
     using namespace boost::ut;
-    using namespace gr::blocks::fileio;
-    using namespace gr::testing;
-    using scheduler = gr::scheduler::Simple<>;
+    namespace fs = std::filesystem;
 
-    constexpr gr::Size_t nSamples    = 1024U;
-    const gr::Size_t     maxFileSize = mode == gr::blocks::fileio::Mode::multi ? 256U : 0U;
-    std::string          modeName{magic_enum::enum_name(mode)};
-    std::string          fileName = std::format("/tmp/gr4_file_sink_test/TestFileName_{}.bin", modeName);
-    gr::blocks::fileio::detail::deleteFilesContaining(fileName);
+    fs::path path{strFilePath};
+    fs::create_directories(path.parent_path());
+    std::string expectedString;
+    for (int i = 0; i < 100; ++i) {
+        std::format_to(std::back_inserter(expectedString), "{}", i);
+    }
+    std::ofstream out(path, std::ios::binary);
+    expect(out.is_open()) << std::format("{}", srcLocation);
+    out.write(expectedString.data(), static_cast<std::streamsize>(expectedString.size()));
+    out.close();
 
-    "BasicFileSink"_test = [&] { // NOSONAR capture all
-        std::string testCaseName = std::format("BasicFileSink: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
-        gr::Graph   flow;
-
-        auto& source   = flow.emplaceBlock<ConstantSource<DataType>>({{"n_samples_max", nSamples}});
-        auto& fileSink = flow.emplaceBlock<BasicFileSink<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"max_bytes_per_file", maxFileSize}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(source).template to<"in">(fileSink)));
-
-        scheduler sched;
-        if (auto ret = sched.exchange(std::move(flow)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
-        expect(sched.runAndWait().has_value()) << testCaseName;
-
-        if (watchdogThread.joinable()) {
-            watchdogThread.join();
-        }
-        expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << testCaseName;
-        expect(eq(source.count, nSamples)) << testCaseName;
-        expect(eq(fileSink._totalBytesWritten / sizeof(DataType), nSamples)) << testCaseName;
-
-        std::vector<std::filesystem::path> files = gr::blocks::fileio::detail::getSortedFilesContaining(fileName);
-        if (mode == gr::blocks::fileio::Mode::multi) {
-            // greater-equal 'ge' because files can be legitimally zero-sized
-            expect(ge(files.size(), (nSamples * sizeof(DataType)) / maxFileSize)) << testCaseName;
-        } else {
-            expect(eq(files.size(), 1U)) << testCaseName;
-        }
-        for (const auto& file : files) {
-            auto fileSize = gr::blocks::fileio::detail::getFileSize(file);
-            if (mode == gr::blocks::fileio::Mode::multi) {
-                // less-equal 'le' because files can be legitimally zero-sized
-                expect(le(fileSize, maxFileSize)) << testCaseName;
-            } else {
-                expect(eq(fileSize, nSamples * sizeof(DataType))) << testCaseName;
-            }
-        }
-    };
-
-    // N.B. test directory contains the output files from the previous sink test
-    "BasicFileSource"_test = [&] { // NOSONAR capture all
-        std::string testCaseName = std::format("BasicFileSource: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
-        gr::Graph   flow;
-        auto&       fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}});
-        auto&       sink       = flow.emplaceBlock<CountingSink<DataType>>();
-
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));
-
-        scheduler schedRead;
-        if (auto ret = schedRead.exchange(std::move(flow)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
-        expect(schedRead.runAndWait().has_value()) << testCaseName;
-
-        if (watchdogThreadRead.joinable()) {
-            watchdogThreadRead.join();
-        }
-        expect(!externalInterventionNeededRead->load(std::memory_order_relaxed)) << testCaseName;
-        expect(eq(sink.count, nSamples)) << testCaseName;
-        expect(eq(fileSource._totalBytesRead, nSamples * sizeof(DataType))) << testCaseName;
-    };
-
-    // Test for `offset` and `length` parameters
-    "BasicFileSource with offset and length"_test = [&] { // NOSONAR capture all
-        constexpr gr::Size_t offsetSamples = 8U;
-        constexpr gr::Size_t lengthSamples = 8U;
-        std::string          testCaseName  = std::format("BasicFileSource with offset and length: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
-        gr::Graph            flow;
-        auto&                fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"offset", offsetSamples}, {"length", lengthSamples}});
-        auto&                sink       = flow.emplaceBlock<CountingSink<DataType>>();
-
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));
-
-        scheduler schedRead;
-        if (auto ret = schedRead.exchange(std::move(flow)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
-        expect(schedRead.runAndWait().has_value()) << testCaseName;
-
-        if (watchdogThreadRead.joinable()) {
-            watchdogThreadRead.join();
-        }
-        expect(!externalInterventionNeededRead->load(std::memory_order_relaxed)) << testCaseName;
-
-        auto nonEmptyFileCount = static_cast<gr::Size_t>(std::ranges::count_if(gr::blocks::fileio::detail::getSortedFilesContaining(fileName), [](const auto& file) { return std::filesystem::file_size(file) > 0; }));
-        expect(eq(sink.count, nonEmptyFileCount * lengthSamples)) << testCaseName;
-        expect(eq(fileSource._totalBytesRead, nonEmptyFileCount * lengthSamples * sizeof(DataType))) << testCaseName;
-    };
-
-    expect(!gr::blocks::fileio::detail::deleteFilesContaining(fileName).empty());
+    expect(fs::exists(path)) << std::format("{}", srcLocation);
+    return expectedString;
 }
 
-} // anonymous namespace
-
-const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
+const boost::ut::suite<"FileIO tests"> fileIOTests = [] {
     using namespace std::chrono_literals;
     using namespace boost::ut;
     using namespace gr;
+    using namespace gr::blocks;
+    namespace fs = std::filesystem;
 
-    constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>();
+    "FileIO - Native local"_test = [&] {
+        const std::string path           = "/tmp/gr4_fileio_test/TestFileIo.bin";
+        std::string       expectedString = createTestFile(path);
 
-    using enum gr::blocks::fileio::Mode;
-    "overwrite mode"_test = []<typename T>(const T&) { runTest<T>(overwrite); } | kArithmeticTypes;
+        fileio::RequestOptions opts;
+        opts.chunkBytes    = 8;
+        opts.bufferMinSize = 128;
 
-    "append mode"_test = []<typename T>(const T&) { runTest<T>(append); } | kArithmeticTypes;
+        auto subExp = fileio::subscribe(std::format("file:/{}", path), opts);
+        expect(subExp.has_value());
+        auto                      sub = std::move(subExp.value());
+        std::vector<std::uint8_t> allBytes;
+        while (!sub.finished()) {
+            if (auto chunk = sub.poll()) {
+                allBytes.insert(allBytes.end(), chunk->begin(), chunk->end());
+            } else if (sub.error()) {
+                // handle *sub.error()
+                break;
+            }
+        }
+        expect(!sub.isRunning());
 
-    "create new mode"_test = []<typename T>(const T&) { runTest<T>(multi); } | kArithmeticTypes;
+        std::string outString(reinterpret_cast<const char*>(allBytes.data()), allBytes.size());
+        expect(eq(expectedString, outString));
+
+        std::error_code ec;
+        fs::remove(path, ec);
+        expect(!ec);
+    };
+
+    "FileIO - Native http"_test = [&] {
+        const std::string path           = "/tmp/gr4_fileio_test/TestFileIoHttp.bin";
+        std::string       expectedString = createTestFile(path);
+#ifndef __EMSCRIPTEN__
+        httplib::Server server;
+        server.Get("/getNumbers", [&](const httplib::Request, httplib::Response& res) { res.set_content(expectedString, "text/plain"); });
+
+        auto thread = std::thread{[&server] { server.listen("localhost", 8080); }};
+        server.wait_until_ready();
+#endif
+
+        auto subExp = fileio::subscribe("http://localhost:8080/getNumbers", {});
+        expect(subExp.has_value());
+        auto                      sub = std::move(subExp.value());
+        std::vector<std::uint8_t> allBytes;
+        while (!sub.finished()) {
+            if (auto chunk = sub.poll()) {
+                allBytes.insert(allBytes.end(), chunk->begin(), chunk->end());
+            } else if (sub.error()) {
+                // handle *sub.error()
+                break;
+            }
+        }
+        std::string outString(reinterpret_cast<const char*>(allBytes.data()), allBytes.size());
+        expect(eq(expectedString, outString));
+        expect(!sub.isRunning());
+
+        std::error_code ec;
+        fs::remove(path, ec);
+        expect(!ec);
+
+#ifndef __EMSCRIPTEN__
+        server.stop();
+        thread.join();
+#endif
+    };
 };
 
 int main() { /* not needed for UT */ }
