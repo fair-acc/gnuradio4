@@ -200,8 +200,25 @@ public:
         }
     };
 
-    [[nodiscard]] std::unordered_multimap<std::string, std::string> exportedInputPorts() final { return _exportedInputPortsForBlock; };
-    [[nodiscard]] std::unordered_multimap<std::string, std::string> exportedOutputPorts() final { return _exportedOutputPortsForBlock; }
+    [[nodiscard]] gr::property_map exportedPortsFor(const auto& collection) {
+        gr::property_map         result;
+        std::string              currentBlock;
+        std::vector<std::string> currentPortNames;
+        for (const auto& [block, port] : collection) {
+            if (block != currentBlock) {
+                if (!currentBlock.empty()) {
+                    result[currentBlock] = std::move(currentPortNames);
+                    currentPortNames     = {};
+                }
+                currentBlock = block;
+            } else {
+                currentPortNames.push_back(port);
+            }
+        }
+        return result;
+    }
+    [[nodiscard]] gr::property_map exportedInputPorts() final { return exportedPortsFor(_exportedInputPortsForBlock); }
+    [[nodiscard]] gr::property_map exportedOutputPorts() final { return exportedPortsFor(_exportedOutputPortsForBlock); }
 
 private:
     DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) {

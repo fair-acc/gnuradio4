@@ -507,10 +507,11 @@ public:
     [[nodiscard]] virtual void* raw() = 0;
 
     // Common interface between managed and unmanaged graphs
-    [[nodiscard]] virtual gr::Graph*                                        graph()                                                                                                                                                                                    = 0;
-    [[nodiscard]] virtual std::unordered_multimap<std::string, std::string> exportedInputPorts()                                                                                                                                                                       = 0;
-    [[nodiscard]] virtual std::unordered_multimap<std::string, std::string> exportedOutputPorts()                                                                                                                                                                      = 0;
-    virtual void                                                            exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) = 0;
+    [[nodiscard]] virtual gr::Graph*       graph()               = 0;
+    [[nodiscard]] virtual gr::property_map exportedInputPorts()  = 0;
+    [[nodiscard]] virtual gr::property_map exportedOutputPorts() = 0;
+
+    virtual void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) = 0;
 };
 
 namespace serialization_fields {
@@ -897,10 +898,10 @@ public:
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 
     // Common interface between managed and unmanaged graphs
-    [[nodiscard]] gr::Graph*                                        graph() override { return nullptr; }
-    [[nodiscard]] std::unordered_multimap<std::string, std::string> exportedInputPorts() override { return {}; }
-    [[nodiscard]] std::unordered_multimap<std::string, std::string> exportedOutputPorts() override { return {}; }
-    void                                                            exportPort(bool, const std::string&, PortDirection, const std::string&, std::source_location = std::source_location::current()) override {}
+    [[nodiscard]] gr::Graph*       graph() override { return nullptr; }
+    [[nodiscard]] gr::property_map exportedInputPorts() override { return {}; }
+    [[nodiscard]] gr::property_map exportedOutputPorts() override { return {}; }
+    void                           exportPort(bool, const std::string&, PortDirection, const std::string&, std::source_location = std::source_location::current()) override {}
 };
 
 namespace detail {
