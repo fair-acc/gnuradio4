@@ -112,6 +112,16 @@ set(GR_MAX_WASM_THREAD_COUNT
     60
     CACHE STRING "Max number of threads for WASM pthread pool")
 add_compile_definitions(GR_MAX_WASM_THREAD_COUNT=${GR_MAX_WASM_THREAD_COUNT}) # propagate to C++
+set(GR_INSTALL_CPR
+    "ON"
+    CACHE STRING
+          "CPR HTTP client (libcurl wrapper): ON=always install, OFF=never, OPTIONAL=only if system libcurl is found")
+set_property(
+  CACHE GR_INSTALL_CPR
+  PROPERTY STRINGS
+           ON
+           OFF
+           OPTIONAL)
 
 if(ENABLE_TESTING
    AND (UNIX
@@ -504,6 +514,7 @@ message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
 message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
 message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
+message(STATUS "GR_INSTALL_CPR               : ${GR_INSTALL_CPR}")
 message(STATUS "------------------------------------------------")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)
