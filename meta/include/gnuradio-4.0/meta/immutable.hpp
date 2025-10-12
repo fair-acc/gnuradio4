@@ -58,6 +58,11 @@ public:
     }
 
     template<typename U>
+    decltype(auto) operator|(U&& other) const {
+        return _value | std::forward<U>(other);
+    }
+
+    template<typename U>
     friend auto operator<=>(const U& other, const immutable<T>& self) {
         return other <=> self._value;
     }
