@@ -13,7 +13,6 @@
 
 // … noisy code …
 
-#include "SimdFFT.cpp"
 #include "SimdFFT.hpp"
 
 #if defined(__clang__)
@@ -896,3 +895,5 @@ boost::ut::suite<"SimdFFT Comprehensive"> _ = [] {
         } | std::array{32UZ, 64UZ, 128UZ, 256UZ};
     } | std::tuple{float{} /*, double{}*/};
 };
+
+// int main() { /* tests are auto-registered */ } TODO: move to a dedicated test-file

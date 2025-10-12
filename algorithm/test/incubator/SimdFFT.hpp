@@ -9,19 +9,14 @@
 #include "gnuradio-4.0/MemoryAllocators.hpp"
 #include "gnuradio-4.0/Message.hpp"
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshadow"          // error in vir/simd
-#pragma GCC diagnostic ignored "-Wsign-conversion" // error in vir/simd
-#endif
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
+#if defined(__clang__) || defined(__GNUC__)
+#define ALWAYS_INLINE(return_type) inline return_type __attribute__((always_inline))
+#define NEVER_INLINE(return_type)  return_type __attribute__((noinline))
+#define RESTRICT                   __restrict
+#elif defined(COMPILER_MSVC)
+#define ALWAYS_INLINE(return_type) __forceinline return_type
+#define NEVER_INLINE(return_type)  __declspec(noinline) return_type
+#define RESTRICT                   __restrict
 #endif
 
 #ifndef __cpp_aligned_new
@@ -30,20 +25,16 @@
 
 #include <vir/simd.h>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-#elif defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshadow"          // error in vir/simd
-#pragma GCC diagnostic ignored "-Wsign-conversion" // error in vir/simd
+#pragma GCC diagnostic ignored "-Wshadow"          // warning/error in vir/simd
+#pragma GCC diagnostic ignored "-Wsign-conversion" // warning/error in vir/simd
+#pragma GCC diagnostic ignored "-Wconversion"      // warning/error in vir/simd
 #endif
 
 #include <vir/simd_execution.h>
 
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 
@@ -51,6 +42,56 @@ namespace stdx = vir::stdx;
 
 template<std::floating_point T, int N = 4> // inspired by future C++26 definition
 using vec = stdx::simd<T, stdx::simd_abi::deduce_t<T, static_cast<std::size_t>(N)>>;
+
+template<typename T>
+constexpr ALWAYS_INLINE(void) store_unchecked(const T& v, typename T::value_type* ptr, auto) {
+    v.copy_to(ptr, stdx::vector_aligned);
+}
+
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) blend_lo2_hi1(const Vec& a, const Vec& b) noexcept {
+    // takes low from 2nd arg, high from 1st (compact, FFT convention)
+    // equivalent for lane 'i': out[i] = (i < 2) ? b[i] : a[i];
+    constexpr int size = Vec::size();
+    return vir::simd_permute<size>(stdx::concat(b, a), [](int i) { return i < 2 ? i : i + size; });
+}
+
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) interleave(const Vec& in1, const Vec& in2, Vec& out1, Vec& out2) noexcept {
+    constexpr int size   = Vec::size();
+    std::tie(out1, out2) = stdx::split<Vec>(vir::simd_permute(stdx::concat(in1, in2), [](int i) { return (i >> 1) + size * (i & 1); }));
+}
+
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) uninterleave(const Vec& in1, const Vec& in2, Vec& out1, Vec& out2) noexcept {
+    constexpr int size   = Vec::size();
+    std::tie(out1, out2) = stdx::split<Vec>(vir::simd_permute(stdx::concat(in1, in2), [](int i) noexcept -> int { return (i % size) * 2 + (i / size); }));
+}
+
+template<typename Vec>
+constexpr static ALWAYS_INLINE(auto) transpose(Vec& x0, Vec& x1, Vec& x2, Vec& x3) noexcept {
+    constexpr int size          = Vec::size();
+    const auto [y0, y1, y2, y3] = stdx::split<Vec>(vir::simd_permute(stdx::concat(x0, x1, x2, x3), [](int i) noexcept -> int { return (i % size) * size + (i / size); }));
+    x0                          = y0;
+    x1                          = y1;
+    x2                          = y2;
+    x3                          = y3;
+}
+
+/* shortcuts for complex multiplications */
+template<typename Vec, typename T>
+constexpr static ALWAYS_INLINE(void) complex_multiply(Vec& ar, Vec& ai, const T& br, const T& bi) noexcept {
+    const Vec tmp = ar * bi;
+    ar            = ar * br - ai * bi;
+    ai            = ai * br + tmp;
+}
+
+template<typename Vec, typename T>
+constexpr static ALWAYS_INLINE(void) complex_multiply_conj(Vec& ar, Vec& ai, const T& br, const T& bi) noexcept {
+    const Vec tmp = ar * bi;
+    ar            = ar * br + ai * bi;
+    ai            = ai * br - tmp;
+}
 
 template<std::size_t Align, typename T>
 [[nodiscard]] constexpr bool isAligned(const T* p) noexcept {
@@ -104,6 +145,8 @@ inline constexpr forward_t   forward{};
 inline constexpr backward_t  backward{};
 inline constexpr ordered_t   ordered{};
 inline constexpr unordered_t unordered{};
+
+#include "SimdFFT.cpp"
 
 template<std::floating_point T>
 void rffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan);
@@ -313,122 +356,224 @@ struct SimdFFT {
             throw gr::exception(std::format("output is not {}-bytes aligned", kAlignment), loc);
         }
 
-        transformInternal<direction, ordering>(*this, inputSpan, outputSpan, scratch());
+        transformInternal<direction, ordering>(inputSpan, outputSpan, scratch());
+    }
+
+    /*
+       call pffft_zreordering(.., PFFFT_FORWARD) after pffft_transform(...,
+       PFFFT_FORWARD) if you want to have the frequency components in
+       the correct "canonical" order, as interleaved complex numbers.
+
+       (for real transforms, both 0-frequency and half frequency
+       components, which are real, are assembled in the first entry as
+       F(0)+i*F(n/2+1). Note that the original fftpack did place
+       F(n/2+1) at the end of the arrays).
+
+       input and output should not alias.
+    */
+    template<Direction direction>
+    constexpr void simdReordering(std::span<const T> input, std::span<T> output) const {
+        constexpr std::size_t L     = vector_type::size();
+        const std::size_t     Ncvec = simdVectorSize();
+
+        assert(input.data() != output.data());
+
+        if constexpr (IsRealValued::value) {
+            assert(canProcessSize(size(), Order::Ordered)); // non-multiple of 32 (while they can be computed) are very hard to bit-reverse
+            if constexpr (direction == Direction::Forward) {
+                const V* vin  = reinterpret_cast<const V*>(input.data());
+                V*       vout = reinterpret_cast<V*>(output.data());
+
+                const std::size_t dk = size() / 32; // For N=48: dk=1
+
+                for (std::size_t k = 0; k < dk; ++k) {
+                    V out0_0, out0_1, out2_0, out2_1;
+
+                    // INTERLEAVE2(vin[k*8+0], vin[k*8+1], vout[2*(0*dk+k)+0], vout[2*(0*dk+k)+1])
+                    interleave(vin[k * 8 + 0], vin[k * 8 + 1], out0_0, out0_1);
+                    vout[2 * (0 * dk + k) + 0] = out0_0;
+                    vout[2 * (0 * dk + k) + 1] = out0_1;
+
+                    // INTERLEAVE2(vin[k*8+4], vin[k*8+5], vout[2*(2*dk+k)+0], vout[2*(2*dk+k)+1])
+                    interleave(vin[k * 8 + 4], vin[k * 8 + 5], out2_0, out2_1);
+                    vout[2 * (2 * dk + k) + 0] = out2_0;
+                    vout[2 * (2 * dk + k) + 1] = out2_1;
+                }
+
+                // reversed_copy(dk, vin+2, 8, (v4sf*)(out + N/2))
+                reversed_copy(dk, vin + 2, 8, reinterpret_cast<V*>(output.data() + size() / 2));
+
+                // reversed_copy(dk, vin+6, 8, (v4sf*)(out + N))
+                reversed_copy(dk, vin + 6, 8, reinterpret_cast<V*>(output.data() + size()));
+            } else { // Backward
+                const V* vin  = reinterpret_cast<const V*>(input.data());
+                V*       vout = reinterpret_cast<V*>(output.data());
+
+                const std::size_t dk = size() / 32;
+
+                for (std::size_t k = 0; k < dk; ++k) {
+                    V out0_0, out0_1, out4_0, out4_1;
+
+                    uninterleave(vin[2 * (0 * dk + k) + 0], vin[2 * (0 * dk + k) + 1], out0_0, out0_1);
+                    vout[k * 8 + 0] = out0_0;
+                    vout[k * 8 + 1] = out0_1;
+
+                    uninterleave(vin[2 * (2 * dk + k) + 0], vin[2 * (2 * dk + k) + 1], out4_0, out4_1);
+                    vout[k * 8 + 4] = out4_0;
+                    vout[k * 8 + 5] = out4_1;
+                }
+
+                unreversed_copy(dk, reinterpret_cast<const V*>(input.data() + size() / 4), reinterpret_cast<V*>(output.data() + size() - 6 * L), -8);
+                unreversed_copy(dk, reinterpret_cast<const V*>(input.data() + 3 * size() / 4), reinterpret_cast<V*>(output.data() + size() - 2 * L), -8);
+            }
+            return;
+        }
+
+        // Complex FFT - this part was already correct
+        const T* inP  = input.data();
+        T*       outP = output.data();
+
+        if constexpr (direction == Direction::Forward) {
+            for (std::size_t k = 0; k < Ncvec; ++k) {
+                const std::size_t kk = (k / 4) + (k % 4) * (Ncvec / 4);
+                V                 lo{}, hi{};
+                interleave(V(inP + (2 * k + 0) * L, stdx::vector_aligned), V(inP + (2 * k + 1) * L, stdx::vector_aligned), lo, hi);
+                store_unchecked(lo, outP + (2 * kk + 0) * L, stdx::vector_aligned);
+                store_unchecked(hi, outP + (2 * kk + 1) * L, stdx::vector_aligned);
+            }
+        } else {
+            for (std::size_t k = 0; k < Ncvec; ++k) {
+                const std::size_t kk = (k / 4) + (k % 4) * (Ncvec / 4);
+                V                 re{}, im{};
+                uninterleave(V(inP + (2 * kk + 0) * L, stdx::vector_aligned), V(inP + (2 * kk + 1) * L, stdx::vector_aligned), re, im);
+                store_unchecked(re, outP + (2 * k + 0) * L, stdx::vector_aligned);
+                store_unchecked(im, outP + (2 * k + 1) * L, stdx::vector_aligned);
+            }
+        }
     }
 
 private:
-    // if any
+    template<Direction direction, Order ordering>
+    constexpr void transformInternal(std::span<const T> inputSpan, std::span<T> outputSpan, std::span<T> scratch) {
+        if constexpr (fftTransform == Transform::Real) {
+            inputSpan  = std::span{inputSpan.data(), size()};
+            outputSpan = std::span{outputSpan.data(), size()};
+        }
+
+        std::span<T>  buff[2]       = {outputSpan, scratch};
+        constexpr int orderinged    = (ordering == Order::Ordered) ? 1 : 0;
+        const int     numStages_odd = _radixPlan[1] & 1;
+
+        std::size_t ib = (numStages_odd ^ orderinged) ? 1 : 0;
+
+        // Use Ncvec * 2 for real FFTs (number of vec<T> units), Ncvec for complex
+        constexpr std::size_t L           = V::size();
+        const std::size_t     Ncvec       = simdVectorSize();
+        const std::size_t     n_vecs_real = Ncvec * 2; // Number of vec<T> units for real FFT
+        const std::size_t     n_vecs_cplx = Ncvec;     // Number of vec<T> units for complex FFT
+
+        std::span<const T> twiddle_span = stageTwiddles();
+        std::span<const T> e_span       = butterflyTwiddles();
+
+        if constexpr (direction == Direction::Forward) {
+            ib = !ib;
+            if constexpr (IsRealValued::value) {
+                std::span<T> outp = rfftf1_ps<T>(n_vecs_real, inputSpan, buff[ib], buff[!ib], twiddle_span, _radixPlan);
+                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
+
+                realFinalise<T>(Ncvec, buff[ib], buff[!ib], e_span);
+
+                if constexpr (ordering == Order::Ordered) {
+                    // reorder reads from buff[!ib] (where finalize wrote), writes to buff[ib]
+                    simdReordering<Direction::Forward>(std::span<const T>{buff[!ib]}, buff[ib]);
+                    // ib already points to buff[ib] - correct for final output
+                } else {
+                    // For unordered, flip ib to point to buff[!ib] where data is
+                    ib = !ib;
+                }
+            } else { // complex path
+                // deinterleave
+                const T* RESTRICT pInput  = std::assume_aligned<64>(inputSpan.data());
+                T* RESTRICT       pBuffer = std::assume_aligned<64>(buff[ib].data());
+                for (std::size_t k = 0; k < Ncvec; ++k) {
+                    const std::size_t k2 = 2 * k * L;
+
+                    V v0(pInput + k2, stdx::vector_aligned);
+                    V v1(pInput + k2 + L, stdx::vector_aligned);
+                    V r, i;
+                    uninterleave(v0, v1, r, i);
+                    store_unchecked(r, pBuffer + k2, stdx::vector_aligned);
+                    store_unchecked(i, pBuffer + k2 + L, stdx::vector_aligned);
+                }
+
+                std::span<T> outp = cfftf1_ps<Direction::Backward, T>(n_vecs_cplx, buff[ib], buff[!ib], buff[ib], twiddle_span, _radixPlan);
+                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
+
+                complexFinalise(Ncvec, buff[ib], buff[!ib], e_span);
+
+                if constexpr (ordering == Order::Ordered) {
+                    simdReordering<Direction::Forward>(std::span<const T>{buff[!ib]}, buff[ib]);
+                } else {
+                    ib = !ib;
+                }
+            }
+
+        } else { // Backward direction
+            if (inputSpan.data() == buff[ib].data()) {
+                ib = !ib; // Avoid collision: if input is in current buffer, switch to other
+            }
+
+            if constexpr (ordering == Order::Ordered) {
+                simdReordering<Direction::Backward>(inputSpan, buff[ib]);
+                inputSpan = buff[ib];
+                ib        = !ib;
+            }
+
+            if constexpr (IsRealValued::value) {
+                realPreprocess<T>(Ncvec, inputSpan, buff[ib], e_span);
+
+                std::span<T> outp = rfftb1_ps<T>(n_vecs_real, buff[ib], buff[0], buff[1], twiddle_span, _radixPlan);
+                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
+            } else {
+                complexPreprocess(Ncvec, inputSpan, buff[ib], e_span);
+
+                std::span<T> outp = cfftf1_ps<Direction::Forward, T>(n_vecs_cplx, buff[ib], buff[0], buff[1], twiddle_span, _radixPlan);
+                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
+
+                // interleave
+                T* RESTRICT pBuffer = std::assume_aligned<64>(buff[ib].data());
+                for (std::size_t k = 0; k < Ncvec; ++k) {
+                    const std::size_t k2 = 2 * k * L;
+
+                    V r(pBuffer + k2, stdx::vector_aligned);
+                    V i(pBuffer + k2 + L, stdx::vector_aligned);
+                    V v0, v1;
+                    interleave(r, i, v0, v1);
+                    store_unchecked(v0, pBuffer + k2, stdx::vector_aligned);
+                    store_unchecked(v1, pBuffer + k2 + L, stdx::vector_aligned);
+                }
+            }
+        }
+
+        if (buff[ib].data() != outputSpan.data()) {
+            T* RESTRICT pBuffer = std::assume_aligned<64>(buff[ib].data());
+            T* RESTRICT pOutput = std::assume_aligned<64>(outputSpan.data());
+            // std::memcpy(pBuffer, pOutput, Ncvec * 2 * L * sizeof(T)); -- outch
+            std::memcpy(pOutput, pBuffer, Ncvec * 2 * L * sizeof(T));
+            ib = !ib;
+        }
+        assert(buff[ib].data() == outputSpan.data());
+    }
 };
 
-/*
-   call pffft_zreordering(.., PFFFT_FORWARD) after pffft_transform(...,
-   PFFFT_FORWARD) if you want to have the frequency components in
-   the correct "canonical" order, as interleaved complex numbers.
-
-   (for real transforms, both 0-frequency and half frequency
-   components, which are real, are assembled in the first entry as
-   F(0)+i*F(n/2+1). Note that the original fftpack did place
-   F(n/2+1) at the end of the arrays).
-
-   input and output should not alias.
-*/
-template<Direction direction, std::floating_point T, Transform transform, std::size_t N>
-constexpr void simdReordering(SimdFFT<T, transform, N>& setup, std::span<const T> input, std::span<T> output);
-
-// TODO: functions below need to be refactored w.r.t. C++API and performance (if possible).
-
-/*
-   Perform a multiplication of the frequency components of dft_a and
-   dft_b and accumulate them into dft_ab. The arrays should have
-   been obtained with pffft_transform(.., PFFFT_FORWARD) and should
-   *not* have been reordered with pffft_zreordering (otherwise just
-   perform the operation yourself as the dft coefs are stored as
-   interleaved complex numbers).
-
-   the operation performed is: dft_ab += (dft_a * fdt_b)*scaling
-
-   The dft_a, dft_b and dft_ab pointers may alias.
-*/
-template<std::floating_point T, Transform transform, std::size_t N_>
-constexpr void zconvolve_accumulate(SimdFFT<T, transform, N_>& s, const T* a, const T* b, T* ab, T scaling) {
-    std::size_t Ncvec = s.simdVectorSize();
-
-    const T ar  = a[0];
-    const T ai  = a[4];
-    const T br  = b[0];
-    const T bi  = b[4];
-    const T abr = ab[0];
-    const T abi = ab[4];
-
-    /* default routine, works fine for non-arm cpus with current compilers */
-    const vec<T>       vscal = scaling;
-    std::span<const T> sa(a, Ncvec * 8);
-    std::span<const T> sb(b, Ncvec * 8);
-    std::span<T>       sab(ab, Ncvec * 8);
-    vir::transform(vir::execution::simd.prefer_size<8UZ>().unroll_by<2UZ>(), std::views::zip(sa, sb, sab), sab, [=](const auto& tup) {
-        const auto& [va, vb, vab] = tup;
-        if constexpr (va.size() == 8UZ) {
-            auto [ar_, ai_]   = split<4, 4>(va);
-            auto [br_, bi_]   = split<4, 4>(vb);
-            auto [abr_, abi_] = split<4, 4>(vab);
-            complex_multiply(ar_, ai_, br_, bi_);
-            return concat((ar * vscal + abr_), (ai * vscal + abi_));
-        } else {
-            __builtin_trap(); // this should be impossible
-            return vab;       // to get the expected return type
-        }
-    });
-
-    if constexpr (SimdFFT<T, transform, N_>::IsRealValued::value) {
-        ab[0] = abr + ar * br * scaling;
-        ab[4] = abi + ai * bi * scaling;
-    }
-}
-
-/*
-   Perform a multiplication of the frequency components of dft_a and
-   dft_b and put result in dft_ab. The arrays should have
-   been obtained with pffft_transform(.., PFFFT_FORWARD) and should
-   *not* have been reordered with pffft_zreordering (otherwise just
-   perform the operation yourself as the dft coefs are stored as
-   interleaved complex numbers).
-
-   the operation performed is: dft_ab = (dft_a * fdt_b)*scaling
-
-   The dft_a, dft_b and dft_ab pointers may alias.
-*/
-template<std::floating_point T, Transform transform, std::size_t N_>
-void pffft_zconvolve_no_accu(SimdFFT<T, transform, N_>& s, const T* a, const T* b, T* ab, T scaling) {
-    const vec<T>      vscal       = scaling;
-    const std::size_t NcvecMulTwo = 2 * s.simdVectorSize(); /* std::size_t Ncvec = s.simdVectorSize(); */
-
-    const T sar = a[0];
-    const T sai = a[vec<T>::size()];
-    const T sbr = b[0];
-    const T sbi = b[vec<T>::size()];
-
-    /* default routine, works fine for non-arm cpus with current compilers */
-    for (std::size_t k = 0; k < NcvecMulTwo; k += 4) {
-        vec<T> var(a + (k + 0) * vec<T>::size(), stdx::vector_aligned);
-        vec<T> vai(a + (k + 1) * vec<T>::size(), stdx::vector_aligned);
-        vec<T> vbr(b + (k + 0) * vec<T>::size(), stdx::vector_aligned);
-        vec<T> vbi(b + (k + 1) * vec<T>::size(), stdx::vector_aligned);
-        complex_multiply(var, vai, vbr, vbi);
-        store_unchecked(var * vscal, ab + (k + 0) * vec<T>::size(), stdx::vector_aligned);
-        store_unchecked(vai * vscal, ab + (k + 1) * vec<T>::size(), stdx::vector_aligned);
-        var(a + (k + 2) * vec<T>::size(), stdx::vector_aligned);
-        vai(a + (k + 3) * vec<T>::size(), stdx::vector_aligned);
-        vbr(b + (k + 2) * vec<T>::size(), stdx::vector_aligned);
-        vbi(b + (k + 3) * vec<T>::size(), stdx::vector_aligned);
-        complex_multiply(var, vai, vbr, vbi);
-        store_unchecked(var * vscal, ab + (k + 2) * vec<T>::size(), stdx::vector_aligned);
-        store_unchecked(vai * vscal, ab + (k + 3) * vec<T>::size(), stdx::vector_aligned);
-    }
-
-    if constexpr (SimdFFT<T, transform, N_>::IsRealValued::value) {
-        ab[0]              = sar * sbr * scaling;
-        ab[vec<T>::size()] = sai * sbi * scaling;
-    }
-}
+#ifdef ALWAYS_INLINE
+#undef ALWAYS_INLINE
+#endif
+#ifdef NEVER_INLINE
+#undef NEVER_INLINE
+#endif
+#ifdef RESTRICT
+#undef RESTRICT
+#endif
 
 #endif /* PFFFT_H */
