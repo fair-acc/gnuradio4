@@ -1304,6 +1304,7 @@ void dispatchRadix(std::size_t radix, std::size_t stride, std::size_t nGroups, s
         const std::size_t   off4 = off3 + stride;
         getRadixFn.template operator()<5>()(stride, nGroups, in, out, twiddles.subspan(offset), twiddles.subspan(off2), twiddles.subspan(off3), twiddles.subspan(off4));
     } break;
+    default: std::unreachable();
     }
 }
 

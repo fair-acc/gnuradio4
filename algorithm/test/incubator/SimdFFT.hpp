@@ -1,3 +1,46 @@
+/* SPDX-License-Identifier: BSD-3-Clause
+Copyright (c) 2025  Matthias Kretz (m.kretz@gsi.de) &
+                    Ralph J. Steinhagen (r.steinhagen@gsi.de)
+                    GSI Helmholtz Centre for Heavy Ion Research, &
+                    FAIR - Facility for Antiproton & Ion Research,
+                    Darmstadt, Germany
+Copyright (c) 2020  Dario Mambro ( dario.mambro@gmail.com )
+Copyright (c) 2019  Hayati Ayguen ( h_ayguen@web.de )
+Copyright (c) 2013  Julien Pommier ( pommier@modartt.com )
+
+Copyright (c) 2004 the University Corporation for Atmospheric
+Research ("UCAR"). All rights reserved. Developed by NCAR's
+Computational and Information Systems Laboratory, UCAR,
+www.cisl.ucar.edu.
+
+Redistribution and use of the Software in source and binary forms,
+with or without modification, is permitted provided that the
+following conditions are met:
+
+- Neither the names of NCAR's Computational and Information Systems
+Laboratory, the University Corporation for Atmospheric Research,
+nor the names of its sponsors or contributors may be used to
+endorse or promote products derived from this Software without
+specific prior written permission.
+
+- Redistributions of source code must retain the above copyright
+notices, this list of conditions, and the disclaimer below.
+
+- Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions, and the disclaimer below in the
+documentation and/or other materials provided with the
+distribution.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
+SOFTWARE.
+*/
 #ifndef SIMD_FFT_HPP
 #define SIMD_FFT_HPP
 
@@ -103,6 +146,7 @@ template<typename T>
     return std::bit_cast<std::uintptr_t>(std::to_address(p)) % alignment == 0UZ;
 }
 
+/// @brief data layout ordering for FFT input/output
 enum class Order {
     Ordered,  /// R2C: [DC, Nyquist, Re(1), Im(1), Re(2), Im(2), …, Re(N/2-1), Im(N/2-1)] (Nyquist at index 1)
               ///      ONLY for N % 32 == 0 (power-of-2 aligned)
@@ -118,41 +162,61 @@ enum class Order {
               /// ~20% faster; REQUIRED for non-power-of-2 R2C; preferred for convolution
 };
 
-enum class Direction { Forward, Backward }; /// direction of the FFT transform (R2C vs. C2R). N.B. For forward-backward identity bin values needs to be normalised by 'N'.
+/// @brief Transform direction for FFT operations
+/// @note Transforms are unnormalized: backward(forward(x)) = N*x
+enum class Direction {
+    Forward, /// Time → frequency domain (R2C or C2C forward)
+    Backward /// Frequency → time domain (C2R or C2C inverse)
+};
 
-/* type of transform */
-enum class Transform { Real, Complex };
+/// @brief Type of Fourier transform
+enum class Transform {
+    Real,   /// real-valued input/output (exploits Hermitian symmetry)
+    Complex /// complex-valued input/output (general DFT)
+};
 
 template<class R, class T>
 concept InBuf = std::ranges::borrowed_range<R> && std::ranges::contiguous_range<R> && std::convertible_to<decltype(std::ranges::data(std::declval<R&>())), const T*>;
 template<class R, class T>
 concept OutBuf = std::ranges::borrowed_range<R> && std::ranges::contiguous_range<R> && std::same_as<decltype(std::ranges::data(std::declval<R&>())), T*>;
 
-struct forward_t {
-    static constexpr Direction value = Direction::Forward;
-};
-struct backward_t {
-    static constexpr Direction value = Direction::Backward;
-};
-struct ordered_t {
-    static constexpr Order value = Order::Ordered;
-};
-struct unordered_t {
-    static constexpr Order value = Order::Unordered;
-};
+// clang-format off
+/// @brief Tag types for direction/ordering dispatch
+struct forward_t   { static constexpr Direction value = Direction::Forward; };
+struct backward_t  { static constexpr Direction value = Direction::Backward; };
+struct ordered_t   { static constexpr Order value = Order::Ordered; };
+struct unordered_t { static constexpr Order value = Order::Unordered; };
+// clang-format on
 
+/// @brief tag instances for transform dispatch
+/// @example fft.transform(forward, unordered, input, output);
 inline constexpr forward_t   forward{};
 inline constexpr backward_t  backward{};
 inline constexpr ordered_t   ordered{};
 inline constexpr unordered_t unordered{};
 
-#include "SimdFFT.cpp"
+#include "SimdFFT.inl" // private helper implementation details (still templates)
 
-// template<std::floating_point T>
-// void rffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan);
-template<std::floating_point T>
-void cffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan);
-
+/**
+ * @brief SIMD-optimized FFT for real or complex transforms
+ * @tparam T float or double
+ * @tparam fftTransform Transform::Real or Transform::Complex
+ * @tparam N Size at compile-time, or std::dynamic_extent for runtime sizing
+ *
+ * Supports mixed-radix {2,3,4,5} factorizations. Real transforms use Hermitian symmetry.
+ * Transforms are unnormalized: backward(forward(x)) = N*x (scale by 1/N for identity).
+ *
+ * @example
+ * SimdFFT<float, Transform::Real, 1024> fft;
+ * // alt: SimdFFT<float, Transform::Real> fft(1025);
+ * fft.transform(forward, unordered, input, output);
+ * // Scale for inverse: for(auto& x : output) x /= 1024;
+ *
+ * or:
+ * @example
+ * SimdFFT<float, Transform::Complex, 1024> fft;
+ * fft.transform(forward, unordered, input, output);
+ */
 template<std::floating_point T, Transform fftTransform, std::size_t N = std::dynamic_extent>
 struct SimdFFT {
     using value_type   = T;
@@ -176,6 +240,8 @@ struct SimdFFT {
     alignas(64) StageTwiddleStorage _stageTwiddles{};         // stage-level twiddles
     alignas(64) ButterflyTwiddleStorage _butterflyTwiddles{}; // butterfly simd-level twiddles
 
+    /// @brief Construct compile-time sized FFT
+    /// N must be valid, can be checked using `canProcessSize(std::size_t) -> bool`
     constexpr SimdFFT()
     requires(!IsDynamic::value)
     {
@@ -183,6 +249,8 @@ struct SimdFFT {
         computeTwiddles();
     }
 
+    /// @brief construct runtime-sized FFT handler
+    /// @throws gr::exception if n is incompatible (must factor into {2,3,4,5} and >= minSize()), can be checked using `canProcessSize(std::size_t) -> bool`
     explicit SimdFFT(std::size_t n, std::source_location loc = std::source_location::current())
     requires(IsDynamic::value)
         : _N(n) {
@@ -214,7 +282,7 @@ struct SimdFFT {
         }
 
         constexpr std::size_t L     = simdSize();
-        constexpr std::size_t N_min = minSize(); // 16 for complex, 32 for real
+        constexpr std::size_t N_min = minSize(); /// 16 for complex, 32 for real
 
         if (ordering == Order::Ordered && fftTransform == Transform::Real) {
             if (n % (2 * L * L) != 0) {
@@ -334,45 +402,18 @@ struct SimdFFT {
         }
     }
 
-    /**
-     * Perform a Fourier transform , The z-domain data is stored in the
-   most efficient order for transforming it back, or using it for
-   convolution. If you need to have its content sorted in the
-   "usual" way, that is as an array of interleaved complex numbers,
-   either use pffft_transform_ordered , or call pffft_zreordering after
-   the forward fft, and before the backward fft.
-
-   Transforms are not scaled: PFFFT_BACKWARD(PFFFT_FORWARD(x)) = N*x.
-   Typically you will want to scale the backward transform by 1/N.
-
-   The 'work' pointer should point to an area of N (2*N for complex
-   fft) floats, properly aligned. If 'work' is NULL, then stack will
-   be used instead (this is probably the best strategy for small
-   FFTs, say for N < 16384). Threads usually have a small stack, that
-   there's no sufficient amount of memory, usually leading to a crash!
-   Use the heap with pffft_aligned_malloc() in this case.
-
-   For a real forward transform (PFFFT_REAL | PFFFT_FORWARD) with real
-   input with input(=transformation) length N, the output array is
-   'mostly' complex:
-     index k in 1 .. N/2 -1  corresponds to frequency k * Samplerate / N
-     index k == 0 is a special case:
-       the real() part contains the result for the DC frequency 0,
-       the imag() part contains the result for the Nyquist frequency Samplerate/2
-   both 0-frequency and half frequency components, which are real,
-   are assembled in the first entry as  F(0)+i*F(N/2).
-   With the output size N/2 complex values (=N real/imag values), it is
-   obvious, that the result for negative frequencies are not output,
-   cause of symmetry.
-
-   @param order
-    * fft_order_t::Unordered -- better performance (notably for back-and-forth transforms
-    * fft_order_t::Ordered makes sure that the output is
-   ordered as expected (interleaved complex numbers).  This is
-   similar to calling pffft_transform and then pffft_zreordering.
-
-   input and output may alias.
-*/
+    /// @brief Perform forward/backward FFT with optional reordering
+    /// @param direction forward or backward tag
+    /// @param ordering ordered (canonical interleaved) or unordered (SIMD-optimized, ~20% faster)
+    /// @param in Input buffer (real: N samples, complex: 2*N samples)
+    /// @param out Output buffer (same size as input), may alias input
+    /// @throws gr::exception on size mismatch or unsupported configuration
+    ///
+    /// @example real-valued transform, unordered (fastest, usually used for convolution):
+    /// fft.transform(forward, unordered, input, spectrum);
+    ///
+    /// @example complex-valued transform, ordered (canonical frequency bins):
+    /// fft.transform(forward, ordered, timeDomain, freqDomain)
     void transform(forward_t, ordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { transform<Direction::Forward, Order::Ordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
     void transform(backward_t, ordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { transform<Direction::Backward, Order::Ordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
     void transform(forward_t, unordered_t, InBuf<T> auto&& in, OutBuf<T> auto&& out, std::source_location loc = std::source_location::current()) { transform<Direction::Forward, Order::Unordered>(std::forward<decltype(in)>(in), std::forward<decltype(out)>(out), loc); }
@@ -405,18 +446,9 @@ struct SimdFFT {
         transformInternal<direction, ordering>(inputSpan, outputSpan, scratch());
     }
 
-    /*
-       call pffft_zreordering(.., PFFFT_FORWARD) after pffft_transform(...,
-       PFFFT_FORWARD) if you want to have the frequency components in
-       the correct "canonical" order, as interleaved complex numbers.
-
-       (for real transforms, both 0-frequency and half frequency
-       components, which are real, are assembled in the first entry as
-       F(0)+i*F(n/2+1). Note that the original fftpack did place
-       F(n/2+1) at the end of the arrays).
-
-       input and output should not alias.
-    */
+    /// @brief reorder between SIMD-tiled and canonical interleaved format
+    /// @note real-valued transforms: only supported for N % 32 == 0
+    /// @note Input and output must not alias
     template<Direction direction>
     constexpr void simdReordering(std::span<const T> input, std::span<T> output) const {
         constexpr std::size_t L     = vector_type::size();
