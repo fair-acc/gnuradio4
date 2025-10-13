@@ -1232,102 +1232,6 @@ static NEVER_INLINE(void) realRadix5(std::size_t stride, std::size_t nGroups, st
 /**************************************************************************************************************/
 /**************************************************************************************************************/
 
-template<std::floating_point T>
-static NEVER_INLINE(std::span<T>) rfftf1_ps(std::size_t n_vecs, std::span<const T> input_span, std::span<T> work1_span, std::span<T> work2_span, std::span<const T> wa_span, std::span<const std::size_t, 15> radixPlan) {
-    const T* RESTRICT input_aligned = std::assume_aligned<64>(input_span.data());
-    std::span<T>      in{const_cast<T*>(input_aligned), input_span.size()};
-    std::span<T>      out = (in.data() == work2_span.data()) ? work1_span : work2_span;
-
-    const std::size_t numStages = radixPlan[1];
-    std::size_t       l2        = n_vecs; // n_vecs is the number of vec<T> units
-    std::size_t       iw        = n_vecs - 1UZ;
-
-    for (std::size_t k1 = 1; k1 <= numStages; ++k1) {
-        const std::size_t kh     = numStages - k1;
-        const std::size_t radix  = radixPlan[kh + 2];
-        const std::size_t l1     = l2 / radix;
-        const std::size_t stride = n_vecs / l2;
-        iw -= (radix - 1) * stride;
-
-        switch (radix) {
-        case 5: {
-            std::size_t ix2 = iw + stride;
-            std::size_t ix3 = ix2 + stride;
-            std::size_t ix4 = ix3 + stride;
-            realRadix5<Direction::Forward>(stride, l1, in, out, wa_span.subspan(iw), wa_span.subspan(ix2), wa_span.subspan(ix3), wa_span.subspan(ix4));
-        } break;
-        case 4: {
-            std::size_t ix2 = iw + stride;
-            std::size_t ix3 = ix2 + stride;
-            realRadix4<Direction::Forward>(stride, l1, in, out, wa_span.subspan(iw), wa_span.subspan(ix2), wa_span.subspan(ix3));
-        } break;
-        case 3: {
-            std::size_t ix2 = iw + stride;
-            realRadix3<Direction::Forward>(stride, l1, in, out, wa_span.subspan(iw), wa_span.subspan(ix2));
-        } break;
-        case 2: realRadix2<Direction::Forward>(stride, l1, in, out, wa_span.subspan(iw)); break;
-        }
-
-        l2 = l1;
-        if (out.data() == work2_span.data()) {
-            out = work1_span;
-            in  = work2_span;
-        } else {
-            out = work2_span;
-            in  = work1_span;
-        }
-    }
-    return in;
-}
-
-template<std::floating_point T>
-static NEVER_INLINE(std::span<T>) rfftb1_ps(std::size_t n_vecs, std::span<const T> input_span, std::span<T> work1_span, std::span<T> work2_span, std::span<const T> wa_span, std::span<const std::size_t, 15> radixPlan) {
-    const T* RESTRICT input_aligned = std::assume_aligned<64>(input_span.data());
-    std::span<T>      input{const_cast<T*>(input_aligned), input_span.size()};
-    std::span<T>      output = (input.data() == work2_span.data()) ? work1_span : work2_span;
-
-    std::size_t numStages = radixPlan[1];
-    std::size_t l1        = 1;
-    std::size_t iw        = 0;
-    assert(input.data() != output.data());
-
-    for (std::size_t k1 = 1; k1 <= numStages; k1++) {
-        std::size_t       radix  = radixPlan[k1 + 1];
-        std::size_t       l2     = radix * l1;
-        std::size_t       stride = n_vecs / l2;
-        const std::size_t ix2    = iw + stride;
-
-        switch (radix) {
-        case 5: {
-            std::size_t ix3 = ix2 + stride;
-            std::size_t ix4 = ix3 + stride;
-            realRadix5<Direction::Backward>(stride, l1, input, output, wa_span.subspan(iw), wa_span.subspan(ix2), wa_span.subspan(ix3), wa_span.subspan(ix4));
-        } break;
-        case 4: {
-            std::size_t ix3 = ix2 + stride;
-            realRadix4<Direction::Backward>(stride, l1, input, output, wa_span.subspan(iw), wa_span.subspan(ix2), wa_span.subspan(ix3));
-        } break;
-        case 3: {
-            realRadix3<Direction::Backward>(stride, l1, input, output, wa_span.subspan(iw), wa_span.subspan(ix2));
-        } break;
-        case 2: realRadix2<Direction::Backward>(stride, l1, input, output, wa_span.subspan(iw)); break;
-        default: assert(0); break;
-        }
-
-        l1 = l2;
-        iw += (radix - 1) * stride;
-
-        if (output.data() == work2_span.data()) {
-            output = work1_span;
-            input  = work2_span;
-        } else {
-            output = work2_span;
-            input  = work1_span;
-        }
-    }
-    return input;
-}
-
 template<std::array<std::size_t, 5UZ> ntryh>
 static constexpr std::size_t decompose(std::size_t n, std::span<std::size_t> radixPlan) {
     std::size_t nl = n, numStages = 0;
@@ -1356,124 +1260,113 @@ static constexpr std::size_t decompose(std::size_t n, std::span<std::size_t> rad
     return numStages;
 }
 
-template<std::floating_point T>
-void rffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan) {
-    const std::size_t numStages   = decompose<{4, 2, 3, 5, 0}>(n, radixPlan);
-    const T           argh        = (2 * std::numbers::pi_v<T>) / static_cast<T>(n);
-    std::size_t       is          = 0;
-    std::size_t       numStagesm1 = numStages - 1;
-    std::size_t       l1          = 1;
+template<Direction dir, Transform transform, std::floating_point T>
+void dispatchRadix(std::size_t radix, std::size_t stride, std::size_t nGroups, std::span<T> in, std::span<T> out, std::span<const T> twiddles, std::size_t offset) {
 
-    for (std::size_t k1 = 1; k1 <= numStagesm1; k1++) {
-        std::size_t radix  = radixPlan[k1 + 1];
-        std::size_t ld     = 0;
-        std::size_t l2     = l1 * radix;
-        std::size_t stride = n / l2;
-        std::size_t radixm = radix - 1;
-
-        for (std::size_t j = 1; j <= radixm; ++j) {
-            T           argld;
-            std::size_t i = is, fi = 0;
-            ld += l1;
-            argld = static_cast<T>(ld) * argh;
-            for (std::size_t ii = 3; ii <= stride; ii += 2) {
-                i += 2;
-                fi += 1;
-                wa[i - 2] = std::cos(T(fi) * argld);
-                wa[i - 1] = std::sin(T(fi) * argld);
+    constexpr auto getRadixFn = []<std::size_t R>() {
+        if constexpr (transform == Transform::Real) {
+            if constexpr (R == 2) {
+                return &realRadix2<dir, T>;
+            } else if constexpr (R == 3) {
+                return &realRadix3<dir, T>;
+            } else if constexpr (R == 4) {
+                return &realRadix4<dir, T>;
+            } else if constexpr (R == 5) {
+                return &realRadix5<dir, T>;
             }
-            is += stride;
-        }
-        l1 = l2;
-    }
-}
-
-template<std::floating_point T>
-void cffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan) {
-    const std::size_t numStages = decompose<{5, 3, 4, 2, 0}>(n, radixPlan);
-    const T           argh      = (2 * std::numbers::pi_v<T>) / static_cast<T>(n);
-    std::size_t       i         = 1;
-    std::size_t       l1        = 1;
-
-    for (std::size_t k1 = 1; k1 <= numStages; k1++) {
-        std::size_t radix         = radixPlan[k1 + 1];
-        std::size_t ld            = 0UZ;
-        std::size_t l2            = l1 * radix;
-        std::size_t stride        = n / l2;
-        std::size_t complexStride = stride + stride + 2;
-        std::size_t radixm        = radix - 1;
-
-        for (std::size_t j = 1; j <= radixm; j++) {
-            std::size_t i1 = i, fi = 0;
-            wa[i - 1] = 1;
-            wa[i]     = 0;
-            ld += l1;
-            const T argld = static_cast<T>(ld) * argh;
-            for (std::size_t ii = 4; ii <= complexStride; ii += 2) {
-                i += 2;
-                fi += 1;
-                wa[i - 1] = std::cos(T(fi) * argld);
-                wa[i]     = std::sin(T(fi) * argld);
-            }
-            if (radix > 5) {
-                wa[i1 - 1] = wa[i - 1];
-                wa[i1]     = wa[i];
-            }
-        }
-        l1 = l2;
-    }
-}
-
-template<Direction direction, std::floating_point T>
-static std::span<T> cfftf1_ps(std::size_t n_vecs, std::span<const T> input_span, std::span<T> work1_span, std::span<T> work2_span, std::span<const T> wa_span, std::span<const std::size_t, 15> radixPlan) {
-    const T* RESTRICT input_aligned = std::assume_aligned<64>(input_span.data());
-    std::span<T>      in{const_cast<T*>(input_aligned), input_span.size()};
-    std::span<T>      out = (in.data() == work2_span.data()) ? work1_span : work2_span;
-
-    std::size_t numStages = radixPlan[1];
-    std::size_t nGroups   = 1;
-    std::size_t iw        = 0;
-    for (std::size_t k1 = 2; k1 <= numStages + 1; k1++) {
-        const std::size_t radix         = radixPlan[k1];
-        const std::size_t l2            = radix * nGroups;
-        const std::size_t stride        = n_vecs / l2;
-        const std::size_t complexStride = stride + stride;
-
-        switch (radix) {
-        case 5: {
-            std::size_t ix2 = iw + complexStride;
-            std::size_t ix3 = ix2 + complexStride;
-            std::size_t ix4 = ix3 + complexStride;
-            complexRadix5<direction, T>(complexStride, nGroups, in, out, wa_span.subspan(iw), wa_span.subspan(ix2), wa_span.subspan(ix3), wa_span.subspan(ix4));
-        } break;
-        case 4: {
-            std::size_t ix2 = iw + complexStride;
-            std::size_t ix3 = ix2 + complexStride;
-            complexRadix4<direction, T>(complexStride, nGroups, in, out, wa_span.subspan(iw), wa_span.subspan(ix2), wa_span.subspan(ix3));
-        } break;
-        case 2: {
-            complexRadix2<direction, T>(complexStride, nGroups, in, out, wa_span.subspan(iw));
-        } break;
-        case 3: {
-            std::size_t ix2 = iw + complexStride;
-            complexRadix3<direction, T>(complexStride, nGroups, in, out, wa_span.subspan(iw), wa_span.subspan(ix2));
-        } break;
-        default: assert(0);
-        }
-
-        nGroups = l2;
-        iw += (radix - 1) * complexStride;
-
-        if (out.data() == work2_span.data()) {
-            out = work1_span;
-            in  = work2_span;
         } else {
-            out = work2_span;
-            in  = work1_span;
+            if constexpr (R == 2) {
+                return &complexRadix2<dir, T>;
+            } else if constexpr (R == 3) {
+                return &complexRadix3<dir, T>;
+            } else if constexpr (R == 4) {
+                return &complexRadix4<dir, T>;
+            } else if constexpr (R == 5) {
+                return &complexRadix5<dir, T>;
+            }
+        }
+    };
+
+    switch (radix) {
+    case 2: getRadixFn.template operator()<2>()(stride, nGroups, in, out, twiddles.subspan(offset)); break;
+    case 3: {
+        const std::size_t   off2 = offset + stride;
+        getRadixFn.template operator()<3>()(stride, nGroups, in, out, twiddles.subspan(offset), twiddles.subspan(off2));
+    } break;
+    case 4: {
+        const std::size_t   off2 = offset + stride;
+        const std::size_t   off3 = off2 + stride;
+        getRadixFn.template operator()<4>()(stride, nGroups, in, out, twiddles.subspan(offset), twiddles.subspan(off2), twiddles.subspan(off3));
+    } break;
+    case 5: {
+        const std::size_t   off2 = offset + stride;
+        const std::size_t   off3 = off2 + stride;
+        const std::size_t   off4 = off3 + stride;
+        getRadixFn.template operator()<5>()(stride, nGroups, in, out, twiddles.subspan(offset), twiddles.subspan(off2), twiddles.subspan(off3), twiddles.subspan(off4));
+    } break;
+    }
+}
+
+template<Direction dir, Transform transform, std::floating_point T>
+static NEVER_INLINE(std::span<T>) fftStages(std::size_t nVectors, std::span<const T> input, std::span<T> workBuffer1, std::span<T> workBuffer2, std::span<const T> twiddles, std::span<const std::size_t, 15> radixPlan) {
+    assert(isAligned<64>(input.data()));
+    assert(isAligned<64>(workBuffer1.data()));
+    assert(isAligned<64>(workBuffer2.data()));
+    assert(isAligned<64>(twiddles.data()));
+
+    const T* RESTRICT inputAligned = std::assume_aligned<64>(input.data());
+    std::span<T>      bufferIn{const_cast<T*>(inputAligned), input.size()};
+    std::span<T>      bufferOut = (bufferIn.data() == workBuffer2.data()) ? workBuffer1 : workBuffer2;
+    if constexpr (transform == Transform::Real && dir == Direction::Backward) {
+        assert(bufferIn.data() != bufferOut.data());
+    }
+
+    constexpr bool isRealForward = (transform == Transform::Real && dir == Direction::Forward);
+    constexpr bool isComplex     = (transform == Transform::Complex);
+    std::size_t    groupSize     = isRealForward ? nVectors : 1;
+    std::size_t    twiddleOffset = isRealForward ? (nVectors - 1) : 0;
+
+    const std::size_t numStages = radixPlan[1];
+    auto              getRadix  = [&](std::size_t k1) -> std::size_t {
+        if constexpr (isRealForward) {
+            return radixPlan[numStages - k1 + 2];
+        } else if constexpr (isComplex) {
+            return radixPlan[k1];
+        } else {
+            return radixPlan[k1 + 1];
+        }
+    };
+
+    const auto [loopStart, loopEnd] = isComplex ? std::pair{2UZ, numStages + 1} : std::pair{1UZ, numStages};
+    for (std::size_t k1 = loopStart; k1 <= loopEnd; ++k1) {
+        const std::size_t radix           = getRadix(k1);
+        const std::size_t nextGroupSize   = isRealForward ? groupSize / radix : groupSize * radix;
+        const std::size_t stride          = nVectors / (isRealForward ? groupSize : nextGroupSize);
+        const std::size_t effectiveStride = isComplex ? (stride + stride) : stride;
+
+        // update twiddle offset before dispatch for real-forward
+        if constexpr (isRealForward) {
+            twiddleOffset -= (radix - 1) * effectiveStride;
+        }
+
+        dispatchRadix<dir, transform>(radix, effectiveStride, isRealForward ? nextGroupSize : groupSize, bufferIn, bufferOut, twiddles, twiddleOffset);
+
+        groupSize = nextGroupSize;
+
+        if constexpr (!isRealForward) {
+            twiddleOffset += (radix - 1) * effectiveStride;
+        }
+
+        if (bufferOut.data() == workBuffer2.data()) {
+            bufferOut = workBuffer1;
+            bufferIn  = workBuffer2;
+        } else {
+            bufferOut = workBuffer2;
+            bufferIn  = workBuffer1;
         }
     }
 
-    return in; // this is in fact the output (in-place operation)
+    return bufferIn;
 }
 
 /* [0 0 1 2 3 4 5 6 7 8] -> [0 8 7 6 5 4 3 2 1] */

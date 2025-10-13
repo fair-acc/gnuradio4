@@ -1,5 +1,5 @@
-#ifndef PFFFT_H
-#define PFFFT_H
+#ifndef SIMD_FFT_HPP
+#define SIMD_FFT_HPP
 
 #include <bit>
 #include <cstddef>
@@ -148,8 +148,8 @@ inline constexpr unordered_t unordered{};
 
 #include "SimdFFT.cpp"
 
-template<std::floating_point T>
-void rffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan);
+// template<std::floating_point T>
+// void rffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan);
 template<std::floating_point T>
 void cffti1_ps(std::size_t n, std::span<T> wa, std::span<std::size_t, 15> radixPlan);
 
@@ -180,7 +180,7 @@ struct SimdFFT {
     requires(!IsDynamic::value)
     {
         static_assert(!canProcessSize(size()), "cannot process this size: min>=16C2C (32: R2C) & radix-2, -3, -5 & 'x min' compatible");
-        computeTwiddle();
+        computeTwiddles();
     }
 
     explicit SimdFFT(std::size_t n, std::source_location loc = std::source_location::current())
@@ -189,7 +189,7 @@ struct SimdFFT {
         if (!canProcessSize(size())) {
             throw gr::exception(std::format("incompatible sizes for {}2C: N ({}) must be multiple of 2,3,4,5 and >{}", fftTransform == Transform::Real ? "R" : "C", size(), minSize()), loc);
         }
-        computeTwiddle();
+        computeTwiddles();
     }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept {
@@ -245,7 +245,7 @@ struct SimdFFT {
     [[nodiscard]] std::span<T>       scratch() noexcept { return _scratch; }
     [[nodiscard]] std::span<const T> scratch() const noexcept { return _scratch; }
 
-    void computeTwiddle() {
+    void computeTwiddles() {
         // not too performance critical, computed usually only once
         constexpr std::size_t L       = simdSize();
         const std::size_t     nScalar = ceil_div(size(), L);
@@ -257,10 +257,56 @@ struct SimdFFT {
         }
 
         // compute stage twiddles & radix plan
-        if constexpr (IsRealValued::value) {
-            rffti1_ps<T>(size() / L, _stageTwiddles, _radixPlan);
-        } else {
-            cffti1_ps<T>(size() / L, _stageTwiddles, _radixPlan);
+        // radix preference order: Real prefers 4 first, Complex prefers 5
+        [[maybe_unused]] constexpr auto radixOrderOriginal = (fftTransform == Transform::Real) ? std::array{4UZ, 2UZ, 3UZ, 5UZ, 0UZ} : std::array{5UZ, 3UZ, 4UZ, 2UZ, 0UZ};
+        [[maybe_unused]] constexpr auto radixOrder         = radixOrderOriginal; // N.B. this is potentially a platform-specific tuning parameter
+
+        std::size_t       n         = size() / L;
+        const std::size_t numStages = decompose<radixOrder>(n, _radixPlan);
+        const T           argh      = (2 * std::numbers::pi_v<T>) / static_cast<T>(n);
+
+        std::size_t       twiddlePos = fftTransform == Transform::Real ? 0 : 1;
+        std::size_t       l1         = 1;
+        const std::size_t loopEnd    = fftTransform == Transform::Real ? (numStages - 1) : numStages;
+        for (std::size_t k1 = 1UZ; k1 <= loopEnd; ++k1) {
+            const std::size_t radix  = _radixPlan[k1 + 1];
+            std::size_t       ld     = 0;
+            const std::size_t l2     = l1 * radix;
+            const std::size_t stride = n / l2;
+            const std::size_t radixm = radix - 1;
+
+            for (std::size_t j = 1; j <= radixm; ++j) {
+                ld += l1;
+                const T argld = static_cast<T>(ld) * argh;
+
+                if constexpr (fftTransform == Transform::Real) { // simple stride-based indexing
+                    std::size_t twiddleIdx = twiddlePos;
+                    for (std::size_t fi = 1, ii = 3; ii <= stride; ii += 2, ++fi) {
+                        twiddleIdx += 2UZ;
+                        _stageTwiddles[twiddleIdx - 2] = std::cos(T(fi) * argld);
+                        _stageTwiddles[twiddleIdx - 1] = std::sin(T(fi) * argld);
+                    }
+                    twiddlePos += stride;
+                } else { // fftTransform == Transform::Complex -- more complex indexing with special cases
+                    const std::size_t startPos     = twiddlePos;
+                    _stageTwiddles[twiddlePos - 1] = 1;
+                    _stageTwiddles[twiddlePos]     = 0;
+
+                    const std::size_t complexStride = stride + stride + 2;
+                    for (std::size_t fi = 1, ii = 4; ii <= complexStride; ii += 2, ++fi) {
+                        twiddlePos += 2;
+                        _stageTwiddles[twiddlePos - 1] = std::cos(T(fi) * argld);
+                        _stageTwiddles[twiddlePos]     = std::sin(T(fi) * argld);
+                    }
+
+                    // special handling for large radices
+                    if (radix > 5) {
+                        _stageTwiddles[startPos - 1] = _stageTwiddles[twiddlePos - 1];
+                        _stageTwiddles[startPos]     = _stageTwiddles[twiddlePos];
+                    }
+                }
+            }
+            l1 = l2;
         }
 
         // butterfly “rotation” scalars in SoA layout
@@ -466,61 +512,52 @@ private:
 
         std::size_t ib = (numStages_odd ^ orderinged) ? 1 : 0;
 
-        // Use Ncvec * 2 for real FFTs (number of vec<T> units), Ncvec for complex
-        constexpr std::size_t L           = V::size();
-        const std::size_t     Ncvec       = simdVectorSize();
-        const std::size_t     n_vecs_real = Ncvec * 2; // Number of vec<T> units for real FFT
-        const std::size_t     n_vecs_cplx = Ncvec;     // Number of vec<T> units for complex FFT
+        const std::size_t Ncvec = simdVectorSize();
+        const std::size_t nVecs = IsRealValued::value ? (Ncvec * 2) : Ncvec;
 
-        std::span<const T> twiddle_span = stageTwiddles();
-        std::span<const T> e_span       = butterflyTwiddles();
+        // complex-valued FFT inverts the stage direction
+        constexpr Direction stagesDir           = (IsRealValued::value == (direction == Direction::Forward)) ? Direction::Forward : Direction::Backward;
+        auto                processInterleaving = [&](auto operation, std::span<const T> src, std::span<T> dst) {
+            assert(isAligned<64>(src.data()));
+            assert(isAligned<64>(dst.data()));
+            const T* RESTRICT pSrc = std::assume_aligned<64>(src.data());
+            T* RESTRICT       pDst = std::assume_aligned<64>(dst.data());
+
+            for (std::size_t k = 0UZ; k < Ncvec; ++k) {
+                const std::size_t k2 = 2UZ * k * V::size();
+                V                 out0, out1;
+                operation(V(pSrc + k2, stdx::vector_aligned), V(pSrc + k2 + V::size(), stdx::vector_aligned), out0, out1);
+                store_unchecked(out0, pDst + k2, stdx::vector_aligned);
+                store_unchecked(out1, pDst + k2 + V::size(), stdx::vector_aligned);
+            }
+        };
 
         if constexpr (direction == Direction::Forward) {
-            ib = !ib;
+            ib                             = !ib;
+            std::span<const T> stagesInput = inputSpan; // default to input
+            if constexpr (!IsRealValued::value) {
+                processInterleaving(uninterleave<V>, inputSpan, buff[ib]);
+                stagesInput = buff[ib];
+            }
+            std::span<T> outp = fftStages<stagesDir, fftTransform, T>(nVecs, stagesInput, buff[ib], buff[!ib], stageTwiddles(), _radixPlan);
+            ib                = (outp.data() == buff[0].data()) ? 0 : 1;
+
+            // finalise: butterfly twiddle application
             if constexpr (IsRealValued::value) {
-                std::span<T> outp = rfftf1_ps<T>(n_vecs_real, inputSpan, buff[ib], buff[!ib], twiddle_span, _radixPlan);
-                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
-
-                realFinalise<T>(Ncvec, buff[ib], buff[!ib], e_span);
-
-                if constexpr (ordering == Order::Ordered) {
-                    // reorder reads from buff[!ib] (where finalize wrote), writes to buff[ib]
-                    simdReordering<Direction::Forward>(std::span<const T>{buff[!ib]}, buff[ib]);
-                    // ib already points to buff[ib] - correct for final output
-                } else {
-                    // For unordered, flip ib to point to buff[!ib] where data is
-                    ib = !ib;
-                }
-            } else { // complex path
-                // deinterleave
-                const T* RESTRICT pInput  = std::assume_aligned<64>(inputSpan.data());
-                T* RESTRICT       pBuffer = std::assume_aligned<64>(buff[ib].data());
-                for (std::size_t k = 0; k < Ncvec; ++k) {
-                    const std::size_t k2 = 2 * k * L;
-
-                    V v0(pInput + k2, stdx::vector_aligned);
-                    V v1(pInput + k2 + L, stdx::vector_aligned);
-                    V r, i;
-                    uninterleave(v0, v1, r, i);
-                    store_unchecked(r, pBuffer + k2, stdx::vector_aligned);
-                    store_unchecked(i, pBuffer + k2 + L, stdx::vector_aligned);
-                }
-
-                std::span<T> outp = cfftf1_ps<Direction::Backward, T>(n_vecs_cplx, buff[ib], buff[!ib], buff[ib], twiddle_span, _radixPlan);
-                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
-
-                complexFinalise(Ncvec, buff[ib], buff[!ib], e_span);
-
-                if constexpr (ordering == Order::Ordered) {
-                    simdReordering<Direction::Forward>(std::span<const T>{buff[!ib]}, buff[ib]);
-                } else {
-                    ib = !ib;
-                }
+                realFinalise<T>(Ncvec, buff[ib], buff[!ib], butterflyTwiddles());
+            } else {
+                complexFinalise(Ncvec, buff[ib], buff[!ib], butterflyTwiddles());
             }
 
-        } else { // Backward direction
+            if constexpr (ordering == Order::Ordered) {
+                simdReordering<Direction::Forward>(std::span<const T>{buff[!ib]}, buff[ib]);
+            } else {
+                ib = !ib;
+            }
+
+        } else { // Direction::Backward
             if (inputSpan.data() == buff[ib].data()) {
-                ib = !ib; // Avoid collision: if input is in current buffer, switch to other
+                ib = !ib;
             }
 
             if constexpr (ordering == Order::Ordered) {
@@ -529,37 +566,23 @@ private:
                 ib        = !ib;
             }
 
+            // preprocess: inverse butterfly twiddles
             if constexpr (IsRealValued::value) {
-                realPreprocess<T>(Ncvec, inputSpan, buff[ib], e_span);
-
-                std::span<T> outp = rfftb1_ps<T>(n_vecs_real, buff[ib], buff[0], buff[1], twiddle_span, _radixPlan);
-                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
+                realPreprocess<T>(Ncvec, inputSpan, buff[ib], butterflyTwiddles());
             } else {
-                complexPreprocess(Ncvec, inputSpan, buff[ib], e_span);
+                complexPreprocess(Ncvec, inputSpan, buff[ib], butterflyTwiddles());
+            }
 
-                std::span<T> outp = cfftf1_ps<Direction::Forward, T>(n_vecs_cplx, buff[ib], buff[0], buff[1], twiddle_span, _radixPlan);
-                ib                = (outp.data() == buff[0].data()) ? 0 : 1;
+            std::span<T> outp = fftStages<stagesDir, fftTransform, T>(nVecs, buff[ib], buff[0], buff[1], stageTwiddles(), _radixPlan);
+            ib                = (outp.data() == buff[0].data()) ? 0 : 1;
 
-                // interleave
-                T* RESTRICT pBuffer = std::assume_aligned<64>(buff[ib].data());
-                for (std::size_t k = 0; k < Ncvec; ++k) {
-                    const std::size_t k2 = 2 * k * L;
-
-                    V r(pBuffer + k2, stdx::vector_aligned);
-                    V i(pBuffer + k2 + L, stdx::vector_aligned);
-                    V v0, v1;
-                    interleave(r, i, v0, v1);
-                    store_unchecked(v0, pBuffer + k2, stdx::vector_aligned);
-                    store_unchecked(v1, pBuffer + k2 + L, stdx::vector_aligned);
-                }
+            if constexpr (!IsRealValued::value) {
+                processInterleaving(interleave<V>, buff[ib], buff[ib]);
             }
         }
 
-        if (buff[ib].data() != outputSpan.data()) {
-            T* RESTRICT pBuffer = std::assume_aligned<64>(buff[ib].data());
-            T* RESTRICT pOutput = std::assume_aligned<64>(outputSpan.data());
-            // std::memcpy(pBuffer, pOutput, Ncvec * 2 * L * sizeof(T)); -- outch
-            std::memcpy(pOutput, pBuffer, Ncvec * 2 * L * sizeof(T));
+        if (buff[ib].data() != outputSpan.data()) { // final copy -- only if needed
+            std::memcpy(std::assume_aligned<64>(outputSpan.data()), std::assume_aligned<64>(buff[ib].data()), Ncvec * 2 * V::size() * sizeof(T));
             ib = !ib;
         }
         assert(buff[ib].data() == outputSpan.data());
@@ -576,4 +599,4 @@ private:
 #undef RESTRICT
 #endif
 
-#endif /* PFFFT_H */
+#endif /* SIMD_FFT_HPP */
