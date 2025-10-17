@@ -16,3 +16,4 @@ function(add_gr_benchmark BM_NAME)
 endfunction()
 
 add_gr_benchmark(bm_fft)
+add_gr_benchmark(bm_pffft)
