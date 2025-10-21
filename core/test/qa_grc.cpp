@@ -58,6 +58,7 @@ auto collectEdges(const gr::Graph& graph) {
 }
 
 bool checkAndPrintMissingBlocks(const std::string& first, const std::string& second) {
+
     gr::property_map firstYaml  = *pmtv::yaml::deserialize(first);
     gr::property_map secondYaml = *pmtv::yaml::deserialize(second);
 
@@ -290,6 +291,130 @@ connections:
   - [chained_multiplier, 0, counter, 0]
   - [counter, 0, sink, 0]
 )";
+
+            const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            expect(eq(graph->blocks().size(), 5UZ));
+
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
+
+            expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
+        } catch (const std::string& e) {
+            std::println(std::cerr, "Unexpected exception: {}", e);
+            expect(false);
+        }
+    };
+
+    "Basic graph and subgraph loading and storing using plugins"_test = [&] {
+        try {
+            using namespace gr;
+
+            constexpr std::string_view pluginsTestGrc = R"(
+blocks:
+  - id: good::fixed_source<float64>
+    parameters:
+      name: main_source
+      event_count: 100
+      unknown_property: 42
+  - id: good::multiply<float64>
+    parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
+      total_count: 100
+      unknown_property: 42
+  - id: SUBGRAPH
+    parameters:
+      name: chained_multiplier
+    graph:
+      blocks:
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier1
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier2
+      connections:
+        - [multiplier1, 0, multiplier2, 0]
+      exported_ports:
+        - [multiplier1, INPUT, in]
+        - [multiplier2, OUTPUT, out]
+
+connections:
+  - [main_source, 0, multiplier, 0]
+  - [multiplier, 0, chained_multiplier, 0]
+  - [chained_multiplier, 0, counter, 0]
+  - [counter, 0, sink, 0]
+)";
+
+            const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            expect(eq(graph->blocks().size(), 5UZ));
+
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
+
+            expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
+        } catch (const std::string& e) {
+            std::println(std::cerr, "Unexpected exception: {}", e);
+            expect(false);
+        }
+    };
+
+    "Basic graph and managed subgraph loading and storing using plugins"_test = [&] {
+        try {
+            using namespace gr;
+
+            constexpr std::string_view pluginsTestGrc = R"(
+    blocks:
+      - id: good::fixed_source<float64>
+        parameters:
+          name: main_source
+          event_count: 100
+          unknown_property: 42
+      - id: good::multiply<float64>
+        parameters:
+          name: multiplier
+      - id: builtin_counter<float64>
+        parameters:
+          name: counter
+      - id: good::cout_sink<float64>
+        parameters:
+          name: sink
+          total_count: 100
+          unknown_property: 42
+      - id: SUBGRAPH
+        parameters:
+          name: chained_multiplier
+        scheduler:
+          id: good::GoodMathScheduler
+          parameters:
+            defaultPoolName: default_cpu
+        graph:
+          blocks:
+            - id: good::multiply<float64>
+              parameters:
+                name: multiplier1
+            - id: good::multiply<float64>
+              parameters:
+                name: multiplier2
+          connections:
+            - [multiplier1, 0, multiplier2, 0]
+          exported_ports:
+            - [multiplier1, INPUT, in]
+            - [multiplier2, OUTPUT, out]
+
+    connections:
+      - [main_source, 0, multiplier, 0]
+      - [multiplier, 0, chained_multiplier, 0]
+      - [chained_multiplier, 0, counter, 0]
+      - [counter, 0, sink, 0]
+    )";
 
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
             auto       graph    = gr::loadGrc(context->loader, graphSrc);

@@ -22619,6 +22619,7 @@ struct std::formatter<gr::work::Result, char> {
 
 namespace gr {
 class BlockModel;
+struct Graph;
 
 struct PortDefinition {
     struct IndexBased {
@@ -23112,6 +23113,13 @@ public:
     [[nodiscard]] virtual std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept = 0;
 
     [[nodiscard]] virtual void* raw() = 0;
+
+    // Common interface between managed and unmanaged graphs
+    [[nodiscard]] virtual gr::Graph*       graph()               = 0;
+    [[nodiscard]] virtual gr::property_map exportedInputPorts()  = 0;
+    [[nodiscard]] virtual gr::property_map exportedOutputPorts() = 0;
+
+    virtual void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) = 0;
 };
 
 namespace serialization_fields {
@@ -23328,22 +23336,6 @@ protected:
     T           _block;
     std::string _type_name = gr::meta::type_name<T>();
 
-    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
-    [[nodiscard]] constexpr auto& blockRef() noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
     void initMessagePorts() {
         msgIn  = std::addressof(_block.msgIn);
         msgOut = std::addressof(_block.msgOut);
@@ -23390,8 +23382,13 @@ protected:
     }
 
 public:
-    BlockWrapper() : BlockWrapper(gr::property_map()) {}
-    explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
+    explicit BlockWrapper(gr::property_map initParameter = {}) : _block(std::move(initParameter)) {
+        initMessagePorts();
+        _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
+        _dynamicPortsLoader.instance = this;
+    }
+
+    explicit BlockWrapper(T&& original) : _block(std::move(original)) {
         initMessagePorts();
         _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
         _dynamicPortsLoader.instance = this;
@@ -23403,7 +23400,27 @@ public:
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
     ~BlockWrapper() override                           = default;
 
-    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override { return blockRef().init(progress, ioThreadPool); }
+    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override {
+        if constexpr (requires { blockRef().init(progress, ioThreadPool); }) {
+            return blockRef().init(progress, ioThreadPool);
+        }
+    }
+
+    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
+
+    [[nodiscard]] constexpr auto& blockRef() noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 
@@ -23487,6 +23504,12 @@ public:
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
+
+    // Common interface between managed and unmanaged graphs
+    [[nodiscard]] gr::Graph*       graph() override { return nullptr; }
+    [[nodiscard]] gr::property_map exportedInputPorts() override { return {}; }
+    [[nodiscard]] gr::property_map exportedOutputPorts() override { return {}; }
+    void                           exportPort(bool, const std::string&, PortDirection, const std::string&, std::source_location = std::source_location::current()) override {}
 };
 
 namespace detail {
@@ -23649,558 +23672,6 @@ struct std::formatter<gr::Edge> {
 
 // #include <gnuradio-4.0/CircularBuffer.hpp>
 
-// #include <gnuradio-4.0/PluginLoader.hpp>
-#ifndef GNURADIO_PLUGIN_LOADER_HPP
-#define GNURADIO_PLUGIN_LOADER_HPP
-
-#include <algorithm>
-#include <filesystem>
-#include <span>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
-
-// #include "BlockRegistry.hpp"
-#ifndef GNURADIO_BLOCK_REGISTRY_HPP
-#define GNURADIO_BLOCK_REGISTRY_HPP
-
-#include <memory>
-#include <string>
-#include <string_view>
-
-#include <gnuradio-4.0/config.hpp>
-// #include <gnuradio-4.0/meta/utils.hpp>
-
-
-// #include "BlockModel.hpp"
-
-
-// #include <gnuradio-4.0/Export.hpp>
-#ifndef GNURADIO_EXPORT_MACRO_HPP
-#define GNURADIO_EXPORT_MACRO_HPP
-
-#if defined _WIN32 || defined __CYGWIN__
-#ifdef BUILDING_MYPLUGIN
-#define GNURADIO_EXPORT __declspec(dllexport)
-#else
-#define GNURADIO_EXPORT __declspec(dllimport)
-#endif
-#else
-#if __GNUC__ >= 4
-#define GNURADIO_EXPORT __attribute__((visibility("default")))
-#else
-#define GNURADIO_EXPORT
-#endif
-#endif
-
-#endif
-
-
-/**
- *  namespace gr {
- *  template<typename T> struct AlgoImpl1 {};
- *  template<typename T> struct AlgoImpl2 {};
- *
- *  // register block with arbitrary NTTPs (here: 3UZ) and expand T in [float,double], U in [short, int, long, long long]
- *  GR_REGISTER_BLOCK(gr::basic::BlockN, ([T], [U], 3UZ), [ float, double ], [ short, int, long, long long ])
- *  // register block with arbitrary NTTPs (here: 4UZ) and expand T for [short], U for [short] only
- *  GR_REGISTER_BLOCK("CustomBlockNameN", gr::basic::BlockN, ([T], [U], 4UZ, gr::basic::AlgoImpl2<[T]>), [ short ], [ short ])
- *
- *  template<typename T, typename U, std::size_t N, typename Alog = AlgoImpl1<T>>
- *  struct BlockN : public gr::IBlock { ... };
- *
- *  } // namespace gr::basic
- *
- * other macro variants options:
- * GR_REGISTER_BLOCK("MyBlockName", gr::basic::Block1, ([T], [U]), [ float, double ], [int])
- * GR_REGISTER_BLOCK(gr::basic::Block0)
- * GR_REGISTER_BLOCK("blockN.hpp", gr::basic::BlockN, ([T],[U],3UZ,SomeAlgo<[T]>), [ short, int], [double])
- */
-#define GR_REGISTER_BLOCK(...) /* Marker macro for parse_registrations */
-
-namespace gr {
-
-using namespace std::string_literals;
-using namespace std::string_view_literals;
-
-namespace detail {
-
-template<typename TBlock>
-requires std::is_constructible_v<TBlock, property_map>
-std::unique_ptr<gr::BlockModel> blockFactory(property_map params) {
-    return std::make_unique<gr::BlockWrapper<TBlock>>(std::move(params));
-}
-
-std::unique_ptr<gr::BlockModel> blockFactoryProto(property_map params);
-
-} // namespace detail
-
-class BlockRegistry {
-    struct TBlockTypeHandler {
-        std::string                          alias;
-        decltype(detail::blockFactoryProto)* createFunction = nullptr;
-    };
-
-    std::map<std::string, TBlockTypeHandler, std::less<>> _blockTypeHandlers;
-
-public:
-    BlockRegistry()                                      = default;
-    BlockRegistry(const BlockRegistry& other)            = delete;
-    BlockRegistry& operator=(const BlockRegistry& other) = delete;
-
-    BlockRegistry(BlockRegistry&& other) noexcept : _blockTypeHandlers(std::exchange(other._blockTypeHandlers, {})) {}
-    BlockRegistry& operator=(BlockRegistry&& other) noexcept {
-        auto tmp = std::move(other);
-        std::swap(_blockTypeHandlers, tmp._blockTypeHandlers);
-        return *this;
-    }
-
-#ifdef GR_ENABLE_BLOCK_REGISTRY
-    template<BlockLike TBlock>
-    requires std::is_constructible_v<TBlock, property_map>
-    bool insert(std::string_view alias = "", std::string_view aliasParameters = "") {
-        const std::string name      = gr::meta::type_name<TBlock>();
-        const std::string fullAlias = [&] {
-            if (alias.empty()) {
-                return std::string{};
-            }
-            if (alias[0] == '=') {
-                return std::string(alias.substr(1));
-            }
-            if (aliasParameters.empty()) {
-                return meta::detail::makePortableTypeName(alias);
-            }
-            return meta::detail::makePortableTypeName(std::string{alias} + "<" + std::string{aliasParameters} + ">");
-        }();
-
-        auto handler = TBlockTypeHandler{.alias = fullAlias, .createFunction = detail::blockFactory<TBlock>};
-
-        auto resName = _blockTypeHandlers.insert_or_assign(name, handler);
-
-        bool aliasInserted = false;
-        if (!fullAlias.empty()) {
-            handler.alias.clear();
-            _blockTypeHandlers[fullAlias] = handler;
-            auto resAlias                 = _blockTypeHandlers.insert_or_assign(fullAlias, handler);
-            aliasInserted                 = resAlias.second;
-        }
-
-        return resName.second || aliasInserted;
-    }
-#else
-    template<BlockLike TBlock>
-    requires std::is_constructible_v<TBlock, property_map>
-    bool insert([[maybe_unused]] std::string_view alias = "", [[maybe_unused]] std::string_view aliasParameters = "") {
-        return false;
-        // disables plugin system in favour of faster compile-times and when runtime or Python wrapping APIs are not requrired
-        // e.g. for compile-time only flow-graphs or for CI runners
-    }
-#endif
-
-    [[nodiscard]] std::unique_ptr<gr::BlockModel> create(std::string_view blockName, property_map blockParams) const {
-        if (auto blockIt = _blockTypeHandlers.find(blockName); blockIt != _blockTypeHandlers.end()) {
-            return blockIt->second.createFunction(std::move(blockParams));
-        }
-        return nullptr;
-    }
-
-    [[nodiscard]] std::vector<std::string> keys() const {
-        auto view = _blockTypeHandlers | std::views::keys;
-        return {view.begin(), view.end()};
-    }
-
-    [[nodiscard]] bool contains(std::string_view blockName) const { return _blockTypeHandlers.contains(blockName); }
-
-    std::string typeName(const std::shared_ptr<BlockModel>& block) {
-        auto name = block->typeName();
-        auto it   = _blockTypeHandlers.find(name);
-        if (it != _blockTypeHandlers.end() && !it->second.alias.empty()) {
-            return it->second.alias;
-        }
-        return std::string(name);
-    }
-
-    void merge(gr::BlockRegistry& anotherRegistry) {
-        if (this == std::addressof(anotherRegistry)) {
-            return;
-        }
-
-        _blockTypeHandlers.insert(anotherRegistry._blockTypeHandlers.cbegin(), anotherRegistry._blockTypeHandlers.cend());
-    }
-
-    friend BlockRegistry& globalBlockRegistry(std::source_location location);
-};
-
-GNURADIO_EXPORT
-BlockRegistry& globalBlockRegistry(std::source_location location = std::source_location::current());
-
-} // namespace gr
-
-extern "C" {
-GNURADIO_EXPORT
-gr::BlockRegistry* grGlobalBlockRegistry(std::source_location location = std::source_location::current());
-}
-
-#endif // GNURADIO_BLOCK_REGISTRY_HPP
-
-
-#ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
-#include <dlfcn.h>
-
-// #include "Plugin.hpp"
-#ifndef GNURADIO_PLUGIN_H
-#define GNURADIO_PLUGIN_H
-
-#include <span>
-#include <string>
-#include <string_view>
-
-#include <dlfcn.h>
-
-// #include "BlockRegistry.hpp"
-
-
-// #include <gnuradio-4.0/Export.hpp>
-
-
-using namespace std::string_literals;
-using namespace std::string_view_literals;
-
-#define GR_PLUGIN_CURRENT_ABI_VERSION 1
-
-struct GNURADIO_EXPORT gr_plugin_metadata {
-    std::string_view plugin_name;
-    std::string_view plugin_author;
-    std::string_view plugin_license;
-    std::string_view plugin_version;
-};
-
-class GNURADIO_EXPORT gr_plugin_base {
-public:
-    gr_plugin_metadata metadata;
-
-    virtual ~gr_plugin_base();
-
-    virtual std::uint8_t abiVersion() const = 0;
-
-    virtual std::vector<std::string>        availableBlocks() const                                            = 0;
-    virtual std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const gr::property_map& params) = 0;
-};
-
-namespace gr {
-template<std::uint8_t ABI_VERSION = GR_PLUGIN_CURRENT_ABI_VERSION>
-class plugin : public gr_plugin_base {
-private:
-    gr::BlockRegistry registry;
-
-public:
-    plugin() {}
-
-    std::uint8_t abiVersion() const override { return ABI_VERSION; }
-
-    std::vector<std::string> availableBlocks() const override { return registry.keys(); }
-
-    std::unique_ptr<gr::BlockModel> createBlock(std::string_view name, const property_map& params) override { return registry.create(name, params); }
-
-    operator gr::BlockRegistry&() { return registry; }
-};
-
-} // namespace gr
-
-/*
- * Defines a plugin - creates the plugin meta-data and creates
- * a block registry (grPluginInstance()) for the plugin.
- *
- * Arguments:
- *  - plugin name
- *  - author
- *  - license of the plugin
- *  - plugin version
- *
- * Example usage:
- *     GR_PLUGIN("Good Base Plugin", "Unknown", "MIT", "v1")
- */
-#define GR_PLUGIN(Name, Author, License, Version)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-    gr::plugin<>& grPluginInstance() {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \
-        static gr::plugin<> instance = [] {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
-            gr::plugin<> result;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
-            result.metadata = gr_plugin_metadata{Name, Author, License, Version};                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-            return result;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     \
-        }();                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-        return instance;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
-    }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          \
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
-    extern "C" {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               \
-    void GNURADIO_EXPORT gr_plugin_make(gr_plugin_base** plugin) { *plugin = &grPluginInstance(); }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
-    void GNURADIO_EXPORT gr_plugin_free(gr_plugin_base*) {}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
-    }
-
-#endif // include guard
-
-#endif
-
-namespace gr {
-
-using namespace std::string_literals;
-using namespace std::string_view_literals;
-
-#ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
-// Plugins are not supported on WASM
-
-using plugin_create_function_t  = void (*)(gr_plugin_base**);
-using plugin_destroy_function_t = void (*)(gr_plugin_base*);
-
-class PluginHandler {
-private:
-    void*                     _dl_handle  = nullptr;
-    plugin_create_function_t  _create_fn  = nullptr;
-    plugin_destroy_function_t _destroy_fn = nullptr;
-    gr_plugin_base*           _instance   = nullptr;
-
-    std::string _status;
-
-    void release() {
-        if (_instance && _destroy_fn) {
-            _destroy_fn(_instance);
-            _instance = nullptr;
-        }
-
-        if (_dl_handle) {
-            dlclose(_dl_handle);
-            _dl_handle = nullptr;
-        }
-    }
-
-public:
-    PluginHandler() = default;
-
-    explicit PluginHandler(const std::string& plugin_file) {
-        // TODO: Document why RTLD_LOCAL and not RTLD_GLOBAL is used here. (RTLD_LOCAL breaks RTTI/dynamic_cast across
-        // plugin boundaries. Note that RTTI can be very helpful in the debugger.)
-        _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY | RTLD_LOCAL);
-        if (!_dl_handle) {
-            _status = "Failed to load the plugin file";
-            return;
-        }
-
-        // FIXME: Casting a void* to function-pointer is UB in C++. Yes "… 'dlsym' is not C++ and therefore we can do
-        // whateever …". But we don't need to. Simply have a single 'extern "C"' symbol in the plugin which is an object
-        // storing two function pointers. Then we need a single cast from the 'dlsym' result to an aggregate type and
-        // can then extract the two function pointers from it. That's simpler and more likely to be conforming C++.
-        _create_fn = reinterpret_cast<plugin_create_function_t>(dlsym(_dl_handle, "gr_plugin_make"));
-        if (!_create_fn) {
-            _status = "Failed to load symbol gr_plugin_make";
-            release();
-            return;
-        }
-
-        _destroy_fn = reinterpret_cast<plugin_destroy_function_t>(dlsym(_dl_handle, "gr_plugin_free"));
-        if (!_destroy_fn) {
-            _status = "Failed to load symbol gr_plugin_free";
-            release();
-            return;
-        }
-
-        _create_fn(&_instance);
-        if (!_instance) {
-            _status = "Failed to create an instance of the plugin";
-            release();
-            return;
-        }
-
-        if (_instance->abiVersion() != GR_PLUGIN_CURRENT_ABI_VERSION) {
-            _status = "Wrong ABI version";
-            release();
-            return;
-        }
-    }
-
-    PluginHandler(const PluginHandler& other)            = delete;
-    PluginHandler& operator=(const PluginHandler& other) = delete;
-
-    PluginHandler(PluginHandler&& other) noexcept : _dl_handle(std::exchange(other._dl_handle, nullptr)), _create_fn(std::exchange(other._create_fn, nullptr)), _destroy_fn(std::exchange(other._destroy_fn, nullptr)), _instance(std::exchange(other._instance, nullptr)) {}
-
-    PluginHandler& operator=(PluginHandler&& other) noexcept {
-        auto tmp = std::move(other);
-        std::swap(_dl_handle, tmp._dl_handle);
-        std::swap(_create_fn, tmp._create_fn);
-        std::swap(_destroy_fn, tmp._destroy_fn);
-        std::swap(_instance, tmp._instance);
-        return *this;
-    }
-
-    ~PluginHandler() { release(); }
-
-    explicit operator bool() const { return _instance; }
-
-    [[nodiscard]] const std::string& status() const { return _status; }
-
-    auto* operator->() const { return _instance; }
-};
-
-class PluginLoader {
-private:
-    std::vector<PluginHandler>                       _pluginHandlers;
-    std::unordered_map<std::string, gr_plugin_base*> _pluginForBlockName;
-    std::unordered_map<std::string, std::string>     _failedPlugins;
-    std::unordered_set<std::string>                  _loadedPluginFiles;
-
-    BlockRegistry* _registry;
-
-    gr_plugin_base* pluginForBlockName(std::string_view name) const {
-        if (auto it = _pluginForBlockName.find(std::string(name)); it != _pluginForBlockName.end()) {
-            return it->second;
-        } else {
-            return nullptr;
-        }
-    }
-
-public:
-    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
-        for (const auto& directory : plugin_directories) {
-            if (!std::filesystem::is_directory(directory)) {
-                continue;
-            }
-
-            for (const auto& file : std::filesystem::directory_iterator{directory}) {
-#if defined(_WIN32)
-                if (file.is_regular_file() && file.path().extension() == ".dll") {
-#else
-                if (file.is_regular_file() && file.path().extension() == ".so") {
-#endif
-                    auto fileString = file.path().string();
-                    if (_loadedPluginFiles.contains(fileString)) {
-                        continue;
-                    }
-                    _loadedPluginFiles.insert(fileString);
-
-                    if (PluginHandler handler(file.path().string()); handler) {
-                        for (std::string_view blockName : handler->availableBlocks()) {
-                            _pluginForBlockName.emplace(std::string(blockName), handler.operator->());
-                        }
-
-                        _pluginHandlers.push_back(std::move(handler));
-
-                    } else {
-                        _failedPlugins[file.path().string()] = handler.status();
-                    }
-                }
-            }
-        }
-    }
-
-    BlockRegistry& registry() { return *_registry; }
-
-    const auto& plugins() const { return _pluginHandlers; }
-
-    const auto& failedPlugins() const { return _failedPlugins; }
-
-    std::vector<std::string> availableBlocks() const {
-        auto                     keysView = _pluginForBlockName | std::views::keys;
-        std::vector<std::string> result(keysView.begin(), keysView.end());
-
-        const auto& builtin = _registry->keys();
-        result.insert(result.end(), builtin.begin(), builtin.end());
-
-        // remove duplicates
-        std::ranges::sort(result);
-        auto newEnd = std::ranges::unique(result).begin();
-        result.erase(newEnd, result.end());
-        return result;
-    }
-
-    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
-        // Try to create a node from the global registry
-        if (auto result = _registry->create(name, params)) {
-            return result;
-        }
-
-        auto* plugin = pluginForBlockName(name);
-        if (plugin == nullptr) {
-#ifndef NDEBUG
-            std::print("Available blocks in the registry\n");
-            for (const auto& block : _registry->keys()) {
-                std::print("    {}\n", block);
-            }
-            std::print("]\n");
-
-            std::print("Available blocks from plugins [\n", name);
-            for (const auto& [blockName, _] : _pluginForBlockName) {
-                std::print("    {}\n", blockName);
-            }
-            std::print("]\n");
-#endif
-            std::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
-            return {};
-        }
-
-        auto result = plugin->createBlock(name, params);
-        return result;
-    }
-
-    bool isBlockAvailable(std::string_view block) const { return _registry->contains(block) || pluginForBlockName(block) != nullptr; }
-};
-#else
-// PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
-// same API as proper PluginLoader
-class PluginLoader {
-private:
-    BlockRegistry* _registry;
-
-public:
-    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry) {}
-
-    BlockRegistry& registry() { return *_registry; }
-
-    auto availableBlocks() const { return _registry->keys(); }
-
-    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->create(name, params); }
-
-    bool isBlockAvailable(std::string_view block) const { return _registry->contains(block); }
-};
-#endif
-
-inline auto& globalPluginLoader() {
-    auto pluginPaths = [] {
-        std::vector<std::filesystem::path> result;
-
-        auto* envpath = ::getenv("GNURADIO4_PLUGIN_DIRECTORIES");
-        if (envpath == nullptr) {
-            // TODO choose proper paths when we get the system GR installation done
-            result.emplace_back("core/test/plugins");
-
-        } else {
-            std::string_view paths(envpath);
-
-            auto i = paths.cbegin();
-
-            // TODO If we want to support Windows, this should be ; there
-            auto isSeparator = [](char c) { return c == ':'; };
-
-            while (i != paths.cend()) {
-                i      = std::find_if_not(i, paths.cend(), isSeparator);
-                auto j = std::find_if(i, paths.cend(), isSeparator);
-
-                if (i != paths.cend()) {
-                    result.emplace_back(std::string_view(i, j));
-                }
-                i = j;
-            }
-        }
-
-        return result;
-    };
-
-    static PluginLoader instance(gr::globalBlockRegistry(), {pluginPaths()});
-    return instance;
-}
-
-} // namespace gr
-
-#endif // GNURADIO_PLUGIN_LOADER_HPP
-
 // #include <gnuradio-4.0/Port.hpp>
 
 // #include <gnuradio-4.0/Sequence.hpp>
@@ -24239,16 +23710,20 @@ concept GraphLike = requires(T t, const T& tc) {
     { t.edges() } -> std::same_as<std::span<Edge>>;
 };
 
+using namespace std::string_literals;
+
+class PluginLoader;
+
 namespace graph::property {
-inline static const char* kInspectBlock   = "InspectBlock";
-inline static const char* kBlockInspected = "BlockInspected";
-inline static const char* kGraphInspect   = "GraphInspect";
-inline static const char* kGraphInspected = "GraphInspected";
+inline const char* kInspectBlock   = "InspectBlock";
+inline const char* kBlockInspected = "BlockInspected";
+inline const char* kGraphInspect   = "GraphInspect";
+inline const char* kGraphInspected = "GraphInspected";
 
-inline static const char* kRegistryBlockTypes = "RegistryBlockTypes";
+inline const char* kRegistryBlockTypes = "RegistryBlockTypes";
 
-inline static const char* kSubgraphExportPort   = "SubgraphExportPort";
-inline static const char* kSubgraphExportedPort = "SubgraphExportedPort";
+inline const char* kSubgraphExportPort   = "SubgraphExportPort";
+inline const char* kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
 
 namespace graph {
@@ -24318,13 +23793,13 @@ void forEachEdge(const GraphLike auto& root, Fn&& function, Edge::EdgeState filt
 
 } // namespace graph
 
-template<typename TSubGraph>
-class GraphWrapper : public BlockWrapper<TSubGraph> {
+template<typename TSelf, typename TSubGraph = TSelf>
+class GraphWrapper : public BlockWrapper<TSelf> {
+protected:
     std::unordered_multimap<std::string, std::string> _exportedInputPortsForBlock;
     std::unordered_multimap<std::string, std::string> _exportedOutputPortsForBlock;
 
-public:
-    GraphWrapper(gr::property_map init = {}) : gr::BlockWrapper<TSubGraph>(std::move(init)) {
+    void initExportPorts() {
         // We need to make sure nobody touches our dynamic ports
         // as this class will handle them
         this->_dynamicPortsLoader.instance = nullptr;
@@ -24343,7 +23818,12 @@ public:
         };
     }
 
-    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) {
+public:
+    GraphWrapper(gr::property_map params = {}) : BlockWrapper<TSelf>(std::move(params)) { initExportPorts(); }
+
+    GraphWrapper(TSubGraph&& original) : BlockWrapper<TSelf>(std::move(original)) { initExportPorts(); }
+
+    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) override {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
         if (infoFound == exportFlag) {
             throw Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
@@ -24376,20 +23856,52 @@ public:
         updateMetaInformation();
     }
 
-    auto& blockRef() { return BlockWrapper<TSubGraph>::blockRef(); }
-    auto& blockRef() const { return BlockWrapper<TSubGraph>::blockRef(); }
-
-    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return this->blockRef().blocks(); }
-    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return this->blockRef().blocks(); }
-    [[nodiscard]] std::span<const Edge>                        edges() const noexcept { return this->blockRef().edges(); }
-    [[nodiscard]] std::span<Edge>                              edges() noexcept { return this->blockRef().edges(); }
+    [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept override { return this->blockRef().blocks(); }
+    [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept override { return this->blockRef().blocks(); }
+    [[nodiscard]] std::span<const Edge>                        edges() const noexcept override { return this->blockRef().edges(); }
+    [[nodiscard]] std::span<Edge>                              edges() noexcept override { return this->blockRef().edges(); }
 
     const std::unordered_multimap<std::string, std::string>& exportedInputPortsForBlock() const { return _exportedInputPortsForBlock; }
     const std::unordered_multimap<std::string, std::string>& exportedOutputPortsForBlock() const { return _exportedOutputPortsForBlock; }
 
+    [[nodiscard]] gr::Graph* graph() final {
+        if constexpr (requires { this->blockRef().graph(); }) {
+            return &(this->blockRef().graph());
+        } else {
+            return &(this->blockRef());
+        }
+    };
+
+    [[nodiscard]] gr::property_map exportedPortsFor(const auto& collection) {
+        gr::property_map         result;
+        std::string              currentBlock;
+        std::vector<std::string> currentPortNames;
+        for (const auto& [block, port] : collection) {
+            if (block != currentBlock) {
+                if (!currentBlock.empty()) {
+                    result[currentBlock] = std::move(currentPortNames);
+                    currentPortNames     = {};
+                }
+                currentBlock = block;
+            } else {
+                currentPortNames.push_back(port);
+            }
+        }
+        return result;
+    }
+    [[nodiscard]] gr::property_map exportedInputPorts() final { return exportedPortsFor(_exportedInputPortsForBlock); }
+    [[nodiscard]] gr::property_map exportedOutputPorts() final { return exportedPortsFor(_exportedOutputPortsForBlock); }
+
 private:
     DynamicPort& findPortInBlock(const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) {
-        std::expected<std::shared_ptr<BlockModel>, Error> block = graph::findBlock(this->blockRef(), uniqueBlockName, location);
+        const auto& asGraph = [this] -> const auto& {
+            if constexpr (requires { this->blockRef().graph(); }) {
+                return this->blockRef().graph();
+            } else {
+                return this->blockRef();
+            }
+        }();
+        std::expected<std::shared_ptr<BlockModel>, Error> block = graph::findBlock(asGraph, uniqueBlockName, location);
         if (!block.has_value()) {
             throw gr::exception(block.error().message, location);
         }
@@ -24413,7 +23925,7 @@ private:
     }
 
     void updateMetaInformation() {
-        auto& info = BlockWrapper<TSubGraph>::metaInformation();
+        auto& info = this->metaInformation();
 
         auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
             std::string              previousUniqueName;
@@ -24447,7 +23959,7 @@ struct Graph : Block<Graph> {
 
     std::shared_ptr<gr::Sequence> _progress = std::make_shared<gr::Sequence>();
 
-    gr::PluginLoader* _pluginLoader = std::addressof(gr::globalPluginLoader());
+    gr::PluginLoader* _pluginLoader = nullptr;
 
     // Just a dummy class that stores the graph and the source block and port
     // to be able to split the connection into two separate calls
@@ -24559,15 +24071,9 @@ public:
 
     constexpr static block::Category blockCategory = block::Category::TransparentBlockGroup;
 
-    Graph(property_map settings = {}) : gr::Block<Graph>(std::move(settings)) {
-        _blocks.reserve(100); // TODO: remove
+    Graph(property_map settings = {});
 
-        propertyCallbacks[graph::property::kInspectBlock]       = std::mem_fn(&Graph::propertyCallbackInspectBlock);
-        propertyCallbacks[graph::property::kGraphInspect]       = std::mem_fn(&Graph::propertyCallbackGraphInspect);
-        propertyCallbacks[graph::property::kRegistryBlockTypes] = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
-    }
-
-    Graph(gr::PluginLoader& pluginLoader) : Graph(property_map{}) { _pluginLoader = std::addressof(pluginLoader); }
+    Graph(gr::PluginLoader& pluginLoader, property_map settings = {}) : Graph(std::move(settings)) { _pluginLoader = std::addressof(pluginLoader); }
 
     Graph(Graph&& other)
         : gr::Block<gr::Graph>(std::move(other)),                             //
@@ -24612,13 +24118,7 @@ public:
         return *rawBlockRef;
     }
 
-    [[maybe_unused]] std::shared_ptr<BlockModel> const& emplaceBlock(std::string_view type, property_map initialSettings) {
-        if (std::shared_ptr<BlockModel> block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
-            const std::shared_ptr<BlockModel>& newBlock = addBlock(block_load);
-            return newBlock;
-        }
-        throw gr::exception(std::format("Cannot create block '{}'", type));
-    }
+    [[maybe_unused]] std::shared_ptr<BlockModel> const& emplaceBlock(std::string_view type, property_map initialSettings);
 
     bool containsEdge(const Edge& edge) const {
         return std::ranges::any_of(_edges, [&](const Edge& e) { return e == edge; });
@@ -24637,23 +24137,7 @@ public:
         return std::erase_if(_edges, [&](const Edge& e) { return e == edge; });
     }
 
-    std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kInspectBlock);
-        using namespace std::string_literals;
-        const auto&        data       = message.data.value();
-        const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
-        using namespace std::string_literals;
-
-        auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
-        if (it == _blocks.end()) {
-            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
-        }
-
-        gr::Message reply;
-        reply.endpoint = graph::property::kBlockInspected;
-        reply.data     = serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All);
-        return {reply};
-    }
+    std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message);
 
     std::shared_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
@@ -24672,34 +24156,7 @@ public:
         return removedBlock;
     }
 
-    std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
-        auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
-        if (it == _blocks.end()) {
-            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
-        }
-
-        auto newBlock = gr::globalPluginLoader().instantiate(type, properties);
-        if (!newBlock) {
-            throw gr::exception(std::format("Can not create block {}", type));
-        }
-
-        addBlock(newBlock);
-
-        for (auto& edge : _edges) {
-            if (edge._sourceBlock == *it) {
-                edge._sourceBlock = newBlock;
-            }
-
-            if (edge._destinationBlock == *it) {
-                edge._destinationBlock = newBlock;
-            }
-        }
-
-        std::shared_ptr<BlockModel> oldBlock = std::move(*it);
-        _blocks.erase(it);
-
-        return {std::move(oldBlock), newBlock};
-    }
+    std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties);
 
     void emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
         std::string destinationPort, [[maybe_unused]] const std::size_t minBufferSize, [[maybe_unused]] const std::int32_t weight, std::string_view edgeName) {
@@ -24744,39 +24201,8 @@ public:
         }
     }
 
-    std::optional<Message> propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kGraphInspect);
-        message.data = [&] {
-            property_map result;
-            result["name"s]          = std::string(name);
-            result["uniqueName"s]    = std::string(unique_name);
-            result["blockCategory"s] = std::string(magic_enum::enum_name(blockCategory));
-
-            property_map serializedChildren;
-            for (const auto& child : blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
-            }
-            result["children"] = std::move(serializedChildren);
-
-            property_map serializedEdges;
-            std::size_t  index = 0UZ;
-            for (const auto& edge : edges()) {
-                serializedEdges[std::to_string(index)] = serializeEdge(edge);
-                index++;
-            }
-            result["edges"] = std::move(serializedEdges);
-            return result;
-        }();
-
-        message.endpoint = graph::property::kGraphInspected;
-        return message;
-    }
-
-    std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
-        assert(propertyName == graph::property::kRegistryBlockTypes);
-        message.data = property_map{{"types", _pluginLoader->availableBlocks()}};
-        return message;
-    }
+    std::optional<Message> propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message);
 
     // connect using the port index
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
@@ -25447,6 +24873,12 @@ public:
     const std::size_t unique_id   = _unique_id_counter++;
     const std::string unique_name = std::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
 
+    MergedGraph(const MergedGraph<Left, Right, OutId, InId>& other)       = delete;
+    MergedGraph& operator=(MergedGraph<Left, Right, OutId, InId>& other)  = delete;
+    MergedGraph& operator=(MergedGraph<Left, Right, OutId, InId>&& other) = delete;
+
+    MergedGraph(MergedGraph<Left, Right, OutId, InId>&& other) : left(std::move(other.left)), right(std::move(other.right)) {}
+
 private:
     // copy-paste from above, keep in sync
     using base = Block<MergedGraph<Left, Right, OutId, InId>>;
@@ -25598,7 +25030,7 @@ inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_coun
  * @endcode
  */
 template<std::size_t OutId, std::size_t InId, SourceBlockLike A, SinkBlockLike B>
-constexpr auto mergeByIndex(A&& a, B&& b) -> MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId> {
+constexpr auto mergeByIndex(A&& a, B&& b) {
     if constexpr (!std::is_same_v<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
         gr::meta::print_types<                                                                                                                                                                                          //
             gr::meta::message_type<"OUTPUT_PORTS_ARE:">,                                                                                                                                                                //

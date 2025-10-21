@@ -301,4 +301,109 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
     };
 };
 
+template<gr::block::Category BlockCategory>
+void visitBlocks(gr::Graph& graph, size_t nExpected, std::vector<std::string> expectedNames = {}, //
+    gr::block::Category filter = gr::block::Category::All, std::source_location location = std::source_location::current()) {
+    using namespace boost::ut;
+    std::vector<std::string> visited;
+
+    gr::graph::forEachBlock<BlockCategory>(
+        graph,
+        [&](auto& block) { //
+            visited.emplace_back(block->uniqueName());
+        },
+        filter);
+
+    expect(eq(visited.size(), nExpected)) << std::format("visited:\n{}\n location={}\n", gr::join(visited, "\n"), location);
+    for (const auto& name : expectedNames) {
+        expect(std::ranges::find(visited, name) != visited.end()) << std::format("couldn't find '{}' in '{} location={}", name, gr::join(visited, ", "), location);
+    }
+};
+
+const boost::ut::suite<"forEachBlock"> _3 = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "No nesting"_test = [] {
+        Graph              graph;
+        NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
+        NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
+
+        visitBlocks<gr::block::Category::All>(graph, 2UZ, {src.unique_name, snk.unique_name});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(graph, 2UZ, {src.unique_name, snk.unique_name});
+        visitBlocks<gr::block::Category::NormalBlock>(graph, 2UZ, {src.unique_name, snk.unique_name});
+        visitBlocks<gr::block::Category::ScheduledBlockGroup>(graph, 2UZ, {src.unique_name, snk.unique_name});
+    };
+
+    "unmanaged sub-graph"_test = [] {
+        Graph root;
+        Graph subGraph;
+        auto& subSrc        = subGraph.emplaceBlock<NullSource<float>>();
+        auto& subSnk        = subGraph.emplaceBlock<NullSink<float>>();
+        auto  subGraphModel = std::unique_ptr<BlockModel>(std::make_unique<GraphWrapper<Graph>>(std::move(subGraph)).release());
+
+        auto& src         = root.emplaceBlock<NullSource<float>>();
+        auto  nestedGraph = root.addBlock(std::move(subGraphModel));
+        auto& sink        = root.emplaceBlock<NullSink<float>>();
+
+        visitBlocks<gr::block::Category::All>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedGraph->uniqueName())});
+        visitBlocks<gr::block::Category::All>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+            gr::block::Category::NormalBlock);
+        visitBlocks<gr::block::Category::All>(root, 1UZ, {std::string(nestedGraph->uniqueName())}, //
+            gr::block::Category::TransparentBlockGroup);
+        visitBlocks<gr::block::Category::All>(root, 0UZ, {}, //
+            gr::block::Category::ScheduledBlockGroup);
+
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedGraph->uniqueName())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+            gr::block::Category::NormalBlock);
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 1UZ, {std::string(nestedGraph->uniqueName())}, //
+            gr::block::Category::TransparentBlockGroup);
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 0UZ, {}, //
+            gr::block::Category::ScheduledBlockGroup);
+    };
+
+    "managed sub-graph"_test = [] {
+        using Scheduler = gr::scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded>;
+
+        Graph root;
+        Graph subGraph;
+        auto& subSrc = subGraph.emplaceBlock<NullSource<float>>();
+        auto& subSnk = subGraph.emplaceBlock<NullSink<float>>();
+
+        auto schedulerModel = std::unique_ptr<BlockModel>(std::make_unique<SchedulerWrapper<Scheduler>>().release());
+        auto wrapper        = static_cast<SchedulerWrapper<Scheduler>*>(schedulerModel.get());
+        wrapper->setGraph(std::move(subGraph));
+
+        auto& src             = root.emplaceBlock<NullSource<float>>();
+        auto  nestedScheduler = root.addBlock(std::move(schedulerModel));
+        auto& sink            = root.emplaceBlock<NullSink<float>>();
+
+        visitBlocks<gr::block::Category::All>(root, 5UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name, std::string(nestedScheduler->uniqueName())});
+        visitBlocks<gr::block::Category::All>(root, 4UZ, {src.unique_name, sink.unique_name, subSrc.unique_name, subSnk.unique_name}, //
+            gr::block::Category::NormalBlock);
+        visitBlocks<gr::block::Category::All>(root, 1UZ, {std::string(nestedScheduler->uniqueName())}, //
+            gr::block::Category::ScheduledBlockGroup);
+        visitBlocks<gr::block::Category::All>(root, 0UZ, {}, //
+            gr::block::Category::TransparentBlockGroup);
+
+        expect(subSrc.blockCategory == gr::block::Category::NormalBlock) << std::format("subSrc.blockCategory = {}", static_cast<int>(subSrc.blockCategory));
+        expect(subSnk.blockCategory == gr::block::Category::NormalBlock) << std::format("subSnk.blockCategory = {}", static_cast<int>(subSnk.blockCategory));
+        expect(nestedScheduler->blockCategory() == gr::block::Category::ScheduledBlockGroup) << std::format("nestedScheduler->blockCategory() = {}", static_cast<int>(nestedScheduler->blockCategory()));
+        expect(src.blockCategory == gr::block::Category::NormalBlock) << std::format("src.blockCategory = {}", static_cast<int>(src.blockCategory));
+        expect(sink.blockCategory == gr::block::Category::NormalBlock) << std::format("sink.blockCategory = {}", static_cast<int>(sink.blockCategory));
+
+        expect(eq(root.blocks().size(), 3UZ)) << "root.blocks().size()";
+        expect(eq(nestedScheduler->graph()->blocks().size(), 2UZ)) << "nestedScheduler->graph()->blocks().size()";
+
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 3UZ, {src.unique_name, sink.unique_name, std::string(nestedScheduler->uniqueName())});
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 2UZ, {src.unique_name, sink.unique_name}, //
+            gr::block::Category::NormalBlock);
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 1UZ, {std::string(nestedScheduler->uniqueName())}, //
+            gr::block::Category::ScheduledBlockGroup);
+        visitBlocks<gr::block::Category::TransparentBlockGroup>(root, 0UZ, {}, gr::block::Category::TransparentBlockGroup);
+    };
+};
+
 int main() { /* not needed for UT */ }

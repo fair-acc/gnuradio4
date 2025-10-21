@@ -11,6 +11,7 @@
 
 namespace gr {
 class BlockModel;
+struct Graph;
 
 struct PortDefinition {
     struct IndexBased {
@@ -504,6 +505,13 @@ public:
     [[nodiscard]] virtual std::expected<std::size_t, gr::Error> primeInputPort(std::size_t portIdx, std::size_t nSamples, std::source_location loc = std::source_location::current()) noexcept = 0;
 
     [[nodiscard]] virtual void* raw() = 0;
+
+    // Common interface between managed and unmanaged graphs
+    [[nodiscard]] virtual gr::Graph*       graph()               = 0;
+    [[nodiscard]] virtual gr::property_map exportedInputPorts()  = 0;
+    [[nodiscard]] virtual gr::property_map exportedOutputPorts() = 0;
+
+    virtual void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) = 0;
 };
 
 namespace serialization_fields {
@@ -720,22 +728,6 @@ protected:
     T           _block;
     std::string _type_name = gr::meta::type_name<T>();
 
-    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
-    [[nodiscard]] constexpr auto& blockRef() noexcept {
-        if constexpr (requires { *_block; }) {
-            return *_block;
-        } else {
-            return _block;
-        }
-    }
-
     void initMessagePorts() {
         msgIn  = std::addressof(_block.msgIn);
         msgOut = std::addressof(_block.msgOut);
@@ -782,8 +774,13 @@ protected:
     }
 
 public:
-    BlockWrapper() : BlockWrapper(gr::property_map()) {}
-    explicit BlockWrapper(gr::property_map initParameter) : _block(std::move(initParameter)) {
+    explicit BlockWrapper(gr::property_map initParameter = {}) : _block(std::move(initParameter)) {
+        initMessagePorts();
+        _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
+        _dynamicPortsLoader.instance = this;
+    }
+
+    explicit BlockWrapper(T&& original) : _block(std::move(original)) {
         initMessagePorts();
         _dynamicPortsLoader.fn       = &BlockWrapper::blockWrapperDynamicPortsLoader;
         _dynamicPortsLoader.instance = this;
@@ -795,7 +792,27 @@ public:
     BlockWrapper& operator=(BlockWrapper&& other)      = delete;
     ~BlockWrapper() override                           = default;
 
-    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override { return blockRef().init(progress, ioThreadPool); }
+    void init(std::shared_ptr<gr::Sequence> progress, std::string_view ioThreadPool = gr::thread_pool::kDefaultIoPoolId) override {
+        if constexpr (requires { blockRef().init(progress, ioThreadPool); }) {
+            return blockRef().init(progress, ioThreadPool);
+        }
+    }
+
+    [[nodiscard]] constexpr const auto& blockRef() const noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
+
+    [[nodiscard]] constexpr auto& blockRef() noexcept {
+        if constexpr (requires { *_block; }) {
+            return *_block;
+        } else {
+            return _block;
+        }
+    }
 
     [[nodiscard]] constexpr work::Result work(std::size_t requested_work = undefined_size) override { return blockRef().work(requested_work); }
 
@@ -879,6 +896,12 @@ public:
     [[nodiscard]] SettingsBase&              settings() override { return blockRef().settings(); }
     [[nodiscard]] const SettingsBase&        settings() const override { return blockRef().settings(); }
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
+
+    // Common interface between managed and unmanaged graphs
+    [[nodiscard]] gr::Graph*       graph() override { return nullptr; }
+    [[nodiscard]] gr::property_map exportedInputPorts() override { return {}; }
+    [[nodiscard]] gr::property_map exportedOutputPorts() override { return {}; }
+    void                           exportPort(bool, const std::string&, PortDirection, const std::string&, std::source_location = std::source_location::current()) override {}
 };
 
 namespace detail {

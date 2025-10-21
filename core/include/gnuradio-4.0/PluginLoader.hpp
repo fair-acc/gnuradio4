@@ -18,6 +18,8 @@
 #include "Plugin.hpp"
 #endif
 
+#include <gnuradio-4.0/Profiler.hpp>
+
 namespace gr {
 
 using namespace std::string_literals;
@@ -121,10 +123,12 @@ class PluginLoader {
 private:
     std::vector<PluginHandler>                       _pluginHandlers;
     std::unordered_map<std::string, gr_plugin_base*> _pluginForBlockName;
+    std::unordered_map<std::string, gr_plugin_base*> _pluginForSchedulerName;
     std::unordered_map<std::string, std::string>     _failedPlugins;
     std::unordered_set<std::string>                  _loadedPluginFiles;
 
-    BlockRegistry* _registry;
+    BlockRegistry*     _registry;
+    SchedulerRegistry* _schedulerRegistry;
 
     gr_plugin_base* pluginForBlockName(std::string_view name) const {
         if (auto it = _pluginForBlockName.find(std::string(name)); it != _pluginForBlockName.end()) {
@@ -134,8 +138,16 @@ private:
         }
     }
 
+    gr_plugin_base* pluginForSchedulerName(std::string_view name) const {
+        if (auto it = _pluginForSchedulerName.find(std::string(name)); it != _pluginForSchedulerName.end()) {
+            return it->second;
+        } else {
+            return nullptr;
+        }
+    }
+
 public:
-    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry) {
+    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry), _schedulerRegistry(&scheduler_registry) {
         for (const auto& directory : plugin_directories) {
             if (!std::filesystem::is_directory(directory)) {
                 continue;
@@ -158,6 +170,10 @@ public:
                             _pluginForBlockName.emplace(std::string(blockName), handler.operator->());
                         }
 
+                        for (std::string_view schedulerName : handler->availableSchedulers()) {
+                            _pluginForSchedulerName.emplace(std::string(schedulerName), handler.operator->());
+                        }
+
                         _pluginHandlers.push_back(std::move(handler));
 
                     } else {
@@ -168,7 +184,8 @@ public:
         }
     }
 
-    BlockRegistry& registry() { return *_registry; }
+    BlockRegistry&     registry() { return *_registry; }
+    SchedulerRegistry& schedulerRegistry() { return *_schedulerRegistry; }
 
     const auto& plugins() const { return _pluginHandlers; }
 
@@ -217,62 +234,83 @@ public:
         return result;
     }
 
+    std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
+        if (auto result = _schedulerRegistry->create(name, params)) {
+            return std::shared_ptr<gr::SchedulerModel>(result.release());
+        }
+
+        auto* plugin = pluginForSchedulerName(name);
+
+        if (plugin == nullptr) {
+#ifndef NDEBUG
+            std::println("Could not find scheduler {}. Available schedulers in the registry", name);
+            for (const auto& scheduler : _schedulerRegistry->keys()) {
+                std::print("    {}\n", scheduler);
+            }
+            std::print("]\n");
+
+            std::print("Available schedulers from plugins [\n", name);
+            for (const auto& [schedulerName, _] : _pluginForSchedulerName) {
+                std::print("    {}\n", schedulerName);
+            }
+            std::print("]\n");
+#endif
+            std::print("Error: Scheduler plugin not found for '{}', returning nullptr.\n", name);
+            return {};
+        }
+
+        auto result = plugin->createScheduler(name, params);
+        return std::shared_ptr<gr::SchedulerModel>(result.release());
+    }
+
+    std::vector<std::string> availableSchedulers() const {
+        auto                     keysView = _pluginForSchedulerName | std::views::keys;
+        std::vector<std::string> result(keysView.begin(), keysView.end());
+
+        const auto& builtin = _schedulerRegistry->keys();
+        result.insert(result.end(), builtin.begin(), builtin.end());
+
+        // remove duplicates
+        std::ranges::sort(result);
+        auto newEnd = std::ranges::unique(result).begin();
+        result.erase(newEnd, result.end());
+        return result;
+    }
+
     bool isBlockAvailable(std::string_view block) const { return _registry->contains(block) || pluginForBlockName(block) != nullptr; }
+
+    bool isSchedulerAvailable(std::string_view scheduler) const { return _schedulerRegistry->contains(scheduler) || pluginForSchedulerName(scheduler) != nullptr; }
 };
 #else
 // PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
 // same API as proper PluginLoader
 class PluginLoader {
 private:
-    BlockRegistry* _registry;
+    BlockRegistry*     _registry;
+    SchedulerRegistry* _schedulerRegistry;
 
 public:
-    PluginLoader(BlockRegistry& registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry) {}
+    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry), _schedulerRegistry(&scheduler_registry) {}
 
-    BlockRegistry& registry() { return *_registry; }
+    BlockRegistry&     registry() { return *_registry; }
+    SchedulerRegistry& schedulerRegistry() { return *_schedulerRegistry; }
 
     auto availableBlocks() const { return _registry->keys(); }
+    auto availableSchedulers() const { return _schedulerRegistry->keys(); }
 
     std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->create(name, params); }
 
+    std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
+        auto result = _schedulerRegistry->create(name, params);
+        return result ? std::shared_ptr<gr::SchedulerModel>(reinterpret_cast<gr::SchedulerModel*>(result.release())) : nullptr;
+    }
+
     bool isBlockAvailable(std::string_view block) const { return _registry->contains(block); }
+    bool isSchedulerAvailable(std::string_view scheduler) const { return _schedulerRegistry->contains(scheduler); }
 };
 #endif
 
-inline auto& globalPluginLoader() {
-    auto pluginPaths = [] {
-        std::vector<std::filesystem::path> result;
-
-        auto* envpath = ::getenv("GNURADIO4_PLUGIN_DIRECTORIES");
-        if (envpath == nullptr) {
-            // TODO choose proper paths when we get the system GR installation done
-            result.emplace_back("core/test/plugins");
-
-        } else {
-            std::string_view paths(envpath);
-
-            auto i = paths.cbegin();
-
-            // TODO If we want to support Windows, this should be ; there
-            auto isSeparator = [](char c) { return c == ':'; };
-
-            while (i != paths.cend()) {
-                i      = std::find_if_not(i, paths.cend(), isSeparator);
-                auto j = std::find_if(i, paths.cend(), isSeparator);
-
-                if (i != paths.cend()) {
-                    result.emplace_back(std::string_view(i, j));
-                }
-                i = j;
-            }
-        }
-
-        return result;
-    };
-
-    static PluginLoader instance(gr::globalBlockRegistry(), {pluginPaths()});
-    return instance;
-}
+PluginLoader& globalPluginLoader();
 
 } // namespace gr
 
