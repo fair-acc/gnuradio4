@@ -70,7 +70,9 @@ inline static const char* kBlockReplaced = "BlockReplaced";
 inline static const char* kEdgeEmplaced  = "EdgeEmplaced";
 inline static const char* kEdgeRemoved   = "EdgeRemoved";
 
-inline static const char* kGraphGRC = "GraphGRC";
+inline static const char* kGraphGRC           = "GraphGRC";
+inline static const char* kSchedulerInspect   = "SchedulerInspect";
+inline static const char* kSchedulerInspected = "SchedulerInspected";
 } // namespace property
 
 enum class ExecutionPolicy {
@@ -136,13 +138,14 @@ protected:
 
     void registerPropertyCallbacks() noexcept {
         _forbid_reserved_overrides();
-        auto& callbacks                               = this->propertyCallbacks;
-        callbacks[scheduler::property::kEmplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
-        callbacks[scheduler::property::kRemoveBlock]  = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
-        callbacks[scheduler::property::kRemoveEdge]   = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
-        callbacks[scheduler::property::kEmplaceEdge]  = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
-        callbacks[scheduler::property::kReplaceBlock] = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
-        callbacks[scheduler::property::kGraphGRC]     = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
+        auto& callbacks                                   = this->propertyCallbacks;
+        callbacks[scheduler::property::kEmplaceBlock]     = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
+        callbacks[scheduler::property::kRemoveBlock]      = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kRemoveEdge]       = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
+        callbacks[scheduler::property::kEmplaceEdge]      = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
+        callbacks[scheduler::property::kReplaceBlock]     = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
+        callbacks[scheduler::property::kGraphGRC]         = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
+        callbacks[scheduler::property::kSchedulerInspect] = std::mem_fn(&SchedulerBase::propertyCallbackSchedulerInspect);
         this->settings().updateActiveParameters();
     }
 
@@ -997,6 +1000,30 @@ protected:
             throw gr::exception(std::format("Unexpected command type {}", message.cmd));
         }
 
+        return message;
+    }
+
+    std::optional<Message> propertyCallbackSchedulerInspect([[maybe_unused]] std::string_view propertyName, Message message) {
+        assert(propertyName == scheduler::property::kSchedulerInspect);
+        message.data = [&] {
+            property_map result;
+            result[std::string(serialization_fields::BLOCK_NAME)]        = std::string(this->name);
+            result[std::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(this->unique_name);
+            result[std::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
+
+            // Requesting graph serialization
+            property_map serializedChildren;
+            auto         graphData = _graph->propertyCallbackGraphInspect(graph::property::kGraphInspect, {});
+            if (!graphData.has_value()) {
+                return result;
+            }
+            serializedChildren[_graph->unique_name] = graphData->data.value();
+
+            result[std::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
+            return result;
+        }();
+
+        message.endpoint = scheduler::property::kSchedulerInspected;
         return message;
     }
 

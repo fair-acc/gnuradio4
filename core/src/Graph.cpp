@@ -76,15 +76,15 @@ std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std:
     assert(propertyName == graph::property::kGraphInspect);
     message.data = [&] {
         property_map result;
-        result["name"s]          = std::string(name);
-        result["uniqueName"s]    = std::string(unique_name);
-        result["blockCategory"s] = std::string(magic_enum::enum_name(blockCategory));
+        result[std::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
+        result[std::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
+        result[std::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
 
         property_map serializedChildren;
         for (const auto& child : blocks()) {
             serializedChildren[std::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
         }
-        result["children"] = std::move(serializedChildren);
+        result[std::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
 
         property_map serializedEdges;
         std::size_t  index = 0UZ;
@@ -92,7 +92,7 @@ std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std:
             serializedEdges[std::to_string(index)] = serializeEdge(edge);
             index++;
         }
-        result["edges"] = std::move(serializedEdges);
+        result[std::string(serialization_fields::BLOCK_EDGES)] = std::move(serializedEdges);
         return result;
     }();
 
