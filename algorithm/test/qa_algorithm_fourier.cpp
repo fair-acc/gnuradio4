@@ -11,7 +11,6 @@
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
-#include <gnuradio-4.0/algorithm/fourier/simd_fft.hpp>
 
 template<typename T>
 std::vector<T> generateSinSample(std::size_t N, double sample_rate, double frequency, double amplitude) {

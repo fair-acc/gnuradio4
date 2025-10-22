@@ -313,7 +313,7 @@ struct SimdFFT {
     /// @throws gr::exception if n is incompatible (must factor into {2,3,4,5} and >= minSize()), can be checked using `canProcessSize(std::size_t) -> bool`
     explicit SimdFFT(std::size_t n = 64UZ, std::source_location loc = std::source_location::current())
     requires(IsDynamic::value)
-        : _N(n) {
+        : _N(0UZ) {
         resize(n, loc);
     }
 
@@ -327,6 +327,9 @@ struct SimdFFT {
     constexpr void resize(std::size_t n, std::source_location loc = std::source_location::current())
     requires(IsDynamic::value)
     {
+        if (_N == n) {
+            return;
+        }
         _N = n;
         if (!canProcessSize(size())) {
             throw gr::exception(std::format("incompatible sizes for {}2C: N ({}) must be multiple of 2,3,4,5 and >{}", fftTransform == Transform::Real ? "R" : "C", size(), minSize()), loc);
@@ -1849,14 +1852,14 @@ static NEVER_INLINE(void) realRadix5(std::size_t stride, std::size_t nGroups, st
                 V im_neg3(pInput + (ic + 1 + (5 * k + 3) * stride) * L, stdx::vector_aligned);
 
                 // unpack Hermitian pairs
-                V sumRe_14  = re_i2 + re_neg1;
-                V diffRe_14 = re_i2 - re_neg1;
-                V sumRe_23  = re_i4 + re_neg3;
-                V diffRe_23 = re_i4 - re_neg3;
-                V sumIm_14  = im_i2 - re_neg1;
-                V diffIm_14 = im_i2 + re_neg1;
-                V sumIm_23  = im_i4 - re_neg3;
-                V diffIm_23 = im_i4 + re_neg3;
+                V                  sumRe_14  = re_i2 + re_neg1;
+                V                  diffRe_14 = re_i2 - re_neg1;
+                V                  sumRe_23  = re_i4 + re_neg3;
+                V                  diffRe_23 = re_i4 - re_neg3;
+                [[maybe_unused]] V sumIm_14  = im_i2 - re_neg1;
+                [[maybe_unused]] V diffIm_14 = im_i2 + re_neg1;
+                V                  sumIm_23  = im_i4 - re_neg3;
+                [[maybe_unused]] V diffIm_23 = im_i4 + re_neg3;
 
                 V crossRe_14 = re_i2 - im_neg1;
                 V crossRe_23 = re_i4 - im_neg3;
@@ -1940,7 +1943,6 @@ static constexpr std::size_t decompose(std::size_t n, std::span<std::size_t> rad
 
 template<Direction dir, Transform transform, std::floating_point T>
 void dispatchRadix(std::size_t radix, std::size_t stride, std::size_t nGroups, std::span<T> in, std::span<T> out, std::span<const T> twiddles, std::size_t offset) {
-
     constexpr auto getRadixFn = []<std::size_t R>() {
         if constexpr (transform == Transform::Real) {
             if constexpr (R == 2) {
