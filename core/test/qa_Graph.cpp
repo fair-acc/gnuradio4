@@ -83,11 +83,12 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
 
         graph.connectPendingEdges();
 
-        // Note: the actual size is always power of 2 and aligned with page size, see std::bit_ceil
-        expect(eq(src.out.bufferSize(), 16384UZ));
-        expect(eq(sink1.in.bufferSize(), 16384UZ));
-        expect(eq(sink2.in.bufferSize(), 16384UZ));
-        expect(eq(sink3.in.bufferSize(), 16384UZ));
+        // contract: min buffer is at least as larges 'minBufferSize' connection requirement
+        const std::size_t maxBuffer = std::max<std::size_t>(2000UZ, std::max<std::size_t>(10000UZ, 8000UZ));
+        expect(ge(src.out.bufferSize(), maxBuffer));
+        expect(ge(sink1.in.bufferSize(), maxBuffer));
+        expect(ge(sink2.in.bufferSize(), maxBuffer));
+        expect(ge(sink3.in.bufferSize(), maxBuffer));
     };
 
     "Graph connection buffer size test - Multi output ports"_test = [] {

@@ -227,14 +227,19 @@ enum class WriterSpanReservePolicy {
  */
 template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producerType = ProducerType::Single, WaitStrategyLike TWaitStrategy = SleepingWaitStrategy>
 class CircularBuffer {
+public:
+    using value_type = T;
     using Allocator  = std::pmr::polymorphic_allocator<T>;
     using BufferType = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
     using ClaimType  = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
 
+private:
     struct BufferImpl {
         Allocator                 _allocator{};
         const bool                _isMmapAllocated;
-        const std::size_t         _size; // pre-condition: std::has_single_bit(_size)
+        const std::size_t         _size;
+        const std::size_t         _mask;
+        const bool                _is_power_of_two;
         std::vector<T, Allocator> _data;
         ClaimType                 _claimStrategy;
         std::atomic<std::size_t>  _reader_count{0UZ};
@@ -244,7 +249,8 @@ class CircularBuffer {
         BufferImpl(const std::size_t min_size, Allocator allocator)
             : _allocator(allocator),                                                                 //
               _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), //
-              _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)),                //
+              _size(align_with_page_size(min_size, _isMmapAllocated)), _mask(_size - 1),             //
+              _is_power_of_two(std::has_single_bit(_size)),                                          //
               _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
               _claimStrategy(ClaimType(_size)) {}
 
@@ -253,23 +259,39 @@ class CircularBuffer {
         BufferImpl& operator=(const BufferImpl&) = delete;
         BufferImpl& operator=(BufferImpl&&)      = delete;
 
-#ifdef HAS_POSIX_MAP_INTERFACE
-        static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
-            if (_isMmapAllocated) {
-                const std::size_t pageSize    = static_cast<std::size_t>(getpagesize());
-                const std::size_t elementSize = sizeof(T);
-                // least common multiple (lcm) of elementSize and pageSize
-                std::size_t lcmValue = elementSize * pageSize / std::gcd(elementSize, pageSize);
-
-                // adjust lcmValue to be larger than min_size
-                while (lcmValue < min_size) {
-                    lcmValue += lcmValue;
-                }
-                return lcmValue;
-            } else {
-                return min_size;
+        [[nodiscard]] std::size_t calculateIndex(std::size_t cursor) const noexcept {
+            if (_is_power_of_two) { // fast path: use bitwise AND for power-of-2 sizes
+                return cursor & _mask;
+            } else { // general case: use modulo for arbitrary sizes
+                return cursor % _size;
             }
         }
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+        constexpr static std::size_t align_with_page_size(std::size_t min_elems, bool isMmap) {
+            if (!isMmap) {
+                return min_elems;
+            }
+            // pick N elems so (N*sizeof(T)) % page == 0.
+            // start at bit_ceil(min) to preserve mask fast path; bump by stepElems.
+            const std::size_t page_size    = static_cast<std::size_t>(getpagesize());
+            const std::size_t element_size = sizeof(T);
+
+            // use LCM to ensure both page alignment AND integral number of elements
+            const std::size_t gcd_value        = std::gcd(page_size, element_size);
+            const std::size_t lcm              = (page_size / gcd_value) * element_size;
+            const std::size_t elements_per_lcm = lcm / element_size;
+
+            // round up to nearest multiple of elements_per_lcm
+            const std::size_t num_blocks = (min_elems + elements_per_lcm - 1) / elements_per_lcm;
+            const std::size_t result     = num_blocks * elements_per_lcm;
+
+            // Verify our constraints are met (for debugging)
+            assert((result * element_size) % page_size == 0);
+
+            return result;
+        }
+
 #else
         static std::size_t align_with_page_size(const std::size_t min_size, bool) {
             return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
@@ -440,6 +462,8 @@ class CircularBuffer {
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
 
+        [[nodiscard]] std::size_t bufferIndex() const noexcept { return _buffer->calculateIndex(_buffer->_claimStrategy._publishCursor.value()); }
+
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
             checkIfCanReserveAndAbortIfNeeded();
@@ -452,7 +476,7 @@ class CircularBuffer {
 
             const std::optional<std::size_t> sequence = _buffer->_claimStrategy.tryNext(nSamples);
             if (sequence.has_value()) {
-                const std::size_t index = (sequence.value() + _buffer->_size - nSamples) % _buffer->_size;
+                const std::size_t index = _buffer->calculateIndex(sequence.value() + _buffer->_size - nSamples);
                 return WriterSpan<U, policy>(this, index, sequence.value(), nSamples);
             } else {
                 return WriterSpan<U, policy>(this);
@@ -470,7 +494,7 @@ class CircularBuffer {
             }
 
             const auto        sequence = _buffer->_claimStrategy.next(nSamples);
-            const std::size_t index    = (sequence + _buffer->_size - nSamples) % _buffer->_size;
+            const std::size_t index    = _buffer->calculateIndex(sequence + _buffer->_size - nSamples);
             return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
@@ -640,10 +664,7 @@ class CircularBuffer {
         std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
         std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
 
-        std::size_t bufferIndex() const noexcept {
-            const auto bitmask = _buffer->_size - 1;
-            return _readIndexCached & bitmask;
-        }
+        std::size_t bufferIndex() const noexcept { return _buffer->calculateIndex(_readIndexCached); }
 
     public:
         Reader() = delete;
