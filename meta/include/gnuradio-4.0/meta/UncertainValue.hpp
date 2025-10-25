@@ -1,7 +1,6 @@
 #ifndef GNURADIO_UNCERTAINVALUE_HPP
 #define GNURADIO_UNCERTAINVALUE_HPP
 
-#include <atomic>
 #include <complex>
 #include <concepts>
 #include <cstdint>
