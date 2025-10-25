@@ -13,7 +13,6 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <memory_resource>
 #endif
 #include <algorithm>
-#include <atomic>
 #include <bit>
 #include <cassert> // to assert if compiled for debugging
 #include <functional>
@@ -242,8 +241,8 @@ private:
         const bool                _is_power_of_two;
         std::vector<T, Allocator> _data;
         ClaimType                 _claimStrategy;
-        std::atomic<std::size_t>  _reader_count{0UZ};
-        std::atomic<std::size_t>  _writer_count{0UZ};
+        std::size_t               _reader_count{0UZ};
+        std::size_t               _writer_count{0UZ};
 
         BufferImpl() = delete;
         BufferImpl(const std::size_t min_size, Allocator allocator)
@@ -433,7 +432,7 @@ private:
 
     public:
         Writer() = delete;
-        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { atomic_ref(_buffer->_writer_count).fetch_add(1UZ); };
 
         Writer(Writer&& other) noexcept
             : _buffer(std::move(other._buffer)),                                                  //
@@ -456,7 +455,7 @@ private:
 
         ~Writer() {
             if (_buffer) {
-                _buffer->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
+                gr::atomic_ref(_buffer->_writer_count).fetch_sub(1UZ);
             }
         }
 
@@ -670,7 +669,7 @@ private:
         Reader() = delete;
         explicit Reader(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(buffer) {
             gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
-            _buffer->_reader_count.fetch_add(1UZ, std::memory_order_relaxed);
+            gr::atomic_ref(_buffer->_reader_count).fetch_add(1UZ);
             _readIndexCached = _readIndex->value();
         }
 
@@ -696,7 +695,7 @@ private:
         ~Reader() {
             if (_buffer) {
                 gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
-                _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+                gr::atomic_ref(_buffer->_reader_count).fetch_sub(1UZ);
             }
         }
 
@@ -760,8 +759,8 @@ public:
     [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_sharedBufferPtr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] std::size_t n_writers() const { return _sharedBufferPtr->_writer_count.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::size_t n_readers() const { return _sharedBufferPtr->_reader_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t n_writers() const { return gr::atomic_ref(_sharedBufferPtr->_writer_count).load_acquire(); }
+    [[nodiscard]] std::size_t n_readers() const { return gr::atomic_ref(_sharedBufferPtr->_reader_count).load_acquire(); }
     [[nodiscard]] const auto& claim_strategy() { return _sharedBufferPtr->_claimStrategy; }
     [[nodiscard]] const auto& wait_strategy() { return _sharedBufferPtr->_claimStrategy._wait_strategy; }
     [[nodiscard]] const auto& cursor_sequence() { return _sharedBufferPtr->_claimStrategy._publishCursor; }

@@ -15,6 +15,12 @@
 #include "Sequence.hpp"
 #include "WaitStrategy.hpp"
 
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and
+// consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
+
 namespace gr {
 
 template<typename T>
@@ -258,5 +264,9 @@ using producer_type_v = typename producer_type<size, producerType, TWaitStrategy
 } // namespace detail
 
 } // namespace gr
+
+#ifdef forceinline
+#undef forceinline
+#endif
 
 #endif // GNURADIO_CLAIMSTRATEGY_HPP
