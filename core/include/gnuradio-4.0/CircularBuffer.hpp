@@ -351,13 +351,30 @@ private:
 
                 if (!_parent->_buffer->_isMmapAllocated) {
                     const std::size_t size = _parent->_buffer->_size;
-                    // mirror samples below/above the buffer's wrap-around point
+
+                    // mirror samples below/above the wrap point
                     const std::size_t nFirstHalf  = std::min(size - _parent->_index, _parent->_nRequestedSamplesToPublish);
                     const std::size_t nSecondHalf = _parent->_nRequestedSamplesToPublish - nFirstHalf;
 
-                    auto& data = _parent->_buffer->_data;
-                    std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
-                    std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
+                    auto* base = _parent->_buffer->_data.data();
+
+                    // A) copy the contiguous tail (in first half) to second half
+                    //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
+                    if constexpr (std::is_trivially_copyable_v<T>) {
+                        std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
+                    } else {
+                        std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
+                    }
+
+                    // B) mirror back the wrapped head we just wrote contiguously at
+                    //    [size, size + nSecondHalf) down to [0, nSecondHalf)
+                    if (nSecondHalf) {
+                        if constexpr (std::is_trivially_copyable_v<T>) {
+                            std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                        } else {
+                            std::copy_n(base + size, nSecondHalf, base);
+                        }
+                    }
                 }
                 _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
                 _parent->_offset += _parent->_nRequestedSamplesToPublish;
