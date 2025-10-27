@@ -102,6 +102,25 @@ private:
         static_assert(std::same_as<decltype(&Derived::reset), decltype(&Base::reset)>, "Derived defines 'reset()' (reserved). Use 'customReset()' instead.");
     }
 
+    gr::Graph* findTargetSubGraph(const gr::property_map& data) {
+        auto it = data.find("_targetGraph"s);
+        if (it == data.end()) {
+            return std::addressof(*_graph);
+        } else {
+            const auto& targetGraphName = std::get<std::string>(it->second);
+            auto        result          = graph::findBlock(*_graph, std::string_view(targetGraphName));
+            if (!result) {
+                return nullptr;
+            }
+
+            if (result.value()->typeName() != "gr::Graph") {
+                return nullptr;
+            }
+
+            return static_cast<gr::Graph*>(result.value()->raw());
+        }
+    }
+
 protected:
     using ProfileHandle = decltype(std::declval<TProfiler&>().forThisThread());
 
@@ -734,7 +753,13 @@ protected:
             }
         }();
 
-        auto& newBlock = _graph->emplaceBlock(type, properties);
+        auto* targetGraph = findTargetSubGraph(data);
+
+        if (targetGraph == nullptr) {
+            return {};
+        }
+
+        auto& newBlock = targetGraph->emplaceBlock(type, properties);
 
         if (lifecycle::isActive(this->state())) {
             // Block is being added while scheduler is running. Will be adopted by a thread.
@@ -766,7 +791,11 @@ protected:
             }
         }
 
-        this->emitMessage(scheduler::property::kBlockEmplaced, serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All));
+        auto messageData = serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All);
+
+        messageData["_targetGraph"s] = targetGraph->unique_name;
+
+        this->emitMessage(scheduler::property::kBlockEmplaced, std::move(messageData));
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
@@ -810,9 +839,16 @@ protected:
         [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
         const std::string                   edgeName         = std::get<std::string>(data.at("edgeName"s));
 
-        _graph->emplaceEdge(sourceBlock, sourcePort, destinationBlock, destinationPort, minBufferSize, weight, edgeName);
+        auto* targetGraph = findTargetSubGraph(data);
 
-        message.endpoint = scheduler::property::kEdgeEmplaced;
+        if (targetGraph == nullptr) {
+            return {};
+        }
+
+        targetGraph->emplaceEdge(sourceBlock, sourcePort, destinationBlock, destinationPort, minBufferSize, weight, edgeName);
+
+        message.endpoint                 = scheduler::property::kEdgeEmplaced;
+        (*message.data)["_targetGraph"s] = targetGraph->unique_name;
         return message;
     }
 
