@@ -7357,7 +7357,6 @@ inline constexpr std::array<std::string_view, 16> kDefaultTags = {"sample_rate",
 #ifndef GNURADIO_UNCERTAINVALUE_HPP
 #define GNURADIO_UNCERTAINVALUE_HPP
 
-#include <atomic>
 #include <complex>
 #include <concepts>
 #include <cstdint>
@@ -8353,7 +8352,6 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <memory_resource>
 #endif
 #include <algorithm>
-#include <atomic>
 #include <bit>
 #include <cassert> // to assert if compiled for debugging
 #include <functional>
@@ -8674,7 +8672,6 @@ private:
 #define GNURADIO_SEQUENCE_HPP
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -8683,6 +8680,116 @@ private:
 #include <vector>
 
 #include <format>
+
+// #include <gnuradio-4.0/AtomicRef.hpp>
+#ifndef GNURADIO_ATOMICREF_HPP
+#define GNURADIO_ATOMICREF_HPP
+
+#include <atomic>
+#include <cstddef>
+
+#if __has_include(<sycl/sycl.hpp>)
+#include <sycl/sycl.hpp>
+#define GR_HAS_SYCL 1
+#endif
+
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and
+// consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
+
+namespace gr {
+
+template<typename T>
+struct AtomicRef {
+    using value_type = std::remove_cvref_t<T>;
+    value_type& _x;
+    explicit AtomicRef(T& x) noexcept : _x(x) {}
+
+    forceinline T load_acquire() const noexcept {
+#ifdef GR_HAS_SYCL
+        return sycl::atomic_ref<value_type, sycl::memory_order::acquire, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).load();
+#else
+        return std::atomic_ref<value_type>(_x).load(std::memory_order_acquire);
+#endif
+    }
+
+    forceinline constexpr void store_release(T v) noexcept {
+#ifdef GR_HAS_SYCL
+        sycl::atomic_ref<T, sycl::memory_order::release, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).store(v);
+#else
+        std::atomic_ref<T>(_x).store(v, std::memory_order_release);
+#endif
+    }
+
+    forceinline constexpr bool compare_exchange(T& expected, T desired) noexcept {
+#ifdef GR_HAS_SYCL
+        return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).compare_exchange_strong(expected, desired);
+#else
+        return std::atomic_ref<T>(_x).compare_exchange_strong(expected, desired, std::memory_order_acq_rel, std::memory_order_acquire);
+#endif
+    }
+
+    forceinline constexpr T fetch_add(T inc) noexcept {
+#ifdef GR_HAS_SYCL
+        return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_add(inc);
+#else
+        return std::atomic_ref<T>(_x).fetch_add(inc, std::memory_order_acq_rel);
+#endif
+    }
+
+    forceinline constexpr T fetch_sub(T dec) noexcept {
+#ifdef GR_HAS_SYCL
+        return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_sub(dec);
+#else
+        return std::atomic_ref<T>(_x).fetch_sub(dec, std::memory_order_acq_rel);
+#endif
+    }
+
+    forceinline constexpr void wait(T oldValue) const noexcept {
+#ifdef GR_HAS_SYCL
+        // SYCL has no wait/notify; poll shared memory.
+        // Keep it polite to avoid hammering PCIe.
+        for (;;) {
+            if (load_acquire() != oldValue) {
+                break;
+            }
+            // light backoff
+            std::this_thread::yield();
+        }
+#else
+        std::atomic_ref<T>(_x).wait(oldValue);
+#endif
+    }
+
+    forceinline constexpr void notify_all() noexcept {
+#if !defined(GR_HAS_SYCL)
+        std::atomic_ref<T>(_x).notify_all();
+#endif
+    }
+
+    forceinline constexpr void notify_one() noexcept {
+#if !defined(GR_HAS_SYCL)
+        std::atomic_ref<T>(_x).notify_one();
+#endif
+    }
+};
+
+template<typename T>
+[[nodiscard]] forceinline constexpr gr::AtomicRef<T> atomic_ref(T& x) noexcept {
+    static_assert(!std::is_const_v<T>, "atomic_ref requires non-const T");
+    return AtomicRef<T>(x);
+}
+
+} // namespace gr
+
+#ifdef forceinline
+#undef forceinline
+#endif
+
+#endif // GNURADIO_ATOMICREF_HPP
+
 
 namespace gr {
 
@@ -8704,33 +8811,32 @@ static constexpr const std::size_t kInitialCursorValue = 0L;
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
  * processors. Support a number of concurrent operations including CAS and order writes.
- * Also attempts to be more efficient with regards to false sharing by adding padding
- * around the volatile field.
+ * Also avoids false sharing by adding padding cacheline-padding around the volatile field.
  */
-class Sequence {
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> _fieldsValue{};
+class alignas(hardware_destructive_interference_size) Sequence {
+    mutable std::size_t _fieldsValue{kInitialCursorValue};
 
 public:
     Sequence(const Sequence&)       = delete;
     Sequence(const Sequence&&)      = delete;
     void operator=(const Sequence&) = delete;
 
-    explicit Sequence(std::size_t initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+    Sequence() = default;
+    explicit Sequence(std::size_t v) noexcept { gr::atomic_ref(_fieldsValue).store_release(v); }
 
-    [[nodiscard]] forceinline std::size_t value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
-    forceinline void                      setValue(const std::size_t value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
+    [[nodiscard]] forceinline std::size_t value() const noexcept { return gr::atomic_ref(_fieldsValue).load_acquire(); }
+    forceinline void                      setValue(const std::size_t value) noexcept { gr::atomic_ref(_fieldsValue).store_release(value); }
 
     [[nodiscard]] forceinline bool compareAndSet(std::size_t expectedSequence, std::size_t nextSequence) noexcept {
-        // atomically set the value to the given updated value if the current value == the
-        // expected value (true, otherwise folse).
-        return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
+        // atomically set the value to the given updated value if the current value == the expected value (true, otherwise folse).
+        return gr::atomic_ref(_fieldsValue).compare_exchange(expectedSequence, nextSequence);
     }
 
-    [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
-    [[nodiscard]] forceinline std::size_t addAndGet(std::size_t value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-    [[nodiscard]] forceinline std::size_t subAndGet(std::size_t value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
-    void                                  wait(std::size_t oldValue) const noexcept { std::atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
-    void                                  notify_all() noexcept { _fieldsValue.notify_all(); }
+    [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return gr::atomic_ref(_fieldsValue).fetch_add(1UZ) + 1UZ; }
+    [[nodiscard]] forceinline std::size_t addAndGet(std::size_t increment) noexcept { return gr::atomic_ref(_fieldsValue).fetch_add(increment) + increment; }
+    [[nodiscard]] forceinline std::size_t subAndGet(std::size_t decrement) noexcept { return gr::atomic_ref(_fieldsValue).fetch_sub(decrement) - decrement; }
+    void                                  wait(std::size_t oldValue) const noexcept { gr::atomic_ref(_fieldsValue).wait(oldValue); }
+    void                                  notify_all() noexcept { gr::atomic_ref(_fieldsValue).notify_all(); }
 };
 
 namespace detail {
@@ -8739,8 +8845,8 @@ namespace detail {
  * Get the minimum sequence from an array of Sequences.
  *
  * \param sequences sequences to compare.
- * \param minimum an initial default minimum.  If the array is empty this value will
- * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
+ * \param minimum the initial default minimum. If the array is empty, this value will be returned.
+ * \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
 inline std::size_t getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, std::size_t minimum = std::numeric_limits<std::size_t>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
@@ -8853,6 +8959,10 @@ struct std::formatter<gr::Sequence> {
 namespace gr {
 inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << std::format("{}", v.value()); }
 } // namespace gr
+
+#ifdef forceinline
+#undef forceinline
+#endif
 
 #endif // GNURADIO_SEQUENCE_HPP
 
@@ -9239,6 +9349,12 @@ public:
 #endif // GNURADIO_WAITSTRATEGY_HPP
 
 
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and
+// consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
+
 namespace gr {
 
 template<typename T>
@@ -9315,15 +9431,25 @@ static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
  * Suitable for use for sequencing across multiple publisher threads.
  * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
  * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
- *
- * The size argument (compile-time and run-time) must be a power-of-2 value.
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
-requires(SIZE == std::dynamic_extent || std::has_single_bit(SIZE))
 class alignas(hardware_constructive_interference_size) MultiProducerStrategy {
     AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
-    const std::size_t  _size = SIZE;
-    const std::size_t  _mask = SIZE - 1;
+    const std::size_t  _size   = SIZE;
+    const bool         _isPow2 = std::has_single_bit(SIZE);
+    const std::size_t  _mask   = SIZE - 1; // valid only when _isPow2
+
+    forceinline constexpr std::size_t calculateIndex(std::size_t seq) const noexcept {
+        if constexpr (SIZE == std::dynamic_extent) {
+            return _isPow2 ? (seq & _mask) : (seq % _size);
+        } else {
+            if constexpr (std::has_single_bit(SIZE)) {
+                return seq & (SIZE - 1);
+            } else {
+                return seq % SIZE;
+            }
+        }
+    }
 
 public:
     Sequence                                                _reserveCursor; // slots can be reserved starting from _reserveCursor
@@ -9332,10 +9458,6 @@ public:
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
     MultiProducerStrategy() = delete;
-
-    explicit MultiProducerStrategy()
-    requires(SIZE != std::dynamic_extent)
-    {}
 
     explicit MultiProducerStrategy(std::size_t bufferSize)
     requires(SIZE == std::dynamic_extent)
@@ -9399,7 +9521,7 @@ public:
             currentPublishCursor = _publishCursor.value();
             nextPublishCursor    = currentPublishCursor;
 
-            while (_slotStates.test(nextPublishCursor & _mask) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
+            while (_slotStates.test(calculateIndex(nextPublishCursor)) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
                 nextPublishCursor++;
             }
         } while (!_publishCursor.compareAndSet(currentPublishCursor, nextPublishCursor));
@@ -9423,8 +9545,8 @@ private:
     void setSlotsStates(std::size_t seqBegin, std::size_t seqEnd, bool value) {
         assert(seqBegin <= seqEnd);
         assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
-        const std::size_t beginSet  = seqBegin & _mask;
-        const std::size_t endSet    = seqEnd & _mask;
+        const std::size_t beginSet  = calculateIndex(seqBegin);
+        const std::size_t endSet    = calculateIndex(seqEnd);
         const auto        diffReset = seqEnd - seqBegin;
 
         if (beginSet <= endSet && diffReset < _size) {
@@ -9437,7 +9559,7 @@ private:
         }
         // Non-bulk AtomicBitset API
         //        for (std::size_t seq = static_cast<std::size_t>(seqBegin); seq < static_cast<std::size_t>(seqEnd); seq++) {
-        //            _slotStates.set(seq & _mask, value);
+        //            _slotStates.set(wrap(seq), value);
         //        }
     }
 };
@@ -9476,6 +9598,10 @@ using producer_type_v = typename producer_type<size, producerType, TWaitStrategy
 } // namespace detail
 
 } // namespace gr
+
+#ifdef forceinline
+#undef forceinline
+#endif
 
 #endif // GNURADIO_CLAIMSTRATEGY_HPP
 
@@ -9653,24 +9779,30 @@ enum class WriterSpanReservePolicy {
  */
 template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producerType = ProducerType::Single, WaitStrategyLike TWaitStrategy = SleepingWaitStrategy>
 class CircularBuffer {
+public:
+    using value_type = T;
     using Allocator  = std::pmr::polymorphic_allocator<T>;
     using BufferType = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
     using ClaimType  = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
 
+private:
     struct BufferImpl {
         Allocator                 _allocator{};
         const bool                _isMmapAllocated;
-        const std::size_t         _size; // pre-condition: std::has_single_bit(_size)
+        const std::size_t         _size;
+        const std::size_t         _mask;
+        const bool                _is_power_of_two;
         std::vector<T, Allocator> _data;
         ClaimType                 _claimStrategy;
-        std::atomic<std::size_t>  _reader_count{0UZ};
-        std::atomic<std::size_t>  _writer_count{0UZ};
+        std::size_t               _reader_count{0UZ};
+        std::size_t               _writer_count{0UZ};
 
         BufferImpl() = delete;
         BufferImpl(const std::size_t min_size, Allocator allocator)
             : _allocator(allocator),                                                                 //
               _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), //
-              _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)),                //
+              _size(align_with_page_size(min_size, _isMmapAllocated)), _mask(_size - 1),             //
+              _is_power_of_two(std::has_single_bit(_size)),                                          //
               _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
               _claimStrategy(ClaimType(_size)) {}
 
@@ -9679,23 +9811,39 @@ class CircularBuffer {
         BufferImpl& operator=(const BufferImpl&) = delete;
         BufferImpl& operator=(BufferImpl&&)      = delete;
 
-#ifdef HAS_POSIX_MAP_INTERFACE
-        static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
-            if (_isMmapAllocated) {
-                const std::size_t pageSize    = static_cast<std::size_t>(getpagesize());
-                const std::size_t elementSize = sizeof(T);
-                // least common multiple (lcm) of elementSize and pageSize
-                std::size_t lcmValue = elementSize * pageSize / std::gcd(elementSize, pageSize);
-
-                // adjust lcmValue to be larger than min_size
-                while (lcmValue < min_size) {
-                    lcmValue += lcmValue;
-                }
-                return lcmValue;
-            } else {
-                return min_size;
+        [[nodiscard]] std::size_t calculateIndex(std::size_t cursor) const noexcept {
+            if (_is_power_of_two) { // fast path: use bitwise AND for power-of-2 sizes
+                return cursor & _mask;
+            } else { // general case: use modulo for arbitrary sizes
+                return cursor % _size;
             }
         }
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+        constexpr static std::size_t align_with_page_size(std::size_t min_elems, bool isMmap) {
+            if (!isMmap) {
+                return min_elems;
+            }
+            // pick N elems so (N*sizeof(T)) % page == 0.
+            // start at bit_ceil(min) to preserve mask fast path; bump by stepElems.
+            const std::size_t page_size    = static_cast<std::size_t>(getpagesize());
+            const std::size_t element_size = sizeof(T);
+
+            // use LCM to ensure both page alignment AND integral number of elements
+            const std::size_t gcd_value        = std::gcd(page_size, element_size);
+            const std::size_t lcm              = (page_size / gcd_value) * element_size;
+            const std::size_t elements_per_lcm = lcm / element_size;
+
+            // round up to nearest multiple of elements_per_lcm
+            const std::size_t num_blocks = (min_elems + elements_per_lcm - 1) / elements_per_lcm;
+            const std::size_t result     = num_blocks * elements_per_lcm;
+
+            // Verify our constraints are met (for debugging)
+            assert((result * element_size) % page_size == 0);
+
+            return result;
+        }
+
 #else
         static std::size_t align_with_page_size(const std::size_t min_size, bool) {
             return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
@@ -9756,13 +9904,30 @@ class CircularBuffer {
 
                 if (!_parent->_buffer->_isMmapAllocated) {
                     const std::size_t size = _parent->_buffer->_size;
-                    // mirror samples below/above the buffer's wrap-around point
+
+                    // mirror samples below/above the wrap point
                     const std::size_t nFirstHalf  = std::min(size - _parent->_index, _parent->_nRequestedSamplesToPublish);
                     const std::size_t nSecondHalf = _parent->_nRequestedSamplesToPublish - nFirstHalf;
 
-                    auto& data = _parent->_buffer->_data;
-                    std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
-                    std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
+                    auto* base = _parent->_buffer->_data.data();
+
+                    // A) copy the contiguous tail (in first half) to second half
+                    //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
+                    if constexpr (std::is_trivially_copyable_v<T>) {
+                        std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
+                    } else {
+                        std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
+                    }
+
+                    // B) mirror back the wrapped head we just wrote contiguously at
+                    //    [size, size + nSecondHalf) down to [0, nSecondHalf)
+                    if (nSecondHalf) {
+                        if constexpr (std::is_trivially_copyable_v<T>) {
+                            std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                        } else {
+                            std::copy_n(base + size, nSecondHalf, base);
+                        }
+                    }
                 }
                 _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
                 _parent->_offset += _parent->_nRequestedSamplesToPublish;
@@ -9837,7 +10002,7 @@ class CircularBuffer {
 
     public:
         Writer() = delete;
-        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { atomic_ref(_buffer->_writer_count).fetch_add(1UZ); };
 
         Writer(Writer&& other) noexcept
             : _buffer(std::move(other._buffer)),                                                  //
@@ -9860,11 +10025,13 @@ class CircularBuffer {
 
         ~Writer() {
             if (_buffer) {
-                _buffer->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
+                gr::atomic_ref(_buffer->_writer_count).fetch_sub(1UZ);
             }
         }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
+
+        [[nodiscard]] std::size_t bufferIndex() const noexcept { return _buffer->calculateIndex(_buffer->_claimStrategy._publishCursor.value()); }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
@@ -9878,7 +10045,7 @@ class CircularBuffer {
 
             const std::optional<std::size_t> sequence = _buffer->_claimStrategy.tryNext(nSamples);
             if (sequence.has_value()) {
-                const std::size_t index = (sequence.value() + _buffer->_size - nSamples) % _buffer->_size;
+                const std::size_t index = _buffer->calculateIndex(sequence.value() + _buffer->_size - nSamples);
                 return WriterSpan<U, policy>(this, index, sequence.value(), nSamples);
             } else {
                 return WriterSpan<U, policy>(this);
@@ -9896,7 +10063,7 @@ class CircularBuffer {
             }
 
             const auto        sequence = _buffer->_claimStrategy.next(nSamples);
-            const std::size_t index    = (sequence + _buffer->_size - nSamples) % _buffer->_size;
+            const std::size_t index    = _buffer->calculateIndex(sequence + _buffer->_size - nSamples);
             return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
@@ -10066,16 +10233,13 @@ class CircularBuffer {
         std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
         std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
 
-        std::size_t bufferIndex() const noexcept {
-            const auto bitmask = _buffer->_size - 1;
-            return _readIndexCached & bitmask;
-        }
+        std::size_t bufferIndex() const noexcept { return _buffer->calculateIndex(_readIndexCached); }
 
     public:
         Reader() = delete;
         explicit Reader(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(buffer) {
             gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
-            _buffer->_reader_count.fetch_add(1UZ, std::memory_order_relaxed);
+            gr::atomic_ref(_buffer->_reader_count).fetch_add(1UZ);
             _readIndexCached = _readIndex->value();
         }
 
@@ -10101,7 +10265,7 @@ class CircularBuffer {
         ~Reader() {
             if (_buffer) {
                 gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
-                _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+                gr::atomic_ref(_buffer->_reader_count).fetch_sub(1UZ);
             }
         }
 
@@ -10165,8 +10329,8 @@ public:
     [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_sharedBufferPtr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] std::size_t n_writers() const { return _sharedBufferPtr->_writer_count.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::size_t n_readers() const { return _sharedBufferPtr->_reader_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t n_writers() const { return gr::atomic_ref(_sharedBufferPtr->_writer_count).load_acquire(); }
+    [[nodiscard]] std::size_t n_readers() const { return gr::atomic_ref(_sharedBufferPtr->_reader_count).load_acquire(); }
     [[nodiscard]] const auto& claim_strategy() { return _sharedBufferPtr->_claimStrategy; }
     [[nodiscard]] const auto& wait_strategy() { return _sharedBufferPtr->_claimStrategy._wait_strategy; }
     [[nodiscard]] const auto& cursor_sequence() { return _sharedBufferPtr->_claimStrategy._publishCursor; }
@@ -15694,7 +15858,6 @@ struct Logging {
 #define GNURADIO_SEQUENCE_HPP
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -15703,6 +15866,9 @@ struct Logging {
 #include <vector>
 
 #include <format>
+
+// #include <gnuradio-4.0/AtomicRef.hpp>
+
 
 namespace gr {
 
@@ -15724,33 +15890,32 @@ static constexpr const std::size_t kInitialCursorValue = 0L;
 /**
  * Concurrent sequence class used for tracking the progress of the ring buffer and event
  * processors. Support a number of concurrent operations including CAS and order writes.
- * Also attempts to be more efficient with regards to false sharing by adding padding
- * around the volatile field.
+ * Also avoids false sharing by adding padding cacheline-padding around the volatile field.
  */
-class Sequence {
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> _fieldsValue{};
+class alignas(hardware_destructive_interference_size) Sequence {
+    mutable std::size_t _fieldsValue{kInitialCursorValue};
 
 public:
     Sequence(const Sequence&)       = delete;
     Sequence(const Sequence&&)      = delete;
     void operator=(const Sequence&) = delete;
 
-    explicit Sequence(std::size_t initialValue = kInitialCursorValue) noexcept : _fieldsValue(initialValue) {}
+    Sequence() = default;
+    explicit Sequence(std::size_t v) noexcept { gr::atomic_ref(_fieldsValue).store_release(v); }
 
-    [[nodiscard]] forceinline std::size_t value() const noexcept { return std::atomic_load_explicit(&_fieldsValue, std::memory_order_acquire); }
-    forceinline void                      setValue(const std::size_t value) noexcept { std::atomic_store_explicit(&_fieldsValue, value, std::memory_order_release); }
+    [[nodiscard]] forceinline std::size_t value() const noexcept { return gr::atomic_ref(_fieldsValue).load_acquire(); }
+    forceinline void                      setValue(const std::size_t value) noexcept { gr::atomic_ref(_fieldsValue).store_release(value); }
 
     [[nodiscard]] forceinline bool compareAndSet(std::size_t expectedSequence, std::size_t nextSequence) noexcept {
-        // atomically set the value to the given updated value if the current value == the
-        // expected value (true, otherwise folse).
-        return std::atomic_compare_exchange_strong(&_fieldsValue, &expectedSequence, nextSequence);
+        // atomically set the value to the given updated value if the current value == the expected value (true, otherwise folse).
+        return gr::atomic_ref(_fieldsValue).compare_exchange(expectedSequence, nextSequence);
     }
 
-    [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return std::atomic_fetch_add(&_fieldsValue, 1L) + 1L; }
-    [[nodiscard]] forceinline std::size_t addAndGet(std::size_t value) noexcept { return std::atomic_fetch_add(&_fieldsValue, value) + value; }
-    [[nodiscard]] forceinline std::size_t subAndGet(std::size_t value) noexcept { return std::atomic_fetch_sub(&_fieldsValue, value) - value; }
-    void                                  wait(std::size_t oldValue) const noexcept { std::atomic_wait_explicit(&_fieldsValue, oldValue, std::memory_order_acquire); }
-    void                                  notify_all() noexcept { _fieldsValue.notify_all(); }
+    [[maybe_unused]] forceinline std::size_t incrementAndGet() noexcept { return gr::atomic_ref(_fieldsValue).fetch_add(1UZ) + 1UZ; }
+    [[nodiscard]] forceinline std::size_t addAndGet(std::size_t increment) noexcept { return gr::atomic_ref(_fieldsValue).fetch_add(increment) + increment; }
+    [[nodiscard]] forceinline std::size_t subAndGet(std::size_t decrement) noexcept { return gr::atomic_ref(_fieldsValue).fetch_sub(decrement) - decrement; }
+    void                                  wait(std::size_t oldValue) const noexcept { gr::atomic_ref(_fieldsValue).wait(oldValue); }
+    void                                  notify_all() noexcept { gr::atomic_ref(_fieldsValue).notify_all(); }
 };
 
 namespace detail {
@@ -15759,8 +15924,8 @@ namespace detail {
  * Get the minimum sequence from an array of Sequences.
  *
  * \param sequences sequences to compare.
- * \param minimum an initial default minimum.  If the array is empty this value will
- * returned. \returns the minimum sequence found or lon.MaxValue if the array is empty.
+ * \param minimum the initial default minimum. If the array is empty, this value will be returned.
+ * \returns the minimum sequence found or lon.MaxValue if the array is empty.
  */
 inline std::size_t getMinimumSequence(const std::vector<std::shared_ptr<Sequence>>& sequences, std::size_t minimum = std::numeric_limits<std::size_t>::max()) noexcept {
     // Note that calls to getMinimumSequence get rather expensive with sequences.size() because
@@ -15873,6 +16038,10 @@ struct std::formatter<gr::Sequence> {
 namespace gr {
 inline std::ostream& operator<<(std::ostream& os, const Sequence& v) { return os << std::format("{}", v.value()); }
 } // namespace gr
+
+#ifdef forceinline
+#undef forceinline
+#endif
 
 #endif // GNURADIO_SEQUENCE_HPP
 

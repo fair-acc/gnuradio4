@@ -35,10 +35,11 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     using namespace gr;
 
     "CustomSizePort"_test = [] {
-        PortOut<int, RequiredSamples<1, 16>, StreamBufferType<CircularBuffer<int, 32UZ>>> out;
+        using T = int;
+        PortOut<T, RequiredSamples<1, 16>, StreamBufferType<CircularBuffer<T, 32UZ>>> out;
         expect(out.resizeBuffer(32UZ) == ConnectionResult::SUCCESS);
 #if defined(__linux__) || defined(__gnu_linux__)
-        expect(eq(out.buffer().streamBuffer.size(), static_cast<std::size_t>(getpagesize())));
+        expect(eq(out.buffer().streamBuffer.size(), static_cast<std::size_t>(getpagesize()) / sizeof(T)));
 #else
         // 4096 (page-size) is the minimum buffer size
         // may be difficult to test across other architectures
