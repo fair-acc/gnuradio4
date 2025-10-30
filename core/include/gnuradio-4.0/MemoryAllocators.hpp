@@ -17,6 +17,16 @@
 
 namespace gr::allocator {
 
+template<std::size_t Align, typename T>
+[[nodiscard]] constexpr bool isAligned(const T* p) noexcept {
+    return std::bit_cast<std::uintptr_t>(std::to_address(p)) % Align == 0UZ;
+}
+
+template<typename T>
+[[nodiscard]] constexpr bool isAligned(const T* p, std::size_t alignment) noexcept {
+    return std::bit_cast<std::uintptr_t>(std::to_address(p)) % alignment == 0UZ;
+}
+
 /** @brief STL allocator guaranteeing `alignment` byte alignment. */
 template<typename T, std::size_t alignment = 64UZ>
 requires(std::has_single_bit(alignment) && alignment >= alignof(T))
@@ -72,6 +82,49 @@ concept has_allocate_at_least = requires(Alloc a, std::size_t n) {
     { std::allocator_traits<Alloc>::allocate_at_least(a, n) };
 };
 
+template<typename Alloc>
+struct is_aligned_allocator : std::false_type {};
+
+template<typename T, std::size_t Alignment>
+struct is_aligned_allocator<gr::allocator::Aligned<T, Alignment>> : std::true_type {};
+
+template<typename Alloc>
+inline constexpr bool is_aligned_allocator_v = is_aligned_allocator<Alloc>::value;
+
+template<typename Container>
+struct container_allocator {
+    using type = std::allocator<typename Container::value_type>;
+};
+
+template<typename T, typename Alloc>
+struct container_allocator<std::vector<T, Alloc>> {
+    using type = Alloc;
+};
+
+template<typename Container>
+using container_allocator_t = typename container_allocator<Container>::type;
+
+template<typename Alloc, typename NewType>
+struct rebind_allocator {
+    using type = typename std::allocator_traits<Alloc>::template rebind_alloc<NewType>;
+};
+
+template<typename T, std::size_t Alignment, typename NewType>
+struct rebind_allocator<gr::allocator::Aligned<T, Alignment>, NewType> {
+    using type = gr::allocator::Aligned<NewType, Alignment>;
+};
+
+template<typename Alloc, typename NewType>
+using rebind_allocator_t = typename rebind_allocator<Alloc, NewType>::type;
+
+template<typename InputContainer, typename OutputType>
+struct deduce_output_allocator {
+    using input_alloc = container_allocator_t<std::remove_cvref_t<InputContainer>>;
+    using type        = rebind_allocator_t<input_alloc, OutputType>;
+};
+
+template<typename InputContainer, typename OutputType>
+using deduce_output_allocator_t = typename deduce_output_allocator<InputContainer, OutputType>::type;
 } // namespace detail
 
 template<typename T, typename Underlying = Default<T>, typename Logger = detail::DefaultLogger>
