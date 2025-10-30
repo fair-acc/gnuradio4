@@ -9,10 +9,21 @@ function(add_gr_benchmark BM_NAME)
             ut-benchmark)
 
   if(EMSCRIPTEN)
-    target_compile_options(${BM_NAME} PRIVATE -O2) # benchmarks should be optimised
+    # WebAssembly SIMD (128-bit) + optimisation for benches
+    target_compile_options(${BM_NAME} PRIVATE -O2 -msimd128)
+    target_link_options(${BM_NAME} PRIVATE -msimd128)
+
+    # (optional) Relaxed SIMD if your toolchain supports it
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-mrelaxed-simd" HAS_RELAXED_SIMD)
+    if(HAS_RELAXED_SIMD)
+      target_compile_options(${BM_NAME} PRIVATE -mrelaxed-simd)
+      target_link_options(${BM_NAME} PRIVATE -mrelaxed-simd)
+    endif()
   else()
-    target_compile_options(${BM_NAME} PRIVATE -O2 -march=native) # benchmarks should be optimised
+    target_compile_options(${BM_NAME} PRIVATE -O2 -march=native)
   endif()
 endfunction()
 
 add_gr_benchmark(bm_fft)
+add_gr_benchmark(bm_pffft)

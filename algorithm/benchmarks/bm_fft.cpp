@@ -13,8 +13,8 @@
 #include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
 
 template<typename T>
-std::vector<T> generateSinSample(std::size_t N, double sampleRate, double frequency, double amplitude) {
-    std::vector<T> signal(N);
+std::vector<T, gr::allocator::Aligned<T>> generateSinSample(std::size_t N, double sampleRate, double frequency, double amplitude) {
+    std::vector<T, gr::allocator::Aligned<T>> signal(N);
     for (std::size_t i = 0; i < N; i++) {
         if constexpr (gr::meta::complex_like<T>) {
             signal[i] = {static_cast<typename T::value_type>(amplitude * std::sin(2. * std::numbers::pi * frequency * static_cast<double>(i) / sampleRate)), 0.};
@@ -57,9 +57,9 @@ void testFFT() {
         const std::size_t scaling      = static_cast<std::size_t>(static_cast<double>(N) * std::log(static_cast<double>(N)));
 
         try {
-            std::vector<T> signal = generateSinSample<T>(N, 1., static_cast<double>(binnedFrequency) / static_cast<double>(N), 1.);
-            FFTAlgo        fft;
-            auto           output = fft.compute(signal); // warm up cache/twiddlefactors
+            std::vector<T, gr::allocator::Aligned<T>> signal = generateSinSample<T>(N, 1., static_cast<double>(binnedFrequency) / static_cast<double>(N), 1.);
+            FFTAlgo                                   fft;
+            auto                                      output = fft.compute(signal); // warm up cache/twiddlefactors
 
             ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&fft, &signal, &output] { output = fft.compute(signal); };
 
