@@ -7,7 +7,6 @@
 #include <gnuradio-4.0/DataSet.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
-#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
 
 #include <gnuradio-4.0/fourier/fft.hpp>
 
@@ -86,13 +85,6 @@ void testFFT() {
 
     std::vector<T> signal = generateSinSample<T>(N, sampleRate, frequency, amplitude);
 
-    {
-        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFTw> fft1({{"fftSize", N}});
-        std::ignore = fft1.settings().applyStagedParameters();
-
-        std::vector<DataSet<PrecisionType>> resultingDataSets(1);
-        ::benchmark::benchmark<nRepetitions>(std::format("{} - fftw", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };
-    }
     {
         gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT> fft1({{"fftSize", N}});
         std::ignore = fft1.settings().applyStagedParameters();

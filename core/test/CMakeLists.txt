@@ -10,7 +10,6 @@ function(setup_test_no_asan TEST_NAME)
     PRIVATE gnuradio-options
             gnuradio-core
             gnuradio-blocklib-core
-            fftw
             gr-basic
             gr-fileio
             gr-math
