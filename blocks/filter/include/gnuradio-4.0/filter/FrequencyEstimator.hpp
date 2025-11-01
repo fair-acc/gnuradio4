@@ -15,7 +15,6 @@
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
-#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 
 namespace gr::filter {

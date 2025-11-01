@@ -10,7 +10,6 @@
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
-#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
 
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -119,7 +118,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
     };
 
     "FFT flow graph example"_test = [] {
-        // This test checks how fftw works if one creates and destroys several fft blocks in different graph flows
+        // This test checks how the FFT block works if one creates and destroys several fft blocks in different graph flows
         using namespace boost::ut;
         using Scheduler = gr::scheduler::Simple<>;
         gr::Graph flow1;
@@ -186,11 +185,11 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             for (std::size_t i = 0; i < N; i++) {
                 if constexpr (gr::meta::complex_like<InType>) {
                     const auto expValue = static_cast<value_type>(signal[i].real()) * windowFunc[i];
-                    expect(approx(fftBlock._inData[i].real(), expValue, tolerance)) << std::format("<{}> equal fftwIn complex.real", type_name<T>());
-                    expect(approx(fftBlock._inData[i].imag(), expValue, tolerance)) << std::format("<{}> equal fftwIn complex.imag", type_name<T>());
+                    expect(approx(fftBlock._inData[i].real(), expValue, tolerance)) << std::format("<{}> equal complex.real", type_name<T>());
+                    expect(approx(fftBlock._inData[i].imag(), expValue, tolerance)) << std::format("<{}> equal complex.imag", type_name<T>());
                 } else {
                     const value_type expValue = static_cast<value_type>(signal[i]) * static_cast<value_type>(windowFunc[i]);
-                    expect(approx(fftBlock._inData[i], expValue, tolerance)) << std::format("<{}> equal fftwIn", type_name<T>());
+                    expect(approx(fftBlock._inData[i], expValue, tolerance)) << std::format("<{}> equal fft", type_name<T>());
                 }
             }
         }
