@@ -1,6 +1,8 @@
 #ifndef GNURADIO_RANGESHELPER_HPP
 #define GNURADIO_RANGESHELPER_HPP
 
+#include <algorithm>
+#include <cassert>
 #include <functional>
 #include <ranges>
 
@@ -66,8 +68,8 @@ PairDeduplicateView(TEq1, TEq2) -> PairDeduplicateView<std::decay_t<TEq1>, std::
  * @brief Lazy k-way merge over a range of sorted ranges.
  *
  * Two main components:
- *  - `MergeView<R, Comp>` - the iterable view that performs the merge lazily.
- *  - `Merge<Comp>` - the pipeable adaptor that builds a `MergeView` from an outer range.
+ *  - `MergeView<R, Comp, NRanges>` - the iterable view that performs the merge lazily.
+ *  - `MergeAdaptor<Comp, NRanges>` - the pipeable adaptor that builds a `MergeView` from an outer range.
  *
  * Given an outer range `R` whose elements are themselves ranges (the “inner ranges”),
  * the merge yields a single, sorted sequence by repeatedly selecting the smallest current
@@ -77,7 +79,7 @@ PairDeduplicateView(TEq1, TEq2) -> PairDeduplicateView<std::decay_t<TEq1>, std::
 
  * Usage
  *  // 1) Pipeable adaptor:
- *  auto merged = inputs | Merge{compByKey};
+ *  auto merged = inputs | Merge(compByKey);
  *  for (auto&& x : merged) { ... }
  *  // 2) Direct view construction:
  *   // *  MergeView view{std::views::all(inputs), compByKey};
@@ -87,10 +89,10 @@ PairDeduplicateView(TEq1, TEq2) -> PairDeduplicateView<std::decay_t<TEq1>, std::
  *  std::vector<int> a{1,3,5};
  *  std::vector<int> b{2,4,6};
  *  std::array ranges{ std::views::all(a), std::views::all(b) };
- *  auto out = ranges | Merge{std::ranges::less{}};
+ *  auto out = ranges | Merge(std::ranges::less{});
  *  // yields: 1,2,3,4,5,6
  */
-template<class R, class TComp>
+template<class R, class TComp, std::size_t NRanges = std::dynamic_extent>
 struct MergeView : std::ranges::view_interface<MergeView<R, TComp>> {
     using TOut      = R;
     using TInView   = std::remove_cvref_t<std::ranges::range_reference_t<TOut>>;
@@ -114,21 +116,29 @@ struct MergeView : std::ranges::view_interface<MergeView<R, TComp>> {
         using reference         = std::iter_reference_t<TIterator>;
         using value_type        = std::iter_value_t<TIterator>;
 
-        MergeView*             _view{};
-        std::vector<TIterator> _its;
-        std::size_t            _chosen{static_cast<std::size_t>(-1)};
+        constexpr static bool isDynamic = NRanges == std::dynamic_extent;
+
+        MergeView*                                                                            _view{};
+        std::conditional_t<isDynamic, std::vector<TIterator>, std::array<TIterator, NRanges>> _its;
+        std::size_t                                                                           _chosen{static_cast<std::size_t>(-1)};
 
         Iterator()                           = default;
         Iterator(const Iterator&)            = default;
         Iterator& operator=(const Iterator&) = default;
 
         explicit Iterator(MergeView* parent) : _view(parent) {
-            if constexpr (std::ranges::sized_range<TOut>) {
-                auto n = std::ranges::size(_view->_out);
-                _its.reserve(n);
-            }
-            for (auto&& v : _view->_out) {
-                _its.push_back(std::ranges::begin(v));
+            if constexpr (isDynamic) {
+                if constexpr (std::ranges::sized_range<TOut>) {
+                    _its.reserve(std::ranges::size(_view->_out));
+                }
+                for (auto&& v : _view->_out) {
+                    _its.push_back(std::ranges::begin(v));
+                }
+            } else {
+                if constexpr (std::ranges::sized_range<TOut>) {
+                    assert(NRanges == std::ranges::size(_view->_out));
+                }
+                std::ranges::transform(_view->_out, _its.begin(), [](auto&& v) { return std::ranges::begin(v); });
             }
             next();
         }
@@ -188,25 +198,27 @@ struct MergeView : std::ranges::view_interface<MergeView<R, TComp>> {
     auto end() { return std::default_sentinel; }
 };
 
-template<class Comp = std::ranges::less>
-struct Merge : std::ranges::range_adaptor_closure<Merge<Comp>> {
+template<class Comp = std::ranges::less, std::size_t NRanges = std::dynamic_extent>
+struct MergeAdaptor : std::ranges::range_adaptor_closure<MergeAdaptor<Comp, NRanges>> {
     [[no_unique_address]] Comp _comp{};
 
-    Merge() = default;
+    MergeAdaptor() = default;
 
     template<class TCompFw>
     requires std::constructible_from<Comp, TCompFw>
-    explicit Merge(TCompFw&& c) : _comp(std::forward<TCompFw>(c)) {}
+    explicit MergeAdaptor(TCompFw&& c) : _comp(std::forward<TCompFw>(c)) {}
 
     template<class R>
     requires std::ranges::input_range<R> && std::ranges::input_range<std::remove_cvref_t<std::ranges::range_reference_t<std::views::all_t<R>>>>
     auto operator()(R&& r) const {
-        return MergeView<std::views::all_t<R>, Comp>(std::views::all(std::forward<R>(r)), _comp);
+        return MergeView<std::views::all_t<R>, Comp, NRanges>(std::views::all(std::forward<R>(r)), _comp);
     }
 };
 
-template<class Comp = std::ranges::less>
-Merge(Comp) -> Merge<Comp>;
+template<std::size_t N = std::dynamic_extent, class Comp = std::ranges::less>
+[[nodiscard]] constexpr auto Merge(Comp comp = {}) {
+    return MergeAdaptor<Comp, N>(std::move(comp));
+}
 
 } // namespace gr
 
