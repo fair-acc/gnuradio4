@@ -494,18 +494,42 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     expect(eq(getNReplyMessages(scheduler.fromScheduler), 0UZ));
 
     // Get the whole graph
+    std::string graphUniqueName;
     testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", graph::property::kGraphInspect, property_map{}, //
-        [](const Message& reply) {
+        [&graphUniqueName](const Message& reply) {
             if (reply.endpoint != graph::property::kGraphInspected) {
                 return false;
             }
 
-            const auto& data     = reply.data.value();
+            const auto& data = reply.data.value();
+
+            graphUniqueName = std::get<std::string>(data.at(std::string(serialization_fields::BLOCK_UNIQUE_NAME)));
+
             const auto& children = std::get<property_map>(data.at("children"s));
             expect(eq(children.size(), 4UZ));
 
             const auto& edges = std::get<property_map>(data.at("edges"s));
             expect(eq(edges.size(), 4UZ));
+            return true;
+        });
+
+    // Inspect the scheduler
+    testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", scheduler::property::kSchedulerInspect, property_map{}, //
+        [&graphUniqueName](const Message& reply) {
+            if (reply.endpoint != scheduler::property::kSchedulerInspected) {
+                return false;
+            }
+
+            const auto& data     = reply.data.value();
+            const auto& children = std::get<property_map>(data.at("children"s));
+            expect(eq(children.size(), 1UZ));
+
+            for (const auto& [childUniqueName, child] : children) {
+                expect(eq(graphUniqueName, childUniqueName));
+            }
+
+            // Scheduler contains a graph as the only child, no edges in scheduler
+            expect(!data.contains("edges"s));
             return true;
         });
 

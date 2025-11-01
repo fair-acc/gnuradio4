@@ -520,9 +520,11 @@ using namespace std::string_literals;
 
 // Serialization block fields for which we don't use reflection
 constexpr auto BLOCK_ID               = "id"sv;
+constexpr auto BLOCK_NAME             = "name"sv;
 constexpr auto BLOCK_UNIQUE_NAME      = "unique_name"sv;
 constexpr auto BLOCK_META_INFORMATION = "meta_information"sv;
 constexpr auto BLOCK_PARAMETERS       = "parameters"sv;
+constexpr auto BLOCK_CATEGORY         = "blockCategory"sv;
 constexpr auto BLOCK_CTX_PARAMETERS   = "ctx_parameters"sv;
 
 constexpr auto BLOCK_INPUT_PORTS  = "input_ports"sv;
