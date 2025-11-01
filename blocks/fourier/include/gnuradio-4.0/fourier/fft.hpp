@@ -10,7 +10,6 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
-#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 
 namespace gr::blocks::fft {
@@ -28,7 +27,6 @@ struct OutputDataSet<T> {
 };
 
 GR_REGISTER_BLOCK("gr::blocks::fft::FFT", gr::blocks::fft::FFT, [T], [ float, double ])
-GR_REGISTER_BLOCK("gr::blocks::fft::FFTw", gr::blocks::fft::FFT, ([T], typename gr::blocks::fft::OutputDataSet<[T]>::type, gr::algorithm::FFTw), [ float, double ])
 
 template<typename T, typename U = OutputDataSet<T>::type, template<typename, typename> typename FourierAlgorithm = gr::algorithm::FFT>
 requires((gr::meta::complex_like<T> || std::floating_point<T>) && (std::is_same_v<U, DataSet<float>> || std::is_same_v<U, DataSet<double>>))
@@ -89,7 +87,7 @@ On the choice of window (mathematically aka. apodisation) functions
 
 @tparam T type of the input signal.
 @tparam U type of the output data (presently limited to DataSet<float> and DataSet<double>)
-@tparam FourierAlgorithm the specific algorithm used to perform the Fourier Transform (can be DFT, FFT, FFTW).
+@tparam FourierAlgorithm the specific algorithm used to perform the Fourier Transform.
 )"">;
     using value_type  = U::value_type;
     using InDataType  = std::conditional_t<gr::meta::complex_like<T>, std::complex<value_type>, value_type>;

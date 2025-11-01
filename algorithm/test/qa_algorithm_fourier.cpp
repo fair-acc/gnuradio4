@@ -10,7 +10,7 @@
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/algorithm/fourier/fft_common.hpp>
-#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
+#include <gnuradio-4.0/algorithm/fourier/window.hpp>
 
 template<typename T>
 std::vector<T> generateSinSample(std::size_t N, double sample_rate, double frequency, double amplitude) {
@@ -37,15 +37,6 @@ bool equalVectors(const T& v1, const U& v2, double tolerance = std::is_same_v<ty
     }
 }
 
-template<typename TInput, typename TOutput, typename TExpInput, typename TExpOutput, typename TExpPlan>
-void testFFTwTypes() {
-    using namespace boost::ut;
-    gr::algorithm::FFTw<TInput, TOutput> fftBlock;
-    expect(std::is_same_v<typename std::remove_pointer_t<decltype(fftBlock.fftwIn.get())>, TExpInput>) << "";
-    expect(std::is_same_v<typename std::remove_pointer_t<decltype(fftBlock.fftwOut.get())>, TExpOutput>) << "";
-    expect(std::is_same_v<decltype(fftBlock.fftwPlan.get()), TExpPlan>) << "";
-}
-
 template<typename TInput, typename TOutput, template<typename, typename> typename TAlgo>
 struct TestTypes {
     using InType   = TInput;
@@ -58,19 +49,18 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
     using namespace boost::ut::reflection;
     using gr::algorithm::window::create;
     using gr::algorithm::FFT;
-    using gr::algorithm::FFTw;
 
     using ComplexTypesToTest = std::tuple<
         // complex input, same in-out precision
-        TestTypes<std::complex<float>, std::complex<float>, FFT>, TestTypes<std::complex<float>, std::complex<float>, FFTw>, TestTypes<std::complex<double>, std::complex<double>, FFT>, TestTypes<std::complex<double>, std::complex<double>, FFTw>,
+        TestTypes<std::complex<float>, std::complex<float>, FFT>, TestTypes<std::complex<double>, std::complex<double>, FFT>,
         // complex input, different in-out precision
-        TestTypes<std::complex<float>, std::complex<double>, FFT>, TestTypes<std::complex<float>, std::complex<double>, FFTw>, TestTypes<std::complex<double>, std::complex<float>, FFT>, TestTypes<std::complex<double>, std::complex<float>, FFTw>>;
+        TestTypes<std::complex<float>, std::complex<double>, FFT>, TestTypes<std::complex<double>, std::complex<float>, FFT>>;
 
     using RealTypesToTest = std::tuple<
         // real input, same in-out precision
-        TestTypes<float, std::complex<float>, FFT>, TestTypes<float, std::complex<float>, FFTw>, TestTypes<double, std::complex<double>, FFT>, TestTypes<double, std::complex<double>, FFTw>,
+        TestTypes<float, std::complex<float>, FFT>, TestTypes<double, std::complex<double>, FFT>,
         // real input, different in-out precision
-        TestTypes<double, std::complex<float>, FFT>, TestTypes<double, std::complex<float>, FFTw>, TestTypes<double, std::complex<float>, FFT>, TestTypes<double, std::complex<float>, FFTw>>;
+        TestTypes<double, std::complex<float>, FFT>, TestTypes<double, std::complex<float>, FFT>>;
 
     using AllTypesToTest = decltype(std::tuple_cat(std::declval<ComplexTypesToTest>(), std::declval<RealTypesToTest>()));
 
@@ -158,26 +148,6 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         std::vector<double> expOut = {0.2, -1., -3.78318531, -3.1, -5.38318531, -6.78318531, -5.08318531, -5.48318531, -4.78318531, -7.48318531, -8.98318531, -11.66637061, -13.36637061, -13.96637061, -11.96637061, -11.46637061, -14.46637061, -12.16637061, -11.26637061, -13.26637061};
         gr::algorithm::fft::unwrapPhase(phase);
         expect(equalVectors(phase, expOut)) << "unwrapped phases are equal";
-    };
-
-    "FFTw types tests"_test = [] {
-        testFFTwTypes<std::complex<float>, std::complex<float>, fftwf_complex, fftwf_complex, fftwf_plan>();
-        testFFTwTypes<std::complex<double>, std::complex<double>, fftw_complex, fftw_complex, fftw_plan>();
-        testFFTwTypes<float, std::complex<float>, float, fftwf_complex, fftwf_plan>();
-        testFFTwTypes<double, std::complex<double>, double, fftw_complex, fftw_plan>();
-    };
-
-    "FFTW wisdom import/export tests"_test = []() {
-        gr::algorithm::FFTw<double, std::complex<double>> fftw1{};
-
-        std::string wisdomString1 = fftw1.exportWisdomToString();
-        fftw1.forgetWisdom();
-        int importOk = fftw1.importWisdomFromString(wisdomString1);
-        expect(eq(importOk, 1)) << "Wisdom import from string.";
-        std::string wisdomString2 = fftw1.exportWisdomToString();
-
-        // lines are not always at the same order thus it is hard to compare
-        // expect(eq(wisdomString1, wisdomString2)) << "Wisdom strings are the same.";
     };
 
     "window pre-computed array tests"_test = []<typename T>() { // this tests regression w.r.t. changed implementations

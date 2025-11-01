@@ -7,10 +7,6 @@
 #include <format>
 
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
-#ifndef __EMSCRIPTEN__
-#include <gnuradio-4.0/algorithm/fourier/fftpf.hpp>
-#endif
-#include <gnuradio-4.0/algorithm/fourier/fftw.hpp>
 
 template<typename T>
 std::vector<T, gr::allocator::Aligned<T>> generateSinSample(std::size_t N, double sampleRate, double frequency, double amplitude) {
@@ -81,11 +77,7 @@ inline const boost::ut::suite<"FFT forward tests"> _fft_bm_tests = [] {
 
     auto testAll = [&]<typename... Ts>(auto /*types*/) { //
         auto testForType = []<typename T>() {
-            ([]<template<typename, typename> typename Algo>() { testFFT<T, Algo>(); }.template operator()<FFTw>(), //
-#ifndef __EMSCRIPTEN__
-                []<template<typename, typename> typename Algo>() { testFFT<T, Algo>(); }.template operator()<FFTpf>(), //
-#endif
-                []<template<typename, typename> typename Algo>() { testFFT<T, Algo>(); }.template operator()<FFT>()); //
+            ([]<template<typename, typename> typename Algo>() { testFFT<T, Algo>(); }.template operator()<FFT>()); //
         };
         (testForType.template operator()<Ts>(), ...);
     };

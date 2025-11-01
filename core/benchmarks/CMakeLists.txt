@@ -7,7 +7,6 @@ if(NOT EMSCRIPTEN)
               gnuradio-core
               gnuradio-blocklib-core
               gnuradio-plugin
-              fftw
               gr-basic
               gr-fileio
               gr-math

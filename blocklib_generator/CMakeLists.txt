@@ -3,7 +3,7 @@ project(MyProject LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 
-option(ENABLE_SPLIT "Enable splitting of generated files (pass --split to the parser)" ON)
+option(ENABLE_SPLIT "Enable splitting of generated files (pass --split to the parser)" OFF)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
