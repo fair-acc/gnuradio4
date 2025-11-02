@@ -106,6 +106,8 @@ private:
         auto it = data.find("_targetGraph"s);
         if (it == data.end()) {
             return std::addressof(*_graph);
+        } else if (it->second == _graph->unique_name) {
+            return std::addressof(*_graph);
         } else {
             const auto& targetGraphName = std::get<std::string>(it->second);
             auto        result          = graph::findBlock(*_graph, std::string_view(targetGraphName));
@@ -753,10 +755,13 @@ protected:
             }
         }();
 
+        message.endpoint = scheduler::property::kBlockEmplaced;
+
         auto* targetGraph = findTargetSubGraph(data);
 
         if (targetGraph == nullptr) {
-            return {};
+            message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
+            return message;
         }
 
         auto& newBlock = targetGraph->emplaceBlock(type, properties);
@@ -795,10 +800,7 @@ protected:
 
         messageData["_targetGraph"s] = targetGraph->unique_name;
 
-        this->emitMessage(scheduler::property::kBlockEmplaced, std::move(messageData));
-
-        // Message is sent as a reaction to emplaceBlock, no need for a separate one
-        return {};
+        return message;
     }
 
     std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
@@ -807,10 +809,18 @@ protected:
         const auto&        data       = message.data.value();
         const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
 
-        auto removedBlock = _graph->removeBlockByName(uniqueName);
+        message.endpoint = scheduler::property::kBlockRemoved;
+
+        auto* targetGraph = findTargetSubGraph(data);
+
+        if (targetGraph == nullptr) {
+            message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
+            return message;
+        }
+
+        auto removedBlock = targetGraph->removeBlockByName(uniqueName);
         makeZombie(std::move(removedBlock));
 
-        message.endpoint = scheduler::property::kBlockRemoved;
         return {message};
     }
 
@@ -821,9 +831,17 @@ protected:
         const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
         const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
 
-        _graph->removeEdgeBySourcePort(sourceBlock, sourcePort);
-
         message.endpoint = scheduler::property::kEdgeRemoved;
+
+        auto* targetGraph = findTargetSubGraph(data);
+
+        if (targetGraph == nullptr) {
+            message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
+            return message;
+        }
+
+        targetGraph->removeEdgeBySourcePort(sourceBlock, sourcePort);
+
         return message;
     }
 
@@ -839,15 +857,17 @@ protected:
         [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
         const std::string                   edgeName         = std::get<std::string>(data.at("edgeName"s));
 
+        message.endpoint = scheduler::property::kEdgeEmplaced;
+
         auto* targetGraph = findTargetSubGraph(data);
 
         if (targetGraph == nullptr) {
-            return {};
+            message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
+            return message;
         }
 
         targetGraph->emplaceEdge(sourceBlock, sourcePort, destinationBlock, destinationPort, minBufferSize, weight, edgeName);
 
-        message.endpoint                 = scheduler::property::kEdgeEmplaced;
         (*message.data)["_targetGraph"s] = targetGraph->unique_name;
         return message;
     }
@@ -1077,7 +1097,14 @@ protected:
             }
         }();
 
-        auto [oldBlock, newBlockRaw] = _graph->replaceBlock(uniqueName, type, properties);
+        auto* targetGraph = findTargetSubGraph(data);
+
+        if (targetGraph == nullptr) {
+            message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
+            return message;
+        }
+
+        auto [oldBlock, newBlockRaw] = targetGraph->replaceBlock(uniqueName, type, properties);
         makeZombie(std::move(oldBlock));
 
         std::optional<Message> result = gr::Message{};
