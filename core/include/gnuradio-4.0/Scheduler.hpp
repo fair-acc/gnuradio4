@@ -800,7 +800,10 @@ protected:
 
         messageData["_targetGraph"s] = targetGraph->unique_name;
 
-        return message;
+        this->emitMessage(scheduler::property::kBlockEmplaced, std::move(messageData));
+
+        // Message is sent as a reaction to emplaceBlock, no need for a separate one
+        return {};
     }
 
     std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {

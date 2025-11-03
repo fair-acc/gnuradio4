@@ -6,14 +6,21 @@ namespace gr {
 Graph::Graph(property_map settings) : gr::Block<Graph>(std::move(settings)), _pluginLoader(std::addressof(gr::globalPluginLoader())) {
     _blocks.reserve(100); // TODO: remove
 
-    propertyCallbacks[graph::property::kInspectBlock]       = std::mem_fn(&Graph::propertyCallbackInspectBlock);
-    propertyCallbacks[graph::property::kGraphInspect]       = std::mem_fn(&Graph::propertyCallbackGraphInspect);
-    propertyCallbacks[graph::property::kRegistryBlockTypes] = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
+    propertyCallbacks[graph::property::kInspectBlock]           = std::mem_fn(&Graph::propertyCallbackInspectBlock);
+    propertyCallbacks[graph::property::kGraphInspect]           = std::mem_fn(&Graph::propertyCallbackGraphInspect);
+    propertyCallbacks[graph::property::kRegistryBlockTypes]     = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
+    propertyCallbacks[graph::property::kRegistrySchedulerTypes] = std::mem_fn(&Graph::propertyCallbackRegistrySchedulerTypes);
 }
 
 [[maybe_unused]] std::shared_ptr<BlockModel> const& Graph::emplaceBlock(std::string_view type, property_map initialSettings) {
-    if (std::shared_ptr<BlockModel> block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
+    if (type.starts_with("gr::Graph")) {
+        auto subGraphModel = std::unique_ptr<BlockModel>(std::make_unique<GraphWrapper<Graph>>().release());
+        return addBlock(std::move(subGraphModel));
+    } else if (std::shared_ptr<BlockModel> block_load = _pluginLoader->instantiate(type, std::move(initialSettings)); block_load) {
         const std::shared_ptr<BlockModel>& newBlock = addBlock(block_load);
+        return newBlock;
+    } else if (std::shared_ptr<SchedulerModel> scheduler_load = _pluginLoader->instantiateScheduler(type, std::move(initialSettings)); scheduler_load) {
+        const std::shared_ptr<BlockModel>& newBlock = addBlock(SchedulerModel::asBlockModelPtr(scheduler_load));
         return newBlock;
     }
     throw gr::exception(std::format("Cannot create block '{}'", type));
@@ -51,6 +58,12 @@ std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::repla
 std::optional<Message> Graph::propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kRegistryBlockTypes);
     message.data = property_map{{"types", _pluginLoader->availableBlocks()}};
+    return message;
+}
+
+std::optional<Message> Graph::propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message) {
+    assert(propertyName == graph::property::kRegistryBlockTypes);
+    message.data = property_map{{"types", _pluginLoader->availableSchedulers()}};
     return message;
 }
 
