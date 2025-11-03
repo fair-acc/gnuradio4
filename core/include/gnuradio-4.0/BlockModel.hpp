@@ -524,7 +524,7 @@ constexpr auto BLOCK_NAME             = "name"sv;
 constexpr auto BLOCK_UNIQUE_NAME      = "unique_name"sv;
 constexpr auto BLOCK_META_INFORMATION = "meta_information"sv;
 constexpr auto BLOCK_PARAMETERS       = "parameters"sv;
-constexpr auto BLOCK_CATEGORY         = "blockCategory"sv;
+constexpr auto BLOCK_CATEGORY         = "block_category"sv;
 constexpr auto BLOCK_CTX_PARAMETERS   = "ctx_parameters"sv;
 
 constexpr auto BLOCK_INPUT_PORTS  = "input_ports"sv;
@@ -604,6 +604,7 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
     property_map result;
     result.emplace(serialization_fields::BLOCK_ID, pluginLoader.registry().typeName(block));
     result.emplace(serialization_fields::BLOCK_UNIQUE_NAME, std::string(block->uniqueName()));
+    result.emplace(serialization_fields::BLOCK_CATEGORY, std::string(magic_enum::enum_name(block->blockCategory())));
 
     if (!block->metaInformation().empty()) {
         result.emplace(serialization_fields::BLOCK_META_INFORMATION, block->metaInformation());
