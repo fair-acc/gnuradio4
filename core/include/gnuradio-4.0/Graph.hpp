@@ -48,7 +48,8 @@ inline const char* kBlockInspected = "BlockInspected";
 inline const char* kGraphInspect   = "GraphInspect";
 inline const char* kGraphInspected = "GraphInspected";
 
-inline const char* kRegistryBlockTypes = "RegistryBlockTypes";
+inline const char* kRegistryBlockTypes     = "RegistryBlockTypes";
+inline const char* kRegistrySchedulerTypes = "RegistrySchedulerTypes";
 
 inline const char* kSubgraphExportPort   = "SubgraphExportPort";
 inline const char* kSubgraphExportedPort = "SubgraphExportedPort";
@@ -531,6 +532,7 @@ public:
 
     std::optional<Message> propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message);
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message);
 
     // connect using the port index
     template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
