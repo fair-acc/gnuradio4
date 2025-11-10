@@ -425,6 +425,7 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             }
 
             expect(tensors_approximately_equal(y, y_expected, 1e-5f));
+            std::println("result: {} vs. {}", y, y_expected);
         };
 
         "Matrix-Vector (y = A * x)"_test = [] {

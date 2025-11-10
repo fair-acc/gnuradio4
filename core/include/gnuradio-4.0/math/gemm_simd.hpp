@@ -5,6 +5,7 @@
 #include <array>
 #include <concepts>
 #include <cstring>
+#include <execution>
 #include <memory>
 #include <numeric>
 #include <span>
@@ -16,16 +17,7 @@ namespace detail {
 
 namespace stdx = vir::stdx;
 
-template<typename T>
-using native_simd = stdx::native_simd<T>;
-
-template<typename T>
-using simd_mask = typename native_simd<T>::mask_type;
-
-template<typename T>
-inline constexpr std::size_t simd_width = native_simd<T>::size();
-
-namespace helper {
+namespace helper::gemm {
 template<typename V, typename S, typename U>
 constexpr V fma(const V& a, const S& b, const U& c) noexcept {
     if constexpr (stdx::is_simd_v<V>) {
@@ -46,13 +38,13 @@ constexpr V fma(const V& a, const S& b, const U& c) noexcept {
         }
     }
 }
-} // namespace helper
+} // namespace helper::gemm
 
 namespace config {
 
 template<typename T>
 struct GemmParams {
-    static constexpr std::size_t SIMD_WIDTH = simd_width<T>;
+    static constexpr std::size_t SIMD_WIDTH = stdx::native_simd<T>::size();
 
     static constexpr std::size_t KC = 256;  // Inner K dimension - fits in L1
     static constexpr std::size_t MC = 128;  // M blocking for L2
@@ -66,7 +58,7 @@ struct CacheOptimizedGemm {
     template<typename ATensor, typename BTensor, typename CTensor>
     static void compute(const ATensor& A, const BTensor& B, CTensor& C, T alpha, T beta) {
         using params = config::GemmParams<T>;
-        using simd_t = native_simd<T>;
+        using simd_t = stdx::native_simd<T>;
 
         const auto C_ext = C.extents();
         const auto A_ext = A.extents();
@@ -80,7 +72,11 @@ struct CacheOptimizedGemm {
         } else if (beta != T{1}) {
             for (std::size_t i = 0; i < M; ++i) {
                 T* c_row = &C[i, 0];
+#if defined(__GLIBCXX__)
                 std::transform(std::execution::unseq, c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
+#else
+                std::transform(c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
+#endif
             }
         }
 
@@ -90,7 +86,7 @@ struct CacheOptimizedGemm {
 
         constexpr std::size_t KC       = params::KC;
         constexpr std::size_t MC       = params::MC;
-        constexpr std::size_t VEC_SIZE = simd_width<T>;
+        constexpr std::size_t VEC_SIZE = stdx::native_simd<T>::size();
 
         // block over K dimension first (most important for cache reuse)
         for (std::size_t kc = 0UZ; kc < K; kc += KC) {
@@ -127,10 +123,10 @@ struct CacheOptimizedGemm {
                                 c2.copy_from(&c_row[j + 2 * VEC_SIZE], stdx::element_aligned);
                                 c3.copy_from(&c_row[j + 3 * VEC_SIZE], stdx::element_aligned);
 
-                                c0 = helper::fma(a_vec, b0, c0);
-                                c1 = helper::fma(a_vec, b1, c1);
-                                c2 = helper::fma(a_vec, b2, c2);
-                                c3 = helper::fma(a_vec, b3, c3);
+                                c0 = helper::gemm::fma(a_vec, b0, c0);
+                                c1 = helper::gemm::fma(a_vec, b1, c1);
+                                c2 = helper::gemm::fma(a_vec, b2, c2);
+                                c3 = helper::gemm::fma(a_vec, b3, c3);
 
                                 c0.copy_to(&c_row[j], stdx::element_aligned);
                                 c1.copy_to(&c_row[j + VEC_SIZE], stdx::element_aligned);
@@ -143,16 +139,20 @@ struct CacheOptimizedGemm {
                                 simd_t b_vec, c_vec;
                                 b_vec.copy_from(&b_row[j], stdx::element_aligned);
                                 c_vec.copy_from(&c_row[j], stdx::element_aligned);
-                                c_vec = helper::fma(a_vec, b_vec, c_vec);
+                                c_vec = helper::gemm::fma(a_vec, b_vec, c_vec);
                                 c_vec.copy_to(&c_row[j], stdx::element_aligned);
                             }
 
                             // epilog
                             for (; j < N; ++j) {
-                                c_row[j] = helper::fma(a_ik, b_row[j], c_row[j]);
+                                c_row[j] = helper::gemm::fma(a_ik, b_row[j], c_row[j]);
                             }
                         } else { // small N -> auto-vectorise
-                            std::transform(std::execution::unseq, b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::fma(a_ik, b, c); });
+#if defined(__GLIBCXX__)
+                            std::transform(std::execution::unseq, b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });
+#else
+                            std::transform(b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });
+#endif
                         }
                     }
                 }
@@ -177,7 +177,11 @@ struct SmallGemm {
         } else if (beta != T{1}) {
             for (std::size_t i = 0; i < M; ++i) {
                 T* c_row = &C[i, 0];
+#if defined(__GLIBCXX__)
                 std::transform(std::execution::unseq, c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
+#else
+                std::transform(c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
+#endif
             }
         }
 
@@ -192,7 +196,11 @@ struct SmallGemm {
             for (std::size_t k = 0UZ; k < K; ++k) {
                 const T  a_ik  = alpha * A[i, k];
                 const T* b_row = &B[k, 0UZ];
-                std::transform(std::execution::unseq, b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::fma(a_ik, b, c); });
+#if defined(__GLIBCXX__)
+                std::transform(std::execution::unseq, b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });
+#else
+                std::transform(b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });
+#endif
             }
         }
     }

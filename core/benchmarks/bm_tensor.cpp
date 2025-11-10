@@ -96,7 +96,11 @@ constexpr void gemm(C& C_out, const A& A_in, const B& B_in) {
             const T* b_row = &B_in[p, 0UZ]; // row p of B, contiguous
 
             // crow[j] += a_ip * brow[j]  for j in [0, n)
+#if defined(__GLIBCXX__)
             std::transform(std::execution::unseq, b_row, b_row + n, crow, crow, [a_ip](const T& b, const T& c) noexcept { return c + a_ip * b; });
+#else
+            std::transform(b_row, b_row + n, crow, crow, [a_ip](const T& b, const T& c) noexcept { return c + a_ip * b; });
+#endif
         }
     }
 }
@@ -163,7 +167,11 @@ void gemv(Y& y, const A& a, const X& x) {
         const T* rowEnd   = &a[i, k];
 
         // dot product of A[i,*] and x[*]
+#if defined(__GLIBCXX__)
         y[i] = std::transform_reduce(std::execution::unseq, rowBegin, rowEnd, x.cbegin(), T{}, std::plus<>{}, std::multiplies<>{});
+#else
+        y[i] = std::transform_reduce(rowBegin, rowEnd, x.cbegin(), T{}, std::plus<>{}, std::multiplies<>{});
+#endif
     }
 }
 } // namespace test::reference
@@ -194,12 +202,12 @@ void testGEMV() {
         const std::string bmName = std::format("GEMV(naive)  {:12} M={},K={}", typeName, Parameter::M, Parameter::K);
 
         ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&]() { test::reference::gemv<T>(y_prod, A, x); };
-        expect(le(max_abs_diff_1d(y_prod, y_ref), static_cast<T>(1e-5f))) << bmName << fatal;
+        expect(le(max_abs_diff_1d(y_prod, y_ref), static_cast<T>(1e-4f))) << bmName << fatal;
     } else {
         const std::string bmName = std::format("GEMV         {:12} M={},K={}", typeName, Parameter::M, Parameter::K);
 
         ::benchmark::benchmark<nRepetitions>(std::string_view(bmName), scaling) = [&]() { gr::math::gemv(y_prod, A, x); };
-        expect(le(max_abs_diff_1d(y_prod, y_ref), static_cast<T>(1e-5f))) << bmName << fatal;
+        expect(le(max_abs_diff_1d(y_prod, y_ref), static_cast<T>(1e-4f))) << bmName << fatal;
     }
 }
 

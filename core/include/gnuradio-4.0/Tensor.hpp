@@ -136,9 +136,13 @@ struct tensor_traits<TensorBase<E, managed, Ex...>> {
 
 template<typename T, std::size_t... Ex>
 struct tensor_traits<Tensor<T, Ex...>> : tensor_traits<TensorBase<T, true, Ex...>> {};
+template<typename T, std::size_t... Ex>
+struct tensor_traits<const Tensor<T, Ex...>> : tensor_traits<TensorBase<T, true, Ex...>> {};
 
 template<typename T, std::size_t... Ex>
 struct tensor_traits<TensorView<T, Ex...>> : tensor_traits<TensorBase<T, false, Ex...>> {};
+template<typename T, std::size_t... Ex>
+struct tensor_traits<const TensorView<T, Ex...>> : tensor_traits<TensorBase<T, false, Ex...>> {};
 
 template<typename Tensor>
 concept TensorLike = is_tensor<std::remove_cvref_t<Tensor>>;
@@ -1570,7 +1574,11 @@ struct TensorView : TensorBase<T, false, Ex...> {
     using reference       = value_type&;
     using const_reference = const value_type&;
 
-    TensorView() = default;
+    TensorView()                                 = default;
+    TensorView(const TensorView&)                = default;
+    TensorView(TensorView&&) noexcept            = default;
+    TensorView& operator=(const TensorView&)     = default;
+    TensorView& operator=(TensorView&&) noexcept = default;
 
     // construct from pointer, extents, and strides
     template<typename ExtentRange, typename StrideRange>
@@ -1636,6 +1644,25 @@ struct TensorView : TensorBase<T, false, Ex...> {
     template<typename U, std::size_t... TEx>
     requires(std::is_const_v<T> && std::same_as<std::remove_const_t<T>, std::remove_const_t<U>>)
     explicit TensorView(const Tensor<U, TEx...>& tensor) : TensorView(const_cast<Tensor<U, TEx...>&>(tensor)) {}
+
+    template<typename U, std::size_t... VEx>
+    requires(std::is_const_v<T> && std::same_as<std::remove_const_t<T>, std::remove_const_t<U>>)
+    TensorView& operator=(TensorView<U, VEx...>& other) {
+        if constexpr (sizeof...(Ex) == 0UZ) {
+            base_t::_metaInfo.rank = other.rank();
+        }
+        if constexpr (!detail::all_static_v<Ex...>) {
+            std::copy_n(other.extents().begin(), other.rank(), base_t::_metaInfo.extents.begin());
+            std::copy_n(other.strides().begin(), other.rank(), base_t::_metaInfo.strides.begin());
+        }
+
+        base_t::_data._data     = other.data();
+        base_t::_data._size     = other.size();
+        base_t::_data._capacity = other.size();
+        base_t::_data._resource = nullptr;
+
+        return *this;
+    }
 };
 
 // deduction guides

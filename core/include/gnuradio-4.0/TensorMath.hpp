@@ -121,9 +121,6 @@ struct invalid_transpose : std::runtime_error {
 
 } // namespace gr::math
 
-#include "math/gemm_simd.hpp"
-#include "math/gemv_simd.hpp"
-
 namespace gr {
 template<typename T, std::size_t... Ex>
 struct Tensor;
@@ -134,63 +131,6 @@ struct TensorView;
 
 namespace gr::math {
 
-/**
- * @brief General Matrix-Matrix Multiplication: C = alpha * op(A) * op(B) + beta * C
- *
- * @param C Output matrix [M x N]
- * @param A Input matrix A [M x K] or [K x M] if transposed
- * @param B Input matrix B [K x N] or [N x K] if transposed
- * @param alpha Scalar multiplier for A*B (default: 1)
- * @param beta Scalar multiplier for C (default: 0)
- *
- * @throws dimension_mismatch If dimensions are incompatible
- * @throws std::runtime_error If tensors are not contiguous
- */
-template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorC, TensorOf<T> TensorA, TensorOf<T> TensorB>
-void gemm(Policy&& policy, TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) {
-    if constexpr (CpuExecutionPolicy<Policy>) {
-        detail::gemm<TransA, TransB>(policy, C, A, B, alpha, beta);
-    } else if constexpr (GpuExecutionPolicy<Policy>) {
-        static_assert(gr::meta::always_false<T>, "GPU GEMM not yet implemented");
-    }
-}
-
-template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, TensorLike TensorC, TensorLike TensorA, TensorLike TensorB, typename T = TensorC::value_type>
-void gemm(TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) { // simplified interface: C = A * B & auto-detect policy version
-    gemm<TransA, TransB>(cpu_policy{}, C, A, B, alpha, beta);
-}
-
-/**
- * @brief General Matrix-Vector Multiplication: y = alpha * op(A) * x + beta * y
- *
- * @tparam TransA Transpose operation for A (compile-time)
- * @tparam Policy Execution policy
- * @tparam TensorY Output vector type
- * @tparam TensorA Input matrix type
- * @tparam TensorX Input vector type
- * @tparam T Scalar type
- *
- * @param policy Execution policy object
- * @param y Output vector [M] or [N] if A transposed
- * @param A Input matrix [M x N]
- * @param x Input vector [N] or [M] if A transposed
- * @param alpha Scalar multiplier for A*x (default: 1)
- * @param beta Scalar multiplier for y (default: 0)
- */
-template<TransposeOp TransA = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorY, TensorOf<T> TensorA, TensorOf<T> TensorX>
-void gemv(Policy&& policy, TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) {
-    if constexpr (CpuExecutionPolicy<Policy>) {
-        detail::gemv<TransA>(policy, y, A, x, alpha, beta);
-    } else if constexpr (GpuExecutionPolicy<Policy>) {
-        static_assert(gr::meta::always_false<T>, "GPU GEMV not yet implemented");
-    }
-}
-
-template<TransposeOp TransA = TransposeOp::NoTrans, TensorLike TensorY, TensorLike TensorA, TensorLike TensorX, typename T = TensorY::value_type>
-void gemv(TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) { // simplified: y = A * x && auto-detect policy version
-    gemv<TransA>(cpu_policy{}, y, A, x, alpha, beta);
-}
-
 template<typename T, std::size_t... Ex>
 struct TensorOps {
     using TensorType = Tensor<T, Ex...>;
@@ -200,7 +140,11 @@ struct TensorOps {
         if (!same_shape(self.extents(), other.extents())) {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), other.begin(), self.begin(), std::plus<>{});
+#else
         std::transform(self.begin(), self.end(), other.begin(), self.begin(), std::plus<>{});
+#endif
         return self;
     }
 
@@ -214,7 +158,11 @@ struct TensorOps {
         if (!same_shape(self.extents(), other.extents())) {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), other.begin(), self.begin(), std::minus<>{});
+#else
         std::transform(self.begin(), self.end(), other.begin(), self.begin(), std::minus<>{});
+#endif
         return self;
     }
 
@@ -224,7 +172,11 @@ struct TensorOps {
     }
 
     [[maybe_unused]] static constexpr TensorType& multiply_scalar_inplace(TensorType& self, const T& scalar) {
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x * scalar; });
+#else
         std::transform(self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x * scalar; });
+#endif
         return self;
     }
 
@@ -237,7 +189,11 @@ struct TensorOps {
         if (scalar == T{0}) {
             throw std::runtime_error("Division by zero");
         }
-        std::transform(self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x / scalar; });
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x / scalar; });
+#else
+        std::ranges::transform(self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x / scalar; });
+#endif
         return self;
     }
 
@@ -252,7 +208,12 @@ struct TensorOps {
         if (!same_shape(self.extents(), other.extents())) {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
-        std::transform(self.begin(), self.end(), other.begin(), self.begin(), std::multiplies<>{});
+
+#if defined(__GLIBCXX__)
+        std::ranges::transform(std::execution::unseq, self, other.begin(), self.begin(), std::multiplies<>{});
+#else
+        std::ranges::transform(self, other.begin(), self.begin(), std::multiplies<>{});
+#endif
         return self;
     }
 
@@ -266,7 +227,11 @@ struct TensorOps {
         if (!same_shape(self.extents(), other.extents())) {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
-        std::transform(self.begin(), self.end(), other.begin(), self.begin(), std::divides<>{});
+#if defined(__GLIBCXX__)
+        std::ranges::transform(std::execution::unseq, self, other.begin(), self.begin(), std::divides<>{});
+#else
+        std::ranges::transform(self, other.begin(), self.begin(), std::divides<>{});
+#endif
         return self;
     }
 
@@ -397,12 +362,20 @@ struct TensorOps {
     [[maybe_unused]] static constexpr TensorType& replace_nan(TensorType& self, const T& value)
     requires std::floating_point<T>
     {
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), self.begin(), [value](const T& x) { return std::isnan(x) ? value : x; });
+#else
         std::transform(self.begin(), self.end(), self.begin(), [value](const T& x) { return std::isnan(x) ? value : x; });
+#endif
         return self;
     }
 
     [[maybe_unused]] static constexpr TensorType& clip_inplace(TensorType& self, const T& min_val, const T& max_val) {
-        std::transform(self.begin(), self.end(), self.begin(), [min_val, max_val](const T& x) { return std::clamp(x, min_val, max_val); });
+#if defined(__GLIBCXX__)
+        std::ranges::transform(std::execution::unseq, self, self.begin(), [min_val, max_val](const T& x) { return std::clamp(x, min_val, max_val); });
+#else
+        std::ranges::transform(self, self.begin(), [min_val, max_val](const T& x) { return std::clamp(x, min_val, max_val); });
+#endif
         return self;
     }
 
@@ -412,20 +385,24 @@ struct TensorOps {
     }
 
     [[nodiscard]] static constexpr TensorType abs(const TensorType& self) {
-        TensorType result(extents_from, self.extents());
-        std::transform(self.begin(), self.end(), result.begin(), [](const T& x) {
+        TensorType     result(extents_from, self.extents());
+        constexpr auto abs = [](const T& x) {
             if constexpr (std::is_unsigned_v<T>) {
                 return x;
             } else {
                 return std::abs(x);
             }
-        });
-        return result;
+        };
+#if defined(__GLIBCXX__)
+        std::ranges::transform(std::execution::unseq, self, result.begin(), abs);
+#else
+        std::ranges::transform(self, result.begin(), abs);
+#endif
     }
 
     [[nodiscard]] static constexpr TensorType sign(const TensorType& self) {
-        TensorType result(extents_from, self.extents());
-        std::transform(self.begin(), self.end(), result.begin(), [](const T& x) {
+        TensorType     result(extents_from, self.extents());
+        constexpr auto sign = [](const T& x) {
             if (x > T{0}) {
                 return T{1};
             }
@@ -433,38 +410,12 @@ struct TensorOps {
                 return T{-1};
             }
             return T{0};
-        });
-        return result;
-    }
-
-    [[nodiscard]] static constexpr TensorType gemm(const TensorType& a, const TensorType& b) {
-        if (a.rank() != 2 || b.rank() != 2) {
-            throw std::runtime_error("Matrix multiplication requires 2D tensors");
-        }
-
-        auto a_extents = a.extents();
-        auto b_extents = b.extents();
-
-        if (a_extents[1] != b_extents[0]) {
-            throw std::runtime_error("Inner dimensions must match for matrix multiplication");
-        }
-
-        std::size_t m = a_extents[0];
-        std::size_t n = b_extents[1];
-        std::size_t k = a_extents[1];
-
-        TensorType result({m, n});
-        result.fill(T{0});
-
-        // simple matrix multiplication
-        for (std::size_t i = 0; i < m; ++i) {
-            for (std::size_t j = 0; j < n; ++j) {
-                for (std::size_t l = 0; l < k; ++l) {
-                    result[i, j] += a[i, l] * b[l, j];
-                }
-            }
-        }
-
+        };
+#if defined(__GLIBCXX__)
+        std::ranges::transform(std::execution::unseq, self, result.begin(), sign);
+#else
+        std::ranges::transform(self, result.begin(), sign);
+#endif
         return result;
     }
 
@@ -632,7 +583,11 @@ struct TensorOps {
     [[nodiscard]] static constexpr auto real(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, Tensor<typename U::value_type, Ex...>> {
         using RealType = U::value_type;
         Tensor<RealType, Ex...> result(extents_from, self.extents());
-        std::transform(self.begin(), self.end(), result.begin(), [](const U& x) { return x.real(); });
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { return x.real(); });
+#else
+        std::ranges::transform(self, result.begin(), [](const U& x) { return x.real(); });
+#endif
         return result;
     }
 
@@ -640,14 +595,22 @@ struct TensorOps {
     [[nodiscard]] static constexpr auto imag(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, Tensor<typename U::value_type, Ex...>> {
         using RealType = U::value_type;
         Tensor<RealType, Ex...> result(extents_from, self.extents());
-        std::transform(self.begin(), self.end(), result.begin(), [](const U& x) { return x.imag(); });
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { return x.imag(); });
+#else
+        std::ranges::transform(self, result.begin(), [](const U& x) { return x.imag(); });
+#endif
         return result;
     }
 
     template<typename U = T>
     [[nodiscard]] static constexpr auto conj(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, TensorType> {
         TensorType result(extents_from, self.extents());
-        std::transform(self.begin(), self.end(), result.begin(), [](const U& x) { return std::conj(x); });
+#if defined(__GLIBCXX__)
+        std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { return std::conj(x); });
+#else
+        std::ranges::transform(self, result.begin(), [](const U& x) { return std::conj(x); });
+#endif
         return result;
     }
 };
@@ -753,6 +716,68 @@ std::pair<Tensor<T>, Tensor<T>> broadcast(const Tensor<T>& a, const Tensor<T>& b
     }
 
     throw std::runtime_error("Broadcasting not supported for these tensor shapes");
+}
+} // namespace gr::math
+
+#include "math/gemm_simd.hpp"
+#include "math/gemv_simd.hpp"
+
+namespace gr::math {
+/**
+ * @brief General Matrix-Matrix Multiplication: C = alpha * op(A) * op(B) + beta * C
+ *
+ * @param C Output matrix [M x N]
+ * @param A Input matrix A [M x K] or [K x M] if transposed
+ * @param B Input matrix B [K x N] or [N x K] if transposed
+ * @param alpha Scalar multiplier for A*B (default: 1)
+ * @param beta Scalar multiplier for C (default: 0)
+ *
+ * @throws dimension_mismatch If dimensions are incompatible
+ * @throws std::runtime_error If tensors are not contiguous
+ */
+template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorC, TensorOf<T> TensorA, TensorOf<T> TensorB>
+void gemm(Policy&& policy, TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) {
+    if constexpr (CpuExecutionPolicy<Policy>) {
+        detail::gemm<TransA, TransB>(policy, C, A, B, alpha, beta);
+    } else if constexpr (GpuExecutionPolicy<Policy>) {
+        static_assert(gr::meta::always_false<T>, "GPU GEMM not yet implemented");
+    }
+}
+
+template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, TensorLike TensorC, TensorLike TensorA, TensorLike TensorB, typename T = TensorC::value_type>
+void gemm(TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) { // simplified interface: C = A * B & auto-detect policy version
+    gemm<TransA, TransB>(cpu_policy{}, C, A, B, alpha, beta);
+}
+
+/**
+ * @brief General Matrix-Vector Multiplication: y = alpha * op(A) * x + beta * y
+ *
+ * @tparam TransA Transpose operation for A (compile-time)
+ * @tparam Policy Execution policy
+ * @tparam TensorY Output vector type
+ * @tparam TensorA Input matrix type
+ * @tparam TensorX Input vector type
+ * @tparam T Scalar type
+ *
+ * @param policy Execution policy object
+ * @param y Output vector [M] or [N] if A transposed
+ * @param A Input matrix [M x N]
+ * @param x Input vector [N] or [M] if A transposed
+ * @param alpha Scalar multiplier for A*x (default: 1)
+ * @param beta Scalar multiplier for y (default: 0)
+ */
+template<TransposeOp TransA = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorY, TensorOf<T> TensorA, TensorOf<T> TensorX>
+void gemv(Policy&& policy, TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) {
+    if constexpr (CpuExecutionPolicy<Policy>) {
+        detail::gemv<TransA>(policy, y, A, x, alpha, beta);
+    } else if constexpr (GpuExecutionPolicy<Policy>) {
+        static_assert(gr::meta::always_false<T>, "GPU GEMV not yet implemented");
+    }
+}
+
+template<TransposeOp TransA = TransposeOp::NoTrans, TensorLike TensorY, TensorLike TensorA, TensorLike TensorX, typename T = TensorY::value_type>
+void gemv(TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) { // simplified: y = A * x && auto-detect policy version
+    gemv<TransA>(cpu_policy{}, y, A, x, alpha, beta);
 }
 
 } // namespace gr::math
