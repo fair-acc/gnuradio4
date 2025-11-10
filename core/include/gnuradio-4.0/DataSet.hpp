@@ -44,7 +44,7 @@ concept PacketLike = requires(T t) {
  * @brief A concept that describes a Tensor, which is a subset of the DataSet struct.
  */
 template<typename U, typename T = std::remove_cvref_t<U>>
-concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
+concept TensorLikeV2 = PacketLike<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;
     typename T::tensor_layout_type;
@@ -63,7 +63,7 @@ concept TensorLike = PacketLike<T> && requires(T t, const std::size_t n_items) {
  * data with associated metadata, and can be customized for different types of data and applications.
  */
 template<typename U, typename T = std::remove_cvref_t<U>>
-concept DataSetLike = TensorLike<T> && requires(T t, const std::size_t n_items) {
+concept DataSetLike = TensorLikeV2<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
     typename T::pmt_map;
     typename T::tensor_layout_type;
@@ -176,29 +176,6 @@ private:
 static_assert(DataSetLike<DataSet<std::byte>>, "DataSet<std::byte> concept conformity");
 static_assert(DataSetLike<DataSet<float>>, "DataSet<float> concept conformity");
 static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity");
-
-template<typename T>
-struct Tensor {
-    using value_type           = T;
-    using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map              = pmtv::map_t;
-    T            default_value = T(); // default value for padding, ZOH etc.
-    std::int64_t timestamp     = 0;   // UTC timestamp [ns]
-
-    std::vector<std::int32_t> extents{}; // extents[dim0_size, dim1_size, …]
-    tensor_layout_type        layout{};  // row-major, column-major, “special”
-
-    std::vector<T> signal_values{}; // size = \PI_i extents[i]
-
-    // meta data
-    std::vector<pmt_map> meta_information{};
-
-    GR_MAKE_REFLECTABLE(Tensor, timestamp, extents, layout, signal_values, meta_information);
-};
-
-static_assert(TensorLike<Tensor<std::byte>>, "Tensor<std::byte> concept conformity");
-static_assert(TensorLike<Tensor<float>>, "Tensor<std::byte> concept conformity");
-static_assert(TensorLike<Tensor<double>>, "Tensor<std::byte> concept conformity");
 
 template<typename T>
 struct Packet {

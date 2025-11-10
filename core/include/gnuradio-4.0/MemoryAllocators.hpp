@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <memory_resource>
 #include <new>
 #include <print>
 #include <source_location>
@@ -16,7 +17,6 @@
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::allocator {
-
 template<std::size_t Align, typename T>
 [[nodiscard]] constexpr bool isAligned(const T* p) noexcept {
     return std::bit_cast<std::uintptr_t>(std::to_address(p)) % Align == 0UZ;
@@ -190,6 +190,54 @@ struct Logging {
     }
 };
 
+namespace pmr {
+
+template<class T>
+[[nodiscard]] T* migrate(std::pmr::memory_resource& target_resource, std::pmr::memory_resource& source_resource, T* source_ptr, std::size_t count) {
+    if (source_ptr == nullptr || count == 0) {
+        return nullptr;
+    }
+
+    if (&target_resource == &source_resource) {
+        return source_ptr;
+    }
+
+    T*          target_ptr  = static_cast<T*>(target_resource.allocate(count * sizeof(T), alignof(T)));
+    std::size_t constructed = 0;
+
+    try {
+        // move or copy elements
+        if constexpr (std::is_trivially_copyable_v<T>) {
+            std::memcpy(target_ptr, source_ptr, count * sizeof(T));
+            constructed = count;
+        } else if constexpr (std::is_nothrow_move_constructible_v<T>) {
+            std::uninitialized_move_n(source_ptr, count, target_ptr);
+            constructed = count;
+        } else { // copy with exception safety for throwing move constructors
+            for (; constructed < count; ++constructed) {
+                std::construct_at(target_ptr + constructed, source_ptr[constructed]);
+            }
+        }
+    } catch (...) { // clean up partially constructed target
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            std::destroy_n(target_ptr, constructed);
+        }
+        target_resource.deallocate(target_ptr, count * sizeof(T), alignof(T));
+        throw; // Source remains intact (strong guarantee)
+    }
+
+    // Destroy source objects
+    if constexpr (!std::is_trivially_destructible_v<T>) {
+        std::destroy_n(source_ptr, count);
+    }
+
+    // Deallocate source memory
+    source_resource.deallocate(source_ptr, count * sizeof(T), alignof(T));
+
+    return target_ptr;
+}
+
+} // namespace pmr
 } // namespace gr::allocator
 
 #endif // MEMORYALLOCATORS_HPP

@@ -18,6 +18,7 @@ set(public_headers
     include/gnuradio-4.0/MemoryAllocators.hpp
     include/gnuradio-4.0/Message.hpp
     include/gnuradio-4.0/PluginLoader.hpp
+    include/gnuradio-4.0/PmtCollections.hpp
     include/gnuradio-4.0/Port.hpp
     include/gnuradio-4.0/PortTraits.hpp
     include/gnuradio-4.0/Profiler.hpp
@@ -26,6 +27,8 @@ set(public_headers
     include/gnuradio-4.0/Sequence.hpp
     include/gnuradio-4.0/Settings.hpp
     include/gnuradio-4.0/Tag.hpp
+    include/gnuradio-4.0/Tensor.hpp
+    include/gnuradio-4.0/TensorMath.hpp
     include/gnuradio-4.0/TriggerMatcher.hpp
     include/gnuradio-4.0/WaitStrategy.hpp
     include/gnuradio-4.0/YamlPmt.hpp)
