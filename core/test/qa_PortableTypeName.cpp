@@ -1,6 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <format>

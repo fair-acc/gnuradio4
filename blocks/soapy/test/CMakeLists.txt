@@ -5,7 +5,6 @@ target_link_libraries(
   PRIVATE gnuradio-options
           gnuradio-core
           gnuradio-blocklib-core
-          fftw
           gr-soapy
           gr-testing
           ut)
