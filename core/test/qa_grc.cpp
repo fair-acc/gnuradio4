@@ -282,8 +282,8 @@ blocks:
       connections:
         - [multiplier1, 0, multiplier2, 0]
       exported_ports:
-        - [multiplier1, INPUT, in]
-        - [multiplier2, OUTPUT, out]
+        - [multiplier1, INPUT, in, in]
+        - [multiplier2, OUTPUT, out, out]
 
 connections:
   - [main_source, 0, multiplier, 0]
@@ -342,8 +342,8 @@ blocks:
       connections:
         - [multiplier1, 0, multiplier2, 0]
       exported_ports:
-        - [multiplier1, INPUT, in]
-        - [multiplier2, OUTPUT, out]
+        - [multiplier1, INPUT, in, in]
+        - [multiplier2, OUTPUT, out, out]
 
 connections:
   - [main_source, 0, multiplier, 0]
@@ -406,8 +406,8 @@ connections:
           connections:
             - [multiplier1, 0, multiplier2, 0]
           exported_ports:
-            - [multiplier1, INPUT, in]
-            - [multiplier2, OUTPUT, out]
+            - [multiplier1, INPUT, in, in]
+            - [multiplier2, OUTPUT, out, out]
 
     connections:
       - [main_source, 0, multiplier, 0]

@@ -83,7 +83,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 const auto& exportedPorts = std::get<std::vector<pmtv::pmt>>(graphData.at("exported_ports"));
                 for (const auto& exportedPort_ : exportedPorts) {
                     auto exportedPort = std::get<std::vector<pmtv::pmt>>(exportedPort_);
-                    if (exportedPort.size() != 3) {
+                    if (exportedPort.size() != 4) {
                         throw std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort.size());
                     }
 
@@ -101,7 +101,8 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                     graphWrapper->exportPort(true,
                         /* block's unique name */ blockUniqueName,
                         /* port direction */ std::get<std::string>(exportedPort[1]) == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT,
-                        /* port name */ std::get<std::string>(exportedPort[2]));
+                        /* internal port name */ std::get<std::string>(exportedPort[2]),
+                        /* exported port name */ std::get<std::string>(exportedPort[3]));
                 }
             };
 

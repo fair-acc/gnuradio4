@@ -97,11 +97,11 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
-        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                     //
-            property_map{{"uniqueBlockName"s, demo.pass2->unique_name}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}}, //
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                                                  //
+            property_map{{"uniqueBlockName"s, demo.pass2->unique_name}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}, {"exportedName"s, "outExp"}}, //
             ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
-        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                   //
-            property_map{{"uniqueBlockName"s, demo.pass1->unique_name}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}}, //
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                                               //
+            property_map{{"uniqueBlockName"s, demo.pass1->unique_name}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}, {"exportedName"s, "inExp"}}, //
             ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
 
         for (const auto& block : graph.blocks()) {
@@ -110,8 +110,8 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
 
         // Make connections
-        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", demo.graphUniqueName, "in", scheduler.unique_name);
-        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, demo.graphUniqueName, "out", sink.unique_name, "in", scheduler.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, source.unique_name, "out", demo.graphUniqueName, "inExp", scheduler.unique_name);
+        sendAndWaitMessageEmplaceEdge(toScheduler, fromScheduler, demo.graphUniqueName, "outExp", sink.unique_name, "in", scheduler.unique_name);
 
         expect(eq(getNReplyMessages(fromScheduler), 0UZ));
 
@@ -187,11 +187,11 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         auto demo = createDemoSubGraph<float>();
         initGraph.addBlock(demo.graph);
 
-        demo.graph->exportPort(true, demo.pass1->unique_name, PortDirection::INPUT, "in");
-        demo.graph->exportPort(true, demo.pass2->unique_name, PortDirection::OUTPUT, "out");
+        demo.graph->exportPort(true, demo.pass1->unique_name, PortDirection::INPUT, "in", "inExp");
+        demo.graph->exportPort(true, demo.pass2->unique_name, PortDirection::OUTPUT, "out", "outExp");
 
-        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(source, PortDefinition("out"), demo.graph, PortDefinition("in"))));
-        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(demo.graph, PortDefinition("out"), sink, PortDefinition("in"))));
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(source, PortDefinition("out"), demo.graph, PortDefinition("inExp"))));
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(demo.graph, PortDefinition("outExp"), sink, PortDefinition("in"))));
         expect(eq(initGraph.edges().size(), 2UZ));
         expect(eq(demo.graph->edges().size(), 1UZ));
 

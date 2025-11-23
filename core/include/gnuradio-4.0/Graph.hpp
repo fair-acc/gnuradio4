@@ -125,8 +125,12 @@ void forEachEdge(const GraphLike auto& root, Fn&& function, Edge::EdgeState filt
 template<typename TSelf, typename TSubGraph = TSelf>
 class GraphWrapper : public BlockWrapper<TSelf> {
 protected:
-    std::unordered_multimap<std::string, std::string> _exportedInputPortsForBlock;
-    std::unordered_multimap<std::string, std::string> _exportedOutputPortsForBlock;
+    struct PortNameMapper {
+        std::string internalName;
+        std::string exportedName;
+    };
+    std::unordered_multimap<std::string, PortNameMapper> _exportedInputPortsForBlock;
+    std::unordered_multimap<std::string, PortNameMapper> _exportedOutputPortsForBlock;
 
     void initExportPorts() {
         // We need to make sure nobody touches our dynamic ports
@@ -138,9 +142,10 @@ protected:
             const std::string& uniqueBlockName = std::get<std::string>(data.at("uniqueBlockName"s));
             auto               portDirection   = std::get<std::string>(data.at("portDirection"s)) == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;
             const std::string& portName        = std::get<std::string>(data.at("portName"s));
+            const std::string& exportedName    = std::get<std::string>(data.at("exportedName"s));
             const bool         exportFlag      = std::get<bool>(data.at("exportFlag"s));
 
-            exportPort(exportFlag, uniqueBlockName, portDirection, portName);
+            exportPort(exportFlag, uniqueBlockName, portDirection, portName, exportedName);
 
             message.endpoint = graph::property::kSubgraphExportedPort;
             return message;
@@ -152,7 +157,7 @@ public:
 
     GraphWrapper(TSubGraph&& original) : BlockWrapper<TSelf>(std::move(original)) { initExportPorts(); }
 
-    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, std::source_location location = std::source_location::current()) override {
+    void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, const std::string& exportedName, std::source_location location = std::source_location::current()) override {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
         if (infoFound == exportFlag) {
             throw Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
@@ -162,19 +167,13 @@ public:
         auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
         if (exportFlag) {
-            bookkeepingCollection.emplace(uniqueBlockName, portName);
-            portCollection.push_back(port.weakRef());
+            bookkeepingCollection.emplace(uniqueBlockName, PortNameMapper{portName, exportedName});
+            auto& createdDynamicPort                           = portCollection.emplace_back(gr::DynamicPort(port.weakRef()));
+            std::get<gr::DynamicPort>(createdDynamicPort).name = exportedName;
         } else {
             bookkeepingCollection.erase(infoIt);
             // TODO: Add support for exporting port collections
-            auto portIt = std::ranges::find_if(portCollection, [needleName = port.name](const auto& portOrCollection) {
-                return std::visit(meta::overloaded{
-                                      //
-                                      [&](DynamicPort& in) { return in.name == needleName; }, //
-                                      [](auto&) { return false; }                             //
-                                  },
-                    portOrCollection);
-            });
+            auto portIt = std::ranges::find_if(portCollection, [needleName = port.name](const auto& portOrCollection) { return std::visit([&](auto& in) { return in.name == needleName; }, portOrCollection); });
             if (portIt != portCollection.end()) {
                 portCollection.erase(portIt);
             } else {
@@ -190,9 +189,6 @@ public:
     [[nodiscard]] std::span<const Edge>                        edges() const noexcept override { return this->blockRef().edges(); }
     [[nodiscard]] std::span<Edge>                              edges() noexcept override { return this->blockRef().edges(); }
 
-    const std::unordered_multimap<std::string, std::string>& exportedInputPortsForBlock() const { return _exportedInputPortsForBlock; }
-    const std::unordered_multimap<std::string, std::string>& exportedOutputPortsForBlock() const { return _exportedOutputPortsForBlock; }
-
     [[nodiscard]] gr::Graph* graph() final {
         if constexpr (requires { this->blockRef().graph(); }) {
             return &(this->blockRef().graph());
@@ -202,10 +198,10 @@ public:
     };
 
     [[nodiscard]] gr::property_map exportedPortsFor(const auto& collection) {
-        gr::property_map         result;
-        std::string              currentBlock;
-        std::vector<std::string> currentPortNames;
-        for (const auto& [block, port] : collection) {
+        gr::property_map result;
+        std::string      currentBlock;
+        gr::property_map currentPortNames;
+        for (const auto& [block, portNameMap] : collection) {
             if (block != currentBlock) {
                 if (!currentBlock.empty()) {
                     result[currentBlock] = std::move(currentPortNames);
@@ -213,7 +209,9 @@ public:
                 }
                 currentBlock = block;
             } else {
-                currentPortNames.push_back(port);
+                currentPortNames[portNameMap.internalName] = gr::property_map{
+                    {"exportedName", portNameMap.exportedName} //
+                };
             }
         }
         return result;
@@ -246,7 +244,7 @@ private:
         auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
         const auto& [from, to]      = bookkeepingCollection.equal_range(std::string(uniqueBlockName));
         for (auto it = from; it != to; it++) {
-            if (it->second == portName) {
+            if (it->second.internalName == portName) {
                 return std::make_pair(it, true);
             }
         }
@@ -256,29 +254,31 @@ private:
     void updateMetaInformation() {
         auto& info = this->metaInformation();
 
-        auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
-            std::string              previousUniqueName;
-            std::vector<std::string> collectedPorts;
-            for (const auto& [blockUniqueName, portName] : bookkeepingCollection) {
-                if (previousUniqueName != blockUniqueName && !collectedPorts.empty()) {
-                    dest[previousUniqueName] = std::move(collectedPorts);
-                    collectedPorts.clear();
-                }
-                collectedPorts.push_back(portName);
-                previousUniqueName = blockUniqueName;
-            }
-            if (!collectedPorts.empty()) {
-                dest[previousUniqueName] = std::move(collectedPorts);
-                collectedPorts.clear();
-            }
-        };
-
-        property_map exportedInputPorts, exportedOutputPorts;
-        fillMetaInformation(exportedInputPorts, _exportedInputPortsForBlock);
-        fillMetaInformation(exportedOutputPorts, _exportedOutputPortsForBlock);
-
-        info["exportedInputPorts"]  = std::move(exportedInputPorts);
-        info["exportedOutputPorts"] = std::move(exportedOutputPorts);
+        // auto fillMetaInformation = [](property_map& dest, auto& bookkeepingCollection) {
+        //     std::string              previousUniqueName;
+        //     std::vector<std::string> collectedPorts;
+        //     for (const auto& [blockUniqueName, portName] : bookkeepingCollection) {
+        //         if (previousUniqueName != blockUniqueName && !collectedPorts.empty()) {
+        //             dest[previousUniqueName] = std::move(collectedPorts);
+        //             collectedPorts.clear();
+        //         }
+        //         collectedPorts.push_back(portName);
+        //         previousUniqueName = blockUniqueName;
+        //     }
+        //     if (!collectedPorts.empty()) {
+        //         dest[previousUniqueName] = std::move(collectedPorts);
+        //         collectedPorts.clear();
+        //     }
+        // };
+        //
+        // property_map exportedInputPorts, exportedOutputPorts;
+        // fillMetaInformation(exportedInputPorts, _exportedInputPortsForBlock);
+        // fillMetaInformation(exportedOutputPorts, _exportedOutputPortsForBlock);
+        //
+        // info["exportedInputPorts"]  = std::move(exportedInputPorts);
+        // info["exportedOutputPorts"] = std::move(exportedOutputPorts);
+        info["exportedInputPorts"]  = exportedPortsFor(_exportedInputPortsForBlock);
+        info["exportedOutputPorts"] = exportedPortsFor(_exportedOutputPortsForBlock);
     }
 };
 
