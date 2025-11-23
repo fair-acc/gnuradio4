@@ -302,7 +302,7 @@ public:
 
     std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
         auto result = _schedulerRegistry->create(name, params);
-        return result ? std::shared_ptr<gr::SchedulerModel>(reinterpret_cast<gr::SchedulerModel*>(result.release())) : nullptr;
+        return result ? std::shared_ptr<gr::SchedulerModel>((result.release())) : nullptr;
     }
 
     bool isBlockAvailable(std::string_view block) const { return _registry->contains(block); }
