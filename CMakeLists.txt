@@ -400,8 +400,6 @@ if(Python3_FOUND AND NOT EMSCRIPTEN)
   # If NumPy is found, set PYTHON_AVAILABLE to ON
   if(NOT NUMPY_NOT_FOUND)
     set(PYTHON_AVAILABLE ON)
-    include_directories(${Python3_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
-    add_definitions(-DPYTHON_AVAILABLE)
     message(STATUS "Using Python Include Dirs: ${Python3_INCLUDE_DIRS} and ${NUMPY_INCLUDE_DIR}")
   else()
     message(STATUS "Python and Numpy Include headers not found!!")
