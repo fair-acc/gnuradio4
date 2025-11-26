@@ -322,7 +322,7 @@ target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_part
                                          "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
 if(EMSCRIPTEN)
   target_compile_options(exprtk PRIVATE -O1 -g0)
-elseif()
+else()
   target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
 endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
