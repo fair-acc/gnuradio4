@@ -39,7 +39,7 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     PortOut<T> out;
 
     // settings
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>            sample_rate{1.f};
+    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>            sample_rate{1e3f};
     Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>            f_min{40};
     Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">>      f_expected{50};
     Annotated<float, "f_max", Doc<"exp. max/LP frequency (-1: disable)">, Unit<"Hz">> f_max{60};
