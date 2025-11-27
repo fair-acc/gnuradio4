@@ -18,11 +18,15 @@ if(PYTHON_AVAILABLE)
     GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/PythonBlock.hpp
     include/gnuradio-4.0/basic/PythonInterpreter.hpp)
-  list(APPEND GrBasicBlocks_LIBS ${Python3_LIBRARIES})
+  list(
+    APPEND
+    GrBasicBlocks_LIBS
+    Python3::Python
+    Python3::NumPy)
 endif()
 
 add_library(gr-basic INTERFACE ${GrBasicBlocks_HDRS})
-target_link_libraries(gr-basic INTERFACE gnuradio-core gnuradio-algorithm)
+target_link_libraries(gr-basic INTERFACE gnuradio-core gnuradio-algorithm ${GrBasicBlocks_LIBS})
 target_include_directories(gr-basic INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                               $<INSTALL_INTERFACE:include/>)
 
