@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <title>FileioTestApp – Test Fileio implementation in a browser.</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            margin: 2rem;
+        }
+
+        button {
+            font-size: 1rem;
+            padding: .6rem 1rem;
+            margin-right: .5rem;
+            margin-bottom: .5rem;
+        }
+
+        pre {
+            background: #111;
+            color: #0f0;
+            padding: 1rem;
+            overflow: auto;
+            max-height: 50vh;
+        }
+    </style>
+</head>
+
+<body>
+<button id="read-file" disabled>Read local file</button>
+<button id="write-file" disabled>Save file</button>
+<button id="http-get" disabled>HTTP GET /getNumbers</button>
+<button id="http-get-404" disabled>HTTP GET /return404</button>
+<button id="http-post" disabled>HTTP POST /postNumbers</button>
+
+<pre id="log">WASM loading…</pre>
+
+<script>
+    window.Module = window.Module || {};
+    const logEl = document.getElementById('log');
+    const log = (m) => {
+        console.log(m);
+        logEl.textContent += (logEl.textContent ? '\n' : '') + m;
+    };
+
+    // Redirect C/C++ std::print to web page log
+    Module.print = (text) => log(String(text));
+    Module.printErr = (text) => log(String(text));
+
+    Module.onRuntimeInitialized = () => {
+        log('WASM ready.');
+        document.getElementById('read-file').disabled = false;
+        document.getElementById('write-file').disabled = false;
+        document.getElementById('http-get').disabled = false;
+        document.getElementById('http-get-404').disabled = false;
+        document.getElementById('http-post').disabled = false;
+
+        log('Origin: ' + window.location.origin);
+    };
+</script>
+
+<script src="FileioTestApp.js"></script>
+
+<script>
+    document.getElementById('read-file').addEventListener('click', () => {
+        Module.ccall('test_dialog_read', null, [], []);
+    });
+
+    document.getElementById('write-file').addEventListener('click', () => {
+        Module.ccall('test_save_file', null, [], []);
+    });
+
+    document.getElementById('http-get').addEventListener('click', () => {
+        Module.ccall('test_http_get', null, [], []);
+    });
+
+    document.getElementById('http-get-404').addEventListener('click', () => {
+        Module.ccall('test_http_get_404', null, [], []);
+    });
+
+    document.getElementById('http-post').addEventListener('click', () => {
+        Module.ccall('test_http_post', null, [], []);
+    });
+</script>
+</body>
+</html>

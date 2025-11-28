@@ -1,27 +1,17 @@
 add_library(gr-fileio INTERFACE)
-target_link_libraries(gr-fileio INTERFACE gnuradio-core httplib::httplib)
+target_link_libraries(gr-fileio INTERFACE gnuradio-core)
 target_include_directories(gr-fileio INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
-        $<INSTALL_INTERFACE:include/>)
-
-if (NOT EMSCRIPTEN)
-    include(FetchContent)
-    FetchContent_Declare(
-            cpr
-            GIT_REPOSITORY https://github.com/libcpr/cpr.git
-            GIT_TAG 1.12.0)
-    FetchContent_MakeAvailable(cpr)
-    target_link_libraries(gr-fileio INTERFACE cpr::cpr)
-endif ()
+                                               $<INSTALL_INTERFACE:include/>)
 
 gr_add_block_library(
-        GrFileIoBlocks
-        MAKE_SHARED_LIBRARY
-        SPLIT_BLOCK_INSTANTIATIONS
-        HEADERS
-        include/gnuradio-4.0/fileio/BasicFileIo.hpp
-        LINK_LIBRARIES
-        gr-fileio)
+  GrFileIoBlocks
+  MAKE_SHARED_LIBRARY
+  SPLIT_BLOCK_INSTANTIATIONS
+  HEADERS
+  include/gnuradio-4.0/fileio/BasicFileIo.hpp
+  LINK_LIBRARIES
+  gr-fileio)
 
-if (TARGET GrFileIoBlocksShared AND ENABLE_TESTING)
-    add_subdirectory(test)
-endif ()
+if(TARGET GrFileIoBlocksShared AND ENABLE_TESTING)
+  add_subdirectory(test)
+endif()
