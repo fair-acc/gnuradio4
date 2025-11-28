@@ -73,11 +73,11 @@ bool Value::holds() const noexcept {
     } else if constexpr (std::same_as<T, std::pmr::string>) {
         return is_string();
     } else if constexpr (std::same_as<T, std::string>) {
-        // std::string is convertible from pmr::string, so we return true if string is stored
         return is_string();
     } else if constexpr (std::same_as<T, std::string_view>) {
-        // std::string_view can be created from pmr::string (zero-copy)
         return is_string();
+    } else if constexpr (gr::TensorLike<T>) {
+        return is_tensor() && value_type() == get_value_type<typename T::value_type>();
     } else {
         return value_type() == get_value_type<T>() && container_type() == get_container_type<T>();
     }
@@ -116,8 +116,10 @@ T* Value::get_if() noexcept {
         return static_cast<std::pmr::string*>(_storage.ptr);
     } else if constexpr (std::same_as<T, std::string_view> || std::same_as<T, std::string>) {
         static_assert(gr::meta::always_false<T>, "Use value_or<std::string>() or value_or<std::string_view>() for string conversions");
+    } else if constexpr (gr::TensorLike<T>) {
+        return static_cast<T*>(_storage.ptr);
     } else if constexpr (std::same_as<T, Map>) {
-        return &ref_map();
+        return static_cast<Map*>(_storage.ptr);
     } else if constexpr (std::same_as<T, Value>) {
         return this;
     } else {
@@ -129,18 +131,91 @@ T* Value::get_if() noexcept {
 
 namespace gr::pmt {
 
-void Value::set_types(ValueType vt, ContainerType ct) noexcept { _type_info = static_cast<uint8_t>(static_cast<uint8_t>(ct) << 4) | static_cast<uint8_t>(vt); }
+void Value::set_types(ValueType vt, ContainerType ct) noexcept {
+    _value_type     = static_cast<unsigned char>(static_cast<std::uint8_t>(vt) & 0x0F);
+    _container_type = static_cast<unsigned char>(static_cast<std::uint8_t>(ct) & 0x0F);
+}
+
+void Value::copy_from(const Value& other) {
+    assert(_resource != nullptr);
+#if defined(__cpp_assume) && __cpp_assume >= 202207L
+    [[assume(_resource != nullptr)]];
+#endif
+    // Note: Copy uses THIS object's _resource (target's allocator), not other's.
+    // This allows copying between different memory domains (e.g., host ↔ device).
+    switch (other.container_type()) {
+    case ContainerType::Scalar: _storage = other._storage; break;
+
+    case ContainerType::Complex:
+        if (other.value_type() == ValueType::ComplexFloat32) {
+            auto* src    = static_cast<const std::complex<float>*>(other._storage.ptr);
+            auto* mem    = static_cast<std::complex<float>*>(_resource->allocate(sizeof(std::complex<float>), alignof(std::complex<float>)));
+            auto* dst    = std::construct_at(mem, *src);
+            _storage.ptr = dst;
+        } else {
+            auto* src    = static_cast<const std::complex<double>*>(other._storage.ptr);
+            auto* mem    = static_cast<std::complex<double>*>(_resource->allocate(sizeof(std::complex<double>), alignof(std::complex<double>)));
+            auto* dst    = std::construct_at(mem, *src);
+            _storage.ptr = dst;
+        }
+        break;
+
+    case ContainerType::String: {
+        auto* src    = static_cast<const std::pmr::string*>(other._storage.ptr);
+        auto* mem    = static_cast<std::pmr::string*>(_resource->allocate(sizeof(std::pmr::string), alignof(std::pmr::string)));
+        auto* dst    = std::construct_at(mem, *src, _resource); // copy + allocator
+        _storage.ptr = dst;
+        break;
+    }
+
+    case ContainerType::Tensor: {
+        // Dispatch based on value_type
+        switch (other.value_type()) {
+#define X(T)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
+    case get_value_type<T>(): {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
+        auto* src    = static_cast<const Tensor<T>*>(other._storage.ptr);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+        auto* mem    = static_cast<Tensor<T>*>(_resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>)));                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
+        auto* dst    = std::construct_at(mem, *src);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           \
+        _storage.ptr = dst;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    \
+        break;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
+    }
+            GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
+#undef X
+
+        default: break;
+        }
+        break;
+    }
+
+    case ContainerType::Map: {
+        auto* src    = static_cast<const Map*>(other._storage.ptr);
+        auto* mem    = static_cast<Map*>(_resource->allocate(sizeof(Map), alignof(Map)));
+        auto* dst    = std::construct_at(mem, *src, _resource); // copy + allocator
+        _storage.ptr = dst;
+        break;
+    }
+    }
+}
 
 void Value::destroy() noexcept {
+    assert(_resource != nullptr);
+#if defined(__cpp_assume) && __cpp_assume >= 202207L
+    [[assume(_resource != nullptr)]];
+#endif
     if (is_monostate() || container_type() == ContainerType::Scalar || _storage.ptr == nullptr) {
         return;
     }
+
     switch (container_type()) {
     case ContainerType::Complex:
         if (value_type() == ValueType::ComplexFloat32) {
-            _resource->deallocate(_storage.ptr, sizeof(std::complex<float>), alignof(std::complex<float>));
+            auto* ptr = static_cast<std::complex<float>*>(_storage.ptr);
+            std::destroy_at(ptr);
+            _resource->deallocate(ptr, sizeof(std::complex<float>), alignof(std::complex<float>));
         } else if (value_type() == ValueType::ComplexFloat64) {
-            _resource->deallocate(_storage.ptr, sizeof(std::complex<double>), alignof(std::complex<double>));
+            auto* ptr = static_cast<std::complex<double>*>(_storage.ptr);
+            std::destroy_at(ptr);
+            _resource->deallocate(ptr, sizeof(std::complex<double>), alignof(std::complex<double>));
         }
         break;
 
@@ -161,7 +236,6 @@ void Value::destroy() noexcept {
         _resource->deallocate(tensor, sizeof(Tensor<T>), alignof(Tensor<T>));                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  \
         break;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
     }
-
             GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
 #undef X
 
@@ -179,6 +253,7 @@ void Value::destroy() noexcept {
 
     default: break;
     }
+
     _storage.ptr = nullptr;
 }
 
@@ -186,7 +261,22 @@ void Value::destroy() noexcept {
 // CONSTRUCTORS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-Value::Value(std::pmr::memory_resource* resource) : _type_info(0), _resource(ensure_resource(resource)) { set_types(ValueType::Monostate, ContainerType::Scalar); }
+void swap(Value& a, Value& b) noexcept {
+    {
+        auto tmp      = a._value_type;
+        a._value_type = b._value_type;
+        b._value_type = tmp & 0x0F;
+    }
+    {
+        auto tmp          = a._container_type;
+        a._container_type = b._container_type;
+        b._container_type = tmp & 0x0F;
+    }
+    std::swap(a._storage, b._storage);
+    std::swap(a._resource, b._resource);
+}
+
+Value::Value(std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) { set_types(ValueType::Monostate, ContainerType::Scalar); }
 
 Value::Value(bool v, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
     set_types(ValueType::Bool, ContainerType::Scalar);
@@ -275,56 +365,7 @@ Value::Value(Map map, std::pmr::memory_resource* resource) : _resource(ensure_re
 // COPY/MOVE CONSTRUCTORS AND ASSIGNMENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-Value::Value(const Value& other) : _type_info(other._type_info), _resource(ensure_resource(other._resource)) { copy_from(other); }
-
-void Value::copy_from(const Value& other) {
-    // Note: Copy uses THIS object's _resource (target's allocator), not other's.
-    // This allows copying between different memory domains (e.g., host ↔ device).
-    switch (other.container_type()) {
-    case ContainerType::Scalar: _storage = other._storage; break;
-
-    case ContainerType::Complex:
-        if (other.value_type() == ValueType::ComplexFloat32) {
-            void* mem    = _resource->allocate(sizeof(std::complex<float>), alignof(std::complex<float>));
-            _storage.ptr = new (mem) std::complex<float>(*static_cast<const std::complex<float>*>(other._storage.ptr));
-        } else {
-            void* mem    = _resource->allocate(sizeof(std::complex<double>), alignof(std::complex<double>));
-            _storage.ptr = new (mem) std::complex<double>(*static_cast<const std::complex<double>*>(other._storage.ptr));
-        }
-        break;
-
-    case ContainerType::String: {
-        void* mem    = _resource->allocate(sizeof(std::pmr::string), alignof(std::pmr::string));
-        _storage.ptr = new (mem) std::pmr::string(*static_cast<const std::pmr::string*>(other._storage.ptr), _resource);
-        break;
-    }
-
-    case ContainerType::Tensor: {
-        // Dispatch based on value_type
-        switch (other.value_type()) {
-#define X(T)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-    case get_value_type<T>(): {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
-        void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
-        _storage.ptr = new (mem) Tensor<T>(*static_cast<const Tensor<T>*>(other._storage.ptr));                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
-        break;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
-    }
-            GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
-#undef X
-
-        default: break;
-        }
-        break;
-    }
-
-    case ContainerType::Map: {
-        void* mem    = _resource->allocate(sizeof(Map), alignof(Map));
-        _storage.ptr = new (mem) Map(*static_cast<const Map*>(other._storage.ptr), _resource);
-        break;
-    }
-    }
-}
-
-Value::Value(Value&& other) noexcept : _type_info(other._type_info), _storage(other._storage), _resource(other._resource) {
+Value::Value(Value&& other) noexcept : _value_type(other._value_type), _container_type(other._container_type), _storage(other._storage), _resource(other._resource) {
     other.set_types(ValueType::Monostate, ContainerType::Scalar);
     other._storage.u64 = 0UZ;
 }
@@ -332,21 +373,23 @@ Value::Value(Value&& other) noexcept : _type_info(other._type_info), _storage(ot
 Value::~Value() { destroy(); }
 
 Value& Value::operator=(const Value& other) {
-    if (this != &other) {
-        destroy();
-        _type_info = other._type_info;
-        // Note: We keep our own _resource (target's allocator)
-        copy_from(other);
+    if (this == &other) {
+        return *this;
     }
+
+    Value tmp(other, _resource);
+    swap(*this, tmp);
+
     return *this;
 }
 
 Value& Value::operator=(Value&& other) noexcept {
     if (this != &other) {
         destroy();
-        _type_info = other._type_info;
-        _storage   = other._storage;
-        _resource  = other._resource;
+        _value_type     = other._value_type;
+        _container_type = other._container_type;
+        _storage        = other._storage;
+        _resource       = other._resource;
         other.set_types(ValueType::Monostate, ContainerType::Scalar);
         other._storage.u64 = 0UZ;
     }
@@ -471,47 +514,14 @@ Value& Value::operator=(Map map) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SPECIALIZED ACCESSORS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-Value::Map& Value::ref_map() noexcept {
-    if (!is_map()) [[unlikely]] {
-        detail::value_type_mismatch();
-    }
-    return *static_cast<Map*>(_storage.ptr);
-}
-
-const Value::Map& Value::ref_map() const noexcept {
-    if (!is_map()) [[unlikely]] {
-        detail::value_type_mismatch();
-    }
-    return *static_cast<const Map*>(_storage.ptr);
-}
-
-std::string_view Value::as_string_view() const noexcept {
-    if (!is_string()) [[unlikely]] {
-        detail::value_type_mismatch();
-    }
-    const auto* str = static_cast<const std::pmr::string*>(_storage.ptr);
-    return std::string_view{str->data(), str->size()};
-}
-
-std::string Value::as_string() const {
-    if (!is_string()) [[unlikely]] {
-        detail::value_type_mismatch();
-    }
-    return std::string(*static_cast<const std::pmr::string*>(_storage.ptr));
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // COMPARISON HELPER METHODS (reduces switch statement duplication)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 bool Value::compare_scalar_eq(const Value& other) const noexcept {
 #if defined(__cpp_assume) && __cpp_assume >= 202207L
-    [[assume(_type_info == other._type_info && static_cast<ContainerType>(_type_info >> 4) == ContainerType::Scalar)]];
+    [[assume(_value_type == other._value_type && container_type() == ContainerType::Scalar)]];
 #endif
-    assert(_type_info == other._type_info && container_type() == ContainerType::Scalar);
+    assert(_value_type == other._value_type && container_type() == ContainerType::Scalar);
 
     switch (value_type()) {
     case ValueType::Monostate: return true;
@@ -532,9 +542,9 @@ bool Value::compare_scalar_eq(const Value& other) const noexcept {
 
 std::partial_ordering Value::compare_scalar_order(const Value& other) const noexcept {
 #if defined(__cpp_assume) && __cpp_assume >= 202207L
-    [[assume(_type_info == other._type_info && static_cast<ContainerType>(_type_info >> 4) == ContainerType::Scalar)]];
+    [[assume(_value_type == other._value_type && container_type() == ContainerType::Scalar)]];
 #endif
-    assert(_type_info == other._type_info && container_type() == ContainerType::Scalar);
+    assert(_value_type == other._value_type && container_type() == ContainerType::Scalar);
 
     switch (value_type()) {
     case ValueType::Monostate: return std::partial_ordering::equivalent;
@@ -558,7 +568,7 @@ std::partial_ordering Value::compare_scalar_order(const Value& other) const noex
 // ═══════════════════════════════════════════════════════════════════════════════
 
 bool Value::operator==(const Value& other) const {
-    if (_type_info != other._type_info) {
+    if (value_type() != other.value_type() || container_type() != other.container_type()) {
         return false;
     }
 
@@ -590,8 +600,8 @@ std::partial_ordering Value::operator<=>(const Value& other) const {
     using std::partial_ordering;
 
     // primary ordering: type tag (container+value) via _type_info
-    if (_type_info != other._type_info) {
-        return static_cast<std::uint8_t>(_type_info) <=> static_cast<std::uint8_t>(other._type_info);
+    if (value_type() != other.value_type() || container_type() != other.container_type()) {
+        return static_cast<std::uint8_t>(_value_type) <=> static_cast<std::uint8_t>(other._value_type);
     }
 
     switch (container_type()) {
@@ -648,54 +658,45 @@ Value& Value::operator=(Tensor<T> tensor) {
     return *this;
 }
 
-template<typename T>
-Tensor<T>& Value::ref_tensor() noexcept {
-    if (!is_tensor() || value_type() != get_value_type<T>()) [[unlikely]] {
-        detail::value_type_mismatch();
-    }
-    return *static_cast<Tensor<T>*>(_storage.ptr);
-}
-
-template<typename T>
-const Tensor<T>& Value::ref_tensor() const noexcept {
-    if (!is_tensor() || value_type() != get_value_type<T>()) [[unlikely]] {
-        detail::value_type_mismatch();
-    }
-    return *static_cast<const Tensor<T>*>(_storage.ptr);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPLICIT TEMPLATE INSTANTIATIONS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// clang-format off
+
 // Tensor constructors and accessors
-#define X(T)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-    template Value::Value(Tensor<T> tensor, std::pmr::memory_resource* resource);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-    template Value&           Value::operator=(Tensor<T> tensor);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-    template Tensor<T>&       Value::ref_tensor<T>() noexcept;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 \
-    template const Tensor<T>& Value::ref_tensor<T>() const noexcept;
+#define X(T)                                                                      \
+    template Value::Value(Tensor<T> tensor, std::pmr::memory_resource* resource); \
+    template Value&           Value::operator=(Tensor<T> tensor);
 
 GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
 #undef X
 
-// Scalar accessors for all types
-#define X(T)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-    template bool     Value::holds<T>() const noexcept;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
-    template T*       Value::get_if<T>() noexcept;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
-    template const T* Value::get_if<T>() const noexcept;
+// scalar accessors for all types
+#define X(T)                                                            \
+    template bool     Value::holds<T>() const noexcept;                 \
+    template T*       Value::get_if<T>() noexcept;                      \
+    template const T* Value::get_if<T>() const noexcept;                \
+    template bool             Value::holds<Tensor<T>>() const noexcept; \
+    template Tensor<T>*       Value::get_if<Tensor<T>>() noexcept;      \
+    template const Tensor<T>* Value::get_if<Tensor<T>>() const noexcept;
 
 GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
 #undef X
 
 // Comparison operators
-#define X(T)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-    template bool operator== <T>(const Value&, const T&);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+#define X(T)                                              \
+    template bool operator== <T>(const Value&, const T&); \
     template bool operator== <T>(const T&, const Value&);
 GR_PMT_VALUE_SCALAR_TYPES
 #undef X
+// clang-format on
 
-// String type specializations (convertible from pmr::string)
-template bool Value::holds<std::string>() const noexcept;
-template bool Value::holds<std::string_view>() const noexcept;
+// string type specializations (convertible from pmr::string)
+template bool              Value::holds<Value::Map>() const noexcept;
+template bool              Value::holds<std::string>() const noexcept;
+template bool              Value::holds<std::string_view>() const noexcept;
+template Value::Map*       Value::get_if<Value::Map>() noexcept;
+template const Value::Map* Value::get_if<Value::Map>() const noexcept;
 
 } // namespace gr::pmt

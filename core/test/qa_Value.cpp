@@ -213,25 +213,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
         expect(eq(vc64.value_type(), Value::ValueType::ComplexFloat64));
     };
 
-    "string_view construction"_test = [] {
-        Value vs{std::string_view{"hello"}};
-        expect(vs.is_string());
-        expect(eq(vs.value_type(), Value::ValueType::String));
-        expect(eq(vs.container_type(), Value::ContainerType::String));
-        expect(eq(vs.as_string_view(), std::string_view{"hello"}));
-    };
-
-    "const char* construction"_test = [] {
-        Value vc{"world"};
-        expect(vc.is_string());
-        expect(eq(vc.as_string_view(), std::string_view{"world"}));
-    };
-
     "std::string construction"_test = [] {
         std::string str = "test string";
         Value       vs{str};
         expect(vs.is_string());
-        expect(eq(vs.as_string_view(), std::string_view{"test string"}));
+        expect(eq(vs.value_or(std::string_view{""}), std::string_view{"test string"}));
     };
 
     "pmr resource usage and propagation"_test = [] {
@@ -247,7 +233,7 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
 
             // After copy, source should still be valid
             expect(source.is_string());
-            expect(eq(source.as_string_view(), std::string_view{"hello"}));
+            expect(eq(source.value_or(std::string_view{""}), std::string_view{"hello"}));
         };
 
         "assignment copies content using target's allocator"_test = [] {
@@ -260,7 +246,7 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             v2 = v1; // assignment should use v2's allocator
 
             expect(v2.is_string());
-            expect(eq(v2.as_string_view(), std::string_view{"from v1"}));
+            expect(eq(v2.value_or(std::string_view{""}), std::string_view{"from v1"}));
         };
 
         "move transfers ownership without reallocation"_test = [] {
@@ -286,7 +272,7 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
         "nullptr resource for string still works"_test = [] {
             Value v{std::string_view{"test"}, nullptr};
             expect(v.is_string());
-            expect(eq(v.as_string_view(), std::string_view{"test"}));
+            expect(eq(v.value_or(std::string_view{""}), std::string_view{"test"}));
         };
     };
 
@@ -304,13 +290,15 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             expect(v1.is_tensor());
             expect(v2.is_tensor());
 
-            auto& t1 = v1.ref_tensor<float>();
-            auto& t2 = v2.ref_tensor<float>();
+            auto* t1 = v1.get_if<Tensor<float>>();
+            auto* t2 = v2.get_if<Tensor<float>>();
 
-            expect(eq(t1[0, 0], 1.0f));
-            expect(eq(t2[0, 0], 1.0f));
-            expect(eq(t1[1, 2], 6.0f));
-            expect(eq(t2[1, 2], 6.0f));
+            expect(t1 != nullptr);
+            expect(t2 != nullptr);
+            expect(eq((*t1)[0, 0], 1.0f));
+            expect(eq((*t2)[0, 0], 1.0f));
+            expect(eq((*t1)[1, 2], 6.0f));
+            expect(eq((*t2)[1, 2], 6.0f));
         };
 
         "Tensor move transfers ownership"_test = [] {
@@ -322,7 +310,9 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
 
             expect(v1.is_monostate()) << "source reset after move";
             expect(v2.is_tensor());
-            expect(eq(v2.ref_tensor<float>()[0, 0], 42.0f));
+            auto* t2 = v2.get_if<Tensor<float>>();
+            expect(t2 != nullptr);
+            expect(eq((*t2)[0, 0], 42.0f));
         };
     };
 };
@@ -613,12 +603,16 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
             Value v{std::move(outer_map)};
 
             expect(v.is_map());
-            expect(v.ref_map().contains("inner"));
-            expect(v.ref_map().contains("top_level"));
+            auto* map_ptr = v.get_if<Value::Map>();
+            expect(map_ptr != nullptr);
+            expect(map_ptr->contains("inner"));
+            expect(map_ptr->contains("top_level"));
 
-            auto& inner = v.ref_map().at("inner");
+            auto& inner = map_ptr->at("inner");
             expect(inner.is_map());
-            expect(inner.ref_map().at("nested_int").holds<std::int64_t>());
+            auto* inner_map_ptr = inner.get_if<Value::Map>();
+            expect(inner_map_ptr != nullptr);
+            expect(inner_map_ptr->at("nested_int").holds<std::int64_t>());
         };
 
         "Map equality with nested Values"_test = [] {
@@ -1115,7 +1109,7 @@ const boost::ut::suite<"Value - and_then Chaining"> _and_then_suite = [] {
         });
 
         expect(result.holds<std::pmr::string>());
-        expect(eq(result.as_string_view(), std::string_view{"chain_me_modified"}));
+        expect(eq(result.value_or(std::string_view{""}), std::string_view{"chain_me_modified"}));
         expect(v.is_monostate()) << "original Value reset after T&& chain";
     };
 
@@ -1193,12 +1187,13 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
             expect(eq(v_map.container_type(), Value::ContainerType::Map));
             expect(eq(v_map.value_type(), Value::ValueType::Value));
 
-            auto& ref = v_map.ref_map();
-            expect(eq(ref.size(), 2u));
-            expect(ref.contains("a"));
-            expect(ref.contains("b"));
-            expect(eq(ref.at("a").value_or<std::int64_t>(std::int64_t{0}), std::int64_t{1}));
-            expect(eq(ref.at("b").value_or<std::int64_t>(std::int64_t{0}), std::int64_t{2}));
+            auto* map_ptr = v_map.get_if<Map>();
+            expect(map_ptr != nullptr);
+            expect(eq(map_ptr->size(), 2u));
+            expect(map_ptr->contains("a"));
+            expect(map_ptr->contains("b"));
+            expect(eq(map_ptr->at("a").value_or<std::int64_t>(std::int64_t{0}), std::int64_t{1}));
+            expect(eq(map_ptr->at("b").value_or<std::int64_t>(std::int64_t{0}), std::int64_t{2}));
         }
 
         expect(eq(mr.bytes, 0u)) << "all memory freed after destruction";
@@ -1213,8 +1208,8 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
         expect(eq(vt.container_type(), Value::ContainerType::Tensor));
         expect(eq(vt.value_type(), Value::ValueType::Int32));
 
-        auto& tref = vt.ref_tensor<std::int32_t>();
-        static_assert(std::is_same_v<decltype(tref), Tensor<std::int32_t>&>);
+        Tensor<int>* tref = vt.get_if<Tensor<std::int32_t>>();
+        static_assert(std::is_same_v<decltype(*tref), Tensor<std::int32_t>&>);
     };
 
     "Tensor of Value (heterogeneous)"_test = [] {
@@ -1227,9 +1222,9 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
         expect(vt.is_tensor());
         expect(eq(vt.value_type(), Value::ValueType::Value));
 
-        auto& tref = vt.ref_tensor<Value>();
-        expect(eq(tref[0UZ].value_or<std::int64_t>(std::int64_t{0}), std::int64_t{42}));
-        expect(eq(tref[1UZ].as_string(), std::string("Hello World!")));
+        Tensor<Value>* tref = vt.get_if<Tensor<Value>>();
+        expect(eq((*tref)[0UZ].value_or<std::int64_t>(std::int64_t{0}), std::int64_t{42}));
+        expect(eq((*tref)[1UZ].value_or(std::string{}), std::string("Hello World!")));
     };
 };
 
@@ -1328,8 +1323,8 @@ const boost::ut::suite<"Value - Edge Cases"> _edge_case_suite = [] {
         Value copy{original};
 
         expect(copy.is_string());
-        expect(eq(copy.as_string_view(), std::string_view{"test string"}));
-        expect(eq(original.as_string_view(), std::string_view{"test string"})) << "original unchanged";
+        expect(eq(copy.value_or(std::string_view{""}), std::string_view{"test string"}));
+        expect(eq(original.value_or(std::string_view{""}), std::string_view{"test string"})) << "original unchanged";
     };
 
     "move construction transfers ownership"_test = [] {
@@ -1337,7 +1332,7 @@ const boost::ut::suite<"Value - Edge Cases"> _edge_case_suite = [] {
         Value moved{std::move(original)};
 
         expect(moved.is_string());
-        expect(eq(moved.as_string_view(), std::string_view{"test string"}));
+        expect(eq(moved.value_or(std::string_view{""}), std::string_view{"test string"}));
     };
 
     "consecutive ownership transfers"_test = [] {
@@ -1356,15 +1351,15 @@ const boost::ut::suite<"Value - Edge Cases"> _edge_case_suite = [] {
     "empty string handling"_test = [] {
         Value empty_str{std::string_view{""}};
         expect(empty_str.is_string());
-        expect(eq(empty_str.as_string_view(), std::string_view{""}));
-        expect(empty_str.as_string_view().empty());
+        expect(eq(empty_str.value_or(std::string_view{"fallback"}), std::string_view{""}));
+        expect(empty_str.value_or(std::string_view{"fallback"}).empty());
     };
 
     "large string handling"_test = [] {
         std::string large(10000, 'x');
         Value       v{std::string_view{large}};
         expect(v.is_string());
-        expect(eq(v.as_string_view().size(), 10000UZ));
+        expect(eq(v.value_or(std::string_view{""}).size(), 10000UZ));
     };
 };
 

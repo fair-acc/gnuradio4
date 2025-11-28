@@ -57,20 +57,21 @@ inline constexpr std::string value_to_string(const Value& v) {
         out += "monostate";
     } else if (v.is_map()) {
         out += '{';
-        bool first = true;
-        for (const auto& [k, val] : v.ref_map()) {
-            if (!first) {
-                out += ", ";
+        if (auto* map = v.get_if<Value::Map>()) {
+            bool first = true;
+            for (const auto& [k, val] : *map) {
+                if (!first) {
+                    out += ", ";
+                }
+                append_quoted(out, k);
+                out += ": ";
+                out += value_to_string(val); // recursive
+                first = false;
             }
-            append_quoted(out, k);
-            out += ": ";
-            out += value_to_string(val); // recursive
-            first = false;
         }
         out += '}';
     } else if (v.is_string()) {
-        // you still have as_string_view(), so use it instead of spelunking _storage
-        append_quoted(out, v.as_string_view());
+        append_quoted(out, v.value_or(std::string_view{}));
     } else if (v.is_complex()) {
         if (v.value_type() == Value::ValueType::ComplexFloat32) {
             const auto& c = *static_cast<const std::complex<float>*>(v._storage.ptr);
