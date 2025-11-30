@@ -126,12 +126,13 @@ struct tensor_traits {
 
 template<typename E, bool managed, std::size_t... Ex>
 struct tensor_traits<TensorBase<E, managed, Ex...>> {
-    using value_type                              = E;
-    static constexpr bool is_view                 = !managed;
-    static constexpr bool static_rank             = (sizeof...(Ex) > 0UZ);
-    static constexpr bool all_static              = (sizeof...(Ex) > 0UZ) && ((Ex != std::dynamic_extent) && ...);
-    static constexpr bool all_dynamic             = (sizeof...(Ex) == 0UZ);
-    static constexpr bool static_rank_dyn_extents = (sizeof...(Ex) > 0) && ((Ex == std::dynamic_extent) && ...);
+    using value_type                                     = E;
+    static constexpr bool        is_view                 = !managed;
+    static constexpr bool        static_rank             = (sizeof...(Ex) > 0UZ);
+    static constexpr std::size_t rank                    = sizeof...(Ex);
+    static constexpr bool        all_static              = (sizeof...(Ex) > 0UZ) && ((Ex != std::dynamic_extent) && ...);
+    static constexpr bool        all_dynamic             = (sizeof...(Ex) == 0UZ);
+    static constexpr bool        static_rank_dyn_extents = (sizeof...(Ex) > 0) && ((Ex == std::dynamic_extent) && ...);
 };
 
 template<typename T, std::size_t... Ex>
