@@ -143,9 +143,53 @@ private:
     }
 
     template<typename T>
-    static constexpr ValueType get_value_type();
+    static constexpr ValueType get_value_type() {
+        if constexpr (std::same_as<T, bool>) {
+            return ValueType::Bool;
+        } else if constexpr (std::same_as<T, std::int8_t>) {
+            return ValueType::Int8;
+        } else if constexpr (std::same_as<T, std::int16_t>) {
+            return ValueType::Int16;
+        } else if constexpr (std::same_as<T, std::int32_t>) {
+            return ValueType::Int32;
+        } else if constexpr (std::same_as<T, std::int64_t>) {
+            return ValueType::Int64;
+        } else if constexpr (std::same_as<T, std::uint8_t>) {
+            return ValueType::UInt8;
+        } else if constexpr (std::same_as<T, std::uint16_t>) {
+            return ValueType::UInt16;
+        } else if constexpr (std::same_as<T, std::uint32_t>) {
+            return ValueType::UInt32;
+        } else if constexpr (std::same_as<T, std::uint64_t>) {
+            return ValueType::UInt64;
+        } else if constexpr (std::same_as<T, float>) {
+            return ValueType::Float32;
+        } else if constexpr (std::same_as<T, double>) {
+            return ValueType::Float64;
+        } else if constexpr (std::same_as<T, std::complex<float>>) {
+            return ValueType::ComplexFloat32;
+        } else if constexpr (std::same_as<T, std::complex<double>>) {
+            return ValueType::ComplexFloat64;
+        } else if constexpr (std::same_as<T, std::pmr::string>) {
+            return ValueType::String;
+        } else if constexpr (std::same_as<T, Value>) {
+            return ValueType::Value;
+        } else {
+            return ValueType::Monostate;
+        }
+    }
+
     template<typename T>
-    static constexpr ContainerType      get_container_type();
+    static constexpr ContainerType get_container_type() {
+        if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {
+            return ContainerType::Complex;
+        } else if constexpr (std::same_as<T, std::pmr::string>) {
+            return ContainerType::String;
+        } else {
+            return ContainerType::Scalar;
+        }
+    }
+
     [[nodiscard]] bool                  compare_scalar_eq(const Value& other) const noexcept;
     [[nodiscard]] std::partial_ordering compare_scalar_order(const Value& other) const noexcept;
 
@@ -171,11 +215,6 @@ public:
     explicit Value(std::string_view v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     explicit Value(const std::string& v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     explicit Value(const char* v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-
-    template<typename T>
-    Value(Tensor<T> tensor, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-
-    Value(Map map, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
     // copy/move/destructor
     Value(const Value& other) : Value(other, std::pmr::get_default_resource()) {}
@@ -203,8 +242,25 @@ public:
     Value& operator=(const std::string& v);
     Value& operator=(const char* v);
 
-    template<typename T>
-    Value& operator=(Tensor<T> tensor);
+    template<TensorLike TensorCollection>
+    Value(TensorCollection tensor, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : _resource(ensure_resource(resource)) {
+        using T = TensorCollection::value_type;
+        set_types(get_value_type<T>(), ContainerType::Tensor);
+        void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));
+        _storage.ptr = new (mem) Tensor<T>(std::move(tensor));
+    }
+
+    template<TensorLike TensorCollection>
+    Value& operator=(TensorCollection tensor) {
+        using T = TensorCollection::value_type;
+        destroy();
+        set_types(get_value_type<T>(), ContainerType::Tensor);
+        void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));
+        _storage.ptr = new (mem) Tensor<T>(std::move(tensor));
+        return *this;
+    }
+
+    Value(Map map, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     Value& operator=(Map map);
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -594,8 +650,8 @@ bool operator==(const T&, const Value&);
 namespace gr::pmt {
 
 #define X(T)                                                                    \
-    extern template Value::Value(Tensor<T> tensor, std::pmr::memory_resource*); \
-    extern template Value&   Value::operator=(Tensor<T> tensor);                \
+    extern template Value&   Value::operator=(Tensor<T>&& tensor);              \
+    extern template Value&   Value::operator=(const Tensor<T>& tensor);         \
     extern template bool     Value::holds<T>() const noexcept;                  \
     extern template T*       Value::get_if<T>() noexcept;                       \
     extern template const T* Value::get_if<T>() const noexcept;
