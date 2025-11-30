@@ -28,12 +28,32 @@ struct vector<T, false> { // trivially copyable, no lifetime management
     [[nodiscard]] constexpr T&       operator[](std::size_t i) noexcept { return _data[i]; }
     [[nodiscard]] constexpr const T& operator[](std::size_t i) const noexcept { return _data[i]; }
 
+    [[nodiscard]] constexpr T& at(std::size_t i) {
+        if (i >= _size) [[unlikely]] {
+            throw std::out_of_range("gr::pmr::vector::at");
+        }
+        return _data[i];
+    }
+    [[nodiscard]] constexpr const T& at(std::size_t i) const {
+        if (i >= _size) [[unlikely]] {
+            throw std::out_of_range("gr::pmr::vector::at");
+        }
+        return _data[i];
+    }
+
     [[nodiscard]] constexpr T*       begin() noexcept { return _data; }
     [[nodiscard]] constexpr T*       end() noexcept { return _data + _size; }
     [[nodiscard]] constexpr const T* begin() const noexcept { return _data; }
     [[nodiscard]] constexpr const T* end() const noexcept { return _data + _size; }
     [[nodiscard]] constexpr const T* cbegin() const noexcept { return _data; }
     [[nodiscard]] constexpr const T* cend() const noexcept { return _data + _size; }
+
+    [[nodiscard]] constexpr std::reverse_iterator<T*>       rbegin() noexcept { return std::reverse_iterator<T*>(end()); }
+    [[nodiscard]] constexpr std::reverse_iterator<T*>       rend() noexcept { return std::reverse_iterator<T*>(begin()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> rbegin() const noexcept { return std::reverse_iterator<const T*>(end()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> rend() const noexcept { return std::reverse_iterator<const T*>(begin()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> crbegin() const noexcept { return std::reverse_iterator<const T*>(cend()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> crend() const noexcept { return std::reverse_iterator<const T*>(cbegin()); }
 
     [[nodiscard]] constexpr T&       front() noexcept { return _data[0]; }
     [[nodiscard]] constexpr const T& front() const noexcept { return _data[0]; }
@@ -115,15 +135,8 @@ struct vector<T, true> { // managed vector
 
     vector(const vector& other)
     requires(std::is_copy_constructible_v<T>)
-        : _resource{other._resource}, _size{other._size}, _capacity{other._size} {
-        if (_size > 0) {
-            _data = static_cast<T*>(_resource->allocate(_capacity * sizeof(T), alignof(T)));
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::memcpy(_data, other._data, _size * sizeof(T));
-            } else {
-                std::uninitialized_copy_n(other._data, _size, _data);
-            }
-        }
+        : _resource{other._resource} {
+        _assign_from_ptr(other._data, other._size);
     }
 
     vector(vector&& other) noexcept : _resource{other._resource}, _size{other._size}, _capacity{other._capacity}, _data{other._data} {
@@ -132,22 +145,11 @@ struct vector<T, true> { // managed vector
         other._capacity = 0;
     }
 
-    vector& operator=(const vector& o)
+    vector& operator=(const vector& other)
     requires(std::is_copy_constructible_v<T>)
     {
-        if (this == &o) {
-            return *this;
-        }
-        clear();
-        if (o._size > 0) {
-            _data     = static_cast<T*>(_resource->allocate(o._size * sizeof(T), alignof(T)));
-            _capacity = o._size;
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::memcpy(_data, o._data, o._size * sizeof(T));
-            } else {
-                std::uninitialized_copy_n(o._data, o._size, _data);
-            }
-            _size = o._size;
+        if (this != &other) {
+            _assign_from_ptr(other._data, other._size);
         }
         return *this;
     }
@@ -156,7 +158,14 @@ struct vector<T, true> { // managed vector
         if (this == &other) {
             return *this;
         }
-        clear();
+        // Destroy and deallocate our resources
+        if (_data) {
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                std::destroy_n(_data, _size);
+            }
+            _resource->deallocate(_data, _capacity * sizeof(T), alignof(T));
+        }
+        // Take ownership of other's resources
         _resource       = other._resource;
         _size           = other._size;
         _capacity       = other._capacity;
@@ -211,132 +220,29 @@ struct vector<T, true> { // managed vector
         }
     }
 
+    template<std::ranges::input_range Range>
+    requires(!std::same_as<std::remove_cvref_t<Range>, vector>)
+    vector(Range&& r, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : vector(std::ranges::begin(r), std::ranges::end(r), mr) {}
+
     vector(std::initializer_list<T> il, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : vector(il.begin(), il.end(), mr) {}
 
     vector(std::span<const T> s, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : vector(s.begin(), s.end(), mr) {}
 
-    // FIXED: Range constructor now properly handles lifetime of temporary ranges
-    template<std::ranges::input_range R>
-    explicit vector(R&& r, std::pmr::memory_resource* mr = std::pmr::get_default_resource())
-    requires(!std::same_as<std::remove_cvref_t<R>, vector>)
-        : _resource{mr} {
-        const auto n = static_cast<std::size_t>(std::ranges::distance(r));
-        if (n > 0) {
-            _data     = static_cast<T*>(_resource->allocate(n * sizeof(T), alignof(T)));
-            _capacity = n;
-            _size     = n;
-            try {
-                auto first = std::ranges::begin(r);
-                auto last  = std::ranges::end(r);
-
-                if constexpr (detail::iter_yields_nonconst_T_ref<T, decltype(first)>) {
-                    if constexpr (std::contiguous_iterator<decltype(first)> && std::is_trivially_copyable_v<T>) {
-                        std::memcpy(_data, std::to_address(first), n * sizeof(T));
-                    } else {
-#if !defined(__clang__) // issue with clang's libc++ std::uninitialized_move as of clang20
-                        std::uninitialized_move(first, last, _data);
-#else
-                        if constexpr (detail::iter_yields_nonconst_T_ref<T, decltype(first)> && !std::is_integral_v<T>) {
-                            std::uninitialized_move(first, last, _data); // only use move for non-integral types where it matters
-                        } else {
-                            std::uninitialized_copy(first, last, _data);
-                        }
-#endif
-                    }
-                } else {
-                    std::uninitialized_copy(first, last, _data);
-                }
-            } catch (...) {
-                _resource->deallocate(_data, n * sizeof(T), alignof(T));
-                _data     = nullptr;
-                _size     = 0;
-                _capacity = 0;
-                throw;
+    ~vector() {
+        if (_data) {
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                std::destroy_n(_data, _size);
             }
+            _resource->deallocate(_data, _capacity * sizeof(T), alignof(T));
         }
     }
 
-    vector& operator=(const std::pmr::vector<T>& other) {
-        clear();
-        if (other.size() > 0) {
-            reserve(other.size());
-            std::uninitialized_copy(other.begin(), other.end(), _data);
-            _size = other.size();
-        }
-        return *this;
-    }
-
-    vector& operator=(std::pmr::vector<T>&& other) {
-        // can't move data since they're different types -> optimised copy
-        clear();
-        if (other.size() > 0) {
-            reserve(other.size());
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::memcpy(_data, other.data(), other.size() * sizeof(T));
-            } else {
-
-#if !defined(__clang__) // issue with clang's libc++ std::uninitialized_move as of clang20
-                std::uninitialized_move(other.begin(), other.end(), _data);
-#else
-                if constexpr (detail::iter_yields_nonconst_T_ref<T, decltype(other.begin())> && !std::is_integral_v<T>) {
-                    std::uninitialized_move(other.begin(), other.end(), _data); // only use move for non-integral types where it matters
-                } else {
-                    std::uninitialized_copy(other.begin(), other.end(), _data);
-                }
-#endif
-            }
-            _size = other.size();
-        }
-        other.clear(); // clear the source
-        return *this;
-    }
-
-    explicit vector(const std::pmr::vector<T>& other, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : _resource{mr} {
-        if (other.size() > 0) {
-            _capacity = other.size();
-            _size     = other.size();
-            _data     = static_cast<T*>(_resource->allocate(_capacity * sizeof(T), alignof(T)));
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::memcpy(_data, other.data(), _size * sizeof(T));
-            } else {
-                std::uninitialized_copy_n(other.data(), _size, _data);
-            }
-        }
-    }
-
-    explicit vector(std::pmr::vector<T>&& other, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : _resource{mr} {
-        if (other.size() > 0) {
-            _capacity = other.size();
-            _size     = other.size();
-            _data     = static_cast<T*>(_resource->allocate(_capacity * sizeof(T), alignof(T)));
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::memcpy(_data, other.data(), _size * sizeof(T));
-            } else {
-#if !defined(__clang__) // issue with clang's libc++ std::uninitialized_move as of clang20
-                std::uninitialized_move(other.begin(), other.end(), _data);
-#else
-                if constexpr (detail::iter_yields_nonconst_T_ref<T, decltype(other.begin())> && !std::is_integral_v<T>) {
-                    std::uninitialized_move(other.begin(), other.end(), _data); // only use move for non-integral types where it matters
-                } else {
-                    std::uninitialized_copy(other.begin(), other.end(), _data);
-                }
-#endif
-            }
-        }
-        other.clear();
-    }
-
-    ~vector() { clear(); }
-
-    [[nodiscard]] std::pmr::memory_resource* resource() const noexcept { return _resource; }
     [[nodiscard]] constexpr T*               data() noexcept { return _data; }
     [[nodiscard]] constexpr const T*         data() const noexcept { return _data; }
     [[nodiscard]] constexpr std::size_t      size() const noexcept { return _size; }
     [[nodiscard]] constexpr bool             empty() const noexcept { return _size == 0UZ; }
     [[nodiscard]] constexpr std::size_t      capacity() const noexcept { return _capacity; }
-
-    [[nodiscard]] constexpr T&       operator[](std::size_t i) noexcept { return _data[i]; }
-    [[nodiscard]] constexpr const T& operator[](std::size_t i) const noexcept { return _data[i]; }
+    [[nodiscard]] std::pmr::memory_resource* resource() const noexcept { return _resource; }
 
     [[nodiscard]] constexpr T*       begin() noexcept { return _data; }
     [[nodiscard]] constexpr T*       end() noexcept { return _data + _size; }
@@ -345,20 +251,49 @@ struct vector<T, true> { // managed vector
     [[nodiscard]] constexpr const T* cbegin() const noexcept { return _data; }
     [[nodiscard]] constexpr const T* cend() const noexcept { return _data + _size; }
 
+    [[nodiscard]] constexpr std::reverse_iterator<T*>       rbegin() noexcept { return std::reverse_iterator<T*>(end()); }
+    [[nodiscard]] constexpr std::reverse_iterator<T*>       rend() noexcept { return std::reverse_iterator<T*>(begin()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> rbegin() const noexcept { return std::reverse_iterator<const T*>(end()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> rend() const noexcept { return std::reverse_iterator<const T*>(begin()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> crbegin() const noexcept { return std::reverse_iterator<const T*>(cend()); }
+    [[nodiscard]] constexpr std::reverse_iterator<const T*> crend() const noexcept { return std::reverse_iterator<const T*>(cbegin()); }
+
+    [[nodiscard]] constexpr T& operator[](std::size_t i) noexcept {
+        assert(i < _size);
+        return _data[i];
+    }
+    [[nodiscard]] constexpr const T& operator[](std::size_t i) const noexcept {
+        assert(i < _size);
+        return _data[i];
+    }
+
+    [[nodiscard]] constexpr T& at(std::size_t i) {
+        if (i >= _size) [[unlikely]] {
+            throw std::out_of_range("gr::pmr::vector::at");
+        }
+        return _data[i];
+    }
+    [[nodiscard]] constexpr const T& at(std::size_t i) const {
+        if (i >= _size) [[unlikely]] {
+            throw std::out_of_range("gr::pmr::vector::at");
+        }
+        return _data[i];
+    }
+
     [[nodiscard]] constexpr T& front() noexcept {
-        assert(_data != nullptr && _size > 0);
+        assert(_size > 0);
         return _data[0];
     }
     [[nodiscard]] constexpr const T& front() const noexcept {
-        assert(_data != nullptr && _size > 0);
+        assert(_size > 0);
         return _data[0];
     }
     [[nodiscard]] constexpr T& back() noexcept {
-        assert(_data != nullptr && _size > 0);
+        assert(_size > 0);
         return _data[_size - 1];
     }
     [[nodiscard]] constexpr const T& back() const noexcept {
-        assert(_data != nullptr && _size > 0);
+        assert(_size > 0);
         return _data[_size - 1];
     }
 
@@ -374,7 +309,11 @@ struct vector<T, true> { // managed vector
             return;
         }
         if (_size == 0UZ) {
-            clear();
+            if (_data) {
+                _resource->deallocate(_data, _capacity * sizeof(T), alignof(T));
+                _data = nullptr;
+            }
+            _capacity = 0;
             return;
         }
         _grow_capacity(_size);
@@ -404,22 +343,52 @@ struct vector<T, true> { // managed vector
 
     constexpr void resize(std::size_t new_size) {
         if (new_size <= _size) { // shrink in place - no reallocation!
-            std::destroy_n(_data + new_size, _size - new_size);
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                std::destroy_n(_data + new_size, _size - new_size);
+            }
             _size = new_size;
-        } else if (new_size <= _capacity) { // grow within capacity - no reallocation!
+        } else if (new_size <= _capacity && _data != nullptr) { // grow within capacity - no reallocation!
             std::uninitialized_value_construct_n(_data + _size, new_size - _size);
             _size = new_size;
-        } else {                            // must reallocate
-            _grow_capacity(new_size * 2UZ); // factor 2 growth factor
+        } else { // must reallocate
+            _grow_capacity(_next_cap(_capacity, new_size));
             std::uninitialized_value_construct_n(_data + _size, new_size - _size);
             _size = new_size;
         }
     }
 
+    constexpr void resize(std::size_t new_size, const T& value) {
+        if (new_size <= _size) { // shrink in place
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                std::destroy_n(_data + new_size, _size - new_size);
+            }
+            _size = new_size;
+        } else if (new_size <= _capacity && _data != nullptr) { // grow within capacity
+            std::uninitialized_fill_n(_data + _size, new_size - _size, value);
+            _size = new_size;
+        } else { // must reallocate
+            _grow_capacity(_next_cap(_capacity, new_size));
+            std::uninitialized_fill_n(_data + _size, new_size - _size, value);
+            _size = new_size;
+        }
+    }
+
     void assign(std::size_t count, const T& value) {
-        clear();
-        if (count > 0) {
-            reserve(count);
+        if (count <= _capacity && _data != nullptr) { // reuse existing capacity
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                std::destroy_n(_data, _size);
+            }
+            std::uninitialized_fill_n(_data, count, value);
+            _size = count;
+        } else { // need to reallocate
+            if (_data) {
+                if constexpr (!std::is_trivially_destructible_v<T>) {
+                    std::destroy_n(_data, _size);
+                }
+                _resource->deallocate(_data, _capacity * sizeof(T), alignof(T));
+            }
+            _data     = static_cast<T*>(_resource->allocate(count * sizeof(T), alignof(T)));
+            _capacity = count;
             std::uninitialized_fill_n(_data, count, value);
             _size = count;
         }
@@ -428,45 +397,43 @@ struct vector<T, true> { // managed vector
     template<class It, class End>
     requires std::input_iterator<It> && std::sentinel_for<End, It>
     void assign(It first, End last) {
-        const auto new_size = static_cast<std::size_t>(std::ranges::distance(first, last));
-        clear();
-        if (new_size > 0) {
-            _data     = static_cast<T*>(_resource->allocate(new_size * sizeof(T), alignof(T)));
-            _capacity = new_size;
-            try {
+        // For contiguous iterators of T, delegate to optimized path
+        if constexpr (std::contiguous_iterator<It> && std::same_as<std::iter_value_t<It>, T>) {
+            const auto count = static_cast<std::size_t>(std::ranges::distance(first, last));
+            _assign_from_ptr(std::to_address(first), count);
+        } else { // generic iterator path
+            const auto new_size = static_cast<std::size_t>(std::ranges::distance(first, last));
+            if (new_size <= _capacity && _data != nullptr) {
+                if constexpr (!std::is_trivially_destructible_v<T>) {
+                    std::destroy_n(_data, _size);
+                }
                 std::uninitialized_copy(first, last, _data);
                 _size = new_size;
-            } catch (...) {
-                _resource->deallocate(_data, new_size * sizeof(T), alignof(T));
-                _data     = nullptr;
-                _capacity = 0;
-                throw;
-            }
-        }
-    }
-
-    void assign(std::initializer_list<T> il) { assign(il.begin(), il.end()); }
-    void assign(std::span<const T> s) { assign(s.begin(), s.end()); }
-    void assign(const std::pmr::vector<T>& src) {
-        clear();
-        if (src.size() > 0) {
-            _data     = static_cast<T*>(_resource->allocate(src.size() * sizeof(T), alignof(T)));
-            _capacity = src.size();
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::memcpy(_data, src.data(), src.size() * sizeof(T));
             } else {
+                if (_data) {
+                    if constexpr (!std::is_trivially_destructible_v<T>) {
+                        std::destroy_n(_data, _size);
+                    }
+                    _resource->deallocate(_data, _capacity * sizeof(T), alignof(T));
+                }
+                _data     = static_cast<T*>(_resource->allocate(new_size * sizeof(T), alignof(T)));
+                _capacity = new_size;
                 try {
-                    std::uninitialized_copy_n(src.data(), src.size(), _data);
+                    std::uninitialized_copy(first, last, _data);
+                    _size = new_size;
                 } catch (...) {
-                    _resource->deallocate(_data, src.size() * sizeof(T), alignof(T));
+                    _resource->deallocate(_data, new_size * sizeof(T), alignof(T));
                     _data     = nullptr;
                     _capacity = 0;
                     throw;
                 }
             }
-            _size = src.size();
         }
     }
+
+    void assign(std::initializer_list<T> il) { _assign_from_ptr(il.begin(), il.size()); }
+    void assign(std::span<const T> s) { _assign_from_ptr(s.data(), s.size()); }
+    void assign(const std::pmr::vector<T>& src) { _assign_from_ptr(src.data(), src.size()); }
 
     void rebind(std::pmr::memory_resource* new_resource) {
         _data     = gr::allocator::pmr::migrate<T>(*new_resource, *_resource, _data, _capacity);
@@ -474,17 +441,11 @@ struct vector<T, true> { // managed vector
         _capacity = _size;
     }
 
-    constexpr void clear() {
-        if (_data) {
-            if constexpr (!std::is_trivially_destructible_v<T>) {
-                std::destroy_n(_data, _size);
-            }
-            void* ptr = const_cast<void*>(static_cast<const void*>(_data));
-            _resource->deallocate(ptr, _capacity * sizeof(T), alignof(T));
-            _data = nullptr;
+    constexpr void clear() noexcept {
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            std::destroy_n(_data, _size);
         }
-        _size     = 0;
-        _capacity = 0;
+        _size = 0;
     }
 
     constexpr void swap(vector& other) noexcept {
@@ -502,6 +463,44 @@ private:
     static constexpr std::size_t _next_cap(std::size_t cur, std::size_t min_needed) noexcept {
         std::size_t cand = cur ? (cur + (cur >> 1U) + 1U) : 2U;
         return cand < min_needed ? min_needed : cand;
+    }
+
+    void _assign_from_ptr(const T* src, std::size_t count) {
+        if (count <= _capacity && _data != nullptr) { // reuse existing capacity
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                std::destroy_n(_data, _size);
+            }
+            if (count > 0) {
+                if constexpr (std::is_trivially_copyable_v<T>) {
+                    std::memcpy(_data, src, count * sizeof(T));
+                } else {
+                    std::uninitialized_copy_n(src, count, _data);
+                }
+            }
+            _size = count;
+        } else { // need to reallocate
+            T* new_data = static_cast<T*>(_resource->allocate(count * sizeof(T), alignof(T)));
+            try {
+                if constexpr (std::is_trivially_copyable_v<T>) {
+                    std::memcpy(new_data, src, count * sizeof(T));
+                } else {
+                    std::uninitialized_copy_n(src, count, new_data);
+                }
+            } catch (...) {
+                _resource->deallocate(new_data, count * sizeof(T), alignof(T));
+                throw;
+            }
+            // success - clean up old data
+            if (_data) {
+                if constexpr (!std::is_trivially_destructible_v<T>) {
+                    std::destroy_n(_data, _size);
+                }
+                _resource->deallocate(_data, _capacity * sizeof(T), alignof(T));
+            }
+            _data     = new_data;
+            _capacity = count;
+            _size     = count;
+        }
     }
 
     void _grow_capacity(std::size_t new_cap) {
@@ -537,9 +536,7 @@ private:
             if constexpr (!std::is_trivially_destructible_v<T>) {
                 std::destroy_n(_data, _size);
             }
-            // Cast away const for deallocation
-            void* ptr = const_cast<void*>(static_cast<const void*>(_data));
-            _resource->deallocate(ptr, _capacity * sizeof(T), alignof(T));
+            _resource->deallocate(_data, _capacity * sizeof(T), alignof(T));
         }
         _data     = q;
         _capacity = new_cap;
