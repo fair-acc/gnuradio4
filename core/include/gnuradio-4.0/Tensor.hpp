@@ -1086,7 +1086,7 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
     }
 
     template<std::ranges::range Extents>
-    requires(std::same_as<std::ranges::range_value_t<Extents>, std::size_t>)
+    requires(std::same_as<std::ranges::range_value_t<Extents>, std::size_t> && !std::same_as<std::remove_cvref_t<Extents>, std::initializer_list<std::size_t>>)
     explicit Tensor(const Extents& extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
         auto ext_size = std::ranges::size(extents_);
         if (ext_size > detail::kMaxRank) {
@@ -1106,15 +1106,62 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         base_t::_data.resize(base_t::checked_size(base_t::extents()));
     }
 
-    Tensor(std::initializer_list<std::size_t> extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : Tensor(std::span(extents_), mr) {}
+    template<typename U> // 1. static rank-1: highest priority (most specific - rank is fixed, must be data)
+    requires(sizeof...(Ex) == 1UZ && ((Ex == std::dynamic_extent) && ...) && std::convertible_to<U, T>)
+    Tensor(std::initializer_list<U> values, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
+        base_t::_metaInfo.extents[0UZ] = values.size();
+        base_t::recomputeStrides();
+        base_t::_data = gr::pmr::vector<T, true>(values.begin(), values.end(), mr);
+    }
+
+    // 2. integral literals with non-integral T → extents (type mismatch disambiguates)
+    Tensor(std::initializer_list<std::size_t> extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource())
+    requires(!std::integral<T> && !(sizeof...(Ex) == 1UZ && ((Ex == std::dynamic_extent) && ...)))
+    {
+        *this = Tensor(gr::extents_from, std::span<const std::size_t>(extents_.begin(), extents_.size()), mr);
+    }
 
     template<typename U>
-    requires(sizeof...(Ex) == 1 && ((Ex == std::dynamic_extent) && ...) && std::convertible_to<U, T>)
+    requires(!std::integral<T> && std::integral<U> && !std::same_as<U, std::size_t> && !(sizeof...(Ex) == 1UZ && ((Ex == std::dynamic_extent) && ...)))
+    Tensor(std::initializer_list<U> extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
+        std::vector<std::size_t> dims(extents_.begin(), extents_.end());
+        *this = Tensor(gr::extents_from, std::span<const std::size_t>(dims.data(), dims.size()), mr);
+    }
+
+    template<typename U> // 3. size_t literals with integral T (but T != size_t) → extents
+    requires(std::integral<T> && std::same_as<U, std::size_t> && !std::same_as<T, std::size_t> && !(sizeof...(Ex) == 1UZ && ((Ex == std::dynamic_extent) && ...)))
+    Tensor(std::initializer_list<U> extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : Tensor(gr::extents_from, std::span<const std::size_t>(extents_.begin(), extents_.end()), mr) {}
+
+    template<typename U>                                                              // 4. Same integral type for T and U (or implicitly convertible) → AMBIGUOUS
+    requires(std::integral<T> && std::integral<U> && !std::same_as<U, std::size_t> && // Exclude size_t (handled above)
+             !(sizeof...(Ex) == 1UZ && ((Ex == std::dynamic_extent) && ...)))
+    Tensor(std::initializer_list<U>, std::pmr::memory_resource* = std::pmr::get_default_resource()) {
+        static_assert(gr::meta::always_false<T>, "ambiguous constructor: please use explicit Tensor<T>(gr::extents_from, {...}) or Tensor<T>(gr::data_from, {...})");
+    }
+
+    template<typename U> // 5. Non-integral literals → data (rank-1)
+    requires(!std::integral<U> && std::convertible_to<U, T> && (sizeof...(Ex) == 0UZ || (sizeof...(Ex) == 1UZ && ((Ex == std::dynamic_extent) && ...))))
     Tensor(std::initializer_list<U> values, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 1UZ;
         } else if (sizeof...(Ex) != 1UZ) {
-            throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+            throw std::runtime_error("Tensor: data requires rank-1 tensor.");
+        }
+        base_t::_metaInfo.extents[0UZ] = values.size();
+        base_t::recomputeStrides();
+        base_t::_data = gr::pmr::vector<T, true>(values.begin(), values.end(), mr);
+    }
+
+    // 6. Explicit extents tag (always available)
+    Tensor(tensor_extents_tag, std::initializer_list<std::size_t> extents_, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) : Tensor(gr::extents_from, std::span<const std::size_t>(extents_.begin(), extents_.end()), mr) {}
+
+    template<typename U> // 7. Explicit data tag (always available)
+    requires(std::convertible_to<U, T>)
+    Tensor(tensor_data_tag, std::initializer_list<U> values, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
+        if constexpr (sizeof...(Ex) == 0UZ) {
+            base_t::_metaInfo.rank = 1UZ;
+        } else if (sizeof...(Ex) != 1UZ) {
+            throw std::runtime_error("Tensor: gr::data_from requires rank-1 tensor.");
         }
         base_t::_metaInfo.extents[0UZ] = values.size();
         base_t::recomputeStrides();
@@ -1216,8 +1263,29 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         }
         std::ranges::copy_n(extents_.begin(), static_cast<std::ptrdiff_t>(extents_.size()), base_t::_metaInfo.extents.begin());
         base_t::recomputeStrides();
-        base_t::_data = gr::pmr::vector<T, true>(std::ranges::begin(data), std::ranges::end(data), mr);
 
+        base_t::_data = container_type(std::ranges::begin(data), std::ranges::end(data), mr);
+        if (base_t::_data.size() != base_t::checked_size(base_t::extents())) {
+            throw std::runtime_error("Tensor: data size doesn't match extents product.");
+        }
+    }
+
+    // two initializer_lists: extents + data
+    template<typename U>
+    requires std::convertible_to<U, T>
+    Tensor(std::initializer_list<std::size_t> extents_, std::initializer_list<U> data, std::pmr::memory_resource* mr = std::pmr::get_default_resource()) {
+        if (extents_.size() > detail::kMaxRank) {
+            throw std::runtime_error("Tensor: rank too large for Tensor.");
+        }
+        if constexpr (sizeof...(Ex) == 0UZ) {
+            base_t::_metaInfo.rank = extents_.size();
+        } else if (sizeof...(Ex) != extents_.size()) {
+            throw std::runtime_error("Tensor: provided rank incompatible to pre-defined extents.");
+        }
+        std::ranges::copy_n(extents_.begin(), static_cast<std::ptrdiff_t>(extents_.size()), base_t::_metaInfo.extents.begin());
+        base_t::recomputeStrides();
+
+        base_t::_data = container_type(data.begin(), data.end(), mr);
         if (base_t::_data.size() != base_t::checked_size(base_t::extents())) {
             throw std::runtime_error("Tensor: data size doesn't match extents product.");
         }
