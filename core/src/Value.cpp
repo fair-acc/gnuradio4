@@ -11,58 +11,6 @@
 namespace gr::pmt {
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TYPE TRAIT HELPERS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-template<typename T>
-constexpr Value::ValueType Value::get_value_type() {
-    if constexpr (std::same_as<T, bool>) {
-        return ValueType::Bool;
-    } else if constexpr (std::same_as<T, std::int8_t>) {
-        return ValueType::Int8;
-    } else if constexpr (std::same_as<T, std::int16_t>) {
-        return ValueType::Int16;
-    } else if constexpr (std::same_as<T, std::int32_t>) {
-        return ValueType::Int32;
-    } else if constexpr (std::same_as<T, std::int64_t>) {
-        return ValueType::Int64;
-    } else if constexpr (std::same_as<T, std::uint8_t>) {
-        return ValueType::UInt8;
-    } else if constexpr (std::same_as<T, std::uint16_t>) {
-        return ValueType::UInt16;
-    } else if constexpr (std::same_as<T, std::uint32_t>) {
-        return ValueType::UInt32;
-    } else if constexpr (std::same_as<T, std::uint64_t>) {
-        return ValueType::UInt64;
-    } else if constexpr (std::same_as<T, float>) {
-        return ValueType::Float32;
-    } else if constexpr (std::same_as<T, double>) {
-        return ValueType::Float64;
-    } else if constexpr (std::same_as<T, std::complex<float>>) {
-        return ValueType::ComplexFloat32;
-    } else if constexpr (std::same_as<T, std::complex<double>>) {
-        return ValueType::ComplexFloat64;
-    } else if constexpr (std::same_as<T, std::pmr::string>) {
-        return ValueType::String;
-    } else if constexpr (std::same_as<T, Value>) {
-        return ValueType::Value;
-    } else {
-        return ValueType::Monostate;
-    }
-}
-
-template<typename T>
-constexpr Value::ContainerType Value::get_container_type() {
-    if constexpr (std::same_as<T, std::complex<float>> || std::same_as<T, std::complex<double>>) {
-        return ContainerType::Complex;
-    } else if constexpr (std::same_as<T, std::pmr::string>) {
-        return ContainerType::String;
-    } else {
-        return ContainerType::Scalar;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // TYPE CHECKING
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -636,26 +584,6 @@ bool operator==(const T& lhs, const Value& rhs) {
         return lhs == *rhsRef;
     }
     return false;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// TENSOR TEMPLATE IMPLEMENTATIONS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-template<typename T>
-Value::Value(Tensor<T> tensor, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
-    set_types(get_value_type<T>(), ContainerType::Tensor);
-    void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));
-    _storage.ptr = new (mem) Tensor<T>(std::move(tensor));
-}
-
-template<typename T>
-Value& Value::operator=(Tensor<T> tensor) {
-    destroy();
-    set_types(get_value_type<T>(), ContainerType::Tensor);
-    void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));
-    _storage.ptr = new (mem) Tensor<T>(std::move(tensor));
-    return *this;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
