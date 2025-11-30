@@ -737,6 +737,9 @@ namespace gr::math {
  */
 template<TransposeOp TransA = TransposeOp::NoTrans, TransposeOp TransB = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorC, TensorOf<T> TensorA, TensorOf<T> TensorB>
 void gemm(Policy&& policy, TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta = T{0}) {
+    if (C.size() == 0 || A.size() == 0 || B.size() == 0) {
+        return; // nothing to compute for empty tensors
+    }
     if constexpr (CpuExecutionPolicy<Policy>) {
         detail::gemm<TransA, TransB>(policy, C, A, B, alpha, beta);
     } else if constexpr (GpuExecutionPolicy<Policy>) {
@@ -768,6 +771,9 @@ void gemm(TensorC& C, const TensorA& A, const TensorB& B, T alpha = T{1}, T beta
  */
 template<TransposeOp TransA = TransposeOp::NoTrans, ExecutionPolicy Policy, typename T, TensorOf<T> TensorY, TensorOf<T> TensorA, TensorOf<T> TensorX>
 void gemv(Policy&& policy, TensorY& y, const TensorA& A, const TensorX& x, T alpha = T{1}, T beta = T{0}) {
+    if (y.size() == 0 || A.size() == 0 || x.size() == 0) {
+        return; // nothing to compute for empty tensors
+    }
     if constexpr (CpuExecutionPolicy<Policy>) {
         detail::gemv<TransA>(policy, y, A, x, alpha, beta);
     } else if constexpr (GpuExecutionPolicy<Policy>) {
