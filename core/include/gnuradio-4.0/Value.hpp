@@ -50,6 +50,30 @@ inline constexpr bool is_string_view_v = std::same_as<std::remove_cvref_t<T>, st
 template<typename T>
 inline constexpr bool is_string_convertible_v = is_std_string_v<T> || is_string_view_v<T>;
 
+template<typename T>
+concept ValueScalarType = std::same_as<std::remove_cvref_t<T>, bool>                                                                                                                                                                                 //
+                          || std::same_as<std::remove_cvref_t<T>, std::int8_t> || std::same_as<std::remove_cvref_t<T>, std::int16_t> || std::same_as<std::remove_cvref_t<T>, std::int32_t> || std::same_as<std::remove_cvref_t<T>, std::int64_t>     //
+                          || std::same_as<std::remove_cvref_t<T>, std::uint8_t> || std::same_as<std::remove_cvref_t<T>, std::uint16_t> || std::same_as<std::remove_cvref_t<T>, std::uint32_t> || std::same_as<std::remove_cvref_t<T>, std::uint64_t> //
+                          || std::same_as<std::remove_cvref_t<T>, float> || std::same_as<std::remove_cvref_t<T>, double>                                                                                                                             //
+                          || std::same_as<std::remove_cvref_t<T>, std::complex<float>> || std::same_as<std::remove_cvref_t<T>, std::complex<double>>;                                                                                                //
+
+template<typename T>
+concept ValueConvertible = std::same_as<std::remove_cvref_t<T>, Value> || ValueScalarType<T> || std::convertible_to<T, std::string_view>;
+
+template<typename T>
+concept ValueComparable = ValueScalarType<T> || std::same_as<std::remove_cvref_t<T>, std::pmr::string>;
+
+template<typename M>
+concept ValueMapLike = requires(const std::remove_cvref_t<M>& m) {
+    typename std::remove_cvref_t<M>::key_type;
+    typename std::remove_cvref_t<M>::mapped_type;
+    { m.begin() } -> std::input_iterator;
+    { m.end() } -> std::sentinel_for<decltype(m.begin())>;
+} && std::convertible_to<typename std::remove_cvref_t<M>::key_type, std::string_view> && ValueConvertible<typename std::remove_cvref_t<M>::mapped_type>;
+
+template<typename M>
+concept ExternalValueMap = ValueMapLike<M> && !std::same_as<std::remove_cvref_t<M>, std::pmr::unordered_map<std::pmr::string, Value>>;
+
 constexpr std::string value_to_string(const Value&); // forward declaration
 } // namespace detail
 
@@ -193,6 +217,30 @@ private:
     [[nodiscard]] bool                  compare_scalar_eq(const Value& other) const noexcept;
     [[nodiscard]] std::partial_ordering compare_scalar_order(const Value& other) const noexcept;
 
+    template<detail::ExternalValueMap T>
+    void init_from_map(T&& map) {
+        using DecayedMap           = std::remove_cvref_t<T>;
+        using MappedType           = typename DecayedMap::mapped_type;
+        constexpr bool isValueType = std::same_as<MappedType, Value>;
+        constexpr bool canMove     = std::is_rvalue_reference_v<T&&>;
+
+        set_types(ValueType::Value, ContainerType::Map);
+        void* mem    = _resource->allocate(sizeof(Map), alignof(Map));
+        auto* newMap = new (mem) Map(_resource);
+        newMap->reserve(map.size());
+
+        for (auto& [key, val] : map) {
+            if constexpr (isValueType && canMove) {
+                newMap->emplace(std::pmr::string(key, _resource), std::move(val));
+            } else if constexpr (isValueType) {
+                newMap->emplace(std::pmr::string(key, _resource), val);
+            } else {
+                newMap->emplace(std::pmr::string(key, _resource), Value{val, _resource});
+            }
+        }
+        _storage.ptr = newMap;
+    }
+
 public:
     // ───────────────────────────────────────────────────────────────────────────────────────────────
     // CONSTRUCTION
@@ -262,6 +310,18 @@ public:
 
     Value(Map map, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     Value& operator=(Map map);
+
+    template<detail::ExternalValueMap T>
+    Value(T&& map, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : _resource(ensure_resource(resource)) {
+        init_from_map(std::forward<T>(map));
+    }
+
+    template<detail::ExternalValueMap T>
+    Value& operator=(T&& map) {
+        destroy();
+        init_from_map(std::forward<T>(map));
+        return *this;
+    }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
     // TYPE QUERIES
@@ -605,9 +665,9 @@ public:
     [[nodiscard]] bool                  operator==(const Value& other) const;
     [[nodiscard]] std::partial_ordering operator<=>(const Value& other) const;
 
-    template<typename T>
+    template<detail::ValueComparable T>
     friend bool operator==(const Value&, const T&);
-    template<typename T>
+    template<detail::ValueComparable T>
     friend bool operator==(const T&, const Value&);
 
     friend constexpr std::string detail::value_to_string(const Value&);
@@ -616,9 +676,9 @@ public:
 
 static_assert(sizeof(gr::pmt::Value) <= 24UZ, "minimise Value struct size");
 
-template<typename T>
+template<detail::ValueComparable T>
 bool operator==(const Value&, const T&);
-template<typename T>
+template<detail::ValueComparable T>
 bool operator==(const T&, const Value&);
 
 } // namespace gr::pmt
@@ -673,5 +733,40 @@ extern template bool Value::holds<std::string_view>() const noexcept;
 // clang-format on
 
 } // namespace gr::pmt
+
+namespace std {
+
+template<>
+struct hash<gr::pmt::Value> {
+    [[nodiscard]] std::size_t operator()(const gr::pmt::Value& v) const noexcept;
+
+private:
+    static constexpr std::size_t hashCombine(std::size_t seed, std::size_t h) noexcept { return seed ^ (h + 0x9e3779b9UZ + (seed << 6) + (seed >> 2)); }
+
+    template<typename T>
+    static std::size_t hashValue(const T& value) noexcept {
+        if constexpr (gr::meta::complex_like<T>) {
+            using VT = typename T::value_type;
+            return hashCombine(std::hash<VT>{}(value.real()), std::hash<VT>{}(value.imag()));
+        } else {
+            return std::hash<T>{}(value);
+        }
+    }
+
+    template<typename T>
+    static std::size_t hashTensorElements(const gr::Tensor<T>& tensor) noexcept {
+        std::size_t seed = std::hash<std::size_t>{}(tensor.size());
+        for (const auto& elem : tensor) {
+            seed = hashCombine(seed, hashValue(elem));
+        }
+        return seed;
+    }
+
+    static std::size_t hashScalar(const gr::pmt::Value& v) noexcept;
+    static std::size_t hashTensor(const gr::pmt::Value& v) noexcept;
+    static std::size_t hashMap(const gr::pmt::Value& v) noexcept;
+};
+
+} // namespace std
 
 #endif // GNURADIO_VALUE_HPP
