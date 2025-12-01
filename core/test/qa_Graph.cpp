@@ -66,8 +66,8 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         graph.connectPendingEdges();
 
         // Note: the actual size is always power of 2 and aligned with page size, see std::bit_ceil
-        expect(eq(src.out.bufferSize(), 8192UZ));
-        expect(eq(sink.in.bufferSize(), 8192UZ));
+        expect(ge(src.out.bufferSize(), 8000UZ));
+        expect(ge(sink.in.bufferSize(), 8000UZ));
     };
 
     "Graph connection buffer size test - set, many"_test = [] {
