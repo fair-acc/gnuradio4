@@ -106,7 +106,7 @@ private:
         auto it = data.find("_targetGraph"s);
         if (it == data.end()) {
             return std::addressof(*_graph);
-        } else if (it->second == _graph->unique_name) {
+        } else if (it->second == _graph->unique_name || it->second == this->unique_name) {
             return std::addressof(*_graph);
         } else {
             const auto& targetGraphName = std::get<std::string>(it->second);
@@ -167,6 +167,7 @@ protected:
         callbacks[scheduler::property::kReplaceBlock]     = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
         callbacks[scheduler::property::kGraphGRC]         = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
         callbacks[scheduler::property::kSchedulerInspect] = std::mem_fn(&SchedulerBase::propertyCallbackSchedulerInspect);
+        callbacks[graph::property::kInspectBlock]         = std::mem_fn(&SchedulerBase::propertyCallbackInspectBlock);
         this->settings().updateActiveParameters();
     }
 
@@ -745,10 +746,10 @@ protected:
         using enum lifecycle::State;
         assert(propertyName == scheduler::property::kEmplaceBlock);
         using namespace std::string_literals;
-        const auto&         data       = message.data.value();
-        const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const property_map& properties = [&] {
-            if (auto it = data.find("properties"s); it != data.end()) {
+        const auto&         messageData = message.data.value();
+        const std::string&  type        = std::get<std::string>(messageData.at("type"s));
+        const property_map& properties  = [&] {
+            if (auto it = messageData.find("properties"s); it != messageData.end()) {
                 return std::get<property_map>(it->second);
             } else {
                 return property_map{};
@@ -757,7 +758,7 @@ protected:
 
         message.endpoint = scheduler::property::kBlockEmplaced;
 
-        auto* targetGraph = findTargetSubGraph(data);
+        auto* targetGraph = findTargetSubGraph(messageData);
 
         if (targetGraph == nullptr) {
             message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
@@ -765,6 +766,13 @@ protected:
         }
 
         auto& newBlock = targetGraph->emplaceBlock(type, properties);
+
+        if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*newBlock->msgIn)) {
+            this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", newBlock->uniqueName()));
+        }
+
+        auto toSchedulerBuffer = _fromChildMessagePort.buffer();
+        newBlock->msgOut->setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
         if (lifecycle::isActive(this->state())) {
             // Block is being added while scheduler is running. Will be adopted by a thread.
@@ -796,11 +804,11 @@ protected:
             }
         }
 
-        auto messageData = serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All);
+        auto replyData = serializeBlock(gr::globalPluginLoader(), newBlock, BlockSerializationFlags::All);
 
-        messageData["_targetGraph"s] = targetGraph->unique_name;
+        replyData["_targetGraph"s] = targetGraph->unique_name;
 
-        this->emitMessage(scheduler::property::kBlockEmplaced, std::move(messageData));
+        this->emitMessage(scheduler::property::kBlockEmplaced, std::move(replyData));
 
         // Message is sent as a reaction to emplaceBlock, no need for a separate one
         return {};
@@ -809,19 +817,20 @@ protected:
     std::optional<Message> propertyCallbackRemoveBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveBlock);
         using namespace std::string_literals;
-        const auto&        data       = message.data.value();
-        const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
+        auto&              messageData = message.data.value();
+        const std::string& uniqueName  = std::get<std::string>(messageData.at("uniqueName"s));
 
         message.endpoint = scheduler::property::kBlockRemoved;
 
-        auto* targetGraph = findTargetSubGraph(data);
+        auto* targetGraph = findTargetSubGraph(messageData);
 
         if (targetGraph == nullptr) {
             message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
             return message;
         }
 
-        auto removedBlock = targetGraph->removeBlockByName(uniqueName);
+        messageData["_targetGraph"] = targetGraph->unique_name;
+        auto removedBlock           = targetGraph->removeBlockByName(uniqueName);
         makeZombie(std::move(removedBlock));
 
         return {message};
@@ -830,19 +839,20 @@ protected:
     std::optional<Message> propertyCallbackRemoveEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kRemoveEdge);
         using namespace std::string_literals;
-        const auto&        data        = message.data.value();
-        const std::string& sourceBlock = std::get<std::string>(data.at("sourceBlock"s));
-        const std::string& sourcePort  = std::get<std::string>(data.at("sourcePort"s));
+        auto&              messageData = message.data.value();
+        const std::string& sourceBlock = std::get<std::string>(messageData.at(std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK)));
+        const std::string& sourcePort  = std::get<std::string>(messageData.at(std::string(gr::serialization_fields::EDGE_SOURCE_PORT)));
 
         message.endpoint = scheduler::property::kEdgeRemoved;
 
-        auto* targetGraph = findTargetSubGraph(data);
+        auto* targetGraph = findTargetSubGraph(messageData);
 
         if (targetGraph == nullptr) {
             message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
             return message;
         }
 
+        messageData["_targetGraph"] = targetGraph->unique_name;
         targetGraph->removeEdgeBySourcePort(sourceBlock, sourcePort);
 
         return message;
@@ -851,27 +861,27 @@ protected:
     std::optional<Message> propertyCallbackEmplaceEdge([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kEmplaceEdge);
         using namespace std::string_literals;
-        const auto&                         data             = message.data.value();
-        const std::string&                  sourceBlock      = std::get<std::string>(data.at("sourceBlock"s));
-        const std::string&                  sourcePort       = std::get<std::string>(data.at("sourcePort"s));
-        const std::string&                  destinationBlock = std::get<std::string>(data.at("destinationBlock"s));
-        const std::string&                  destinationPort  = std::get<std::string>(data.at("destinationPort"s));
-        [[maybe_unused]] const std::size_t  minBufferSize    = std::get<gr::Size_t>(data.at("minBufferSize"s));
-        [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(data.at("weight"s));
-        const std::string                   edgeName         = std::get<std::string>(data.at("edgeName"s));
+        auto&                               messageData      = message.data.value();
+        const std::string&                  sourceBlock      = std::get<std::string>(messageData.at(std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK)));
+        const std::string&                  sourcePort       = std::get<std::string>(messageData.at(std::string(gr::serialization_fields::EDGE_SOURCE_PORT)));
+        const std::string&                  destinationBlock = std::get<std::string>(messageData.at(std::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK)));
+        const std::string&                  destinationPort  = std::get<std::string>(messageData.at(std::string(gr::serialization_fields::EDGE_DESTINATION_PORT)));
+        [[maybe_unused]] const std::size_t  minBufferSize    = std::get<gr::Size_t>(messageData.at(std::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE)));
+        [[maybe_unused]] const std::int32_t weight           = std::get<std::int32_t>(messageData.at(std::string(gr::serialization_fields::EDGE_WEIGHT)));
+        const std::string                   edgeName         = std::get<std::string>(messageData.at(std::string(gr::serialization_fields::EDGE_NAME)));
 
         message.endpoint = scheduler::property::kEdgeEmplaced;
 
-        auto* targetGraph = findTargetSubGraph(data);
+        auto* targetGraph = findTargetSubGraph(messageData);
 
         if (targetGraph == nullptr) {
             message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
             return message;
         }
 
+        messageData["_targetGraph"s] = targetGraph->unique_name;
         targetGraph->emplaceEdge(sourceBlock, sourcePort, destinationBlock, destinationPort, minBufferSize, weight, edgeName);
 
-        (*message.data)["_targetGraph"s] = targetGraph->unique_name;
         return message;
     }
 
@@ -1035,8 +1045,8 @@ protected:
         if (message.cmd == message::Command::Get) {
             message.data = property_map{{"value", gr::saveGrc(pluginLoader, *_graph)}};
         } else if (message.cmd == message::Command::Set) {
-            const auto& data        = message.data.value();
-            auto        yamlContent = std::get<std::string>(data.at("value"s));
+            const auto& messageData = message.data.value();
+            auto        yamlContent = std::get<std::string>(messageData.at("value"s));
 
             try {
                 auto newGraph = gr::loadGrc(pluginLoader, yamlContent);
@@ -1086,21 +1096,29 @@ protected:
         return message;
     }
 
+    std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
+        auto result = _graph->propertyCallbackInspectBlock(propertyName, message);
+        if (result) {
+            result->serviceName = this->unique_name;
+        }
+        return result;
+    }
+
     std::optional<Message> propertyCallbackReplaceBlock([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kReplaceBlock);
         using namespace std::string_literals;
-        const auto&         data       = message.data.value();
-        const std::string&  uniqueName = std::get<std::string>(data.at("uniqueName"s));
-        const std::string&  type       = std::get<std::string>(data.at("type"s));
-        const property_map& properties = [&] {
-            if (auto it = data.find("properties"s); it != data.end()) {
+        const auto&         messageData = message.data.value();
+        const std::string&  uniqueName  = std::get<std::string>(messageData.at("uniqueName"s));
+        const std::string&  type        = std::get<std::string>(messageData.at("type"s));
+        const property_map& properties  = [&] {
+            if (auto it = messageData.find("properties"s); it != messageData.end()) {
                 return std::get<property_map>(it->second);
             } else {
                 return property_map{};
             }
         }();
 
-        auto* targetGraph = findTargetSubGraph(data);
+        auto* targetGraph = findTargetSubGraph(messageData);
 
         if (targetGraph == nullptr) {
             message.data = std::unexpected(Error{std::format("No target graph for the message {}", message)});
@@ -1114,6 +1132,7 @@ protected:
         result->endpoint              = scheduler::property::kBlockReplaced;
         result->data                  = serializeBlock(gr::globalPluginLoader(), newBlockRaw, BlockSerializationFlags::All);
 
+        (*result->data)["_targetGraph"s]            = targetGraph->unique_name;
         (*result->data)["replacedBlockUniqueName"s] = uniqueName;
 
         return result;
