@@ -4,6 +4,7 @@
 #include <concepts>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <typeindex>
 #include <typeinfo>
 
@@ -570,7 +571,7 @@ std::partial_ordering Value::operator<=>(const Value& other) const {
     return partial_ordering::unordered; // should not reach
 }
 
-template<typename T>
+template<detail::ValueComparable T>
 bool operator==(const Value& lhs, const T& rhs) {
     if (auto* lhsRef = lhs.get_if<std::remove_cvref_t<T>>()) {
         return *lhsRef == rhs;
@@ -578,7 +579,7 @@ bool operator==(const Value& lhs, const T& rhs) {
     return false;
 }
 
-template<typename T>
+template<detail::ValueComparable T>
 bool operator==(const T& lhs, const Value& rhs) {
     if (auto* rhsRef = rhs.get_if<std::remove_cvref_t<T>>()) {
         return lhs == *rhsRef;
@@ -628,3 +629,134 @@ template Value::Map*       Value::get_if<Value::Map>() noexcept;
 template const Value::Map* Value::get_if<Value::Map>() const noexcept;
 
 } // namespace gr::pmt
+
+namespace std {
+
+std::size_t hash<gr::pmt::Value>::hashScalar(const gr::pmt::Value& v) noexcept {
+    if (auto* p = v.get_if<bool>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::int8_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::int16_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::int32_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::int64_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::uint8_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::uint16_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::uint32_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::uint64_t>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<float>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<double>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::complex<float>>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::complex<double>>()) {
+        return hashValue(*p);
+    }
+    if (auto* p = v.get_if<std::pmr::string>()) {
+        return std::hash<std::pmr::string>{}(*p);
+    }
+    return 0;
+}
+
+std::size_t hash<gr::pmt::Value>::hashTensor(const gr::pmt::Value& v) noexcept {
+    if (auto* p = v.get_if<gr::Tensor<std::int8_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::int16_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::int32_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::int64_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::uint8_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::uint16_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::uint32_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::uint64_t>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<float>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<double>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::complex<float>>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::complex<double>>>()) {
+        return hashTensorElements(*p);
+    }
+    if (auto* p = v.get_if<gr::Tensor<std::string>>()) {
+        return hashTensorElements(*p);
+    }
+    return 0;
+}
+
+std::size_t hash<gr::pmt::Value>::hashMap(const gr::pmt::Value& v) noexcept {
+    std::size_t accumulator = 0UZ; // order-independent: accumulate with addition
+
+    auto hashMapImpl = [&accumulator](const auto& map) {
+        for (const auto& [key, val] : map) {
+            std::size_t entryHash = hashCombine(std::hash<std::pmr::string>{}(key), std::hash<gr::pmt::Value>{}(val));
+            accumulator += entryHash;
+        }
+    };
+
+    if (auto* p = v.get_if<gr::pmt::Value::Map>()) {
+        hashMapImpl(*p);
+        return accumulator;
+    }
+    return accumulator;
+}
+
+std::size_t hash<gr::pmt::Value>::operator()(const gr::pmt::Value& v) const noexcept {
+    using namespace gr::pmt;
+
+    std::size_t seed = std::hash<int>{}(static_cast<int>(v.container_type()));
+    seed             = hashCombine(seed, std::hash<int>{}(static_cast<int>(v.value_type())));
+
+    if (v.is_monostate()) {
+        return seed;
+    }
+
+    using enum Value::ContainerType;
+    switch (v.container_type()) {
+    case Scalar: return hashCombine(seed, hashScalar(v));
+    case Complex: return hashCombine(seed, hashScalar(v)); // hashScalar handles complex types
+    case String: return hashCombine(seed, hashScalar(v));  // hashScalar handles pmr::string
+    case Tensor: return hashCombine(seed, hashTensor(v));
+    case Map: return hashCombine(seed, hashMap(v));
+    default: return seed;
+    }
+}
+
+} // namespace std
