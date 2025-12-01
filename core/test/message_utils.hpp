@@ -115,8 +115,14 @@ inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::M
 
 inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}:{}\n", sourceLocation.file_name(), sourceLocation.line());
-    gr::property_map data = {{"sourceBlock", sourceBlock}, {"sourcePort", sourcePort}, {"destinationBlock", destinationBlock}, {"destinationPort", destinationPort}, //
-        {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
+    gr::property_map data = {                                                              //
+        {std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), sourceBlock},           //
+        {std::string(gr::serialization_fields::EDGE_SOURCE_PORT), sourcePort},             //
+        {std::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), destinationBlock}, //
+        {std::string(gr::serialization_fields::EDGE_DESTINATION_PORT), destinationPort},   //
+        {std::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::Size_t()},       //
+        {std::string(gr::serialization_fields::EDGE_WEIGHT), 0},                           //
+        {std::string(gr::serialization_fields::EDGE_NAME), "unnamed edge"}};
     testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceEdge, data, //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kEdgeEmplaced});
 };

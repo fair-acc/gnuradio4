@@ -233,9 +233,13 @@ const boost::ut::suite TopologyGraphTests = [] {
         TestScheduler scheduler(std::move(testGraph));
 
         "Add an edge"_test = [&] {
-            property_map data = {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "out"}, //
-                {"destinationBlock", std::string(blockIn->uniqueName())}, {"destinationPort", "in"},          //
-                {"minBufferSize", gr::Size_t()}, {"weight", 0}, {"edgeName", "unnamed edge"}};
+            property_map data = {{std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())}, //
+                {std::string(gr::serialization_fields::EDGE_SOURCE_PORT), "out"},                                                 //
+                {std::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockIn->uniqueName())},              //
+                {std::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "in"},                                             //
+                {std::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::Size_t()},                                      //
+                {std::string(gr::serialization_fields::EDGE_WEIGHT), 0},                                                          //
+                {std::string(gr::serialization_fields::EDGE_NAME), "unnamed edge"}};
 
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, data, //
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEdgeEmplaced});
@@ -243,22 +247,28 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         "Fail to add an edge because source port is invalid"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, //
-                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "OUTPUT"},                                                          //
-                    {"destinationBlock", std::string(blockIn->uniqueName())}, {"destinationPort", "in"}},
+                {{std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())},                                         //
+                    {std::string(gr::serialization_fields::EDGE_SOURCE_PORT), "OUTPUT"},                                                                  //
+                    {std::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockIn->uniqueName())},                                  //
+                    {std::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "in"}},
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEmplaceEdge, .expectedHasData = false});
         };
 
         "Fail to add an edge because destination port is invalid"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, //
-                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "in"},                                                              //
-                    {"destinationBlock", std::string(blockIn->uniqueName())}, {"destinationPort", "INPUT"}},
+                {{std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())},                                         //
+                    {std::string(gr::serialization_fields::EDGE_SOURCE_PORT), "in"},                                                                      //
+                    {std::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockIn->uniqueName())},                                  //
+                    {std::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "INPUT"}},
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEmplaceEdge, .expectedHasData = false});
         };
 
         "Fail to add an edge because ports are not compatible"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceEdge, //
-                {{"sourceBlock", std::string(blockOut->uniqueName())}, {"sourcePort", "out"},                                                             //
-                    {"destinationBlock", std::string(blockWrongType->uniqueName())}, {"destinationPort", "in"}},
+                {{std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), std::string(blockOut->uniqueName())},                                         //
+                    {std::string(gr::serialization_fields::EDGE_SOURCE_PORT), "out"},                                                                     //
+                    {std::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), std::string(blockWrongType->uniqueName())},                           //
+                    {std::string(gr::serialization_fields::EDGE_DESTINATION_PORT), "in"}},
                 ReplyChecker{.expectedEndpoint = scheduler::property::kEmplaceEdge, .expectedHasData = false});
         };
     };
