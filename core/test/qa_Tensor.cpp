@@ -196,8 +196,16 @@ const boost::ut::suite<"Tensor<T> Basic Functionality"> _tensorBasic = [] {
             expect(eq(vec.extent(0UZ), 5UZ));
         };
 
-        "multi-dimensional"_test = [] {
-            Tensor<int> matrix({3UZ, 4UZ});
+        "multi-dimensional -- Variant A"_test = [] {
+            Tensor<int> matrix(gr::extents_from, {3UZ, 4UZ});
+            expect(eq(matrix.rank(), 2UZ));
+            expect(eq(matrix.size(), 12UZ));
+            expect(eq(matrix.extent(0UZ), 3UZ));
+            expect(eq(matrix.extent(1UZ), 4UZ));
+        };
+
+        "multi-dimensional -- Variant B"_test = [] {
+            Tensor<float> matrix(/*gr::extents_from, -- not needed if T != std::size_t */ {3UZ, 4UZ});
             expect(eq(matrix.rank(), 2UZ));
             expect(eq(matrix.size(), 12UZ));
             expect(eq(matrix.extent(0UZ), 3UZ));
@@ -524,7 +532,7 @@ const boost::ut::suite<"Tensor<T> STL Compatibility"> _tensorSTL = [] {
         };
 
         "dynamic Tensor"_test = [] {
-            Tensor<int> dynamicTensor({3, 4});
+            Tensor<int> dynamicTensor(gr::extents_from, {3, 4});
 
             static_assert(std::random_access_iterator<decltype(dynamicTensor.begin())>);
             static_assert(std::contiguous_iterator<decltype(dynamicTensor.begin())>);
@@ -535,7 +543,7 @@ const boost::ut::suite<"Tensor<T> STL Compatibility"> _tensorSTL = [] {
         };
 
         "TensorView"_test = [] {
-            Tensor<int>     dynamicTensor({3, 4});
+            Tensor<int>     dynamicTensor(gr::extents_from, {3, 4});
             TensorView<int> tensorView{dynamicTensor};
 
             static_assert(std::random_access_iterator<decltype(tensorView.begin())>);
@@ -562,7 +570,7 @@ const boost::ut::suite<"Tensor<T> STL Compatibility"> _tensorSTL = [] {
     };
 
     "Data span access"_test = [] {
-        Tensor<int> tensor({2, 3});
+        Tensor<int> tensor(gr::extents_from, {2, 3});
         std::iota(tensor.begin(), tensor.end(), 0);
 
         "mutable span"_test = [&] {
@@ -601,7 +609,7 @@ const boost::ut::suite<"Tensor<T> Vector Compatibility"> _tensorVector = [] {
     };
 
     "Vector assignment"_test = [] {
-        Tensor<double> tensor({2, 2});
+        Tensor<double> tensor({2, 2}); // type mismatch: int literals with double T → extents
 
         expect(throws([&tensor] { tensor = std::vector<double>{1.5, 2.5, 3.5}; })) << "wrong RHS size";
         expect(not throws([&tensor] { tensor = std::vector<double>{1.5, 2.5, 3.5, 4.5}; })) << "correct RHS size";
@@ -806,7 +814,7 @@ const boost::ut::suite<"Tensor<T> Advanced Features"> _tensorAdvanced = [] {
         std::array<std::byte, 1024>         buffer;
         std::pmr::monotonic_buffer_resource resource(buffer.data(), buffer.size());
 
-        Tensor<int> t1({2, 3}, &resource);
+        Tensor<int> t1(gr::extents_from, {2, 3}, &resource);
 
         // Copy constructor with resource
         Tensor<int> t2(t1, &resource);
@@ -917,7 +925,7 @@ const boost::ut::suite<"Tensor<T> Error Handling"> _tensorErrors = [] {
 
     "Overflow detection"_test = [] {
         const std::size_t big = std::numeric_limits<std::size_t>::max() / 2UZ + 1UZ;
-        expect(throws([&] { Tensor<int>({big, 3}); }));
+        expect(throws([&] { Tensor<float>({big, 3}); }));
     };
 
     "Bounds checking"_test = [] {
@@ -932,7 +940,7 @@ const boost::ut::suite<"Tensor<T> Error Handling"> _tensorErrors = [] {
     };
 
     "Conversion errors"_test = [] {
-        Tensor<int> dynamic_source({2, 2, 2});
+        Tensor<int> dynamic_source(gr::extents_from, {2, 2, 2});
         expect(throws([&] { Tensor<int, std::dynamic_extent, std::dynamic_extent>{dynamic_source}; }));
     };
 
@@ -947,7 +955,7 @@ const boost::ut::suite<"Tensor<T> Error Handling"> _tensorErrors = [] {
     "PMR resource exhaustion"_test = [] {
         auto* null_resource = std::pmr::null_memory_resource();
 
-        expect(throws([&] { Tensor<int> tensor({10}, null_resource); }));
+        expect(throws([&] { Tensor<int> tensor(gr::extents_from, {10}, null_resource); }));
         expect(throws([&] { Tensor<double> tensor(100, 3.14, null_resource); }));
         expect(throws([&] {
             Tensor<int> tensor(null_resource);
@@ -1126,7 +1134,7 @@ const boost::ut::suite<"Tensor<T> Boundary Cases"> _tensorBoundary = [] {
     };
 
     "single element tensor operations"_test = [] {
-        Tensor<int> single_elem({1, 1, 1, 1});
+        Tensor<int> single_elem(gr::extents_from, {1, 1, 1, 1});
         single_elem[0, 0, 0, 0] = 99;
 
         expect(eq(single_elem.size(), 1UZ));
@@ -1138,7 +1146,7 @@ const boost::ut::suite<"Tensor<T> Boundary Cases"> _tensorBoundary = [] {
     };
 
     "extent edge cases"_test = [] {
-        Tensor<int> tensor1({1, 5, 1});
+        Tensor<int> tensor1(gr::extents_from, {1, 5, 1});
         expect(eq(tensor1.size(), 5UZ));
 
         if constexpr (sizeof(std::size_t) >= 8) {
@@ -1151,7 +1159,7 @@ const boost::ut::suite<"Tensor<T> Boundary Cases"> _tensorBoundary = [] {
     };
 
     "Indexing edge cases"_test = [] {
-        Tensor<int> tensor({3, 4, 5});
+        Tensor<int> tensor(gr::extents_from, {3, 4, 5});
         std::iota(tensor.begin(), tensor.end(), 0);
 
         expect(eq((tensor[0, 0, 0]), 0));
@@ -1163,12 +1171,12 @@ const boost::ut::suite<"Tensor<T> Boundary Cases"> _tensorBoundary = [] {
     };
 
     "Zero sized dimensions"_test = [] {
-        Tensor<int> tensor({3, 0, 2});
+        Tensor<int> tensor(gr::extents_from, {3, 0, 2});
         expect(eq(tensor.size(), 0UZ));
         expect(eq(tensor.rank(), 3UZ));
         expect(tensor.empty());
 
-        Tensor<int> all_zero({0, 0, 0});
+        Tensor<int> all_zero(gr::extents_from, {0, 0, 0});
         expect(eq(all_zero.size(), 0UZ));
 
         expect(nothrow([&] { tensor.reshape({0}); }));
@@ -1184,7 +1192,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
 
     "Basic view construction"_test = [] {
         "from tensor"_test = [] {
-            Tensor<int> tensor({3, 4});
+            Tensor<int> tensor(gr::extents_from, {3, 4});
             std::iota(tensor.begin(), tensor.end(), 0);
 
             TensorView<int> view(tensor);
@@ -1228,7 +1236,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
 
     "View slicing"_test = [] {
         "basic slice"_test = [] {
-            Tensor<int> tensor({4, 5});
+            Tensor<int> tensor(gr::extents_from, {4, 5});
             std::iota(tensor.begin(), tensor.end(), 0);
 
             TensorView<int> view(tensor);
@@ -1247,7 +1255,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
         };
 
         "partial slice"_test = [] {
-            Tensor<int> tensor({3, 4, 5});
+            Tensor<int> tensor(gr::extents_from, {3, 4, 5});
             std::iota(tensor.begin(), tensor.end(), 0);
 
             TensorView<int> view(tensor);
@@ -1264,7 +1272,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
 
     "View transpose"_test = [] {
         "2D transpose"_test = [] {
-            Tensor<int> tensor({3, 4});
+            Tensor<int> tensor(gr::extents_from, {3, 4});
             std::iota(tensor.begin(), tensor.end(), 0);
 
             TensorView<int> view(tensor);
@@ -1280,7 +1288,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
         };
 
         "custom axis permutation"_test = [] {
-            Tensor<int> tensor({2, 3, 4});
+            Tensor<int> tensor(gr::extents_from, {2, 3, 4});
             std::iota(tensor.begin(), tensor.end(), 0);
 
             TensorView<int> view(tensor);
@@ -1296,7 +1304,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
 
     "View properties"_test = [] {
         "contiguity check"_test = [] {
-            Tensor<int>     tensor({3, 4});
+            Tensor<int>     tensor({3UZ, 4UZ});
             TensorView<int> view(tensor);
 
             expect(tensor.is_contiguous()) << "Tensor is contiguous";
@@ -1310,7 +1318,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
         };
 
         "const view"_test = [] {
-            const Tensor<int> tensor({2, 3});
+            const Tensor<int> tensor(gr::extents_from, {2, 3});
 
             TensorView<const int> const_view{tensor};
 
@@ -1324,7 +1332,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
 
     "View to Tensor conversion"_test = [] {
         "contiguous view"_test = [] {
-            Tensor<int> original({3, 3});
+            Tensor<int> original(gr::extents_from, {3, 3});
             std::iota(original.begin(), original.end(), 1);
 
             TensorView<int> view(original);
@@ -1338,7 +1346,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
         };
 
         "non-contiguous view"_test = [] {
-            Tensor<int> original({3, 3});
+            Tensor<int> original(gr::extents_from, {3, 3});
             std::iota(original.begin(), original.end(), 1);
 
             TensorView<int> view(original);
@@ -1359,7 +1367,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
 
     "View iteration"_test = [] {
         "contiguous iteration"_test = [] {
-            Tensor<int> tensor({2, 3});
+            Tensor<int> tensor(gr::extents_from, {2, 3});
             tensor = {1, 2, 3, 4, 5, 6};
 
             TensorView<int> view(tensor);
@@ -1373,7 +1381,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
         };
 
         "non-contiguous iteration"_test = [] {
-            Tensor<int> tensor({2, 3});
+            Tensor<int> tensor(gr::extents_from, {2, 3});
             tensor = {1, 2, 3, 4, 5, 6};
 
             TensorView<int> view(tensor);
@@ -1403,7 +1411,7 @@ const boost::ut::suite<"TensorView"> _tensorView = [] {
 
     "Advanced view operations"_test = [] {
         "chained operations"_test = [] {
-            Tensor<int> tensor({4, 6});
+            Tensor<int> tensor(gr::extents_from, {4, 6});
             std::iota(tensor.begin(), tensor.end(), 0);
 
             TensorView<int> view(tensor);

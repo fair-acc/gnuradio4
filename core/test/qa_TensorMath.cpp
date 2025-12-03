@@ -236,11 +236,12 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
     using namespace boost::ut::literals;
     using gr::Tensor;
     using gr::math::TensorOps;
+    using gr::extents_from;
 
     "1.1 Basic Reductions"_test = [] {
         "sum variations"_test = [] {
             "large sums that might overflow"_test = [] {
-                Tensor<std::int32_t> large({1000});
+                Tensor<std::int32_t> large(extents_from, {1000});
                 large.fill(1'000'000);
                 auto large_sum = TensorOps<std::int32_t>::sum(large);
                 expect(eq(large_sum, 1'000'000'000));
@@ -263,12 +264,12 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
         };
 
         "product edge cases"_test = [] {
-            Tensor<int> with_zero({5});
+            Tensor<int> with_zero(extents_from, {5});
             with_zero = {1, 2, 0, 4, 5};
             expect(eq(TensorOps<int>::product(with_zero), 0)) << "product of 0 should be 0";
 
             "product overflow"_test = [] {
-                Tensor<std::int8_t> overflow_prod({4});
+                Tensor<std::int8_t> overflow_prod(extents_from, {4});
                 overflow_prod = {10, 10, 10, 10}; // 10^4 > int8_max
                 auto prod     = TensorOps<std::int8_t>::product(overflow_prod);
                 // this will overflow - checking behaviour
@@ -278,7 +279,7 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
 
         "statistical measures"_test = [] {
             // mean of integers returns double
-            Tensor<int> ints({5});
+            Tensor<int> ints(extents_from, {5});
             ints      = {1, 2, 3, 4, 5};
             auto mean = TensorOps<int>::mean(ints);
             expect(eq(mean, 3.0));
@@ -304,7 +305,7 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
     "1.2 Axis Reductions"_test = [] {
         "sum along axis with edge dimensions"_test = [] {
             "1xN matrix"_test = [] {
-                Tensor<int> row_matrix({1, 5});
+                Tensor<int> row_matrix(gr::extents_from, {1, 5});
                 std::iota(row_matrix.begin(), row_matrix.end(), 1);
 
                 auto sum0 = TensorOps<int>::sum_axis(row_matrix, 0);
@@ -313,7 +314,7 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
             };
 
             "Nx1 matrix"_test = [] {
-                Tensor<int> col_matrix({5, 1});
+                Tensor<int> col_matrix(gr::extents_from, {5, 1});
                 std::iota(col_matrix.begin(), col_matrix.end(), 1);
 
                 auto sum1 = TensorOps<int>::sum_axis(col_matrix, 1);
@@ -335,7 +336,7 @@ const boost::ut::suite<"Level 1: Reductions"> _level2_reductions = [] {
 
     "1.3 Min/Max Operations"_test = [] {
         "argmin/argmax with duplicates"_test = [] {
-            Tensor<int> with_dups({8});
+            Tensor<int> with_dups(extents_from, {8});
             with_dups = {3, 1, 4, 1, 5, 9, 2, 1};
 
             auto min_idx = TensorOps<int>::argmin(with_dups);
@@ -425,7 +426,6 @@ const boost::ut::suite<"Level 2: Matrix-Vector (GEMV)"> _level3_gemv = [] {
             }
 
             expect(tensors_approximately_equal(y, y_expected, 1e-5f));
-            std::println("result: {} vs. {}", y, y_expected);
         };
 
         "Matrix-Vector (y = A * x)"_test = [] {
@@ -856,7 +856,7 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
     "E.1 Tensor Reshaping"_test = [] {
         "transpose operations"_test = [] {
             // Square matrix
-            Tensor<int> A({3, 3});
+            Tensor<int> A(gr::extents_from, {3, 3});
             std::iota(A.begin(), A.end(), 0);
 
             auto At = transpose(A);
@@ -882,7 +882,7 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
         };
 
         "concatenation stress test"_test = [] {
-            Tensor<int> t1({2, 3}), t2({2, 3}), t3({2, 3});
+            Tensor<int> t1(gr::extents_from, {2, 3}), t2(gr::extents_from, {2, 3}), t3(gr::extents_from, {2, 3});
             t1.fill(1);
             t2.fill(2);
             t3.fill(3);
@@ -892,8 +892,8 @@ const boost::ut::suite<"Level E: Advanced Operations"> _level5_advanced = [] {
             expect(eq(concat.extent(1), 3UZ));
 
             // Verify values
-            for (std::size_t i = 0; i < 2; ++i) {
-                for (std::size_t j = 0; j < 3; ++j) {
+            for (std::size_t i = 0UZ; i < 2UZ; ++i) {
+                for (std::size_t j = 0UZ; j < 3UZ; ++j) {
                     expect(eq(concat[i, j], 1));
                     expect(eq(concat[i + 2, j], 2));
                     expect(eq(concat[i + 4, j], 3));
@@ -1048,9 +1048,9 @@ const boost::ut::suite<"Level F: Corner Cases"> _level6_corner = [] {
 
     "F.2 Type-specific behaviours"_test = [] {
         "integer overflow in gemm"_test = [] {
-            Tensor<std::int16_t> A({2, 2});
-            Tensor<std::int16_t> B({2, 2});
-            Tensor<std::int16_t> C({2, 2});
+            Tensor<std::int16_t> A(gr::extents_from, {2, 2});
+            Tensor<std::int16_t> B(gr::extents_from, {2, 2});
+            Tensor<std::int16_t> C(gr::extents_from, {2, 2});
 
             // Values that will overflow when multiplied
             A.fill(1000);
@@ -1070,8 +1070,8 @@ const boost::ut::suite<"Level F: Corner Cases"> _level6_corner = [] {
         };
 
         "unsigned integer underflow"_test = [] {
-            Tensor<std::uint8_t> A({2, 2});
-            Tensor<std::uint8_t> B({2, 2});
+            Tensor<std::uint8_t> A(gr::extents_from, {2, 2});
+            Tensor<std::uint8_t> B(gr::extents_from, {2, 2});
 
             A.fill(5);
             B.fill(10);
@@ -1117,7 +1117,7 @@ const boost::ut::suite<"Level F: Corner Cases"> _level6_corner = [] {
 
         "overlapping views (if supported)"_test = [] {
             // This tests behaviour with potentially overlapping memory
-            Tensor<int> A({10});
+            Tensor<int> A(gr::extents_from, {10});
             std::iota(A.begin(), A.end(), 0);
 
             // If views are supported, test overlapping operations

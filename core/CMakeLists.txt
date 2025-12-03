@@ -1,6 +1,7 @@
 add_library(
   gnuradio-core STATIC
   src/Value.cpp
+  src/ValueHelper.cpp
   src/PmtTypeHelpers.cpp
   src/Graph.cpp
   src/PluginLoader.cpp)
@@ -38,6 +39,7 @@ set(public_headers
     include/gnuradio-4.0/Value.hpp
     include/gnuradio-4.0/ValueHelper.hpp
     include/gnuradio-4.0/formatter/ValueFormatter.hpp
+    include/gnuradio-4.0/formatter/ValueHelperFormatter.hpp
     include/gnuradio-4.0/WaitStrategy.hpp
     include/gnuradio-4.0/YamlPmt.hpp)
 

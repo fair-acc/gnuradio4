@@ -1472,4 +1472,652 @@ const boost::ut::suite<"Value - std::format and operator<< support"> _format_sup
     };
 };
 
+#include <map>
+
+const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
+    using namespace boost::ut;
+    using namespace gr::pmt;
+
+    "maps with Value as mapped type"_test = [] {
+        "std::map<string, Value> copy construct"_test = [] {
+            std::map<std::string, Value> m{{"a", Value{1}}, {"b", Value{2}}};
+
+            Value v{m};
+
+            expect(v.is_map());
+            auto* internal = v.get_if<Value::Map>();
+            expect(internal->size() == 2_ul);
+            expect(internal->at("a") == Value{1});
+            expect(internal->at("b") == Value{2});
+            // Source unchanged
+            expect(m.size() == 2_ul);
+        };
+
+        "std::map<string, Value> move construct"_test = [] {
+            std::map<std::string, Value> m{{"key", Value{std::string{"moved"}}}};
+
+            Value v{std::move(m)};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("key") == Value{std::string{"moved"}});
+        };
+
+        "std::unordered_map<string, Value> copy construct"_test = [] {
+            std::unordered_map<std::string, Value> m{{"x", Value{3.14}}, {"y", Value{2.71}}};
+
+            Value v{m};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("x") == Value{3.14});
+            expect(v.get_if<Value::Map>()->at("y") == Value{2.71});
+        };
+
+        "std::unordered_map<string, Value> move construct"_test = [] {
+            std::unordered_map<std::string, Value> m{{"data", Value{42}}};
+
+            Value v{std::move(m)};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("data") == Value{42});
+        };
+
+        "assign std::map<string, Value>"_test = [] {
+            Value                        v{123}; // Start with scalar
+            std::map<std::string, Value> m{{"assigned", Value{true}}};
+
+            v = m;
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("assigned") == Value{true});
+        };
+
+        "move assign std::map<string, Value>"_test = [] {
+            Value                        v;
+            std::map<std::string, Value> m{{"moved", Value{99}}};
+
+            v = std::move(m);
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("moved") == Value{99});
+        };
+    };
+
+    "maps with fundamental types as mapped type"_test = [] {
+        "std::map<string, int>"_test = [] {
+            std::map<std::string, int> m{{"one", 1}, {"two", 2}, {"three", 3}};
+
+            Value v{m};
+
+            expect(v.is_map());
+            auto* internal = v.get_if<Value::Map>();
+            expect(internal->size() == 3_ul);
+            expect(internal->at("one") == Value{1});
+            expect(internal->at("two") == Value{2});
+            expect(internal->at("three") == Value{3});
+        };
+
+        "std::map<string, double>"_test = [] {
+            std::map<std::string, double> m{{"pi", 3.14159}, {"e", 2.71828}};
+
+            Value v{m};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("pi") == Value{3.14159});
+            expect(v.get_if<Value::Map>()->at("e") == Value{2.71828});
+        };
+
+        "std::map<string, float>"_test = [] {
+            std::map<std::string, float> m{{"half", 0.5f}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("half") == Value{0.5f});
+        };
+
+        "std::map<string, bool>"_test = [] {
+            std::map<std::string, bool> m{{"yes", true}, {"no", false}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("yes") == Value{true});
+            expect(v.get_if<Value::Map>()->at("no") == Value{false});
+        };
+
+        "std::map<string, int64_t>"_test = [] {
+            std::map<std::string, std::int64_t> m{{"big", 9'000'000'000'000'000'000LL}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("big") == Value{std::int64_t{9'000'000'000'000'000'000LL}});
+        };
+
+        "std::map<string, uint8_t>"_test = [] {
+            std::map<std::string, std::uint8_t> m{{"byte", std::uint8_t{255}}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("byte") == Value{std::uint8_t{255}});
+        };
+
+        "std::unordered_map<string, int>"_test = [] {
+            std::unordered_map<std::string, int> m{{"a", 10}, {"b", 20}};
+
+            Value v{m};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("a") == Value{10});
+            expect(v.get_if<Value::Map>()->at("b") == Value{20});
+        };
+
+        "std::map<string, complex<float>>"_test = [] {
+            using cf = std::complex<float>;
+            std::map<std::string, cf> m{{"z1", cf{1.0f, 2.0f}}, {"z2", cf{-1.0f, 0.5f}}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("z1") == Value{cf{1.0f, 2.0f}});
+            expect(v.get_if<Value::Map>()->at("z2") == Value{cf{-1.0f, 0.5f}});
+        };
+
+        "std::map<string, complex<double>>"_test = [] {
+            using cd = std::complex<double>;
+            std::map<std::string, cd> m{{"omega", cd{0.0, 1.0}}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("omega") == Value{cd{0.0, 1.0}});
+        };
+    };
+
+    "maps with strings as mapped type"_test = [] {
+        "std::map<string, string>"_test = [] {
+            std::map<std::string, std::string> m{{"greeting", "hello"}, {"farewell", "goodbye"}};
+
+            Value v{m};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("greeting") == Value{std::string{"hello"}});
+            expect(v.get_if<Value::Map>()->at("farewell") == Value{std::string{"goodbye"}});
+        };
+
+        "std::unordered_map<string, string>"_test = [] {
+            std::unordered_map<std::string, std::string> m{{"name", "Claude"}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("name") == Value{std::string{"Claude"}});
+        };
+
+        "std::map<string, const char*>"_test = [] {
+            std::map<std::string, const char*> m{{"literal", "test"}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("literal") == Value{std::string{"test"}});
+        };
+
+        "std::map<string, string_view>"_test = [] {
+            using namespace std::string_view_literals;
+            std::map<std::string, std::string_view> m{{"view", "content"sv}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("view") == Value{std::string{"content"}});
+        };
+    };
+
+    "assignment with fundamental types"_test = [] {
+        "assign std::map<string, int>"_test = [] {
+            Value v{std::string{"initial"}};
+
+            std::map<std::string, int> m{{"count", 42}};
+            v = m;
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("count") == Value{42});
+        };
+
+        "move assign std::map<string, double>"_test = [] {
+            Value                         v;
+            std::map<std::string, double> m{{"value", 1.5}};
+
+            v = std::move(m);
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("value") == Value{1.5});
+        };
+
+        "assign std::map<string, string>"_test = [] {
+            Value v{42};
+
+            std::map<std::string, std::string> m{{"text", "hello"}};
+            v = m;
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("text") == Value{std::string{"hello"}});
+        };
+    };
+
+    "edge cases"_test = [] {
+        "empty map<string, int>"_test = [] {
+            std::map<std::string, int> empty;
+
+            Value v{empty};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->empty());
+        };
+
+        "empty map<string, Value>"_test = [] {
+            std::map<std::string, Value> empty;
+
+            Value v{empty};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->empty());
+        };
+
+        "large map<string, int>"_test = [] {
+            std::map<std::string, int> m;
+            for (int i = 0; i < 1000; ++i) {
+                m["key_" + std::to_string(i)] = i;
+            }
+
+            Value v{m};
+
+            expect(v.is_map());
+            auto* internal = v.get_if<Value::Map>();
+            expect(internal->size() == 1000_ul);
+            expect(internal->at("key_0") == Value{0});
+            expect(internal->at("key_500") == Value{500});
+            expect(internal->at("key_999") == Value{999});
+        };
+
+        "single element map"_test = [] {
+            std::map<std::string, int> m{{"only", 1}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->size() == 1_ul);
+            expect(v.get_if<Value::Map>()->at("only") == Value{1});
+        };
+    };
+
+    "nested maps"_test = [] {
+        "nested: map<string, Value> containing map"_test = [] {
+            std::map<std::string, int> inner{{"inner_int", 42}};
+            Value                      innerValue{inner};
+
+            std::map<std::string, Value> outer{{"nested", innerValue}, {"scalar", Value{3.14}}};
+            Value                        v{outer};
+
+            expect(v.is_map());
+            auto* outerMap = v.get_if<Value::Map>();
+            expect(outerMap->at("scalar") == Value{3.14});
+
+            auto& nestedValue = outerMap->at("nested");
+            expect(nestedValue.is_map());
+            expect(nestedValue.get_if<Value::Map>()->at("inner_int") == Value{42});
+        };
+
+        "deeply nested maps"_test = [] {
+            std::map<std::string, int>   level3{{"deep", 999}};
+            std::map<std::string, Value> level2{{"level3", Value{level3}}};
+            std::map<std::string, Value> level1{{"level2", Value{level2}}};
+
+            Value v{level1};
+
+            auto* l1 = v.get_if<Value::Map>();
+            auto* l2 = l1->at("level2").get_if<Value::Map>();
+            auto* l3 = l2->at("level3").get_if<Value::Map>();
+            expect(l3->at("deep") == Value{999});
+        };
+    };
+
+    "map with pmr::string as key"_test = [] {
+        "std::map<pmr::string, int>"_test = [] {
+            std::map<std::pmr::string, int> m{{"pmr_key", 123}};
+
+            Value v{m};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("pmr_key") == Value{123});
+        };
+
+        "std::map<pmr::string, Value>"_test = [] {
+            std::map<std::pmr::string, Value> m{{"pmr", Value{456}}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("pmr") == Value{456});
+        };
+    };
+
+    "internal Value::Map type cross-check"_test = [] {
+        "internal Map type exact match"_test = [] {
+            Value::Map pmrMap;
+            pmrMap["internal"] = Value{789};
+
+            Value v{std::move(pmrMap)};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("internal") == Value{789});
+        };
+    };
+
+    "custom memory resource with map<string, Value>"_test = [] {
+        "custom memory resource with map<string, int>"_test = [] {
+            std::array<std::byte, 8192>         buffer;
+            std::pmr::monotonic_buffer_resource res{buffer.data(), buffer.size()};
+
+            std::map<std::string, int> m{{"custom", 42}, {"resource", 99}};
+            Value                      v{m, &res};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("custom") == Value{42});
+            expect(v.get_if<Value::Map>()->at("resource") == Value{99});
+        };
+
+        "custom memory resource with map<string, Value>"_test = [] {
+            std::array<std::byte, 8192>         buffer;
+            std::pmr::monotonic_buffer_resource res{buffer.data(), buffer.size()};
+
+            std::map<std::string, Value> m{{"val", Value{3.14}}};
+            Value                        v{m, &res};
+
+            expect(v.is_map());
+            expect(v.get_if<Value::Map>()->at("val") == Value{3.14});
+        };
+    };
+
+    "copy semantics verification"_test = [] {
+        "copy preserves source map<string, int>"_test = [] {
+            std::map<std::string, int> m{{"preserved", 42}};
+
+            Value v{m};
+
+            // Original unchanged
+            expect(m.size() == 1_ul);
+            expect(m.at("preserved") == 42);
+            // Value has independent copy
+            expect(v.get_if<Value::Map>()->at("preserved") == Value{42});
+        };
+
+        "copy preserves source map<string, Value>"_test = [] {
+            std::map<std::string, Value> m{{"preserved", Value{std::string{"original"}}}};
+
+            Value v{m};
+
+            // Original unchanged
+            expect(m.at("preserved") == Value{std::string{"original"}});
+            // Value has independent copy
+            expect(v.get_if<Value::Map>()->at("preserved") == Value{std::string{"original"}});
+        };
+    };
+
+    "type preservation"_test = [] {
+        "int32 vs int64 type preservation"_test = [] {
+            std::map<std::string, std::int32_t> m32{{"val", 42}};
+            std::map<std::string, std::int64_t> m64{{"val", 42}};
+
+            Value v32{m32};
+            Value v64{m64};
+
+            // Same numeric value but different types
+            expect(v32.get_if<Value::Map>()->at("val").holds<std::int32_t>());
+            expect(v64.get_if<Value::Map>()->at("val").holds<std::int64_t>());
+            // They should not be equal due to type strictness
+            expect(v32.get_if<Value::Map>()->at("val") != v64.get_if<Value::Map>()->at("val"));
+        };
+
+        "float vs double type preservation"_test = [] {
+            std::map<std::string, float>  mf{{"val", 1.5f}};
+            std::map<std::string, double> md{{"val", 1.5}};
+
+            Value vf{mf};
+            Value vd{md};
+
+            expect(vf.get_if<Value::Map>()->at("val").holds<float>());
+            expect(vd.get_if<Value::Map>()->at("val").holds<double>());
+        };
+    };
+
+    "special key values"_test = [] {
+        "empty string key"_test = [] {
+            std::map<std::string, int> m{{"", 0}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at("") == Value{0});
+        };
+
+        "unicode keys"_test = [] {
+            std::map<std::string, int> m{{"日本語", 1}, {"émoji", 2}, {"Ω", 3}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->size() == 3_ul);
+            expect(v.get_if<Value::Map>()->at("日本語") == Value{1});
+            expect(v.get_if<Value::Map>()->at("émoji") == Value{2});
+            expect(v.get_if<Value::Map>()->at("Ω") == Value{3});
+        };
+
+        "whitespace keys"_test = [] {
+            std::map<std::string, int> m{{" ", 1}, {"\t", 2}, {"\n", 3}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at(" ") == Value{1});
+            expect(v.get_if<Value::Map>()->at("\t") == Value{2});
+            expect(v.get_if<Value::Map>()->at("\n") == Value{3});
+        };
+
+        "long key"_test = [] {
+            std::string                longKey(1000, 'x');
+            std::map<std::string, int> m{{longKey, 42}};
+
+            Value v{m};
+
+            expect(v.get_if<Value::Map>()->at(std::pmr::string{longKey}) == Value{42});
+        };
+    };
+};
+
+#include <unordered_set>
+
+const boost::ut::suite<"std::hash<Value>"> _hashTests = [] {
+    using namespace boost::ut;
+    using namespace gr::pmt;
+
+    "empty Value hash"_test = [] {
+        Value v1;
+        Value v2;
+        expect(std::hash<Value>{}(v1) == std::hash<Value>{}(v2));
+    };
+
+    "scalar hash equality"_test = [] {
+        expect(std::hash<Value>{}(Value{42}) == std::hash<Value>{}(Value{42}));
+        expect(std::hash<Value>{}(Value{3.14}) == std::hash<Value>{}(Value{3.14}));
+        expect(std::hash<Value>{}(Value{std::string{"hello"}}) == std::hash<Value>{}(Value{std::string{"hello"}}));
+        expect(std::hash<Value>{}(Value{true}) == std::hash<Value>{}(Value{true}));
+    };
+
+    "scalar hash inequality - different values"_test = [] {
+        expect(std::hash<Value>{}(Value{42}) != std::hash<Value>{}(Value{43}));
+        expect(std::hash<Value>{}(Value{3.14}) != std::hash<Value>{}(Value{3.15}));
+        expect(std::hash<Value>{}(Value{std::string{"hello"}}) != std::hash<Value>{}(Value{std::string{"world"}}));
+    };
+
+    "scalar hash inequality - different types same value"_test = [] {
+        expect(std::hash<Value>{}(Value{std::int32_t{0}}) != std::hash<Value>{}(Value{std::uint32_t{0}})) << "Value hash for int32_t and uint32_t should differ";
+        expect(std::hash<Value>{}(Value{std::int32_t{42}}) != std::hash<Value>{}(Value{std::int64_t{42}})) << "Value hash for int32_t and int64_t should differ";
+        expect(std::hash<Value>{}(Value{float{1.0f}}) != std::hash<Value>{}(Value{double{1.0}})) << "Value hash for float and double should differ";
+    };
+
+    "complex scalar hash"_test = [] {
+        using cf = std::complex<float>;
+        using cd = std::complex<double>;
+
+        expect(std::hash<Value>{}(Value{cf{1.0f, 2.0f}}) == std::hash<Value>{}(Value{cf{1.0f, 2.0f}}));
+        expect(std::hash<Value>{}(Value{cf{1.0f, 2.0f}}) != std::hash<Value>{}(Value{cf{2.0f, 1.0f}}));
+        expect(std::hash<Value>{}(Value{cf{1.0f, 2.0f}}) != std::hash<Value>{}(Value{cd{1.0, 2.0}}));
+    };
+
+    "tensor hash equality"_test = [] {
+        using namespace gr;
+
+        Tensor<int> t1{data_from, {1, 2, 3}};
+        Tensor<int> t2{data_from, {1, 2, 3}};
+        expect(std::hash<Value>{}(Value{t1}) == std::hash<Value>{}(Value{t2}));
+
+        Tensor<double> td1{{1.0, 2.0}};
+        Tensor<double> td2{{1.0, 2.0}};
+        expect(std::hash<Value>{}(Value{td1}) == std::hash<Value>{}(Value{td2}));
+    };
+
+    "tensor hash inequality - different elements"_test = [] {
+        using namespace gr;
+
+        Tensor<int> t1{data_from, {1, 2, 3}};
+        Tensor<int> t2{data_from, {1, 2, 4}};
+        expect(std::hash<Value>{}(Value{t1}) != std::hash<Value>{}(Value{t2}));
+    };
+
+    "tensor hash inequality - different sizes"_test = [] {
+        using namespace gr;
+
+        Tensor<int> t1{data_from, {1, 2}};
+        Tensor<int> t2{data_from, {1, 2, 0}};
+        expect(std::hash<Value>{}(Value{t1}) != std::hash<Value>{}(Value{t2}));
+    };
+
+    "tensor hash inequality - different element types"_test = [] {
+        using namespace gr;
+
+        Tensor<std::int32_t> t1{data_from, {1, 2, 3}};
+        Tensor<std::int64_t> t2{data_from, {1, 2, 3}};
+        expect(std::hash<Value>{}(Value{t1}) != std::hash<Value>{}(Value{t2}));
+    };
+
+    "tensor vs scalar hash inequality"_test = [] {
+        using namespace gr;
+
+        Value       scalar{42};
+        Tensor<int> t{data_from, {42}};
+        Value       tensor{t};
+        expect(std::hash<Value>{}(scalar) != std::hash<Value>{}(tensor));
+    };
+
+    "map hash equality"_test = [] {
+        std::map<std::string, Value> m1{{"a", Value{1}}, {"b", Value{2}}};
+        std::map<std::string, Value> m2{{"a", Value{1}}, {"b", Value{2}}};
+        expect(std::hash<Value>{}(Value{m1}) == std::hash<Value>{}(Value{m2}));
+    };
+
+    "map hash order independence"_test = [] {
+        std::unordered_map<std::string, Value> m1;
+        m1["a"] = Value{1};
+        m1["b"] = Value{2};
+        m1["c"] = Value{3};
+
+        std::unordered_map<std::string, Value> m2; // N.B. different insertion order
+        m2["c"] = Value{3};
+        m2["a"] = Value{1};
+        m2["b"] = Value{2};
+
+        expect(std::hash<Value>{}(Value{m1}) == std::hash<Value>{}(Value{m2}));
+    };
+
+    "map hash order independence - std::map vs unordered_map same content"_test = [] {
+        std::map<std::string, Value>           ordered{{"x", Value{10}}, {"y", Value{20}}};
+        std::unordered_map<std::string, Value> unordered{{"y", Value{20}}, {"x", Value{10}}};
+
+        Value v1{ordered};
+        Value v2{unordered};
+
+        // both convert to the same internal Map type, so container types are equal
+        expect(v1.container_type() == v2.container_type());
+        // same content should produce same hash (order-independent)
+        expect(std::hash<Value>{}(v1) == std::hash<Value>{}(v2));
+    };
+
+    "map hash inequality - different values"_test = [] {
+        std::map<std::string, Value> m1{{"a", Value{1}}};
+        std::map<std::string, Value> m2{{"a", Value{2}}};
+        expect(std::hash<Value>{}(Value{m1}) != std::hash<Value>{}(Value{m2}));
+    };
+
+    "map hash inequality - different keys"_test = [] {
+        std::map<std::string, Value> m1{{"a", Value{1}}};
+        std::map<std::string, Value> m2{{"b", Value{1}}};
+        expect(std::hash<Value>{}(Value{m1}) != std::hash<Value>{}(Value{m2}));
+    };
+
+    "nested map hash"_test = [] {
+        std::map<std::string, Value> inner1{{"x", Value{100}}};
+        std::map<std::string, Value> inner2{{"x", Value{100}}};
+
+        std::map<std::string, Value> outer1{{"nested", Value{inner1}}, {"scalar", Value{42}}};
+        std::map<std::string, Value> outer2{{"scalar", Value{42}}, {"nested", Value{inner2}}};
+
+        expect(std::hash<Value>{}(Value{outer1}) == std::hash<Value>{}(Value{outer2}));
+    };
+
+    "nested map hash inequality"_test = [] {
+        std::map<std::string, Value> inner1{{"x", Value{100}}};
+        std::map<std::string, Value> inner2{{"x", Value{999}}};
+
+        std::map<std::string, Value> outer1{{"nested", Value{inner1}}};
+        std::map<std::string, Value> outer2{{"nested", Value{inner2}}};
+
+        expect(std::hash<Value>{}(Value{outer1}) != std::hash<Value>{}(Value{outer2}));
+    };
+
+    "usable in unordered_set"_test = [] {
+        std::unordered_set<Value> set;
+
+        set.insert(Value{1});
+        set.insert(Value{2});
+        set.insert(Value{1}); // duplicate
+
+        expect(set.size() == 2_ul);
+        expect(set.contains(Value{1}));
+        expect(set.contains(Value{2}));
+        expect(!set.contains(Value{3}));
+    };
+
+    "usable in unordered_map as key"_test = [] {
+        std::unordered_map<Value, std::string> map;
+
+        map[Value{std::string{"key1"}}] = "value1";
+        map[Value{42}]                  = "value2";
+        map[Value{std::string{"key1"}}] = "updated"; // overwrite
+
+        expect(map.size() == 2_ul);
+        expect(map.at(Value{std::string{"key1"}}) == "updated");
+        expect(map.at(Value{42}) == "value2");
+    };
+
+    "hash consistency across calls"_test = [] {
+        Value v{std::string{"test"}};
+
+        auto h1 = std::hash<Value>{}(v);
+        auto h2 = std::hash<Value>{}(v);
+        auto h3 = std::hash<Value>{}(v);
+
+        expect(h1 == h2);
+        expect(h2 == h3);
+    };
+
+    "hash distribution sanity check"_test = [] {
+        // Simple check that different small integers produce different hashes
+        std::unordered_set<std::size_t> hashes;
+        for (int i = 0; i < 100; ++i) {
+            hashes.insert(std::hash<Value>{}(Value{i}));
+        }
+        // Expect no collisions for 100 consecutive integers
+        expect(hashes.size() == 100_ul);
+    };
+};
+
 int main() { /* boost::ut auto-runs */ }
