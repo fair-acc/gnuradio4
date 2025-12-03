@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <ranges>
 #include <stdexcept>
 #include <vector>
 
@@ -33,24 +34,24 @@ This block estimates the frequency of a signal using the time-domain algorithm d
       Measurement, Volume 201, 2022,
       https://doi.org/10.1016/j.measurement.2022.111673
 )"">;
-    using TParent     = Block<FrequencyEstimatorTimeDomain<T>, Args...>;
+    using TParent     = Block<FrequencyEstimatorTimeDomain<T, Args...>, Args...>;
 
     PortIn<T>  in;
     PortOut<T> out;
 
     // settings
     Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>            sample_rate{1e3f};
-    Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>            f_min{40};
-    Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">>      f_expected{50};
-    Annotated<float, "f_max", Doc<"exp. max/LP frequency (-1: disable)">, Unit<"Hz">> f_max{60};
-    Annotated<gr::Size_t, "n periods rate", Doc<"number of periods to average over">> n_periods{4};
+    Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>            f_min{40.f};
+    Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">>      f_expected{50.f};
+    Annotated<float, "f_max", Doc<"exp. max/LP frequency (-1: disable)">, Unit<"Hz">> f_max{60.f};
+    Annotated<gr::Size_t, "n periods rate", Doc<"number of periods to average over">> n_periods{4U};
     Annotated<T, "epsilon", Doc<"numerical error threshold">>                         epsilon{T(1e-8)};
 
     GR_MAKE_REFLECTABLE(FrequencyEstimatorTimeDomain, in, out, sample_rate, f_expected, f_min, f_max, n_periods, epsilon);
 
     // private internal state
-    T          _prevFrequency{50.0};   // previous frequency value for continuity
-    gr::Size_t _n_period_estimate{60}; // number of samples for estimation period according to [0]
+    T          _prevFrequency{T(50)};   // previous frequency value for continuity
+    gr::Size_t _n_period_estimate{60U}; // number of samples for estimation period according to [0]
 
     FilterCoefficients<T> _singleFilterSection;
     HistoryBuffer<T>      _inputHistory{32UZ};
@@ -58,8 +59,8 @@ This block estimates the frequency of a signal using the time-domain algorithm d
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         if (newSettings.contains("n_periods") || newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max")) {
-            if (f_min < 0 || f_max >= sample_rate || f_expected < 0 || f_expected >= sample_rate) {
-                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate: {} (N.B. f_max < 0 -> disable low-pass)", f_min, f_expected, f_max, sample_rate));
+            if (f_min < 0.f || f_max >= sample_rate / 2.f || f_expected < 0.f || f_expected >= sample_rate / 2.f) {
+                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate/2: {} (Nyquist limit, N.B. f_max < 0 -> disable low-pass)", f_min, f_expected, f_max, sample_rate / 2.f));
             }
             initialiseFilter();
         }
@@ -69,7 +70,7 @@ This block estimates the frequency of a signal using the time-domain algorithm d
         // Calculate filter coefficients
         // * IIR over FIR: reduced numerical complexity and minimizes group delay
         // * BESSEL: optimizes phase linearity in the pass-band and in turn frequency accuracy
-        _n_period_estimate = n_periods * static_cast<gr::Size_t>(f_min > 0 ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value);
+        _n_period_estimate = n_periods * static_cast<gr::Size_t>(f_min > 0.f ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value);
         using namespace gr::filter::iir;
         _singleFilterSection = iir::designFilter<T, 0UZ>(Type::LOWPASS, FilterParameters{.order = 2UZ, .fLow = static_cast<double>(f_max), .fs = static_cast<double>(sample_rate)}, Design::BESSEL);
         _inputHistory        = HistoryBuffer<T>(std::bit_ceil(_singleFilterSection.b.size()));
@@ -86,8 +87,8 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     {
         // process input sample through the IIR filter
         _inputHistory.push_front(input);
-        const T output = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), static_cast<T>(0))         // feed-forward
-                         - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), static_cast<T>(0)); // feed-back
+        const T output = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), T(0))         // feed-forward
+                         - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), T(0)); // feed-back
         _outputHistory.push_front(output);
         _prevFrequency = estimateFrequency();
         return _prevFrequency;
@@ -110,8 +111,8 @@ This block estimates the frequency of a signal using the time-domain algorithm d
                 // process input sample through the IIR filter
                 _inputHistory.push_front(sample);
 
-                const T output_sample = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), static_cast<T>(0))         // feed-forward
-                                        - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), static_cast<T>(0)); // feed-back
+                const T output_sample = std::inner_product(_singleFilterSection.b.cbegin(), _singleFilterSection.b.cend(), _inputHistory.cbegin(), T(0))         // feed-forward
+                                        - std::inner_product(_singleFilterSection.a.cbegin() + 1, _singleFilterSection.a.cend(), _outputHistory.cbegin(), T(0)); // feed-back
 
                 _outputHistory.push_front(output_sample);
             }
@@ -131,9 +132,9 @@ private:
 
         // implement reference algorithm from [0] (fast, low-group delay)
         // Step 3: compute accumulator A, B, and C
-        T accA = 0;
-        T accB = 0;
-        T accC = 0;
+        T accA = T(0);
+        T accB = T(0);
+        T accC = T(0);
 
         auto         bufferStart = _outputHistory.begin();
         std::span<T> data(bufferStart, std::next(bufferStart, static_cast<std::ptrdiff_t>(_n_period_estimate)));
@@ -162,7 +163,7 @@ private:
 
         // Step 4: Calculate z and ensure it's within [-1, 1]
         T z = (accC / accB) - T(1);
-        if (z >= T(1) || z <= -T(1)) {
+        if (z >= T(1) || z <= T(-1)) {
             return _prevFrequency; // Return previous frequency if conditions are not met
         }
 
@@ -195,7 +196,7 @@ This block estimates the frequency of a signal using the frequency-domain algori
     PortOut<T> out;
 
     // settings
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>       sample_rate{1.f};
+    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>       sample_rate{1e3f};
     Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>       f_min{40.f};
     Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">> f_expected{50.f};
     Annotated<float, "f_max", Doc<"exp. max frequency">, Unit<"Hz">>             f_max{60.f};
@@ -205,8 +206,8 @@ This block estimates the frequency of a signal using the frequency-domain algori
     GR_MAKE_REFLECTABLE(FrequencyEstimatorFrequencyDomain, in, out, sample_rate, f_expected, f_min, f_max, min_fft_size, epsilon);
 
     // private internal state
-    T           _prevFrequency{50.0}; // previous frequency value for continuity
-    std::size_t _minFFT{256UZ};       // number of min required sample (power-of-two)
+    T           _prevFrequency{T(50)}; // previous frequency value for continuity
+    std::size_t _minFFT{256UZ};        // number of min required sample (power-of-two)
 
     HistoryBuffer<T> _inputHistory{32UZ};
 
@@ -217,16 +218,16 @@ This block estimates the frequency of a signal using the frequency-domain algori
     std::vector<T>                         _magnitudeSpectrum;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains("n_periods") || newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max") || newSettings.contains("min_fft_size")) {
-            if (f_min < 0 || f_max >= sample_rate || f_expected < 0 || f_expected >= sample_rate) {
-                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate: {}", f_min, f_expected, f_max, sample_rate));
+        if (newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max") || newSettings.contains("min_fft_size")) {
+            if (f_min < 0.f || f_max >= sample_rate / 2.f || f_expected < 0.f || f_expected >= sample_rate / 2.f) {
+                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate/2: {} (Nyquist limit)", f_min, f_expected, f_max, sample_rate / 2.f));
             }
             initialiseFFT();
         }
     }
 
     void initialiseFFT() {
-        _minFFT = std::bit_ceil(std::max(std::size_t(min_fft_size.value), std::size_t(f_min > 0 ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value)));
+        _minFFT = std::bit_ceil(std::max(std::size_t(min_fft_size.value), std::size_t(f_min > 0.f ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value)));
 
         _inputHistory = HistoryBuffer<T>(_minFFT);
         if constexpr (not TParent::ResamplingControl::kIsConst) {
@@ -277,7 +278,7 @@ This block estimates the frequency of a signal using the frequency-domain algori
 
 private:
     T estimateFrequencyFFT() {
-        // implement reference algorithm from [1]
+        // implement reference algorithm from [0]
         using namespace gr::algorithm::fft;
 
         if (_inputHistory.size() < _minFFT) {
@@ -300,15 +301,16 @@ private:
         std::size_t i_max       = static_cast<std::size_t>(std::ceil((f_max / sample_rate) * scaled_size));
 
         // ensure indices are within bounds
-        i_min = std::clamp(i_min, std::size_t(1), _magnitudeSpectrum.size() - 1UZ);
-        i_max = std::clamp(i_max, std::size_t(1), _magnitudeSpectrum.size() - 1UZ);
+        i_min = std::clamp(i_min, 1UZ, _magnitudeSpectrum.size() - 1UZ);
+        i_max = std::clamp(i_max, 1UZ, _magnitudeSpectrum.size() - 1UZ);
 
         // find the index of the maximum peak in the magnitude spectrum within the [i_min, i_max] range
-        const auto        it_max = std::max_element(_magnitudeSpectrum.begin() + static_cast<difference_type>(i_min), _magnitudeSpectrum.begin() + static_cast<difference_type>(i_max));
-        const std::size_t k_max  = std::size_t(std::distance(_magnitudeSpectrum.begin(), it_max));
+        auto              searchRange = std::ranges::subrange(_magnitudeSpectrum.begin() + static_cast<std::ptrdiff_t>(i_min), _magnitudeSpectrum.begin() + static_cast<std::ptrdiff_t>(i_max));
+        const auto        it_max      = std::ranges::max_element(searchRange);
+        const std::size_t k_max       = static_cast<std::size_t>(std::distance(_magnitudeSpectrum.begin(), it_max));
 
         // ensure the peak is not at the edges to allow interpolation with neighbours
-        if (k_max == 0 || k_max >= _magnitudeSpectrum.size() - 1) {
+        if (k_max == 0UZ || k_max >= _magnitudeSpectrum.size() - 1UZ) {
             return _prevFrequency; // Return previous frequency if peak is at the edges
         }
 
@@ -317,8 +319,7 @@ private:
         const T S_k   = _magnitudeSpectrum[k_max];
         const T S_kp1 = _magnitudeSpectrum[k_max + 1];
 
-        if (!std::isfinite(S_km1) || !std::isfinite(S_k) || !std::isfinite(S_kp1) //
-            || S_km1 <= T(0) || S_k <= T(0) || S_kp1 <= T(0)) {
+        if (!std::isfinite(S_km1) || !std::isfinite(S_k) || !std::isfinite(S_kp1) || S_km1 <= T(0) || S_k <= T(0) || S_kp1 <= T(0)) {
             return _prevFrequency; // cannot compute logarithm
         }
 
@@ -327,7 +328,7 @@ private:
         const T log_S_k   = std::log(S_k);
         const T log_S_kp1 = std::log(S_kp1);
 
-        const T denominator = 2 * log_S_k - log_S_km1 - log_S_kp1;
+        const T denominator = T(2) * log_S_k - log_S_km1 - log_S_kp1;
         if (!std::isfinite(denominator) || std::abs(denominator) < epsilon) {
             return _prevFrequency;
         }

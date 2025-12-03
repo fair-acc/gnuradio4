@@ -1,17 +1,18 @@
 #include <boost/ut.hpp>
 #include <cmath>
 #include <random>
+#include <span>
 #include <vector>
 
 #include <gnuradio-4.0/filter/FrequencyEstimator.hpp>
 
 namespace {
-auto generateTestSignal = [](float trueFreq, float fs, float noise, size_t numSamples) {
+auto generateTestSignal = [](float trueFreq, float fs, float noise, std::size_t numSamples) {
     std::vector<float>                    samples(numSamples);
     std::mt19937                          gen(42); // Fixed seed for unit-test reproducibility
     std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
-    static float                          phase = 0.f; // ensures that sine-wave doesn't have non-physical discontinuities
-    for (size_t i = 0; i < numSamples; ++i) {
+    float                                 phase = 0.f; // Local phase - resets for each signal generation
+    for (std::size_t i = 0UZ; i < numSamples; ++i) {
         phase += 2.f * std::numbers::pi_v<float> * trueFreq / fs;
         samples[i] = std::sin(phase) + noise * dist(gen);
     }
@@ -19,7 +20,7 @@ auto generateTestSignal = [](float trueFreq, float fs, float noise, size_t numSa
 };
 
 template<typename EstimatorType, typename ProcessFunc>
-void testFrequencyEstimator(EstimatorType& estimator, ProcessFunc processFunc, const std::vector<float>& testFrequencies, float sample_rate, size_t numSamples, float noiseAmp, float tolerance) {
+void testFrequencyEstimator(EstimatorType& estimator, ProcessFunc processFunc, std::span<const float> testFrequencies, float sample_rate, std::size_t numSamples, float noiseAmp, float tolerance) {
     using namespace boost::ut;
 
     std::vector<float> frequencyTrue;
@@ -46,7 +47,7 @@ void testFrequencyEstimator(EstimatorType& estimator, ProcessFunc processFunc, c
         float maxDeviation = *std::ranges::max_element(deviations);
         if (maxDeviation > tolerance) {
             std::println("Frequency estimates for {} exceed tolerance of {:.6f} Hz (max deviation: {:.6f} Hz):\ntrue [Hz], estimated [Hz], deviation [Hz]", gr::meta::type_name<EstimatorType>(), tolerance, maxDeviation);
-            for (std::size_t i = 0; i < frequencyEstimates.size(); ++i) {
+            for (std::size_t i = 0UZ; i < frequencyEstimates.size(); ++i) {
                 std::println("{:.4f}, {:.4f}, {:.6f}", frequencyTrue[i], frequencyEstimates[i], std::abs(frequencyEstimates[i] - frequencyTrue[i]));
             }
         } else {
@@ -63,16 +64,18 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
     using namespace boost::ut;
     using namespace gr::filter;
 
-    constexpr static std::array<float, 30> testFrequencies{49.9f,                               //
-        50.0f, 50.001f, 50.002f, 50.003f, 50.004f, 50.005f, 50.006f, 50.007f, 50.008f, 50.009f, //
-        50.01f, 50.02f, 50.03f, 50.04f, 50.05f, 50.06f, 50.07f, 50.08f, 50.09f,                 //
-        50.1f, 50.2f, 50.3f, 50.4f, 50.5f, 50.6f, 50.7f, 50.8f, 50.9f, 51.0f};
+    constexpr static std::array<float, 30> testFrequencies{
+        49.9f,                                                                                  //
+        50.0f, 50.001f, 50.002f, 50.003f, 50.004f, 50.005f, 50.006f, 50.007f, 50.008f, 50.009f, // sub-mHz resolution
+        50.01f, 50.02f, 50.03f, 50.04f, 50.05f, 50.06f, 50.07f, 50.08f, 50.09f,                 // 10 mHz steps
+        50.1f, 50.2f, 50.3f, 50.4f, 50.5f, 50.6f, 50.7f, 50.8f, 50.9f, 51.0f                    // 100 mHz steps
+    };
 
     "Frequency Estimator - Time Domain"_test = [] {
-        constexpr float       sample_rate = 1000.0f; // sampling frequency 1 kHz
-        constexpr std::size_t numSamples  = 128UZ;   // number of samples
-        constexpr float       noiseAmp    = 0.01f;   // 1% noise level
-        constexpr float       tolerance   = 0.03f;
+        constexpr float       sample_rate = 1000.0f; // 1 kHz sampling - 20x oversampling for 50 Hz
+        constexpr std::size_t numSamples  = 128UZ;   // ~6.4 periods at 50 Hz, sufficient for 3-period averaging
+        constexpr float       noiseAmp    = 0.01f;   // 1% noise - typical for clean power systems
+        constexpr float       tolerance   = 0.03f;   // 30 mHz tolerance - meets grid monitoring requirements
 
         FrequencyEstimatorTimeDomain<float> estimator;
         estimator.sample_rate = sample_rate;
@@ -91,14 +94,14 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
             }
         };
 
-        testFrequencyEstimator(estimator, processFunc, std::vector<float>(testFrequencies.begin(), testFrequencies.end()), sample_rate, numSamples, noiseAmp, tolerance);
+        testFrequencyEstimator(estimator, processFunc, testFrequencies, sample_rate, numSamples, noiseAmp, tolerance);
     };
 
-    skip / "Frequency Estimator - Time Domain Decimating"_test = [] {
-        constexpr float       sample_rate = 1000.0f; // sampling frequency 1 kHz
-        constexpr std::size_t numSamples  = 1280UZ;  // number of samples (multiple of chunk size)
+    "Frequency Estimator - Time Domain Decimating"_test = [] {
+        constexpr float       sample_rate = 1000.0f; // 1 kHz sampling
+        constexpr std::size_t numSamples  = 1280UZ;  // Multiple of expected chunk size (128 * 10)
         constexpr float       noiseAmp    = 0.01f;   // 1% noise level
-        constexpr float       tolerance   = 0.03f;
+        constexpr float       tolerance   = 0.03f;   // 30 mHz tolerance
 
         FrequencyEstimatorTimeDomainDecimating<float> estimator;
         estimator.sample_rate = sample_rate;
@@ -113,7 +116,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
             std::size_t chunkSize = estimator.input_chunk_size;
             std::size_t numChunks = samples.size() / chunkSize;
 
-            for (std::size_t i = 0; i < numChunks; ++i) {
+            for (std::size_t i = 0UZ; i < numChunks; ++i) {
                 std::span<const float> inputChunk(samples.data() + i * chunkSize, chunkSize);
                 float                  outputFrequency;
                 std::span<float>       outputChunk(&outputFrequency, 1);
@@ -123,14 +126,16 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
             }
         };
 
-        testFrequencyEstimator(estimator, processFunc, std::vector<float>(testFrequencies.begin(), testFrequencies.end()), sample_rate, numSamples, noiseAmp, tolerance);
+        testFrequencyEstimator(estimator, processFunc, testFrequencies, sample_rate, numSamples, noiseAmp, tolerance);
     };
 
     "Frequency Estimator - Frequency Domain"_test = [] {
-        constexpr float       sample_rate = 1000.0f; // sampling frequency 1 kHz
-        constexpr std::size_t numSamples  = 4100UZ;  // number of samples
+        constexpr float       sample_rate = 1000.0f; // 1 kHz sampling
+        constexpr std::size_t numSamples  = 4100UZ;  // Slightly more than 4096 FFT size for settling
         constexpr float       noiseAmp    = 0.01f;   // 1% noise level
-        constexpr float       tolerance   = 1.0f;
+        // Note: FFT resolution is fs/N = 1000/4096 ≈ 0.244 Hz; Gaussian interpolation improves this
+        // but 1 Hz tolerance is conservative for the 4096-point FFT
+        constexpr float tolerance = 1.0f;
 
         FrequencyEstimatorFrequencyDomain<float> estimator;
         estimator.sample_rate  = sample_rate;
@@ -142,7 +147,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
 
         // Processing function using processOne
         auto processFunc = [&estimator](const std::vector<float>& samples, std::vector<float>& frequencyTrue, std::vector<float>& frequencyEstimates, float trueFreq) {
-            size_t i = 0;
+            std::size_t i = 0UZ;
             for (const auto& sample : samples) {
                 float freqEstimate = estimator.processOne(sample);
                 if (i > estimator.min_fft_size) {
@@ -153,14 +158,14 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
             }
         };
 
-        testFrequencyEstimator(estimator, processFunc, std::vector<float>(testFrequencies.begin(), testFrequencies.end()), sample_rate, numSamples, noiseAmp, tolerance);
+        testFrequencyEstimator(estimator, processFunc, testFrequencies, sample_rate, numSamples, noiseAmp, tolerance);
     };
 
-    skip / "Frequency Estimator - Frequency Domain Decimating"_test = [] {
-        constexpr float       sample_rate = 1000.0f; // sampling frequency 1 kHz
-        constexpr std::size_t numSamples  = 40960UZ; // number of samples (multiple of chunk size)
+    "Frequency Estimator - Frequency Domain Decimating"_test = [] {
+        constexpr float       sample_rate = 1000.0f; // 1 kHz sampling
+        constexpr std::size_t numSamples  = 40960UZ; // 10x FFT size for multiple chunks
         constexpr float       noiseAmp    = 0.01f;   // 1% noise level
-        constexpr float       tolerance   = 1.0f;
+        constexpr float       tolerance   = 1.0f;    // 1 Hz tolerance (limited by FFT bin resolution)
 
         FrequencyEstimatorFrequencyDomainDecimating<float> estimator;
         estimator.sample_rate      = sample_rate;
@@ -175,7 +180,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
             std::size_t chunkSize = estimator.input_chunk_size;
             std::size_t numChunks = samples.size() / chunkSize;
 
-            for (std::size_t i = 0; i < numChunks; ++i) {
+            for (std::size_t i = 0UZ; i < numChunks; ++i) {
                 std::span<const float> inputChunk(samples.data() + i * chunkSize, chunkSize);
                 float                  outputFrequency;
                 std::span<float>       outputChunk(&outputFrequency, 1);
@@ -185,7 +190,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
             }
         };
 
-        testFrequencyEstimator(estimator, processFunc, std::vector<float>(testFrequencies.begin(), testFrequencies.end()), sample_rate, numSamples, noiseAmp, tolerance);
+        testFrequencyEstimator(estimator, processFunc, testFrequencies, sample_rate, numSamples, noiseAmp, tolerance);
     };
 };
 
