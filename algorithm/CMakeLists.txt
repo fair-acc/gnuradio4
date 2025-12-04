@@ -9,10 +9,10 @@ target_link_libraries(
             vir
             magic_enum)
 
-if(GR_NATIVE_HTTP_ENABLED)
+if(NOT EMSCRIPTEN AND GR_HTTP_ENABLED)
   target_link_libraries(gnuradio-algorithm INTERFACE cpr::cpr)
 endif()
-target_compile_definitions(gnuradio-algorithm INTERFACE GR_NATIVE_HTTP_ENABLED=$<BOOL:${GR_NATIVE_HTTP_ENABLED}>)
+target_compile_definitions(gnuradio-algorithm INTERFACE GR_HTTP_ENABLED=$<BOOL:${GR_HTTP_ENABLED}>)
 
 if(ENABLE_EXAMPLES)
   add_subdirectory(benchmarks)

@@ -366,9 +366,10 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG v0.18.1)
 
+set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
-set(GR_NATIVE_HTTP_ENABLED FALSE)
 if(NOT EMSCRIPTEN)
+  set(GR_HTTP_ENABLED FALSE)
   if(NOT
      GR_ENABLE_NATIVE_HTTP
      STREQUAL
@@ -391,7 +392,7 @@ if(NOT EMSCRIPTEN)
         cpr
         GIT_REPOSITORY https://github.com/libcpr/cpr.git
         GIT_TAG 1.14.1)
-      set(GR_NATIVE_HTTP_ENABLED TRUE)
+      set(GR_HTTP_ENABLED TRUE)
     endif()
   endif()
 endif()

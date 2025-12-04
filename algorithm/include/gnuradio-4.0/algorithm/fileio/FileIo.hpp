@@ -25,7 +25,7 @@
 #include <thread>
 #include <vector>
 
-#if !defined(__EMSCRIPTEN__) && GR_NATIVE_HTTP_ENABLED
+#if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
 #include <cpr/cpr.h>
 #endif
 #if __EMSCRIPTEN__
@@ -46,9 +46,13 @@
  *    - download:/ URIs (WASM "download to disk")
  *
  *  Reader:
- *    - ReaderConfig controls chunkBytes, offset, httpTimeoutMs and longPolling.
+ *    - ReaderConfig controls chunkBytes, offset, httpTimeoutNanos and longPolling.
  *    - readAsync(uri, config) returns a Reader backed by a CircularBuffer.
  *    - poll(cb, maxSize, doWait) delivers chunks or errors via PollResult, where cb is called with either data or an error, and a final message.
+ *      maxSize should typically be set to number of free bytes in the caller’s output buffer. This guarantees that all data reported by a single poll()
+ *      call can be written directly without intermediate storage. The default is std::numeric_limits<std::size_t>::max(), meaning "no explicit limit".
+ *      The caller should ensure that ReaderConfig::chunkBytes <= maxSize; otherwise an error is returned, and if that error is not handled correctly in cb,
+ *      user code may end up in an infinite loop.
  *    - get() is a convenience: it blocks on a worker thread and concatenates all data into a single std::vector<uint8_t>.
  *    - cancel() requests a soft cancel; for Emscripten this is best-effort (we cannot synchronously abort emscripten_fetch on another thread).
  *
@@ -74,14 +78,14 @@
  *    - For local files, WriteResult always has httpStatus=0 and an empty body.
  *
  *  Native HTTP implementation:
- *    - Enabled when GR_NATIVE_HTTP_ENABLED=1, using CPR::Session.
+ *    - Enabled when GR_HTTP_ENABLED=1, using CPR::Session.
  *    - Long-polling is handled by repeatedly calling runHttpGetNativeOnce().
  *    - HTTP errors (status >= 400) or CPR errors are reported as gr::Error.
  *
  *  CMake controls for native HTTP (CPR + libcurl):
- *    - GR_ENABLE_NATIVE_HTTP=ON: Require libcurl. If libcurl is found, CPR is enabled and GR_NATIVE_HTTP_ENABLED=1; otherwise CMake fails with an error.
- *    - GR_ENABLE_NATIVE_HTTP=OPTIONAL: Enable CPR only if system libcurl is found. If libcurl is missing, GR_NATIVE_HTTP_ENABLED=0 and HTTP(S) operations are treated as "disabled at build time".
- *    - GR_ENABLE_NATIVE_HTTP = OFF: CPR is never fetched; GR_NATIVE_HTTP_ENABLED=0 and all HTTP(S) operations return "disabled at build time".
+ *    - GR_ENABLE_NATIVE_HTTP=ON: Require libcurl. If libcurl is found, CPR is enabled and GR_HTTP_ENABLED=1; otherwise CMake fails with an error.
+ *    - GR_ENABLE_NATIVE_HTTP=OPTIONAL: Enable CPR only if system libcurl is found. If libcurl is missing, GR_HTTP_ENABLED=0 and HTTP(S) operations are treated as "disabled at build time".
+ *    - GR_ENABLE_NATIVE_HTTP = OFF: CPR is never fetched; GR_HTTP_ENABLED=0 and all HTTP(S) operations return "disabled at build time".
  *
  *  Emscripten implementation:
  *    - Uses emscripten_fetch + callbacks for GET/POST, with optional longPolling (recursive re-fetch).
@@ -98,11 +102,13 @@ inline constexpr std::string_view kMessageDataKey = "data";
 }
 
 struct ReaderConfig {
-    std::size_t                chunkBytes    = 65536;
-    std::optional<std::size_t> offset        = std::nullopt;
-    std::int32_t               httpTimeoutMs = 30000; // only for http(s)
-    std::size_t                bufferMinSize = 1024;  // one gr::Message per slot
-    bool                       longPolling   = false;
+    // Note: When using Reader::poll(cb, maxSize, doWait) - the caller should ensure that chunkBytes <= maxSize; otherwise an error is returned,
+    // and if that error is not handled correctly in cb, user code may end up in an infinite loop.
+    std::size_t                chunkBytes       = std::numeric_limits<std::size_t>::max();
+    std::optional<std::size_t> offset           = std::nullopt;
+    std::uint64_t              httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
+    std::size_t                bufferMinSize    = 1024;           // one gr::Message per slot
+    bool                       longPolling      = false;
 };
 
 struct ReaderState {
@@ -122,13 +128,13 @@ struct ReaderState {
     ReaderState(std::string uri_, ReaderConfig config_) //
         : uri(std::move(uri_)), config(config_), buffer(config_.bufferMinSize), bufferWriter(buffer.new_writer()), bufferReader(buffer.new_reader()) {}
 
-    ~ReaderState() {
 #ifndef NDEBUG
+    ~ReaderState() {
         if (!finalPublished.load(std::memory_order_acquire)) {
-            std::println("ReaderState destroyed without final message");
+            std::puts("ReaderState destroyed without final message");
         }
-#endif
     }
+#endif
 };
 
 struct Reader {
@@ -166,7 +172,7 @@ public:
 #if __EMSCRIPTEN__
         // Do NOT block main WASM thread.
         if (emscripten_is_main_runtime_thread()) {
-            std::println("[fileio] wait() on main WASM thread is not allowed; returning immediately");
+            std::puts("fileio wait() on main WASM thread is not allowed; returning immediately");
             return;
         }
 #endif
@@ -183,8 +189,10 @@ public:
         }
     }
 
+    // Note: The caller should ensure that ReaderConfig::chunkBytes <= maxSize; otherwise an error is returned,
+    // and if that error is not handled correctly in callback, user code may end up in an infinite loop.
     template<typename TCallback>
-    requires std::invocable<TCallback, const PollResult&> && std::same_as<std::invoke_result_t<TCallback, const PollResult&>, void>
+    requires std::invocable<TCallback, PollResult> && std::same_as<std::invoke_result_t<TCallback, PollResult>, void>
     void poll(TCallback&& callback, std::size_t maxSize = std::numeric_limits<std::size_t>::max(), bool doWait = false) {
         if (doWait) {
             wait();
@@ -322,10 +330,7 @@ inline void pushFinal(ReaderState* state) {
 
     bool expected = false;
     if (!state->finalPublished.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-#ifndef NDEBUG
-        assert(false && "pushFinal called more than once on the same ReadState");
-#endif
-        return;
+        throw gr::exception("pushFinal called more than once on the same ReadState");
     }
 
     gr::Message finalMsg;
@@ -416,8 +421,9 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         if (in.eof()) {
             break;
         }
-        remaining -= nReadSize;
-        if (remaining <= 0) {
+        if (nReadSize < remaining) {
+            remaining -= nReadSize;
+        } else {
             break;
         }
     }
@@ -430,7 +436,7 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
     }
 }
 
-#if !defined(__EMSCRIPTEN__) && GR_NATIVE_HTTP_ENABLED
+#if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
 [[nodiscard]] inline bool runHttpGetNativeOnce(std::shared_ptr<ReaderState> state) {
     if (state == nullptr) {
         return false;
@@ -439,7 +445,7 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
     bool         dataReceived = false;
     cpr::Session session;
     session.SetUrl(cpr::Url{state->uri});
-    session.SetTimeout(cpr::Timeout{state->config.httpTimeoutMs});
+    session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
     session.SetWriteCallback(cpr::WriteCallback{[state, &dataReceived](std::string_view chunk, intptr_t) -> bool {
         if (state->cancelRequested.load(std::memory_order_acquire)) {
             return false;
@@ -635,12 +641,12 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
     } else if (detail::isHttpUri(uri)) {
-#if GR_NATIVE_HTTP_ENABLED
+#if GR_HTTP_ENABLED
         auto state = std::make_shared<ReaderState>(std::string(uri), config);
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpGetNative(state); });
         return Reader{state};
 #else
-        return std::unexpected(gr::Error{"HTTP(S) disabled at build time"});
+        return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
 #endif
     } else {
         return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
@@ -669,8 +675,8 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
 enum class WriteMode { overwrite, append };
 
 struct WriterConfig {
-    WriteMode    mode          = WriteMode::overwrite;
-    std::int32_t httpTimeoutMs = 30000;
+    WriteMode     mode             = WriteMode::overwrite;
+    std::uint64_t httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
 };
 
 struct WriteResult {
@@ -691,13 +697,13 @@ struct WriterState {
 
     WriterState(std::string uri_, WriterConfig config_) : uri(std::move(uri_)), config(config_) {}
 
-    ~WriterState() {
 #ifndef NDEBUG
+    ~WriterState() {
         if (!done.load(std::memory_order_acquire)) {
-            std::println("ReaderState destroyed without final message");
+            std::puts("ReaderState destroyed without final message");
         }
-#endif
     }
+#endif
 
     void setResult(std::expected<WriteResult, gr::Error> r) {
         result = std::move(r);
@@ -758,7 +764,7 @@ struct Writer {
     }
 };
 
-#if !defined(__EMSCRIPTEN__) && GR_NATIVE_HTTP_ENABLED
+#if !defined(__EMSCRIPTEN__) && GR_HTTP_ENABLED
 [[nodiscard]] inline std::expected<WriteResult, gr::Error> runHttpPostNative(std::shared_ptr<WriterState> state) {
     if (state == nullptr) {
         return std::unexpected(gr::Error{"runHttpPostNative: state is nullptr"});
@@ -770,7 +776,7 @@ struct Writer {
 
     cpr::Session session;
     session.SetUrl(cpr::Url{state->uri});
-    session.SetTimeout(cpr::Timeout{state->config.httpTimeoutMs});
+    session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
     session.SetOption(cpr::BodyView{reinterpret_cast<const char*>(state->data.data()), state->data.size()});
     session.SetProgressCallback(cpr::ProgressCallback{[state](auto /*dlTotal*/, auto /*dlNow*/, auto /*ulTotal*/, auto /*ulNow*/, auto /*userData*/) { //
         return !state->cancelRequested.load(std::memory_order_acquire);
@@ -1060,7 +1066,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #else
 
     if (detail::isHttpUri(uri)) {
-#if GR_NATIVE_HTTP_ENABLED
+#if GR_HTTP_ENABLED
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
         }
@@ -1072,7 +1078,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         });
         return Writer{state};
 #else
-        return std::unexpected(gr::Error{"HTTP(S) disabled at build time"});
+        return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
 #endif
     } else if (detail::isFileUri(uri)) {
         const auto newPath = detail::stripFileUri(uri);
