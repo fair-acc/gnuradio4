@@ -31,7 +31,7 @@ target_link_libraries(qa_ImChart PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_ImGraph PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_SchmittTrigger PRIVATE gnuradio-algorithm)
 target_link_libraries(qa_SimdFFT PRIVATE gnuradio-algorithm)
-target_link_libraries(qa_FileIo PRIVATE gnuradio-algorithm)
+target_link_libraries(qa_FileIo PRIVATE gnuradio-algorithm httplib::httplib)
 target_link_libraries(qa_FileIoHelpers PRIVATE gnuradio-algorithm)
 
 add_executable(example_ImChart example_ImChart.cpp)

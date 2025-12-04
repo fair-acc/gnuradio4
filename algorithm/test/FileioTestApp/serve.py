@@ -44,4 +44,4 @@ class CORSHTTPRequestHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print("Serving on http://localhost:8080")
-    HTTPServer(('localhost', 8080), CORSHTTPRequestHandler).serve_forever()
+    HTTPServer(("localhost", 8080), CORSHTTPRequestHandler).serve_forever()

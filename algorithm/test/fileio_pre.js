@@ -3,7 +3,6 @@
 // Automated use (in unit tests): Call startServer() in unit test after embedding this file into the JS runtime via --pre-js.
 // See: https://emscripten.org/docs/tools_reference/emcc.html#emcc-pr
 
-
 var http = require("http");
 // this requires xhr2 to be installed, please run: npm install xhr2
 // see: https://github.com/emscripten-core/emscripten/issues/21158
@@ -11,7 +10,7 @@ var http = require("http");
 XMLHttpRequest = require('xhr2');
 
 let   getNumbersAndErrorCounter = 0;
-const numbersString = "0123456789101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899";
+const numbersString             = "0123456789101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899";
 
 const server = http.createServer((req, res) => {
     console.log(req.url);

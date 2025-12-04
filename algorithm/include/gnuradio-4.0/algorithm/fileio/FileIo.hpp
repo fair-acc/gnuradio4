@@ -25,7 +25,7 @@
 #include <thread>
 #include <vector>
 
-#if !defined(__EMSCRIPTEN__) && GR_FILEIO_CPR_AVAILABLE
+#if !defined(__EMSCRIPTEN__) && GR_NATIVE_HTTP_ENABLED
 #include <cpr/cpr.h>
 #endif
 #if __EMSCRIPTEN__
@@ -74,14 +74,14 @@
  *    - For local files, WriteResult always has httpStatus=0 and an empty body.
  *
  *  Native HTTP implementation:
- *    - Enabled when GR_FILEIO_CPR_AVAILABLE=1, using CPR::Session.
+ *    - Enabled when GR_NATIVE_HTTP_ENABLED=1, using CPR::Session.
  *    - Long-polling is handled by repeatedly calling runHttpGetNativeOnce().
  *    - HTTP errors (status >= 400) or CPR errors are reported as gr::Error.
  *
- *  CMake controls for CPR:
- *    - GR_INSTALL_CPR=ON: always FetchContent CPR (if libcurl is available) and define GR_FILEIO_CPR_AVAILABLE=1.
- *    - GR_INSTALL_CPR=OPTIONAL: only enable CPR if system libcurl was found; otherwise HTTP(S) read / write will fail.
- *    -GR_INSTALL_CPR = OFF: CPR is never fetched; GR_FILEIO_CPR_AVAILABLE=0 and all HTTP(S) operations return "HTTP(S) disabled at build time".
+ *  CMake controls for native HTTP (CPR + libcurl):
+ *    - GR_ENABLE_NATIVE_HTTP=ON: Require libcurl. If libcurl is found, CPR is enabled and GR_NATIVE_HTTP_ENABLED=1; otherwise CMake fails with an error.
+ *    - GR_ENABLE_NATIVE_HTTP=OPTIONAL: Enable CPR only if system libcurl is found. If libcurl is missing, GR_NATIVE_HTTP_ENABLED=0 and HTTP(S) operations are treated as "disabled at build time".
+ *    - GR_ENABLE_NATIVE_HTTP = OFF: CPR is never fetched; GR_NATIVE_HTTP_ENABLED=0 and all HTTP(S) operations return "disabled at build time".
  *
  *  Emscripten implementation:
  *    - Uses emscripten_fetch + callbacks for GET/POST, with optional longPolling (recursive re-fetch).
@@ -430,7 +430,7 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
     }
 }
 
-#if !defined(__EMSCRIPTEN__) && GR_FILEIO_CPR_AVAILABLE
+#if !defined(__EMSCRIPTEN__) && GR_NATIVE_HTTP_ENABLED
 [[nodiscard]] inline bool runHttpGetNativeOnce(std::shared_ptr<ReaderState> state) {
     if (state == nullptr) {
         return false;
@@ -635,7 +635,7 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
     } else if (detail::isHttpUri(uri)) {
-#if GR_FILEIO_CPR_AVAILABLE
+#if GR_NATIVE_HTTP_ENABLED
         auto state = std::make_shared<ReaderState>(std::string(uri), config);
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpGetNative(state); });
         return Reader{state};
@@ -758,7 +758,7 @@ struct Writer {
     }
 };
 
-#if !defined(__EMSCRIPTEN__) && GR_FILEIO_CPR_AVAILABLE
+#if !defined(__EMSCRIPTEN__) && GR_NATIVE_HTTP_ENABLED
 [[nodiscard]] inline std::expected<WriteResult, gr::Error> runHttpPostNative(std::shared_ptr<WriterState> state) {
     if (state == nullptr) {
         return std::unexpected(gr::Error{"runHttpPostNative: state is nullptr"});
@@ -1060,7 +1060,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #else
 
     if (detail::isHttpUri(uri)) {
-#if GR_FILEIO_CPR_AVAILABLE
+#if GR_NATIVE_HTTP_ENABLED
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
         }

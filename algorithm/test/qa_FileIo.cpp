@@ -354,7 +354,7 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
         auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
         auto readerExp = fileio::readAsync("http://localhost:8080/getNumbers", fileio::ReaderConfig{.chunkBytes = 11});
-#if GR_FILEIO_CPR_AVAILABLE
+#if GR_NATIVE_HTTP_ENABLED
         expect(readerExp.has_value());
         if (readerExp.has_value()) {
             auto sub        = std::move(readerExp.value());
@@ -381,7 +381,7 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
         server.wait_until_ready();
 
         auto readerExp = fileio::readAsync("http://localhost:8080/return404", {});
-#if GR_FILEIO_CPR_AVAILABLE
+#if GR_NATIVE_HTTP_ENABLED
         expect(readerExp.has_value());
         if (readerExp.has_value()) {
             auto sub        = std::move(readerExp.value());
@@ -417,7 +417,7 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
         config.longPolling = true;
 
         auto readerExp = fileio::readAsync("http://localhost:8080/getNumbers", config);
-#if GR_FILEIO_CPR_AVAILABLE
+#if GR_NATIVE_HTTP_ENABLED
         expect(readerExp.has_value());
         if (readerExp.has_value()) {
             auto                     sub = std::move(readerExp.value());
@@ -477,7 +477,7 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
         config.longPolling = true;
 
         auto readerExp = fileio::readAsync("http://localhost:8080/getNumbersAndError", config);
-#if GR_FILEIO_CPR_AVAILABLE
+#if GR_NATIVE_HTTP_ENABLED
         expect(readerExp.has_value());
         if (readerExp.has_value()) {
             auto sub        = std::move(readerExp.value());
@@ -516,7 +516,7 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
 
         std::vector<std::uint8_t> bytes(expectedBody.begin(), expectedBody.end());
         auto                      writeResultExp = fileio::write("http://localhost:8080/postNumbers", bytes, fileio::WriterConfig{});
-#if GR_FILEIO_CPR_AVAILABLE
+#if GR_NATIVE_HTTP_ENABLED
         expect(writeResultExp.has_value());
         if (writeResultExp.has_value()) {
             auto res = std::move(writeResultExp.value());
@@ -850,7 +850,7 @@ const boost::ut::suite<"FileIO error tests"> fileIoErrorTests = [] {
                             }
                         } else {
                             errorCounter++;
-                            std::println("Error: {}", res.data.error().message);
+                            std::println("Expected error: {}", res.data.error().message);
                         }
                     },
                     maxSize, false);

@@ -112,12 +112,14 @@ set(GR_MAX_WASM_THREAD_COUNT
     60
     CACHE STRING "Max number of threads for WASM pthread pool")
 add_compile_definitions(GR_MAX_WASM_THREAD_COUNT=${GR_MAX_WASM_THREAD_COUNT}) # propagate to C++
-set(GR_INSTALL_CPR
+set(GR_ENABLE_NATIVE_HTTP
     "ON"
-    CACHE STRING
-          "CPR HTTP client (libcurl wrapper): ON=always install, OFF=never, OPTIONAL=only if system libcurl is found")
+    CACHE
+      STRING
+      "HTTP client support (libcurl wrapper): ON=enable and require libcurl (error if not found), OFF=disable, OPTIONAL=enable only if libcurl is found, otherwise disable"
+)
 set_property(
-  CACHE GR_INSTALL_CPR
+  CACHE GR_ENABLE_NATIVE_HTTP
   PROPERTY STRINGS
            ON
            OFF
@@ -364,11 +366,47 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG v0.18.1)
 
-FetchContent_MakeAvailable(
-  pmt
-  ut
-  vir-simd
-  cpp-httplib)
+# Native HTTP support using CPR and libCurl
+set(GR_NATIVE_HTTP_ENABLED FALSE)
+if(NOT EMSCRIPTEN)
+  if(NOT
+     GR_ENABLE_NATIVE_HTTP
+     STREQUAL
+     "OFF")
+    find_package(CURL QUIET)
+    # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
+    if(GR_ENABLE_NATIVE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
+      message(
+        FATAL_ERROR
+          "GR_ENABLE_NATIVE_HTTP is ON, but libcurl was not found. Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_NATIVE_HTTP=OFF/OPTIONAL."
+      )
+    endif()
+
+    if(CURL_FOUND)
+      set(CPR_USE_SYSTEM_CURL
+          ON
+          CACHE BOOL "Use system libcurl in CPR" FORCE)
+
+      FetchContent_Declare(
+        cpr
+        GIT_REPOSITORY https://github.com/libcpr/cpr.git
+        GIT_TAG 1.14.1)
+      set(GR_NATIVE_HTTP_ENABLED TRUE)
+    endif()
+  endif()
+endif()
+
+set(GR_FETCH_MAKE_AVAILABLE_DEPS
+    pmt
+    ut
+    vir-simd
+    cpp-httplib)
+
+if(NOT EMSCRIPTEN)
+  list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS cpr)
+endif()
+
+FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 
 # Fetch SoapySDR -- needed since the distribution version is incompatible w.r.t. stdlibc++ vs. libc++
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
@@ -514,7 +552,7 @@ message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
 message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
 message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
-message(STATUS "GR_INSTALL_CPR               : ${GR_INSTALL_CPR}")
+message(STATUS "GR_ENABLE_NATIVE_HTTP        : ${GR_ENABLE_NATIVE_HTTP}")
 message(STATUS "------------------------------------------------")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)
