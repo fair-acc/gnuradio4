@@ -2,6 +2,7 @@
 #define FILEIOHELPERS_HPP
 
 #include <expected>
+#include <filesystem>
 #include <gnuradio-4.0/Message.hpp>
 
 namespace gr::algorithm::fileio {
@@ -29,6 +30,32 @@ inline DialogOpenCallback& dialogOpenCallback() {
 } // namespace detail
 
 inline void setDialogOpenCallback(detail::DialogOpenCallback cb) { detail::dialogOpenCallback() = std::move(cb); }
+
+struct Capabilities {
+    bool httpEnabled              = false; // GR_HTTP_ENABLED or fetch()
+    bool dialogOpenAvailable      = false; // dialog:/ callback registered
+    bool browserDownloadSupported = false; // download:/ supported
+};
+
+inline Capabilities capabilities() noexcept {
+    Capabilities c{};
+
+#if __EMSCRIPTEN__
+    c.httpEnabled              = true; // We always compile with emscripten fetch here
+    c.browserDownloadSupported = true;
+    c.dialogOpenAvailable      = static_cast<bool>(detail::dialogOpenCallback());
+#else
+
+#if GR_HTTP_ENABLED
+    c.httpEnabled = true;
+#else
+    c.httpEnabled = false;
+#endif
+    c.browserDownloadSupported = true;
+    c.dialogOpenAvailable      = static_cast<bool>(detail::dialogOpenCallback());
+#endif
+    return c;
+}
 
 namespace detail {
 [[nodiscard]] inline bool ciEquals(std::string_view a, std::string_view b) {
@@ -63,17 +90,31 @@ namespace detail {
     return ciEquals(sc, "http") || ciEquals(sc, "https");
 }
 
-[[nodiscard]] inline bool isBrowserDownloadUri(std::string_view uri) { return ciEquals(schemeOf(uri), "download"); }
+[[nodiscard]] inline bool isDownloadUri(std::string_view uri) { return ciEquals(schemeOf(uri), "download"); }
 
 [[nodiscard]] inline bool isFileUri(std::string_view uri) { return ciEquals(schemeOf(uri), "file"); }
 
 [[nodiscard]] inline bool isDialogUri([[maybe_unused]] std::string_view uri) { return ciEquals(schemeOf(uri), "dialog"); }
 
-[[nodiscard]] inline std::expected<std::string, gr::Error> stripBrowserDownloadUri(std::string_view uri) {
-    if (!isBrowserDownloadUri(uri) || !isBrowserDownloadUri(uri)) {
+[[nodiscard]] inline std::expected<std::string, gr::Error> stripDownloadUri(std::string_view uri) {
+    if (!isDownloadUri(uri) || !isDownloadUri(uri)) {
         return std::unexpected(gr::Error{std::format("Not a browser download URI:{}", uri)});
     }
     return std::string(uri.substr(std::string_view("download:/").size()));
+}
+
+namespace detail {
+inline std::filesystem::path defaultDownloadDir() {
+    if (const char* home = std::getenv("HOME")) {
+        return std::filesystem::path(home) / "Downloads";
+    }
+    return std::filesystem::current_path();
+}
+} // namespace detail
+
+inline std::string resolveDownloadPath(std::string_view filename) {
+    std::filesystem::path base = detail::defaultDownloadDir();
+    return (base / std::filesystem::path{filename}).string();
 }
 
 [[nodiscard]] inline std::expected<std::string, gr::Error> stripFileUri(std::string_view uri) {

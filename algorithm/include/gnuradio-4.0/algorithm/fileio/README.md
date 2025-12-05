@@ -20,14 +20,14 @@ All heavy I/O runs on an internal thread pool (except in-memory readers).
 
 ## 2. URI schemes
 
-| Scheme           | Meaning                                    | Notes                                       |
-| ---------------- | ------------------------------------------ | ------------------------------------------- |
-| `file:/path`     | Local file (native FS or MEMFS)            | Append mode only for `file:/`               |
-| `http://...`     | HTTP GET / POST                            | Native: CPR; Emscripten: `emscripten_fetch` |
-| `https://...`    | HTTPS GET / POST                           | `tlsVerifyPeer` controls SSL verify         |
-| `dialog:/open`   | File-open dialog -> memory or file         | Needs dialog callback registered            |
-| `<memory>`       | In-memory span (no URI, just a label)      | No background work after `readAsync`        |
-| `download:/name` | Browser download (Emscripten, Writer only) | Triggers JS “save file”                     |
+| Scheme           | Meaning                               | Notes                                                                                          |
+| ---------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `file:/path`     | Local file (native FS or MEMFS)       | Append mode only for `file:/`                                                                  |
+| `http://...`     | HTTP GET / POST                       | Native: CPR; Emscripten: `emscripten_fetch`                                                    |
+| `https://...`    | HTTPS GET / POST                      | `tlsVerifyPeer` controls SSL verify                                                            |
+| `dialog:/open`   | File-open dialog -> memory or file    | Needs dialog callback registered                                                               |
+| `<memory>`       | In-memory span (no URI, just a label) | No background work after `readAsync`                                                           |
+| `download:/name` | Browser download (Writer only)        | Emscripten: browser “save file”; Native: writes to default Downloads (e.g. `~/Downloads/name`) |
 
 If the URI scheme is unknown, `readAsync` / `writeAsync` return `std::unexpected<gr::Error>`.
 
@@ -225,18 +225,17 @@ if (!resExp) {
 
 ---
 
-### 4.4 Browser download (`download:/`, Emscripten only)
+### 4.4 Download (`download:/`)
 
-Browsers don't allow writing arbitrary files to the user's disk.
-You can either:
+On the web, browsers don’t let you write arbitrary paths on the user’s disk. You usually either
 
-- use `file:/...` -> writes into MEMFS (in-memory file system), or
-- use `download:/name` -> trigger a browser download dialog.
+- use `file:/...` -> write into MEMFS (in-memory file system), or
+- use `download:/name` -> hand the file to the user.
 
-```cpp
-// triggers browser download "dump.bin"
-auto wExp = writeAsync("download:/dump.bin", bytes, WriterConfig{});
-```
+`download:/name` is a small cross-platform convenience:
+
+- **Emscripten**: triggers a browser "Save file" download.
+- **Native**: writes into the user’s default download folder (e.g. `~/Downloads/name`).
 
 ---
 

@@ -1079,8 +1079,8 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         state->data.assign(data.begin(), data.end());
         detail::runHttpPostEmscripten(state);
         return Writer{state};
-    } else if (detail::isBrowserDownloadUri(uri)) {
-        const auto filename = detail::stripBrowserDownloadUri(uri);
+    } else if (detail::isDownloadUri(uri)) {
+        const auto filename = detail::stripDownloadUri(uri);
         if (!filename.has_value()) {
             return std::unexpected(filename.error());
         }
@@ -1126,6 +1126,25 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #else
         return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
 #endif
+    } else if (detail::isDownloadUri(uri)) {
+        const auto filenameExp = detail::stripDownloadUri(uri);
+        if (!filenameExp.has_value()) {
+            return std::unexpected(filenameExp.error());
+        }
+
+        const auto path  = detail::resolveDownloadPath(filenameExp.value());
+        auto       state = std::make_shared<WriterState>(path, config);
+        state->data.assign(data.begin(), data.end());
+
+        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
+            auto r = runWriteLocalFile(state);
+            if (state->cancelRequested.load(std::memory_order_acquire)) {
+                r = std::unexpected(gr::Error{"cancelled by user"});
+            }
+            state->setResult(std::move(r));
+        });
+        return Writer{state};
+
     } else if (detail::isFileUri(uri)) {
         const auto newPath = detail::stripFileUri(uri);
         if (!newPath.has_value()) {
