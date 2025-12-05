@@ -1,3 +1,6 @@
+#ifndef BOOST_UT_DISABLE_MODULE
+#define BOOST_UT_DISABLE_MODULE
+#endif
 #include <boost/ut.hpp>
 
 #include <format>
@@ -879,4 +882,6 @@ const boost::ut::suite<"FileIO error tests"> fileIoErrorTests = [] {
     };
 };
 
-int main() {}
+int main() { //
+    return boost::ut::cfg<>.run();
+}
