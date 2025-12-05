@@ -31,8 +31,15 @@ inline DialogOpenCallback& dialogOpenCallback() {
 inline void setDialogOpenCallback(detail::DialogOpenCallback cb) { detail::dialogOpenCallback() = std::move(cb); }
 
 namespace detail {
+[[nodiscard]] inline bool ciEquals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    return std::ranges::equal(a, b, [](char ac, char bc) { return std::tolower(static_cast<unsigned char>(ac)) == std::tolower(static_cast<unsigned char>(bc)); });
+}
+
 [[nodiscard]] inline bool startsWithScheme(std::string_view uri) {
-    const auto p = uri.find(":");
+    const auto p = uri.find(":/");
     if (p == std::string_view::npos || p == 0UZ) {
         return false;
     }
@@ -48,22 +55,22 @@ namespace detail {
     if (!startsWithScheme(uri)) {
         return {};
     }
-    return uri.substr(0, uri.find(":"));
+    return uri.substr(0, uri.find(":/"));
 }
 
 [[nodiscard]] inline bool isHttpUri(std::string_view uri) {
     const auto sc = schemeOf(uri);
-    return sc == "http" || sc == "https";
+    return ciEquals(sc, "http") || ciEquals(sc, "https");
 }
 
-[[nodiscard]] inline bool isBrowserDownloadUri(std::string_view uri) { return schemeOf(uri) == "download"; }
+[[nodiscard]] inline bool isBrowserDownloadUri(std::string_view uri) { return ciEquals(schemeOf(uri), "download"); }
 
-[[nodiscard]] inline bool isFileUri(std::string_view uri) { return schemeOf(uri) == "file"; }
+[[nodiscard]] inline bool isFileUri(std::string_view uri) { return ciEquals(schemeOf(uri), "file"); }
 
-[[nodiscard]] inline bool isDialogUri([[maybe_unused]] std::string_view uri) { return uri.starts_with("dialog:/open"); }
+[[nodiscard]] inline bool isDialogUri([[maybe_unused]] std::string_view uri) { return ciEquals(schemeOf(uri), "dialog"); }
 
 [[nodiscard]] inline std::expected<std::string, gr::Error> stripBrowserDownloadUri(std::string_view uri) {
-    if (!isBrowserDownloadUri(uri) || !uri.starts_with("download:/")) {
+    if (!isBrowserDownloadUri(uri) || !isBrowserDownloadUri(uri)) {
         return std::unexpected(gr::Error{std::format("Not a browser download URI:{}", uri)});
     }
     return std::string(uri.substr(std::string_view("download:/").size()));
