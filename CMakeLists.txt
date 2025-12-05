@@ -370,17 +370,17 @@ set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
 if(NOT EMSCRIPTEN)
   set(GR_HTTP_ENABLED FALSE)
+
   if(NOT
      GR_ENABLE_HTTP
      STREQUAL
      "OFF")
     find_package(CURL QUIET)
+
     # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
     if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
-      message(
-        FATAL_ERROR
-          "GR_ENABLE_HTTP is ON, but libcurl was not found. Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL."
-      )
+      message(FATAL_ERROR "GR_ENABLE_HTTP is ON, but libcurl was not found. "
+                          "Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL.")
     endif()
 
     if(CURL_FOUND)
@@ -388,10 +388,17 @@ if(NOT EMSCRIPTEN)
           ON
           CACHE BOOL "Use system libcurl in CPR" FORCE)
 
+      set(cpr_patch_command git apply --ignore-space-change --ignore-whitespace
+                            "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
+
+      message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
+
       FetchContent_Declare(
         cpr
         GIT_REPOSITORY https://github.com/libcpr/cpr.git
-        GIT_TAG 1.14.1)
+        GIT_TAG 1.14.1
+        PATCH_COMMAND ${cpr_patch_command} || true)
+
       set(GR_HTTP_ENABLED TRUE)
     endif()
   endif()
