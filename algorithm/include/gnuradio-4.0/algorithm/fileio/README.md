@@ -245,9 +245,7 @@ On the web, browsers don’t let you write arbitrary paths on the user’s disk.
 
 - HTTP uses `emscripten_fetch`; `ReaderConfig::longPolling` re-issues requests in a loop.
 
-- Blocking calls on **main runtime thread**:
-
-  - `Reader::wait()`, `Writer::wait()`, `write()` -> refuse to block, return early / error.
+- Blocking calls on **main runtime thread**: `Reader::wait()`, `Writer::wait()`, `write()` -> refuse to block, return early / error.
 
 - `download:/` is implemented via JS in the browser.
 
