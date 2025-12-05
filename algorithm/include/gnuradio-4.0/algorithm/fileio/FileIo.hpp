@@ -83,9 +83,9 @@
  *    - HTTP errors (status >= 400) or CPR errors are reported as gr::Error.
  *
  *  CMake controls for native HTTP (CPR + libcurl):
- *    - GR_ENABLE_NATIVE_HTTP=ON: Require libcurl. If libcurl is found, CPR is enabled and GR_HTTP_ENABLED=1; otherwise CMake fails with an error.
- *    - GR_ENABLE_NATIVE_HTTP=OPTIONAL: Enable CPR only if system libcurl is found. If libcurl is missing, GR_HTTP_ENABLED=0 and HTTP(S) operations are treated as "disabled at build time".
- *    - GR_ENABLE_NATIVE_HTTP = OFF: CPR is never fetched; GR_HTTP_ENABLED=0 and all HTTP(S) operations return "disabled at build time".
+ *    - GR_ENABLE_HTTP=ON: Require libcurl. If libcurl is found, CPR is enabled and GR_HTTP_ENABLED=1; otherwise CMake fails with an error.
+ *    - GR_ENABLE_HTTP=OPTIONAL: Enable CPR only if system libcurl is found. If libcurl is missing, GR_HTTP_ENABLED=0 and HTTP(S) operations are treated as "disabled at build time".
+ *    - GR_ENABLE_HTTP = OFF: CPR is never fetched; GR_HTTP_ENABLED=0 and all HTTP(S) operations return "disabled at build time".
  *
  *  Emscripten implementation:
  *    - Uses emscripten_fetch + callbacks for GET/POST, with optional longPolling (recursive re-fetch).

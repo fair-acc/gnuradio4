@@ -112,14 +112,14 @@ set(GR_MAX_WASM_THREAD_COUNT
     60
     CACHE STRING "Max number of threads for WASM pthread pool")
 add_compile_definitions(GR_MAX_WASM_THREAD_COUNT=${GR_MAX_WASM_THREAD_COUNT}) # propagate to C++
-set(GR_ENABLE_NATIVE_HTTP
+set(GR_ENABLE_HTTP
     "ON"
     CACHE
       STRING
       "HTTP client support (libcurl wrapper): ON=enable and require libcurl (error if not found), OFF=disable, OPTIONAL=enable only if libcurl is found, otherwise disable"
 )
 set_property(
-  CACHE GR_ENABLE_NATIVE_HTTP
+  CACHE GR_ENABLE_HTTP
   PROPERTY STRINGS
            ON
            OFF
@@ -371,15 +371,15 @@ set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 if(NOT EMSCRIPTEN)
   set(GR_HTTP_ENABLED FALSE)
   if(NOT
-     GR_ENABLE_NATIVE_HTTP
+     GR_ENABLE_HTTP
      STREQUAL
      "OFF")
     find_package(CURL QUIET)
     # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
-    if(GR_ENABLE_NATIVE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
+    if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
       message(
         FATAL_ERROR
-          "GR_ENABLE_NATIVE_HTTP is ON, but libcurl was not found. Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_NATIVE_HTTP=OFF/OPTIONAL."
+          "GR_ENABLE_HTTP is ON, but libcurl was not found. Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL."
       )
     endif()
 
@@ -553,7 +553,7 @@ message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
 message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
 message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
-message(STATUS "GR_ENABLE_NATIVE_HTTP        : ${GR_ENABLE_NATIVE_HTTP}")
+message(STATUS "GR_ENABLE_HTTP               : ${GR_ENABLE_HTTP}")
 message(STATUS "------------------------------------------------")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)

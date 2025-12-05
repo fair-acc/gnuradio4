@@ -18,7 +18,7 @@ target_link_options(
   PRIVATE
   "SHELL:-s WASM=1"
   "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','HEAPU8']"
-  "SHELL:-s EXPORTED_FUNCTIONS=['_malloc','_free','_fileio_dialog_on_bytes','_fileio_dialog_on_cancel','_fileio_dialog_on_error','_test_dialog_read','_test_save_file','_test_http_get','_test_http_get_404','_test_http_post','_main']"
+  "SHELL:-s EXPORTED_FUNCTIONS=['_malloc','_free','_main']"
   "SHELL:-s ASSERTIONS=2"
   "SHELL:-s EXIT_RUNTIME=0"
   "SHELL:-s ALLOW_MEMORY_GROWTH=1")

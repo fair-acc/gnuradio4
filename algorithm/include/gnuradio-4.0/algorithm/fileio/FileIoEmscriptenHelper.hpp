@@ -3,7 +3,7 @@
 
 #include <gnuradio-4.0/algorithm/fileio/FileIoHelpers.hpp>
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/fetch.h>
@@ -11,9 +11,21 @@
 #include <emscripten/threading.h>
 #endif
 
+#if defined(__EMSCRIPTEN__)
+#define FILEIO_EXPORT EMSCRIPTEN_KEEPALIVE
+#else
+#define FILEIO_EXPORT
+#endif
+
+#ifdef __cplusplus
+#define FILEIO_EXTERN_C extern "C"
+#else
+#define FILEIO_EXTERN_C
+#endif
+
 namespace gr::algorithm::fileio {
 constexpr bool isWebAssembly() noexcept {
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
     return true;
 #else
     return false;
@@ -21,7 +33,7 @@ constexpr bool isWebAssembly() noexcept {
 }
 
 inline bool isMainThread() {
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
     return emscripten_is_main_runtime_thread();
 #else
     return true; // Native: assume single-threaded or main thread
@@ -29,7 +41,7 @@ inline bool isMainThread() {
 }
 
 inline bool isTabVisible() {
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
     EmscriptenVisibilityChangeEvent status;
     if (emscripten_get_visibility_status(&status) == EMSCRIPTEN_RESULT_SUCCESS) {
         return !status.hidden;
@@ -40,7 +52,7 @@ inline bool isTabVisible() {
 
 // clang-format off
 inline void listPersistentFiles([[maybe_unused]] bool recursive = true) {
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
     EM_ASM_({
@@ -73,7 +85,7 @@ inline void listPersistentFiles([[maybe_unused]] bool recursive = true) {
 }
 // clang-format on
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__)
 namespace detail {
 // clang-format off
 #pragma GCC diagnostic push
@@ -148,45 +160,45 @@ inline void setupEmscriptenDialogCallback() {
 }
 #endif
 
-#ifdef __EMSCRIPTEN__
-extern "C" {
+#if defined(__EMSCRIPTEN__)
+FILEIO_EXTERN_C {
 
-EMSCRIPTEN_KEEPALIVE
-void fileio_dialog_on_bytes(std::uintptr_t handleToken, const std::uint8_t* data, int len) {
-    auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
-    if (handle == nullptr) {
-        return;
-    }
-
-    if (!data || len <= 0) {
-        if (handle->fail) {
-            handle->fail("Empty or invalid buffer");
+    FILEIO_EXPORT
+    void fileio_dialog_on_bytes(std::uintptr_t handleToken, const std::uint8_t* data, int len) {
+        auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
+        if (handle == nullptr) {
+            return;
         }
-        return;
+
+        if (!data || len <= 0) {
+            if (handle->fail) {
+                handle->fail("Empty or invalid buffer");
+            }
+            return;
+        }
+
+        if (handle->completeWithMemory) {
+            handle->completeWithMemory(std::span<const std::uint8_t>{data, static_cast<std::size_t>(len)});
+        }
     }
 
-    if (handle->completeWithMemory) {
-        handle->completeWithMemory(std::span<const std::uint8_t>{data, static_cast<std::size_t>(len)});
+    FILEIO_EXPORT
+    void fileio_dialog_on_cancel(std::uintptr_t handleToken) {
+        auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
+        if (handle != nullptr && handle->fail) {
+            handle->fail("User cancelled");
+        }
     }
-}
 
-EMSCRIPTEN_KEEPALIVE
-void fileio_dialog_on_cancel(std::uintptr_t handleToken) {
-    auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
-    if (handle != nullptr && handle->fail) {
-        handle->fail("User cancelled");
+    FILEIO_EXPORT
+    void fileio_dialog_on_error(std::uintptr_t handleToken) {
+        auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
+        if (handle != nullptr && handle->fail) {
+            handle->fail("JS error while reading file");
+        }
     }
-}
 
-EMSCRIPTEN_KEEPALIVE
-void fileio_dialog_on_error(std::uintptr_t handleToken) {
-    auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
-    if (handle != nullptr && handle->fail) {
-        handle->fail("JS error while reading file");
-    }
-}
-
-} // extern "C"
+} // FILEIO_EXTERN_C
 #endif
 
 } // namespace gr::algorithm::fileio
