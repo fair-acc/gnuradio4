@@ -102,13 +102,15 @@ inline constexpr std::string_view kMessageDataKey = "data";
 }
 
 struct ReaderConfig {
-    // Note: When using Reader::poll(cb, maxSize, doWait) - the caller should ensure that chunkBytes <= maxSize; otherwise an error is returned,
+    // Note about chunkBytes: When using Reader::poll(cb, maxSize, doWait) - the caller should ensure that chunkBytes <= maxSize; otherwise an error is returned,
     // and if that error is not handled correctly in cb, user code may end up in an infinite loop.
-    std::size_t                chunkBytes       = std::numeric_limits<std::size_t>::max();
-    std::optional<std::size_t> offset           = std::nullopt;
-    std::uint64_t              httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
-    std::size_t                bufferMinSize    = 1024;           // one gr::Message per slot
-    bool                       longPolling      = false;
+    std::size_t                        chunkBytes       = std::numeric_limits<std::size_t>::max();
+    std::optional<std::size_t>         offset           = std::nullopt;
+    std::uint64_t                      httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
+    std::size_t                        bufferMinSize    = 1024;           // one gr::Message per slot
+    bool                               longPolling      = false;
+    std::map<std::string, std::string> httpHeaders      = {};
+    bool                               tlsVerifyPeer    = true; // for native https
 };
 
 struct ReaderState {
@@ -446,6 +448,14 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
     cpr::Session session;
     session.SetUrl(cpr::Url{state->uri});
     session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
+    if (!state->config.httpHeaders.empty()) {
+        cpr::Header header;
+        for (const auto& [k, v] : state->config.httpHeaders) {
+            header.emplace(k, v);
+        }
+        session.SetHeader(std::move(header));
+    }
+    session.SetVerifySsl(cpr::VerifySsl{state->config.tlsVerifyPeer});
     session.SetWriteCallback(cpr::WriteCallback{[state, &dataReceived](std::string_view chunk, intptr_t) -> bool {
         if (state->cancelRequested.load(std::memory_order_acquire)) {
             return false;
@@ -511,6 +521,19 @@ inline void runHttpGetEmscriptenImpl(ReaderState* state) {
     attr.attributes   = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
     attr.userData     = state;
     attr.timeoutMSecs = 0; // non-zero currently causes immediate onerror
+
+    std::vector<const char*> headers;
+    if (!state->config.httpHeaders.empty()) {
+        headers.reserve(state->config.httpHeaders.size() * 2 + 1);
+        for (const auto& [k, v] : state->config.httpHeaders) {
+            headers.push_back(k.c_str());
+            headers.push_back(v.c_str());
+        }
+        headers.push_back(nullptr);
+        attr.requestHeaders = headers.data();
+    } else {
+        attr.requestHeaders = nullptr;
+    }
 
     attr.onsuccess = [](emscripten_fetch_t* fetch) {
         auto* st = static_cast<ReaderState*>(fetch->userData);
@@ -675,8 +698,10 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
 enum class WriteMode { overwrite, append };
 
 struct WriterConfig {
-    WriteMode     mode             = WriteMode::overwrite;
-    std::uint64_t httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
+    WriteMode                          mode             = WriteMode::overwrite;
+    std::uint64_t                      httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
+    std::map<std::string, std::string> httpHeaders      = {};
+    bool                               tlsVerifyPeer    = true; // for native https
 };
 
 struct WriteResult {
@@ -777,6 +802,14 @@ struct Writer {
     cpr::Session session;
     session.SetUrl(cpr::Url{state->uri});
     session.SetTimeout(cpr::Timeout{static_cast<std::int32_t>(state->config.httpTimeoutNanos / 1'000'000ull)});
+    if (!state->config.httpHeaders.empty()) {
+        cpr::Header header;
+        for (const auto& [k, v] : state->config.httpHeaders) {
+            header.emplace(k, v);
+        }
+        session.SetHeader(std::move(header));
+    }
+    session.SetVerifySsl(cpr::VerifySsl{state->config.tlsVerifyPeer});
     session.SetOption(cpr::BodyView{reinterpret_cast<const char*>(state->data.data()), state->data.size()});
     session.SetProgressCallback(cpr::ProgressCallback{[state](auto /*dlTotal*/, auto /*dlNow*/, auto /*ulTotal*/, auto /*ulNow*/, auto /*userData*/) { //
         return !state->cancelRequested.load(std::memory_order_acquire);
@@ -860,6 +893,19 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
     attr.attributes   = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
     attr.timeoutMSecs = 0; // non-zero currently causes immediate onerror in our tests
     attr.userData     = state;
+
+    std::vector<const char*> headers;
+    if (!state->config.httpHeaders.empty()) {
+        headers.reserve(state->config.httpHeaders.size() * 2 + 1);
+        for (const auto& [k, v] : state->config.httpHeaders) {
+            headers.push_back(k.c_str());
+            headers.push_back(v.c_str());
+        }
+        headers.push_back(nullptr);
+        attr.requestHeaders = headers.data();
+    } else {
+        attr.requestHeaders = nullptr;
+    }
 
     attr.requestData     = state->data.empty() ? nullptr : reinterpret_cast<char*>(state->data.data());
     attr.requestDataSize = state->data.size();

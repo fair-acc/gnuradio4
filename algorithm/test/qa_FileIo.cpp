@@ -344,16 +344,28 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
     "FileIO - Native http"_test = [&] {
         std::println("FileIO - Native http begin");
         std::string expectedString = createTestString();
+        bool        headerReceived = false;
+        std::string receivedHeaderValue;
 
         httplib::Server server;
-        server.Get("/getNumbers", [&](const httplib::Request&, httplib::Response& res) {
+        server.Get("/getNumbers", [&](const httplib::Request& req, httplib::Response& res) {
+            if (auto value = req.get_header_value("X-FileIO-Test"); !value.empty()) {
+                headerReceived      = true;
+                receivedHeaderValue = value;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             res.set_content(expectedString, "text/plain");
         });
 
         auto threadServer = std::thread{[&server] { server.listen("localhost", 8080); }};
         server.wait_until_ready();
-        auto readerExp = fileio::readAsync("http://localhost:8080/getNumbers", fileio::ReaderConfig{.chunkBytes = 11});
+
+        fileio::ReaderConfig config;
+        config.chunkBytes = 11;
+        config.httpHeaders.emplace("X-FileIO-Test", "fileio-native");
+        config.httpHeaders.emplace("Accept", "text/plain");
+
+        auto readerExp = fileio::readAsync("http://localhost:8080/getNumbers", config);
 #if GR_HTTP_ENABLED
         expect(readerExp.has_value());
         if (readerExp.has_value()) {
@@ -364,9 +376,13 @@ const boost::ut::suite<"FileIO Native tests"> fileIoNativeTests = [] {
             expect(eq(subResults.errorCounter, 0uz));
             expect(eq(expectedString, joinBytesToString(subResults.allData)));
         }
+
+        expect(headerReceived);
+        expect(eq(std::string{"fileio-native"}, receivedHeaderValue));
 #else
         expect(!readerExp.has_value());
 #endif
+
         server.stop();
         threadServer.join();
         std::println("FileIO - Native http end");
@@ -575,6 +591,8 @@ const boost::ut::suite<"FileIO Emscripten tests"> fileIoEmscriptenTests = [] {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         fileio::ReaderConfig config;
         config.chunkBytes = 11;
+        config.httpHeaders.emplace("X-FileIO-Test", "fileio-emscripten");
+        config.httpHeaders.emplace("Accept", "text/plain");
 
         auto readerExp = readAsyncEmscriptenHttpWorkerThread("http://127.0.0.1:8080/getNumbers", config);
         expect(readerExp.has_value());
