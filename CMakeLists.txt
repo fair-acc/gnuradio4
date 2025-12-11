@@ -113,7 +113,7 @@ set(GR_MAX_WASM_THREAD_COUNT
     CACHE STRING "Max number of threads for WASM pthread pool")
 add_compile_definitions(GR_MAX_WASM_THREAD_COUNT=${GR_MAX_WASM_THREAD_COUNT}) # propagate to C++
 set(GR_ENABLE_HTTP
-    "ON"
+    "OPTIONAL"
     CACHE
       STRING
       "HTTP client support (libcurl wrapper): ON=enable and require libcurl (error if not found), OFF=disable, OPTIONAL=enable only if libcurl is found, otherwise disable"
