@@ -1,10 +1,21 @@
 # blocks/onnx/CMakeLists.txt
+#
+# ONNX Runtime GR4 integration
+#
+# Modes:
+#   off - Disable ONNX integration entirely
+#   opt - Use system-installed onnxruntime (supports ROCm/CUDA, full .onnx format)
+#   on  - Use bundled static libraries (minimal, .ort format only)
+#
+# Bundled libraries are stored in Git LFS and fetched on-demand when mode=on.
+# To rebuild bundled libraries: ./lib/rebuild_static_libs.sh
+#
 
 if(TARGET gr-onnx)
   return()
 endif()
 
-set(ENABLE_ONNX_INTEGRATION "opt" CACHE STRING "off | opt | on")
+set(ENABLE_ONNX_INTEGRATION "on" CACHE STRING "off | opt | on")
 set_property(CACHE ENABLE_ONNX_INTEGRATION PROPERTY STRINGS off opt on)
 
 if(ENABLE_ONNX_INTEGRATION STREQUAL "off")
@@ -12,12 +23,77 @@ if(ENABLE_ONNX_INTEGRATION STREQUAL "off")
   return()
 endif()
 
-set(ONNXRUNTIME_VERSION "1.20.1" CACHE STRING "ONNX Runtime version for 'on' mode")
 set(_have_ort FALSE)
 set(_ort_minimal FALSE)
+set(_ort_has_gpu FALSE)
+
+# Bundled library version (update when rebuilding libs)
+set(GR_ONNX_BUNDLED_VERSION "1.23.2")
 
 # =============================================================================
-# MODE: opt - use system packages (supports .onnx and .ort)
+# Helper: Ensure Git LFS files are present
+# =============================================================================
+function(gr_onnx_ensure_lfs_files lib_subdir)
+  set(_lib_path "${CMAKE_CURRENT_SOURCE_DIR}/lib/${lib_subdir}")
+
+  # Check if this looks like an LFS pointer (small text file starting with "version")
+  if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    set(_check_file "${_lib_path}/libonnxruntime_webassembly.a")
+  else()
+    set(_check_file "${_lib_path}/libonnxruntime.a")
+  endif()
+
+  if(NOT EXISTS "${_check_file}")
+    message(FATAL_ERROR
+            "gr-onnx: bundled library not found: ${_check_file}\n"
+            "This may be a Git LFS issue. Try:\n"
+            "  cd ${CMAKE_SOURCE_DIR} && git lfs pull --include=\"blocks/onnx/lib/${lib_subdir}/*\"\n"
+            "Or use ENABLE_ONNX_INTEGRATION=opt with a system-installed onnxruntime.")
+  endif()
+
+  # Check file size - LFS pointers are ~130 bytes, real libs are megabytes
+  file(SIZE "${_check_file}" _file_size)
+  if(_file_size LESS 10000)
+    # Likely an LFS pointer, try to fetch
+    message(STATUS "gr-onnx: fetching LFS files for ${lib_subdir}...")
+
+    find_package(Git QUIET)
+    if(Git_FOUND)
+      execute_process(
+              COMMAND ${GIT_EXECUTABLE} lfs pull --include "blocks/onnx/lib/${lib_subdir}/*"
+              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+              RESULT_VARIABLE _lfs_result
+              OUTPUT_VARIABLE _lfs_output
+              ERROR_VARIABLE _lfs_error
+      )
+
+      if(NOT _lfs_result EQUAL 0)
+        message(FATAL_ERROR
+                "gr-onnx: failed to fetch LFS files.\n"
+                "Error: ${_lfs_error}\n"
+                "Ensure git-lfs is installed: apt install git-lfs\n"
+                "Then run: cd ${CMAKE_SOURCE_DIR} && git lfs install && git lfs pull")
+      endif()
+
+      # Verify file size again
+      file(SIZE "${_check_file}" _file_size)
+      if(_file_size LESS 10000)
+        message(FATAL_ERROR
+                "gr-onnx: LFS fetch succeeded but file is still a pointer.\n"
+                "Try: cd ${CMAKE_SOURCE_DIR} && git lfs fetch --all && git lfs checkout")
+      endif()
+    else()
+      message(FATAL_ERROR
+              "gr-onnx: bundled library appears to be an LFS pointer but git not found.\n"
+              "Install git and git-lfs, then run: git lfs pull")
+    endif()
+  endif()
+
+  message(STATUS "gr-onnx: bundled library verified (${_file_size} bytes)")
+endfunction()
+
+# =============================================================================
+# MODE: opt - Use system packages (full runtime, GPU support possible)
 # =============================================================================
 if(ENABLE_ONNX_INTEGRATION STREQUAL "opt")
   if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
@@ -26,15 +102,19 @@ if(ENABLE_ONNX_INTEGRATION STREQUAL "opt")
     return()
   endif()
 
+  # Try CMake config first (vcpkg, proper installs)
   find_package(onnxruntime CONFIG QUIET)
   if(TARGET onnxruntime::onnxruntime)
     set(_have_ort TRUE)
-    message(STATUS "gr-onnx: using system onnxruntime (full, .onnx + .ort)")
+    message(STATUS "gr-onnx: found system onnxruntime via CMake config")
   elseif(TARGET onnxruntime)
     add_library(onnxruntime::onnxruntime ALIAS onnxruntime)
     set(_have_ort TRUE)
-    message(STATUS "gr-onnx: using system onnxruntime (aliased)")
-  else()
+    message(STATUS "gr-onnx: found system onnxruntime (aliased)")
+  endif()
+
+  # Try pkg-config
+  if(NOT _have_ort)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
       pkg_check_modules(ORT QUIET libonnxruntime)
@@ -42,183 +122,190 @@ if(ENABLE_ONNX_INTEGRATION STREQUAL "opt")
         add_library(onnxruntime::onnxruntime INTERFACE IMPORTED)
         set_target_properties(onnxruntime::onnxruntime PROPERTIES
                 INTERFACE_INCLUDE_DIRECTORIES "${ORT_INCLUDE_DIRS}"
-                INTERFACE_LINK_LIBRARIES "${ORT_LIBRARIES}")
+                INTERFACE_LINK_LIBRARIES "${ORT_LIBRARIES}"
+        )
         set(_have_ort TRUE)
-        message(STATUS "gr-onnx: using system onnxruntime (pkg-config)")
+        message(STATUS "gr-onnx: found system onnxruntime via pkg-config")
+      endif()
+    endif()
+  endif()
+
+  # Try standard paths (manual install to /usr/local)
+  if(NOT _have_ort)
+    find_library(ORT_LIBRARY NAMES onnxruntime
+            HINTS /usr/local/lib /opt/onnxruntime/lib
+            PATH_SUFFIXES lib lib64
+    )
+    find_path(ORT_INCLUDE_DIR NAMES onnxruntime_cxx_api.h
+            HINTS /usr/local/include /opt/onnxruntime/include
+            PATH_SUFFIXES include onnxruntime
+    )
+    if(ORT_LIBRARY AND ORT_INCLUDE_DIR)
+      add_library(onnxruntime::onnxruntime SHARED IMPORTED GLOBAL)
+      set_target_properties(onnxruntime::onnxruntime PROPERTIES
+              IMPORTED_LOCATION "${ORT_LIBRARY}"
+              INTERFACE_INCLUDE_DIRECTORIES "${ORT_INCLUDE_DIR}"
+      )
+      set(_have_ort TRUE)
+      message(STATUS "gr-onnx: found system onnxruntime at ${ORT_LIBRARY}")
+
+      # Check for GPU providers
+      get_filename_component(_ort_lib_dir "${ORT_LIBRARY}" DIRECTORY)
+      if(EXISTS "${_ort_lib_dir}/libonnxruntime_providers_rocm.so" OR
+              EXISTS "${_ort_lib_dir}/libonnxruntime_providers_cuda.so")
+        set(_ort_has_gpu TRUE)
+        message(STATUS "gr-onnx: GPU execution provider detected")
       endif()
     endif()
   endif()
 
   if(NOT _have_ort)
-    message(STATUS "gr-onnx: system onnxruntime not found, skipping")
-    message(STATUS "gr-onnx: install via: vcpkg install onnxruntime, or use ENABLE_ONNX_INTEGRATION=on")
+    message(STATUS "gr-onnx: system onnxruntime not found")
+    message(STATUS "gr-onnx: install via package manager, or use ENABLE_ONNX_INTEGRATION=on")
     return()
   endif()
 endif()
 
 # =============================================================================
-# MODE: on - build minimal static lib from source (.ort only, smaller binary)
+# MODE: on - Use bundled static libraries (fetched via Git LFS)
 # =============================================================================
 if(ENABLE_ONNX_INTEGRATION STREQUAL "on")
-  include(ExternalProject)
-  find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-  set(ORT_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/onnxruntime)
-  set(ORT_INSTALL_DIR ${ORT_PREFIX}/install)
-
-  # Determine output library path and build arguments based on platform
+  # Determine platform-specific library subdirectory
   if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-    set(_ort_lib_name "libonnxruntime_webassembly.a")
-    set(_ort_platform_args "--build_wasm_static_lib --enable_wasm_simd --enable_wasm_threads")
+    # WASM build - prefer WebGPU variant, fall back to CPU
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/wasm-webgpu/libonnxruntime_webassembly.a")
+      set(_bundled_subdir "wasm-webgpu")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/wasm-cpu/libonnxruntime_webassembly.a")
+      set(_bundled_subdir "wasm-cpu")
+    else()
+      set(_bundled_subdir "wasm-webgpu")  # Will trigger LFS fetch
+    endif()
+    set(_bundled_lib_name "libonnxruntime_webassembly.a")
 
-    # Optional WebGPU support
-    option(ONNX_ENABLE_WEBGPU "Enable WebGPU execution provider in WASM build" OFF)
-    if(ONNX_ENABLE_WEBGPU)
-      string(APPEND _ort_platform_args " --use_jsep --use_webgpu")
+    # Allow override
+    option(GR_ONNX_WASM_CPU_ONLY "Use CPU-only WASM build instead of WebGPU" OFF)
+    if(GR_ONNX_WASM_CPU_ONLY)
+      set(_bundled_subdir "wasm-cpu")
     endif()
   else()
-    set(_ort_lib_name "libonnxruntime.a")
-    set(_ort_platform_args "")
+    # Native build - detect architecture
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+      set(_bundled_subdir "native-linux-x86_64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
+      set(_bundled_subdir "native-linux-aarch64")
+    else()
+      message(FATAL_ERROR
+              "gr-onnx: no bundled library for ${CMAKE_SYSTEM_PROCESSOR}\n"
+              "Use ENABLE_ONNX_INTEGRATION=opt with a system-installed onnxruntime,\n"
+              "or rebuild libraries with: ./blocks/onnx/lib/rebuild_static_libs.sh")
+    endif()
+    set(_bundled_lib_name "libonnxruntime.a")
+  endif()
 
-    # Optional CUDA support for native builds
-    option(ONNX_ENABLE_CUDA "Enable CUDA execution provider" OFF)
-    if(ONNX_ENABLE_CUDA)
-      set(_ort_platform_args "--use_cuda")
-      if(DEFINED CUDA_HOME)
-        string(APPEND _ort_platform_args " --cuda_home ${CUDA_HOME} --cudnn_home ${CUDA_HOME}")
-      endif()
+  # Ensure LFS files are fetched
+  gr_onnx_ensure_lfs_files(${_bundled_subdir})
+
+  set(_bundled_lib "${CMAKE_CURRENT_SOURCE_DIR}/lib/${_bundled_subdir}/${_bundled_lib_name}")
+  set(_bundled_include "${CMAKE_CURRENT_SOURCE_DIR}/lib/${_bundled_subdir}/include")
+
+  if(NOT EXISTS "${_bundled_lib}")
+    message(FATAL_ERROR "gr-onnx: bundled library not found: ${_bundled_lib}")
+  endif()
+
+  # Create imported target
+  # ===========================================================================
+  # IMPORTANT: Use --whole-archive for static ONNX Runtime libraries
+  # ===========================================================================
+  # ONNX Runtime static libraries contain template instantiations (like
+  # GetOpSchema<MaxPool_Onnx_ver1>) that aren't directly referenced by user
+  # code. Without --whole-archive, the linker drops these objects and you
+  # get undefined symbol errors at link time.
+  # ===========================================================================
+  add_library(onnxruntime::onnxruntime INTERFACE IMPORTED GLOBAL)
+
+  # Use INTERFACE library with explicit linker flags for --whole-archive
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+    # Modern CMake approach using WHOLE_ARCHIVE feature
+    set_target_properties(onnxruntime::onnxruntime PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${_bundled_include}"
+            INTERFACE_LINK_LIBRARIES "$<LINK_LIBRARY:WHOLE_ARCHIVE,${_bundled_lib}>"
+    )
+    message(STATUS "gr-onnx: using CMake 3.24+ WHOLE_ARCHIVE feature")
+  else()
+    # Legacy approach for older CMake versions
+    if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+      # Emscripten doesn't need --whole-archive (single WASM output)
+      set_target_properties(onnxruntime::onnxruntime PROPERTIES
+              INTERFACE_INCLUDE_DIRECTORIES "${_bundled_include}"
+              INTERFACE_LINK_LIBRARIES "${_bundled_lib}"
+      )
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+      set_target_properties(onnxruntime::onnxruntime PROPERTIES
+              INTERFACE_INCLUDE_DIRECTORIES "${_bundled_include}"
+              INTERFACE_LINK_LIBRARIES "-Wl,--whole-archive;${_bundled_lib};-Wl,--no-whole-archive"
+      )
+      message(STATUS "gr-onnx: using --whole-archive for static linking")
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+      set_target_properties(onnxruntime::onnxruntime PROPERTIES
+              INTERFACE_INCLUDE_DIRECTORIES "${_bundled_include}"
+              INTERFACE_LINK_LIBRARIES "-Wl,-force_load,${_bundled_lib}"
+      )
+      message(STATUS "gr-onnx: using -force_load for static linking")
+    else()
+      # Fallback - might have linking issues
+      message(WARNING "gr-onnx: unknown compiler, static linking may have undefined symbols")
+      set_target_properties(onnxruntime::onnxruntime PROPERTIES
+              INTERFACE_INCLUDE_DIRECTORIES "${_bundled_include}"
+              INTERFACE_LINK_LIBRARIES "${_bundled_lib}"
+      )
     endif()
   endif()
 
-  set(_ort_lib "${ORT_INSTALL_DIR}/lib/${_ort_lib_name}")
-
-  # Ensure prefix directory exists for scripts
-  file(MAKE_DIRECTORY ${ORT_PREFIX})
-
-  # Patch script - fix Eigen hash mismatch (GitLab regenerates archives with different hashes)
-  # This patches cmake/deps.txt after clone
-  set(ORT_PATCH_SCRIPT "${ORT_PREFIX}/patch_ort.sh")
-  file(WRITE ${ORT_PATCH_SCRIPT}
-          "#!/bin/bash
-set -e
-cd \"${ORT_PREFIX}/src\"
-echo \"Patching ONNX Runtime for CMake 4.x and Eigen hash fix...\"
-
-# Fix Eigen hash mismatch - GitLab regenerates zip archives with different hashes
-# Old hash: be8be39fdbc6e60e94fa7870b280707069b5b81a
-# New hash: 32b145f525a8308d7ab1c09388b2e288312d8eba
-if [ -f cmake/deps.txt ]; then
-  sed -i 's/be8be39fdbc6e60e94fa7870b280707069b5b81a/32b145f525a8308d7ab1c09388b2e288312d8eba/g' cmake/deps.txt
-  echo \"  - Patched Eigen hash in cmake/deps.txt\"
-fi
-
-echo \"Patch complete\"
-")
-  file(CHMOD ${ORT_PATCH_SCRIPT} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-
-  # Build script - must run from source directory
-  # build.py handles configure+build in one step
-  # Note: CMAKE_POLICY_VERSION_MINIMUM=3.5 required for CMake 4.x compatibility
-  #       with older dependencies (google_nsync, etc.)
-  set(ORT_BUILD_SCRIPT "${ORT_PREFIX}/build_ort.sh")
-  file(WRITE ${ORT_BUILD_SCRIPT}
-          "#!/bin/bash
-set -e
-cd \"${ORT_PREFIX}/src\"
-echo \"Building ONNX Runtime v${ONNXRUNTIME_VERSION} minimal from: $(pwd)\"
-\"${Python3_EXECUTABLE}\" tools/ci_build/build.py \\
-  --build_dir \"${ORT_PREFIX}/build\" \\
-  --config Release \\
-  --cmake_extra_defines CMAKE_POLICY_VERSION_MINIMUM=3.5 \\
-  --update \\
-  --build \\
-  --minimal_build extended \\
-  --disable_ml_ops \\
-  --disable_rtti \\
-  --skip_tests \\
-  --parallel \\
-  ${_ort_platform_args}
-echo \"ONNX Runtime build completed successfully\"
-")
-  file(CHMOD ${ORT_BUILD_SCRIPT} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-
-  # Install script - copy artifacts to install dir
-  set(ORT_INSTALL_SCRIPT "${ORT_PREFIX}/install_ort.sh")
-  file(WRITE ${ORT_INSTALL_SCRIPT}
-          "#!/bin/bash
-set -e
-echo \"Installing ONNX Runtime artifacts...\"
-mkdir -p \"${ORT_INSTALL_DIR}/lib\" \"${ORT_INSTALL_DIR}/include\"
-cp \"${ORT_PREFIX}/build/Release/${_ort_lib_name}\" \"${ORT_INSTALL_DIR}/lib/\"
-cp -r \"${ORT_PREFIX}/src/include/onnxruntime/core/session/\"* \"${ORT_INSTALL_DIR}/include/\"
-echo \"ONNX Runtime installed to: ${ORT_INSTALL_DIR}\"
-")
-  file(CHMOD ${ORT_INSTALL_SCRIPT} PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-
-  ExternalProject_Add(onnxruntime_ext
-          PREFIX          ${ORT_PREFIX}
-          SOURCE_DIR      ${ORT_PREFIX}/src
-          BINARY_DIR      ${ORT_PREFIX}/build
-          INSTALL_DIR     ${ORT_INSTALL_DIR}
-          STAMP_DIR       ${ORT_PREFIX}/stamp
-          TMP_DIR         ${ORT_PREFIX}/tmp
-          DOWNLOAD_DIR    ${ORT_PREFIX}/download
-          LOG_DIR         ${ORT_PREFIX}/log
-          GIT_REPOSITORY  https://github.com/microsoft/onnxruntime.git
-          GIT_TAG         v${ONNXRUNTIME_VERSION}
-          GIT_SHALLOW     TRUE
-          GIT_PROGRESS    TRUE
-          PATCH_COMMAND   ${ORT_PATCH_SCRIPT}
-          CONFIGURE_COMMAND ${ORT_BUILD_SCRIPT}
-          BUILD_COMMAND   ""
-          INSTALL_COMMAND ${ORT_INSTALL_SCRIPT}
-          BUILD_BYPRODUCTS ${_ort_lib}
-          LOG_DOWNLOAD    ON
-          LOG_PATCH       ON
-          LOG_CONFIGURE   ON
-          LOG_INSTALL     ON
-  )
-
-  # Create imported target
-  add_library(onnxruntime::onnxruntime STATIC IMPORTED)
-  set_target_properties(onnxruntime::onnxruntime PROPERTIES
-          IMPORTED_LOCATION "${_ort_lib}"
-          INTERFACE_INCLUDE_DIRECTORIES "${ORT_INSTALL_DIR}/include"
-  )
-  add_dependencies(onnxruntime::onnxruntime onnxruntime_ext)
+  # Add required system libraries for native builds
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    target_link_libraries(onnxruntime::onnxruntime INTERFACE pthread dl)
+  endif()
 
   set(_have_ort TRUE)
   set(_ort_minimal TRUE)
 
-  if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-    message(STATUS "gr-onnx: building minimal WASM onnxruntime v${ONNXRUNTIME_VERSION} (.ort only)")
-  else()
-    message(STATUS "gr-onnx: building minimal native onnxruntime v${ONNXRUNTIME_VERSION} (.ort only)")
-  endif()
+  message(STATUS "gr-onnx: using bundled ${_bundled_subdir} v${GR_ONNX_BUNDLED_VERSION}")
 endif()
 
 # =============================================================================
 # Create gr-onnx target
 # =============================================================================
 if(NOT _have_ort)
-  message(FATAL_ERROR "gr-onnx: internal error - _have_ort not set")
+  message(FATAL_ERROR "gr-onnx: internal error - no onnxruntime target created")
 endif()
 
 add_library(gr-onnx INTERFACE)
 target_link_libraries(gr-onnx INTERFACE
-        gnuradio-options gnuradio-meta gnuradio-core gnuradio-algorithm
-        onnxruntime::onnxruntime)
+        gnuradio-options
+        gnuradio-meta
+        gnuradio-core
+        gnuradio-algorithm
+        onnxruntime::onnxruntime
+)
 target_include_directories(gr-onnx INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
-        $<INSTALL_INTERFACE:include/>)
+        $<INSTALL_INTERFACE:include/>
+)
 
-# Expose whether this is a minimal build (for runtime checks)
+# Compile definitions for runtime feature detection
 if(_ort_minimal)
   target_compile_definitions(gr-onnx INTERFACE GR_ONNX_MINIMAL_BUILD=1)
 else()
   target_compile_definitions(gr-onnx INTERFACE GR_ONNX_MINIMAL_BUILD=0)
 endif()
 
+if(_ort_has_gpu)
+  target_compile_definitions(gr-onnx INTERFACE GR_ONNX_HAS_GPU=1)
+else()
+  target_compile_definitions(gr-onnx INTERFACE GR_ONNX_HAS_GPU=0)
+endif()
+
+# Subdirectories
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_subdirectory(src)
 endif()
@@ -226,4 +313,5 @@ if(ENABLE_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test)
   add_subdirectory(test)
 endif()
 
-message(STATUS "gr-onnx: enabled (mode=${ENABLE_ONNX_INTEGRATION}, minimal=${_ort_minimal})")
+# Summary
+message(STATUS "gr-onnx: enabled (mode=${ENABLE_ONNX_INTEGRATION}, minimal=${_ort_minimal}, gpu=${_ort_has_gpu})")
