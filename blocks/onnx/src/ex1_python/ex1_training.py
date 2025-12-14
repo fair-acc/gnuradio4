@@ -74,9 +74,9 @@ class TrainConfig:
     batch_size: int = 64
     epochs: int = 100
     learning_rate: float = 1e-3
-    train_samples: int = 50000
-    val_samples: int = 6250
-    test_samples: int = 6250
+    train_samples: int = 100000
+    val_samples: int = 10000
+    test_samples: int = 10000
     seed: int = 42
     peak_width_min_bins: float = 1.0  # Allow single-bin peaks
     peak_width_max_frac: float = 0.15
@@ -1097,20 +1097,19 @@ def main():
     parser = argparse.ArgumentParser(description="Peak detector v3")
     parser.add_argument("--fft-size", type=int, default=4096, choices=[1024, 2048, 4096, 8192])
     parser.add_argument("--kmax", type=int, default=8)
-    parser.add_argument("--snr-min", type=float, default=6.0)
+    parser.add_argument("--snr-min", type=float, default=3.0)
     parser.add_argument("--snr-max", type=float, default=40.0)
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=str, default=".")
     parser.add_argument("--plot-only", action="store_true")
-    parser.add_argument("--plot-seed", type=int, default=12345)
+    parser.add_argument("--plot-seed", type=int, default=42)
     parser.add_argument("--no-show", action="store_true")
     parser.add_argument("--sequential", action="store_true")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--threshold", type=float, default=0.4)
-    parser.add_argument("--heatmap-res", type=int, default=None,
-                        help="Heatmap resolution (default: fft_size/8)")
+    parser.add_argument("--heatmap-res", type=int, default=None, help="Heatmap resolution (default: fft_size/8)")
     args = parser.parse_args()
 
     heatmap_res = args.heatmap_res if args.heatmap_res else args.fft_size // 8
