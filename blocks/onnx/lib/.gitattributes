@@ -1,0 +1,27 @@
+# blocks/onnx/lib/.gitattributes
+#
+# Git LFS tracking for ONNX Runtime static libraries.
+#
+# These files are large binaries (~10-25 MB each) that should not bloat
+# the main repository. Git LFS stores them separately and fetches on demand.
+#
+# Setup (one-time, repository maintainer):
+#   git lfs install
+#   git lfs track "blocks/onnx/lib/**/*.a"
+#   git add .gitattributes
+#   git commit -m "Track ONNX static libs with Git LFS"
+#
+# For users cloning without LFS objects (faster clone):
+#   GIT_LFS_SKIP_SMUDGE=1 git clone <repo>
+#
+# Fetch specific platform libs when needed:
+#   git lfs pull --include="blocks/onnx/lib/native-linux-x86_64/*"
+#   git lfs pull --include="blocks/onnx/lib/wasm-webgpu/*"
+#
+
+# Track all static library files
+*.a filter=lfs diff=lfs merge=lfs -text
+
+# Ensure headers remain as regular files (not LFS)
+*.h !filter !diff !merge text
+*.hpp !filter !diff !merge text
