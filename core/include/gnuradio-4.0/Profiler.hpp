@@ -302,10 +302,12 @@ public:
             gr::thread_pool::thread::setThreadName(gr::meta::shorten_type_name(gr::meta::type_name<Profiler>()));
             auto          file_name = options.output_file;
             std::ofstream out_file;
-            if (file_name.empty() && options.output_mode == OutputMode::File) {
-                static std::atomic<int> counter = 0;
-                file_name                       = std::format("profile.{}.{}.trace", getpid(), counter++);
-                out_file                        = std::ofstream(file_name, std::ios::out | std::ios::binary);
+            if (options.output_mode == OutputMode::File) {
+                if (file_name.empty()) {
+                    static std::atomic<int> counter = 0;
+                    file_name                       = std::format("profile.{}.{}.trace", getpid(), counter++);
+                }
+                out_file = std::ofstream(file_name, std::ios::out | std::ios::binary);
             }
 
             std::ostream& out_stream = options.output_mode == OutputMode::File ? out_file : std::cout;
