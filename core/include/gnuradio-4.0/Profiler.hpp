@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include <gnuradio-4.0/thread/thread_affinity.hpp>
+#include <gnuradio-4.0/thread/thread_pool.hpp>
 
 namespace gr::profiling {
 
@@ -123,8 +124,10 @@ concept ProfilerLike = requires(T p) {
 enum class OutputMode { StdOut, File };
 
 struct Options {
-    std::string output_file{};
-    OutputMode  output_mode = OutputMode::File;
+    std::string               output_file{};
+    OutputMode                output_mode = OutputMode::File;
+    std::chrono::milliseconds update_period{100};
+    std::size_t               buffer_size{524288};
 
     auto operator<=>(const Options&) const = default;
 };
@@ -182,12 +185,16 @@ struct CompleteEvent {
         }
         const auto elapsed = detail::clock::now() - _start;
         auto       r       = _handler.reserveEvent();
-        r[0].name          = _name;
-        r[0].type          = detail::EventType::Complete;
-        r[0].ts            = std::chrono::duration_cast<std::chrono::microseconds>(_start - _handler.Profiler().start());
-        r[0].dur           = std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
-        r[0].cat           = _categories;
-        r[0].args          = _args;
+        while (r.size() == 0) {
+            std::this_thread::yield();
+            r = _handler.reserveEvent();
+        }
+        r[0].name = _name;
+        r[0].type = detail::EventType::Complete;
+        r[0].ts   = std::chrono::duration_cast<std::chrono::microseconds>(_start - _handler.Profiler().start());
+        r[0].dur  = std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
+        r[0].cat  = _categories;
+        r[0].args = _args;
         r.publish(1);
         _finished = true;
     }
@@ -222,7 +229,11 @@ public:
 
 private:
     void postEvent(detail::EventType type, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
-        auto r    = _handler.reserveEvent();
+        auto r = _handler.reserveEvent();
+        while (r.size() == 0) {
+            std::this_thread::yield();
+            r = _handler.reserveEvent();
+        }
         r[0].name = _name;
         r[0].type = type;
         r[0].id   = _id;
@@ -252,13 +263,19 @@ public:
     auto reserveEvent() noexcept {
         const auto elapsed = detail::clock::now() - _profiler.start();
         auto       r       = _writer.reserve(1);
-        r[0].thread_id     = std::this_thread::get_id();
-        r[0].ts            = std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
+        if (r.size() > 0) {
+            r[0].thread_id = std::this_thread::get_id();
+            r[0].ts        = std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
+        }
         return r;
     }
 
     void instantEvent(std::string_view name, std::string_view categories = {}, std::initializer_list<arg_value> args = {}) noexcept {
-        auto r    = reserveEvent();
+        auto r = reserveEvent();
+        while (r.size() == 0) {
+            std::this_thread::yield();
+            r = reserveEvent();
+        }
         r[0].name = name;
         r[0].type = detail::EventType::Instant;
         r[0].cat  = categories;
@@ -267,7 +284,11 @@ public:
     }
 
     void counterEvent(std::string_view name, std::string_view categories, std::initializer_list<arg_value> args = {}) noexcept {
-        auto r    = reserveEvent();
+        auto r = reserveEvent();
+        while (r.size() == 0) {
+            std::this_thread::yield();
+            r = reserveEvent();
+        }
         r[0].name = name;
         r[0].type = detail::EventType::Counter;
         r[0].cat  = std::string{categories};
@@ -291,14 +312,15 @@ class Profiler {
     using HandlerType = Handler<Profiler, WriterType>;
     std::mutex                             _handlers_lock;
     std::map<std::thread::id, HandlerType> _handlers;
-    std::atomic<bool>                      _finished = false;
-    decltype(_buffer.new_reader())         _reader   = _buffer.new_reader();
-    std::thread                            _event_handler;
-    detail::time_point                     _start = detail::clock::now();
+    std::atomic<bool>                      _finished      = false;
+    std::atomic<bool>                      _consumer_done = false;
+    decltype(_buffer.new_reader())         _reader        = _buffer.new_reader();
+    detail::time_point                     _start         = detail::clock::now();
 
 public:
-    explicit Profiler(const Options& options = {}) : _buffer(524288) {
-        _event_handler = std::thread([options, &reader = _reader, &finished = _finished]() {
+    explicit Profiler(const Options& options = {}) : _buffer(options.buffer_size) {
+        auto io_pool = thread_pool::Manager::defaultIoPool();
+        io_pool->execute([options, &reader = _reader, &finished = _finished, &consumer_done = _consumer_done]() {
             gr::thread_pool::thread::setThreadName(gr::meta::shorten_type_name(gr::meta::type_name<Profiler>()));
             auto          file_name = options.output_file;
             std::ofstream out_file;
@@ -320,7 +342,9 @@ public:
             std::print(out_stream, "[\n");
             bool is_first = true;
             while (!seen_finished) {
-                seen_finished = finished;
+                const auto iteration_start = detail::clock::now();
+                seen_finished              = finished;
+
                 while (reader.available() > 0) {
                     ReaderSpanLike auto event = reader.get(1);
                     auto                it    = mapped_threads.find(event[0].thread_id);
@@ -335,8 +359,18 @@ public:
                     is_first    = false;
                     std::ignore = event.consume(1);
                 }
+
+                if (!seen_finished) {
+                    const auto elapsed   = detail::clock::now() - iteration_start;
+                    const auto sleep_for = options.update_period - std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+                    if (sleep_for > std::chrono::milliseconds::zero()) {
+                        std::this_thread::sleep_for(sleep_for);
+                    }
+                }
             }
             std::println(out_stream, "\n]");
+            consumer_done = true;
+            consumer_done.notify_all();
         });
 
         reset();
@@ -344,8 +378,13 @@ public:
 
     ~Profiler() {
         _finished = true;
-        _event_handler.join();
+        _consumer_done.wait(false);
     }
+
+    Profiler(const Profiler&)            = delete;
+    Profiler& operator=(const Profiler&) = delete;
+    Profiler(Profiler&&)                 = delete;
+    Profiler& operator=(Profiler&&)      = delete;
 
     detail::time_point start() const { return _start; }
 
