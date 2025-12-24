@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/BlockingSync.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <magic_enum.hpp>
@@ -14,7 +15,6 @@ using namespace gr;
 
 namespace function_generator {
 enum class SignalType : int { Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse };
-// TODO: Enum values should be capitalized CamelStyle, for the moment they are the same as FunctionGenerator class members
 enum class ParameterType : int { signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1 };
 
 using enum SignalType;
@@ -78,77 +78,31 @@ GR_REGISTER_BLOCK(gr::basic::FunctionGenerator, [T], [ float, double ])
 
 template<typename T>
 requires(std::floating_point<T>)
-struct FunctionGenerator : Block<FunctionGenerator<T>, BlockingIO<true>> {
-    using Description = Doc<R""(@brief The `FunctionGenerator` class generates a variety of functions and their combinations.
-It supports multiple function types, including Constant, Linear Ramp, Parabolic Ramp, Cubic Spline, and Impulse Response.
-Each function type is configurable with specific parameters, enabling precise tailoring to meet the user's requirements.
-Users can create sequences of various functions using tags.
-These tags are generated through dedicated helper methods, named `create{FunctionName}Tag(...)`.
-This method enables the flexible assembly of diverse function chains, offering significant versatility in signal generation.
+struct FunctionGenerator : Block<FunctionGenerator<T>>, BlockingSync<FunctionGenerator<T>> {
+    using Description = Doc<R""(@brief generates function waveforms and their combinations via tag-based sequencing.
 
-Supported function types and their configurable parameters:
+Supported functions: Constant, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse.
 
-* Const
-  - Constantly returns the same value, specified by 'startValue'.
-  To create a `property_map` use `createConstPropertyMap(tagIndex, startValue)`.
-
-* LinearRamp
-  - Interpolates linearly between a start and a final value over a set duration.
-  To create a `property_map` use `createLinearRampPropertyMap(tagIndex, startValue, finalValue, duration)`.
-
-* ParabolicRamp
-  - Produces a function with three sections: parabolic-linear-parabolic. The 'roundOffTime' parameter determines the length of the parabolic sections.
-  To create a `property_map` use `createParabolicRampPropertyMap(tagIndex, startValue, finalValue, duration, roundOffTime)`.
-
-* CubicSpline
-  - Implements smooth cubic spline interpolation between start and final values over a specified duration.
-  To create a `property_map` use `createCubicSplinePropertyMap(tagIndex, startValue, finalValue, duration)`.
-
-* ImpulseResponse
-  - Creates a function that spikes from 'time0' for a duration of 'time1'.
-  To create a `property_map` use `createImpulseResponsePropertyMap(tagIndex, startValue, finalValue, time0, time1)`.
-
-To create a chain of functions one can use `ClockSource`:
-1) add time Tag entries, with time and command string:
-@code
-auto addTimeTagEntry = []<typename T>(gr::basic::ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
-    clockSource.tag_times.value.push_back(timeInNanoseconds);
-    clockSource.tag_values.value.push_back(value);
-};
-
-auto &clockSrc = testGraph.emplaceBlock<gr::basic::ClockSource>({ gr::tag::SAMPLE_RATE(100.f), { "n_samples_max", 100 }, { "name", "ClockSource" } });
-addTimeTagEntry(1'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1");
-addTimeTagEntry(10'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2");
-addTimeTagEntry(30'000, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3");
-@endcode
-
-2) set parameters for all required contexts:
-@code
-funcGen.settings().set(createConstPropertyMap(5.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=1"});
-funcGen.settings().set(createLinearRampPropertyMap(5.f, 30.f, .2f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=2"});
-funcGen.settings().set(createConstPropertyMap(30.f), SettingsCtx{now, "CMD_BP_START:FAIR.SELECTOR.C=1:S=1:P=3"});
-@endcode
-
-The parameters will automatically update when a Tag containing the 'context' field arrives.
+Operating modes:
+  clk_in connected: generates one sample per clock input sample
+  clk_in disconnected: free-running mode synchronised to wall-clock time
 )"">;
 
-    PortIn<std::uint8_t> in; // ClockSource input
-    PortOut<T>           out;
+    PortIn<std::uint8_t, Optional> clk_in;
+    PortOut<T>                     out;
 
-    // TODO: Example of type aliases for sample_rate, make global and for all default Tags
-    using SampleRate       = Annotated<float, "sample_rate", Visible, Doc<"stream sampling rate in [Hz]">>;
-    SampleRate sample_rate = 1000.f;
+    Annotated<float, "sample_rate", Visible, Doc<"stream sampling rate in [Hz]">>                sample_rate = 1000.f;
+    Annotated<gr::Size_t, "chunk_size", Visible, Doc<"samples per update in free-running mode">> chunk_size  = 100;
 
-    Annotated<std::string, "signal_trigger", Visible, Doc<"required trigger name (empty -> being ignored): ">>   signal_trigger;
+    Annotated<std::string, "signal_trigger", Visible, Doc<"required trigger name (empty -> ignored)">>           signal_trigger;
     Annotated<function_generator::SignalType, "signal_type", Visible, Doc<"see function_generator::SignalType">> signal_type = function_generator::Const;
 
-    // Parameters for different functions, not all parameters are used for all functions
     Annotated<T, "start_value">                                               start_value    = T(0.);
     Annotated<T, "final_value">                                               final_value    = T(0.);
     Annotated<T, "duration", Doc<"in sec">>                                   duration       = T(0.);
-    Annotated<T, "round_off_time", Doc<"Specific to ParabolicRamp, in sec">>  round_off_time = T(0.);
-    Annotated<T, "impulse_time0", Doc<"Specific to ImpulseResponse, in sec">> impulse_time0  = T(0.);
-    Annotated<T, "impulse_time1", Doc<"Specific to ImpulseResponse, in sec">> impulse_time1  = T(0.);
+    Annotated<T, "round_off_time", Doc<"specific to ParabolicRamp, in sec">>  round_off_time = T(0.);
+    Annotated<T, "impulse_time0", Doc<"specific to ImpulseResponse, in sec">> impulse_time0  = T(0.);
+    Annotated<T, "impulse_time1", Doc<"specific to ImpulseResponse, in sec">> impulse_time1  = T(0.);
 
     Annotated<std::string, "trigger name">       trigger_name;
     Annotated<std::uint64_t, "trigger time">     trigger_time;
@@ -156,13 +110,20 @@ The parameters will automatically update when a Tag containing the 'context' fie
     Annotated<std::string, "context name">       context;
     Annotated<property_map, "trigger_meta_info"> trigger_meta_info{};
 
-    GR_MAKE_REFLECTABLE(FunctionGenerator, in, out, sample_rate, signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, //
+    GR_MAKE_REFLECTABLE(FunctionGenerator, clk_in, out, sample_rate, chunk_size, signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, //
         trigger_name, trigger_time, trigger_offset, context, trigger_meta_info);
 
     T   _currentTime   = T(0.);
     int _sampleCounter = 0;
+    T   _timeTick      = T(1.) / static_cast<T>(sample_rate);
 
-    T _timeTick = T(1.) / static_cast<T>(sample_rate);
+    void start() {
+        _currentTime = T(0.);
+        _timeTick    = T(1.) / static_cast<T>(sample_rate);
+        this->blockingSyncStart();
+    }
+
+    void stop() { this->blockingSyncStop(); }
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
         if (newSettings.contains(function_generator::toString(function_generator::signal_type))) {
@@ -173,7 +134,7 @@ The parameters will automatically update when a Tag containing the 'context' fie
                 if (newTrigger == signal_trigger.value) {
                     _currentTime = T(0.);
                 } else {
-                    // trigger does not match required signal_trigger -- revert signal_type and others to previous ones
+                    // trigger does not match required signal_trigger -- revert to previous
                     start_value    = std::get<T>(oldSettings.at("start_value"));
                     final_value    = std::get<T>(oldSettings.at("final_value"));
                     duration       = std::get<T>(oldSettings.at("duration"));
@@ -186,7 +147,24 @@ The parameters will automatically update when a Tag containing the 'context' fie
         _timeTick = T(1.) / static_cast<T>(sample_rate);
     }
 
-    [[nodiscard]] constexpr T processOne(T /*input*/) noexcept {
+    work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
+        const auto nSamples = this->syncSamples(input, output);
+        if (nSamples == 0UZ) {
+            std::ignore = input.consume(0UZ);
+            output.publish(0UZ);
+            return work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
+
+        for (std::size_t i = 0; i < nSamples; ++i) {
+            output[i] = generateSample();
+        }
+
+        std::ignore = input.consume(this->isFreeRunning() ? 0UZ : nSamples);
+        output.publish(nSamples);
+        return work::Status::OK;
+    }
+
+    [[nodiscard]] constexpr T generateSample() noexcept {
         _sampleCounter++;
         using enum function_generator::SignalType;
         T value{};
@@ -210,9 +188,8 @@ The parameters will automatically update when a Tag containing the 'context' fie
         return value;
     }
 
-private:
     [[nodiscard]] constexpr T calculateParabolicRamp() {
-        const T roundOnTime  = round_off_time; // assume that round ON and OFF times are equal
+        const T roundOnTime  = round_off_time;
         const T linearLength = duration - (roundOnTime + round_off_time);
         const T a            = (final_value - start_value) / (T(2.) * roundOnTime * (linearLength + round_off_time));
         const T ar2          = a * std::pow(round_off_time, T(2.));
@@ -222,13 +199,12 @@ private:
             return final_value;
         }
         if (_currentTime < roundOnTime) {
-            return start_value + a * std::pow(_currentTime, T(2.)); // first parabolic section
+            return start_value + a * std::pow(_currentTime, T(2.));
         }
         if (_currentTime < duration - round_off_time) {
             const T transitPoint1 = start_value + ar2;
-            return transitPoint1 + slope * (_currentTime - round_off_time); // linear section
+            return transitPoint1 + slope * (_currentTime - round_off_time);
         }
-        // second parabolic section
         const T shiftedTime   = _currentTime - (duration - round_off_time);
         const T transitPoint2 = final_value - ar2;
         return transitPoint2 + slope * shiftedTime - a * std::pow(shiftedTime, T(2.));

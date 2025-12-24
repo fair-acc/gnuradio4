@@ -211,7 +211,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         using OptionalPort = PortIn<int, gr::Optional>;
         using AsyncPort    = PortIn<int, gr::Async>;
         static_assert(OptionalPort::kIsOptional);
-        static_assert(!OptionalPort::kIsSynch);
+        static_assert(OptionalPort::kIsSynch);
         static_assert(!AsyncPort::kIsSynch);
         static_assert(!AsyncPort::kIsOptional);
     };
