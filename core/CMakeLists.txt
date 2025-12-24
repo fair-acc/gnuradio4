@@ -16,6 +16,7 @@ set(public_headers
     include/gnuradio-4.0/BufferSkeleton.hpp
     include/gnuradio-4.0/CircularBuffer.hpp
     include/gnuradio-4.0/ClaimStrategy.hpp
+    include/gnuradio-4.0/BlockingSync.hpp
     include/gnuradio-4.0/DataSet.hpp
     include/gnuradio-4.0/Graph_yaml_importer.hpp
     include/gnuradio-4.0/Graph.hpp

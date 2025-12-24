@@ -42,7 +42,7 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
-    constexpr static std::size_t N_HISTORY = 16UZ;
+    constexpr static std::size_t N_HISTORY = 32UZ;
 
     PortIn<T>  in;
     PortOut<T> out;
@@ -90,10 +90,16 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
 
     gr::work::Status processBulk(InputSpanLike auto& inputSpan, OutputSpanLike auto& outputSpan) {
         const std::optional<std::size_t> nextEoSTag = samples_to_eos_tag(in);
-        if (inputSpan.size() < N_HISTORY && nextEoSTag.value_or(0) >= N_HISTORY) {
+        if (inputSpan.size() < N_HISTORY && !nextEoSTag.has_value()) {
             return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
-        const std::size_t nProcess = inputSpan.size() - N_HISTORY * nextEoSTag.has_value(); // limit input data to have enough samples to back-date detected trigger if necessary
+
+        const std::size_t nProcessInput = nextEoSTag.has_value() ? inputSpan.size() : (inputSpan.size() > N_HISTORY ? inputSpan.size() - N_HISTORY : 0UZ);
+        const std::size_t nProcess      = std::min(nProcessInput, outputSpan.size());
+
+        if (nProcess == 0) {
+            return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
 
         auto forwardTags = [&](std::size_t maxRelIndex) {
             if (!forward_tag) {
@@ -109,51 +115,50 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
             }
         };
 
-        auto publishEdge = [&](const std::string& triggerName, std::ptrdiff_t edgePosition) {
-            const std::size_t edgePosUnsigned = std::max(0UZ, static_cast<std::size_t>(edgePosition));
-
-            forwardTags(edgePosUnsigned);
+        auto publishEdge = [&](const std::string& triggerName, std::size_t edgePos) {
+            forwardTags(edgePos);
 
             const UncertainValue<float> edgeIdxOffset = UncertainValue<float>{static_cast<float>(_trigger.lastEdgeIdx)} + _trigger.lastEdgeOffset;
             const float                 relOffset     = gr::value(edgeIdxOffset) * static_cast<float>(_period);
             outputSpan.publishTag(
                 property_map{
-                    //
                     {gr::tag::TRIGGER_NAME.shortKey(), triggerName},                                                             //
                     {gr::tag::TRIGGER_TIME.shortKey(), _now - static_cast<uint64_t>(relOffset)},                                 //
                     {"trigger_time_error", static_cast<uint64_t>(gr::uncertainty(edgeIdxOffset) * static_cast<float>(_period))}, //
                     {gr::tag::TRIGGER_OFFSET.shortKey(), relOffset},                                                             //
                     {gr::tag::CONTEXT.shortKey(), context}                                                                       //
                 },
-                edgePosUnsigned);
+                edgePos);
 
-            // copy samples up to nPublish
-            std::copy_n(inputSpan.begin(), edgePosUnsigned, outputSpan.begin());
-            std::ignore = inputSpan.consume(edgePosUnsigned);
-            outputSpan.publish(edgePosUnsigned);
+            const std::size_t nPublish = edgePos + 1; // include edge sample
+            std::copy_n(inputSpan.begin(), nPublish, outputSpan.begin());
+            std::ignore = inputSpan.consume(nPublish);
+            outputSpan.publish(nPublish);
             return gr::work::Status::OK;
         };
 
         for (std::size_t i = 0; i < nProcess; ++i) {
-            const T sample = inputSpan[i];
             _now += _period;
 
-            if (_trigger.processOne(sample) != NONE) { // edge detected
-                const std::ptrdiff_t edgePosition = static_cast<std::ptrdiff_t>(i) + static_cast<std::ptrdiff_t>(gr::value(_trigger.lastEdgeIdx));
+            if (_trigger.processOne(inputSpan[i]) != NONE) { // edge detected
+                const std::ptrdiff_t edgePosition = static_cast<std::ptrdiff_t>(i) + _trigger.lastEdgeIdx;
 
-                if (_trigger.lastEdge == RISING && !trigger_name_rising_edge.value.empty()) {
-                    return publishEdge(trigger_name_rising_edge, edgePosition);
-                }
-
-                if (_trigger.lastEdge == FALLING && !trigger_name_falling_edge.value.empty()) {
-                    return publishEdge(trigger_name_falling_edge, edgePosition);
+                if (edgePosition >= 0 && static_cast<std::size_t>(edgePosition) < nProcess) {
+                    if (_trigger.lastEdge == RISING && !trigger_name_rising_edge.value.empty()) {
+                        return publishEdge(trigger_name_rising_edge, static_cast<std::size_t>(edgePosition));
+                    }
+                    if (_trigger.lastEdge == FALLING && !trigger_name_falling_edge.value.empty()) {
+                        return publishEdge(trigger_name_falling_edge, static_cast<std::size_t>(edgePosition));
+                    }
                 }
             }
         }
 
-        // no trigger found - just copy samples & tags
+        // no trigger found - copy samples & tags
         std::copy_n(inputSpan.begin(), nProcess, outputSpan.begin());
-        forwardTags(nProcess - 1UZ);
+        forwardTags(nProcess - 1);
+        std::ignore = inputSpan.consume(nProcess);
+        outputSpan.publish(nProcess);
         return gr::work::Status::OK;
     }
 };
