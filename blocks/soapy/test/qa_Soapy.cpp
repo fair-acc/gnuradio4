@@ -296,13 +296,13 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
 
         auto& source  = flow.emplaceBlock<SoapyBlock<ValueType, 1UZ>>({
             //
-            {"device", "rtlsdr"},                                //
-            {"sample_rate", float(1e6)},                         //
-            {"rx_center_frequency", std::vector<double>{107e6}}, //
-            {"rx_gains", std::vector<double>{20.}},
+            {"device", gr::pmt::Value("rtlsdr")},           //
+            {"sample_rate", gr::pmt::Value(float(1e6))},    //
+            {"rx_center_frequency", Tensor<double>{107e6}}, //
+            {"rx_gains", Tensor<double>{20.}},
         });
         auto& monitor = flow.emplaceBlock<Copy<ValueType>>();
-        auto& sink    = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
+        auto& sink    = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", gr::pmt::Value(nSamples)}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
@@ -337,16 +337,16 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
 
         auto& source = flow.emplaceBlock<SoapyBlock<ValueType, 2UZ>>({
             //
-            {"device", "lime"},                                         //
-            {"rx_channels", std::vector<gr::Size_t>{0U, 1U}},           //
-            {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}},  //
-            {"sample_rate", float(1e6)},                                //
-            {"rx_center_frequency", std::vector<double>{107e6, 107e6}}, //
-            {"rx_bandwdith", std::vector<double>{0.5e6, 0.5e6}},        //
-            {"rx_gains", std::vector<double>{10., 10.}},
+            {"device", gr::pmt::Value("lime")},                           //
+            {"rx_channels", Tensor<gr::Size_t>(gr::data_from, {0U, 1U})}, //
+            {"rx_antennae", Tensor<pmt::Value>{"LNAW", "LNAW"}},          //
+            {"sample_rate", gr::pmt::Value(float(1e6))},                  //
+            {"rx_center_frequency", Tensor<double>{107e6, 107e6}},        //
+            {"rx_bandwdith", Tensor<double>{0.5e6, 0.5e6}},               //
+            {"rx_gains", Tensor<double>{10., 10.}},
         });
-        auto& sink1  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        auto& sink2  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
+        auto& sink1  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", gr::pmt::Value(nSamples)}});
+        auto& sink2  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", gr::pmt::Value(nSamples)}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(sink1)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 1>(source).to<"in">(sink2)));
 

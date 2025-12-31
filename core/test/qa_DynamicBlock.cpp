@@ -22,12 +22,12 @@ const boost::ut::suite DynamicBlocktests = [] {
 
         gr::Graph graph;
 
-        auto& adder = graph.emplaceBlock<gr::blocks::math::Add<double>>({{"n_inputs", nInputs}});
+        auto& adder = graph.emplaceBlock<gr::blocks::math::Add<double>>({{"n_inputs", gr::pmt::Value(nInputs)}});
         auto& sink  = graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({});
 
         std::vector<TagSource<double>*> sources;
         for (std::size_t i = 0; i < nInputs; ++i) {
-            sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"mark_tag", false}})));
+            sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"mark_tag", gr::pmt::Value(false)}})));
             expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), "out"s, adder, "in#"s + std::to_string(sources.size() - 1)));
         }
         expect(gr::ConnectionResult::SUCCESS == graph.connect<"out">(adder).to<"in">(sink));

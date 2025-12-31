@@ -1059,6 +1059,98 @@ extern template std::expected<std::map<std::string, Value>, ConversionError>
     convertTo<std::map<std::string, Value>>(const Value&, std::pmr::memory_resource*);
 // clang-format on
 
+struct ValueVisitor {
+private:
+    // std::function_ref is C++26, we can not use it
+    const void* handler = nullptr;
+
+#define MAKE_HANDLER_MEMBER(Type, Name)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
+    using Name##_handler_t           = void(const void*, Type);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
+    Name##_handler_t* Name##_handler = nullptr
+
+    MAKE_HANDLER_MEMBER(bool, bool);
+    MAKE_HANDLER_MEMBER(std::int8_t, int8_t);
+    MAKE_HANDLER_MEMBER(std::int16_t, int16_t);
+    MAKE_HANDLER_MEMBER(std::int32_t, int32_t);
+    MAKE_HANDLER_MEMBER(std::int64_t, int64_t);
+    MAKE_HANDLER_MEMBER(std::uint8_t, uint8_t);
+    MAKE_HANDLER_MEMBER(std::uint16_t, uint16_t);
+    MAKE_HANDLER_MEMBER(std::uint32_t, uint32_t);
+    MAKE_HANDLER_MEMBER(std::uint64_t, uint64_t);
+    MAKE_HANDLER_MEMBER(float, float);
+    MAKE_HANDLER_MEMBER(double, double);
+    MAKE_HANDLER_MEMBER(std::complex<float>, complex_float);
+    MAKE_HANDLER_MEMBER(std::complex<double>, complex_double);
+
+    MAKE_HANDLER_MEMBER(std::string_view, string_view);
+    MAKE_HANDLER_MEMBER(const Value::Map&, property_map);
+
+    MAKE_HANDLER_MEMBER(const Tensor<bool>&, tensor_bool);
+    MAKE_HANDLER_MEMBER(const Tensor<std::int8_t>&, tensor_int8_t);
+    MAKE_HANDLER_MEMBER(const Tensor<std::int16_t>&, tensor_int16_t);
+    MAKE_HANDLER_MEMBER(const Tensor<std::int32_t>&, tensor_int32_t);
+    MAKE_HANDLER_MEMBER(const Tensor<std::int64_t>&, tensor_int64_t);
+    MAKE_HANDLER_MEMBER(const Tensor<std::uint8_t>&, tensor_uint8_t);
+    MAKE_HANDLER_MEMBER(const Tensor<std::uint16_t>&, tensor_uint16_t);
+    MAKE_HANDLER_MEMBER(const Tensor<std::uint32_t>&, tensor_uint32_t);
+    MAKE_HANDLER_MEMBER(const Tensor<std::uint64_t>&, tensor_uint64_t);
+    MAKE_HANDLER_MEMBER(const Tensor<float>&, tensor_float);
+    MAKE_HANDLER_MEMBER(const Tensor<double>&, tensor_double);
+    MAKE_HANDLER_MEMBER(const Tensor<std::complex<float>>&, tensor_complex_float);
+    MAKE_HANDLER_MEMBER(const Tensor<std::complex<double>>&, tensor_complex_double);
+
+    MAKE_HANDLER_MEMBER(const Tensor<Value>&, tensor_value);
+
+    MAKE_HANDLER_MEMBER(std::monostate, monostate);
+
+#undef MAKE_HANDLER_MEMBER
+
+public:
+#define MAKE_FIELD_INIT(Type, Name) Name##_handler(+[](const void* handlerPtr, Type value) { (*static_cast<const Handler*>(handlerPtr))(value); })
+
+    template<typename Handler>
+    ValueVisitor(const Handler& _handler)                        //
+        : handler(std::addressof(_handler)),                     //
+          MAKE_FIELD_INIT(bool, bool),                           //
+          MAKE_FIELD_INIT(std::int8_t, int8_t),                  //
+          MAKE_FIELD_INIT(std::int16_t, int16_t),                //
+          MAKE_FIELD_INIT(std::int32_t, int32_t),                //
+          MAKE_FIELD_INIT(std::int64_t, int64_t),                //
+          MAKE_FIELD_INIT(std::uint8_t, uint8_t),                //
+          MAKE_FIELD_INIT(std::uint16_t, uint16_t),              //
+          MAKE_FIELD_INIT(std::uint32_t, uint32_t),              //
+          MAKE_FIELD_INIT(std::uint64_t, uint64_t),              //
+          MAKE_FIELD_INIT(float, float),                         //
+          MAKE_FIELD_INIT(double, double),                       //
+          MAKE_FIELD_INIT(std::complex<float>, complex_float),   //
+          MAKE_FIELD_INIT(std::complex<double>, complex_double), //
+
+          MAKE_FIELD_INIT(std::string_view, string_view),   //
+          MAKE_FIELD_INIT(const Value::Map&, property_map), //
+
+          MAKE_FIELD_INIT(const Tensor<bool>&, tensor_bool),                           //
+          MAKE_FIELD_INIT(const Tensor<std::int8_t>&, tensor_int8_t),                  //
+          MAKE_FIELD_INIT(const Tensor<std::int16_t>&, tensor_int16_t),                //
+          MAKE_FIELD_INIT(const Tensor<std::int32_t>&, tensor_int32_t),                //
+          MAKE_FIELD_INIT(const Tensor<std::int64_t>&, tensor_int64_t),                //
+          MAKE_FIELD_INIT(const Tensor<std::uint8_t>&, tensor_uint8_t),                //
+          MAKE_FIELD_INIT(const Tensor<std::uint16_t>&, tensor_uint16_t),              //
+          MAKE_FIELD_INIT(const Tensor<std::uint32_t>&, tensor_uint32_t),              //
+          MAKE_FIELD_INIT(const Tensor<std::uint64_t>&, tensor_uint64_t),              //
+          MAKE_FIELD_INIT(const Tensor<float>&, tensor_float),                         //
+          MAKE_FIELD_INIT(const Tensor<double>&, tensor_double),                       //
+          MAKE_FIELD_INIT(const Tensor<std::complex<float>>&, tensor_complex_float),   //
+          MAKE_FIELD_INIT(const Tensor<std::complex<double>>&, tensor_complex_double), //
+
+          MAKE_FIELD_INIT(const Tensor<Value>&, tensor_value), //
+          MAKE_FIELD_INIT(std::monostate, monostate)           //
+    //
+    {}
+#undef MAKE_FIELD_INIT
+
+    bool visit(const Value& value);
+};
+
 } // namespace gr::pmt
 
 #endif // GNURADIO_VALUEHELPER_HPP

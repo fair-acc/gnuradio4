@@ -15,7 +15,7 @@ inline constexpr gr::Size_t  nPorts   = 2U;
 inline constexpr gr::Size_t  nSamples = 4'000'000'000;
 
 gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(triggerName)}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(triggerTime)}}};
 };
 
 template<typename TBlock>
@@ -32,11 +32,11 @@ void runTest() {
 
     property_map perfBlockProperties;
     if constexpr (std::is_same_v<TBlock, gr::basic::SyncBlock<int>>) {
-        perfBlockProperties = {{"n_ports", nPorts}};
+        perfBlockProperties = {{"n_ports", gr::pmt::Value(nPorts)}};
     } else if constexpr (std::is_same_v<TBlock, gr::basic::Selector<int>>) {
-        auto                    iotaView = std::views::iota(gr::Size_t(0), nPorts);
-        std::vector<gr::Size_t> indMap(iotaView.begin(), iotaView.end());
-        perfBlockProperties = {{"n_inputs", nPorts}, {"n_outputs", nPorts}, {"map_in", indMap}, {"map_out", indMap}};
+        auto               iotaView = std::views::iota(gr::Size_t(0), nPorts);
+        Tensor<gr::Size_t> indMap(iotaView.begin(), iotaView.end());
+        perfBlockProperties = {{"n_inputs", gr::pmt::Value(nPorts)}, {"n_outputs", gr::pmt::Value(nPorts)}, {"map_in", gr::pmt::Value(indMap)}, {"map_out", gr::pmt::Value(indMap)}};
     } else {
         throw std::invalid_argument("incorrect TBlock type");
     }
@@ -47,7 +47,7 @@ void runTest() {
     std::vector<TagSink<int, ProcessFunction::USE_PROCESS_BULK>*>   sinks;
 
     for (std::size_t i = 0; i < nPorts; i++) {
-        property_map srcParams = {{"n_samples_max", nSamples}, {"verbose_console", false}, {"disconnect_on_done", false}};
+        property_map srcParams = {{"n_samples_max", gr::pmt::Value(nSamples)}, {"verbose_console", gr::pmt::Value(false)}, {"disconnect_on_done", gr::pmt::Value(false)}};
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
         for (std::size_t iT = 0; iT < nTags; iT++) {
             const std::size_t   index = iT * nSamples / nTags + 1;
@@ -58,7 +58,7 @@ void runTest() {
     }
 
     for (std::size_t i = 0; i < nPorts; i++) {
-        property_map sinkParams = {{"log_samples", false}, {"log_tags", false}, {"verbose_console", false}, {"disconnect_on_done", false}};
+        property_map sinkParams = {{"log_samples", gr::pmt::Value(false)}, {"log_tags", gr::pmt::Value(false)}, {"verbose_console", gr::pmt::Value(false)}, {"disconnect_on_done", gr::pmt::Value(false)}};
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
         expect(gr::ConnectionResult::SUCCESS == graph.connect(perfBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
     }
@@ -87,10 +87,10 @@ void runTestPureCopy() {
     std::vector<Copy<int>*>                                         copies;
 
     for (std::size_t i = 0; i < nPorts; i++) {
-        property_map srcParams = {{"n_samples_max", nSamples}, {"verbose_console", false}, {"disconnect_on_done", false}};
+        property_map srcParams = {{"n_samples_max", gr::pmt::Value(nSamples)}, {"verbose_console", gr::pmt::Value(false)}, {"disconnect_on_done", gr::pmt::Value(false)}};
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
         copies.push_back(std::addressof(graph.emplaceBlock<Copy<int>>()));
-        property_map sinkParams = {{"log_samples", false}, {"log_tags", false}, {"verbose_console", false}, {"disconnect_on_done", false}};
+        property_map sinkParams = {{"log_samples", gr::pmt::Value(false)}, {"log_tags", gr::pmt::Value(false)}, {"verbose_console", gr::pmt::Value(false)}, {"disconnect_on_done", gr::pmt::Value(false)}};
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
 
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, *copies[i], "in"s));

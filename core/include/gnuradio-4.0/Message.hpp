@@ -8,8 +8,6 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include <pmtv/pmt.hpp>
-
 #include <expected>
 #include <source_location>
 #include <string_view>
@@ -138,7 +136,7 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
 }
 
 template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::string, pmtv::pmt>> userMessage, std::string_view clientRequestID = "") {
+void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> userMessage, std::string_view clientRequestID = "") {
     detail::sendMessage<cmd, property_map>(port, serviceName, endpoint, property_map(userMessage), clientRequestID);
 }
 

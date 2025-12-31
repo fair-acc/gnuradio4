@@ -125,11 +125,11 @@ const boost::ut::suite propertyMapFormatter = [] {
     using namespace std::literals::string_literals;
 
     "std::formatter<gr::property_map>"_test = [] {
-        gr::property_map pmInt{{"key0", 0}, {"key1", 1}, {"key2", 2}};
-        expect(eq("{ key0: 0, key1: 1, key2: 2 }"s, std::format("{}", pmInt)));
+        gr::property_map pmInt{{"key0", gr::pmt::Value(0)}, {"key1", gr::pmt::Value(1)}, {"key2", gr::pmt::Value(2)}};
+        expect(eq("{\"key2\": 2, \"key1\": 1, \"key0\": 0}"s, std::format("{}", pmInt)));
 
-        gr::property_map pmFloat{{"key0", 0.01f}, {"key1", 1.01f}, {"key2", 2.01f}};
-        expect(eq("{ key0: 0.01, key1: 1.01, key2: 2.01 }"s, std::format("{}", pmFloat)));
+        gr::property_map pmFloat{{"key0", gr::pmt::Value(0.01f)}, {"key1", gr::pmt::Value(1.01f)}, {"key2", gr::pmt::Value(2.01f)}};
+        expect(eq("{\"key2\": 2.010000, \"key1\": 1.010000, \"key0\": 0.010000}"s, std::format("{}", pmFloat)));
     };
 };
 

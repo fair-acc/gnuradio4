@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
     gr::Size_t         nSamples         = 0U;
     gr::Size_t         evaluatePerfRate = 100'000;
     Graph              testGraph;
-    const property_map srcParameter = {{"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", true}};
+    const property_map srcParameter = {{"n_samples_max", gr::pmt::Value(nSamples)}, {"name", gr::pmt::Value("TagSource")}, {"verbose_console", gr::pmt::Value(false)}, {"repeat_tags", gr::pmt::Value(true)}};
     auto&              src          = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
 
     // parameters of generated Tags
@@ -76,17 +76,17 @@ int main(int argc, char* argv[]) {
     }
 
     if (nSamplesPerTag > 0) {
-        src._tags = {gr::Tag(nSamplesPerTag - 1, {{tagName, 2000.f}})};
+        src._tags = {gr::Tag(nSamplesPerTag - 1, gr::property_map{{convert_string_domain(tagName), gr::pmt::Value(2000.f)}})};
     };
 
-    auto& monitorBulk        = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"log_samples", false}, {"log_tags", false}});
-    auto& monitorOne         = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"log_samples", false}, {"log_tags", false}});
+    auto& monitorBulk        = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagMonitorBulk")}, {"log_samples", gr::pmt::Value(false)}, {"log_tags", gr::pmt::Value(false)}});
+    auto& monitorOne         = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagMonitorOne")}, {"log_samples", gr::pmt::Value(false)}, {"log_tags", gr::pmt::Value(false)}});
     auto& monitorPerformance = testGraph.emplaceBlock<PerformanceMonitor<float>>( //
-        {{"name", "PerformanceMonitor"}, {"evaluate_perf_rate", evaluatePerfRate}, {"output_csv_file_path", outputCsvFilePath}});
+        {{"name", gr::pmt::Value("PerformanceMonitor")}, {"evaluate_perf_rate", gr::pmt::Value(evaluatePerfRate)}, {"output_csv_file_path", gr::pmt::Value(outputCsvFilePath)}});
 
     // performance statistics outputs
-    auto& sinkRes  = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRes"}, {"log_samples", false}, {"log_tags", false}});
-    auto& sinkRate = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRate"}, {"log_samples", false}, {"log_tags", false}});
+    auto& sinkRes  = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSinkRes")}, {"log_samples", gr::pmt::Value(false)}, {"log_tags", gr::pmt::Value(false)}});
+    auto& sinkRate = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSinkRate")}, {"log_samples", gr::pmt::Value(false)}, {"log_tags", gr::pmt::Value(false)}});
 
     // src -> monitorBulk -> monitorOne -> monitorPerformance
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitorBulk)));

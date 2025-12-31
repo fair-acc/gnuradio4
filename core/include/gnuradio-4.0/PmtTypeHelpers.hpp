@@ -16,9 +16,8 @@
 #include <string_view>
 #include <variant>
 
-#include <gnuradio-4.0/meta/formatter.hpp>
-
-#include <pmtv/pmt.hpp>
+#include <gnuradio-4.0/Value.hpp>
+#include <gnuradio-4.0/ValueHelper.hpp>
 
 #ifdef __GNUC__
 // ignore warning from external libraries we don't control
@@ -34,7 +33,7 @@
 #pragma GCC diagnostic pop
 #endif
 
-namespace pmtv {
+namespace gr::pmt {
 
 namespace detail {
 
@@ -137,228 +136,231 @@ static std::expected<T, std::string> parseStringToFloat(std::string_view trimmed
 
 } // namespace detail
 
-template<class T, bool strictCheck = false, detail::VariantLike TVariant>
-[[nodiscard]] constexpr std::expected<T, std::string> convert_safely(const TVariant& v) {
+template<class T, bool strictCheck = false, typename From>
+[[nodiscard]] constexpr std::expected<T, std::string> convert_safely(const From& srcValue) {
     using namespace std::string_literals;
-    return std::visit(
-        [&](auto&& srcValue) -> std::expected<T, std::string> {
-            using S = std::decay_t<decltype(srcValue)>;
+    using S = std::decay_t<decltype(srcValue)>;
 
-            // 1) same type => trivial
-            if constexpr (std::is_same_v<S, T>) {
-                return srcValue;
-            }
+    // 1) same type => trivial
+    if constexpr (std::is_same_v<S, T>) {
+        return srcValue;
+    }
 
-            if constexpr (strictCheck) {
-                return std::unexpected(std::format("strict-check enabled: source {} and target {} type do not match", typeid(S).name(), typeid(T).name()));
-            }
+    if constexpr (strictCheck) {
+        return std::unexpected(std::format("strict-check enabled: source {} and target {} type do not match", typeid(S).name(), typeid(T).name()));
+    }
 
-            // 2) source is bool (special case, needed to be treated first because of overlapping with integral)
-            else if constexpr (std::is_same_v<S, bool>) {
-                if constexpr (std::is_same_v<T, std::string>) {
-                    return srcValue ? "true" : "false";
-                } else if constexpr (std::is_integral_v<T>) {
-                    return std::unexpected("unsupported bool to integer conversion"s);
-                } else if constexpr (std::is_floating_point_v<T>) {
-                    return std::unexpected("unsupported bool to floating-point conversion"s);
+    // 2) source is bool (special case, needed to be treated first because of overlapping with integral)
+    else if constexpr (std::is_same_v<S, bool>) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            return srcValue ? "true" : "false";
+        } else if constexpr (std::is_integral_v<T>) {
+            return std::unexpected("unsupported bool to integer conversion"s);
+        } else if constexpr (std::is_floating_point_v<T>) {
+            return std::unexpected("unsupported bool to floating-point conversion"s);
+        }
+    }
+
+    // 3) source is integral
+    else if constexpr (std::is_integral_v<S>) {
+        // 3a) target is integral
+        if constexpr (std::is_integral_v<T>) {
+            if constexpr (std::is_unsigned_v<T> && std::is_signed_v<S>) {
+                if (srcValue < 0) {
+                    return std::unexpected(std::format("negative integer {} cannot be converted to unsigned type", srcValue));
                 }
             }
-
-            // 3) source is integral
-            else if constexpr (std::is_integral_v<S>) {
-                // 3a) target is integral
-                if constexpr (std::is_integral_v<T>) {
-                    if constexpr (std::is_unsigned_v<T> && std::is_signed_v<S>) {
-                        if (srcValue < 0) {
-                            return std::unexpected(std::format("negative integer {} cannot be converted to unsigned type", srcValue));
-                        }
-                    }
-                    constexpr auto digitsS = std::numeric_limits<S>::digits;
-                    constexpr auto digitsT = std::numeric_limits<T>::digits;
-                    if constexpr (digitsS <= digitsT) {
-                        return static_cast<T>(srcValue); // always safe
-                    } else {                             // range check
-                        if (static_cast<std::int64_t>(srcValue) >= std::numeric_limits<T>::lowest() && static_cast<std::int64_t>(srcValue) <= std::numeric_limits<T>::max()) {
-                            return static_cast<T>(srcValue);
-                        }
-                        return std::unexpected(std::format("out-of-range integer conversion: {} not in [{}..{}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
-                    }
-                }
-                // 3b) target is floating‐point
-                else if constexpr (std::is_floating_point_v<T>) {
-                    // integer->float
-                    constexpr auto digitsS = std::numeric_limits<S>::digits;
-                    constexpr auto digitsT = std::numeric_limits<T>::digits;
-                    if constexpr (digitsS <= digitsT) {
-                        return static_cast<T>(srcValue);
-                    } else {
-                        using WideType     = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
-                        const auto wideVal = static_cast<WideType>(srcValue);
-                        if (wideVal == std::numeric_limits<WideType>::min()) {
-                            return std::unexpected(std::format("cannot handle integer min()={} when checking bit width", wideVal));
-                        }
-                        const WideType magnitude = (wideVal < 0) ? -wideVal : wideVal;
-                        const auto     bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
-                        if (bitWidth <= digitsT) {
-                            return static_cast<T>(srcValue);
-                        }
-                        return std::unexpected(std::format("integer bit_width({})={} > floating-point mantissa={}", srcValue, bitWidth, digitsT));
-                    }
-                }
-                // 3c) target is std::complex<T>
-                else if constexpr (detail::is_complex_v<T>) { // value becomes real-part
-                    auto conv = convert_safely<typename T::value_type>(v);
-                    if (conv.has_value()) {
-                        return T{conv.value()};
-                    }
-                    return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
-                }
-                // 3d) no match
-                else {
-                    return std::unexpected(std::format("no valid safe conversion for <integral {}> -> <{}>", typeid(S).name(), typeid(T).name()));
-                }
-            }
-
-            // 4) source is floating-point
-            else if constexpr (std::is_floating_point_v<S>) {
-                // 4a) target is integral
-                if constexpr (std::is_integral_v<T>) {
-                    if (!std::isfinite(srcValue)) {
-                        return std::unexpected(std::format("floating-point value {} is not finite (NaN/inf)", srcValue));
-                    }
-                    if (srcValue < static_cast<S>(std::numeric_limits<T>::lowest()) || srcValue > static_cast<S>(std::numeric_limits<T>::max())) {
-                        return std::unexpected(std::format("floating-point value {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
-                    }
-                    if (srcValue != std::nearbyint(srcValue)) {
-                        return std::unexpected(std::format("floating-point value {} is not an integer", srcValue));
-                    }
+            constexpr auto digitsS = std::numeric_limits<S>::digits;
+            constexpr auto digitsT = std::numeric_limits<T>::digits;
+            if constexpr (digitsS <= digitsT) {
+                return static_cast<T>(srcValue); // always safe
+            } else {                             // range check
+                if (static_cast<std::int64_t>(srcValue) >= std::numeric_limits<T>::lowest() && static_cast<std::int64_t>(srcValue) <= std::numeric_limits<T>::max()) {
                     return static_cast<T>(srcValue);
                 }
-                // 4b) target is floating‐point
-                else if constexpr (std::is_floating_point_v<T>) {
-                    if (static_cast<long double>(srcValue) >= static_cast<long double>(std::numeric_limits<T>::lowest()) && static_cast<long double>(srcValue) <= static_cast<long double>(std::numeric_limits<T>::max())) {
-                        return static_cast<T>(srcValue);
-                    }
-                    return std::unexpected(std::format("floating-point conversion from {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
-                }
-                // 4c) target is std::complex<T>
-                else if constexpr (detail::is_complex_v<T>) { // value becomes real-part
-                    auto conv = convert_safely<typename T::value_type>(v);
-                    if (conv.has_value()) {
-                        return T{conv.value()};
-                    }
-                    return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
-                }
-                // 4d) no match
-                else {
-                    return std::unexpected(std::format("no valid safe conversion for <float {}> src = {} -> <{}>", typeid(S).name(), srcValue, typeid(T).name()));
-                }
+                return std::unexpected(std::format("out-of-range integer conversion: {} not in [{}..{}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
             }
-
-            // 5) source is complex
-            else if constexpr (detail::is_complex_v<S>) {
-                // 5a) complex->complex
-                if constexpr (detail::is_complex_v<T>) {
-                    using RealS = typename S::value_type;
-                    using RealT = typename T::value_type;
-                    if constexpr (std::is_same_v<S, T>) {
-                        return srcValue; // trivial
-                    } else {
-                        // Must convert real/imag individually
-                        auto realPart = convert_safely<RealT>(std::variant<RealS>{srcValue.real()});
-                        if (!realPart) {
-                            return std::unexpected(realPart.error());
-                        }
-                        auto imagPart = convert_safely<RealT>(std::variant<RealS>{srcValue.imag()});
-                        if (!imagPart) {
-                            return std::unexpected(imagPart.error());
-                        }
-                        return T{*realPart, *imagPart};
-                    }
+        }
+        // 3b) target is floating‐point
+        else if constexpr (std::is_floating_point_v<T>) {
+            // integer->float
+            constexpr auto digitsS = std::numeric_limits<S>::digits;
+            constexpr auto digitsT = std::numeric_limits<T>::digits;
+            if constexpr (digitsS <= digitsT) {
+                return static_cast<T>(srcValue);
+            } else {
+                using WideType     = std::conditional_t<(sizeof(S) < sizeof(long long)), long long, S>;
+                const auto wideVal = static_cast<WideType>(srcValue);
+                if (wideVal == std::numeric_limits<WideType>::min()) {
+                    return std::unexpected(std::format("cannot handle integer min()={} when checking bit width", wideVal));
                 }
-                // 5b) complex->integral or float (only for real-valued complex)
-                else if constexpr (std::is_arithmetic_v<T>) {
-                    if (std::imag(srcValue) != 0) {
-                        return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
-                            typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
-                    }
-                    auto conv = convert_safely<T>(std::variant<typename S::value_type>{srcValue.real()});
-                    if (conv.has_value()) {
-                        return conv.value();
-                    }
-                    return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}> reason: {}", //
-                        typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name(), conv.error()));
+                const WideType magnitude = (wideVal < 0) ? -wideVal : wideVal;
+                const auto     bitWidth  = std::bit_width(static_cast<std::make_unsigned_t<WideType>>(magnitude));
+                if (bitWidth <= digitsT) {
+                    return static_cast<T>(srcValue);
                 }
+                return std::unexpected(std::format("integer bit_width({})={} > floating-point mantissa={}", srcValue, bitWidth, digitsT));
+            }
+        }
+        // 3c) target is std::complex<T>
+        else if constexpr (detail::is_complex_v<T>) { // value becomes real-part
+            auto conv = convert_safely<typename T::value_type>(srcValue);
+            if (conv.has_value()) {
+                return T{conv.value()};
+            }
+            return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
+        }
+        // 3d) no match
+        else {
+            return std::unexpected(std::format("no valid safe conversion for <integral {}> -> <{}>", typeid(S).name(), typeid(T).name()));
+        }
+    }
 
-                return std::unexpected(std::format("no valid safe conversion for std:complex<{}> src= {} +{}i -> <{}>", //
+    // 4) source is floating-point
+    else if constexpr (std::is_floating_point_v<S>) {
+        // 4a) target is integral
+        if constexpr (std::is_integral_v<T>) {
+            if (!std::isfinite(srcValue)) {
+                return std::unexpected(std::format("floating-point value {} is not finite (NaN/inf)", srcValue));
+            }
+            if (srcValue < static_cast<S>(std::numeric_limits<T>::lowest()) || srcValue > static_cast<S>(std::numeric_limits<T>::max())) {
+                return std::unexpected(std::format("floating-point value {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+            }
+            if (srcValue != std::nearbyint(srcValue)) {
+                return std::unexpected(std::format("floating-point value {} is not an integer", srcValue));
+            }
+            return static_cast<T>(srcValue);
+        }
+        // 4b) target is floating‐point
+        else if constexpr (std::is_floating_point_v<T>) {
+            if (static_cast<long double>(srcValue) >= static_cast<long double>(std::numeric_limits<T>::lowest()) && static_cast<long double>(srcValue) <= static_cast<long double>(std::numeric_limits<T>::max())) {
+                return static_cast<T>(srcValue);
+            }
+            return std::unexpected(std::format("floating-point conversion from {} is outside [{}, {}]", srcValue, std::numeric_limits<T>::lowest(), std::numeric_limits<T>::max()));
+        }
+        // 4c) target is std::complex<T>
+        else if constexpr (detail::is_complex_v<T>) { // value becomes real-part
+            auto conv = convert_safely<typename T::value_type>(srcValue);
+            if (conv.has_value()) {
+                return T{conv.value()};
+            }
+            return std::unexpected(std::format("unsupported complex conversion {}", conv.error()));
+        }
+        // 4d) no match
+        else {
+            return std::unexpected(std::format("no valid safe conversion for <float {}> src = {} -> <{}>", typeid(S).name(), srcValue, typeid(T).name()));
+        }
+    }
+
+    // 5) source is complex
+    else if constexpr (detail::is_complex_v<S>) {
+        // 5a) complex->complex
+        if constexpr (detail::is_complex_v<T>) {
+            using RealS = typename S::value_type;
+            using RealT = typename T::value_type;
+            if constexpr (std::is_same_v<S, T>) {
+                return srcValue; // trivial
+            } else {
+                // Must convert real/imag individually
+                auto realPart = convert_safely<RealT>(std::variant<RealS>{srcValue.real()});
+                if (!realPart) {
+                    return std::unexpected(realPart.error());
+                }
+                auto imagPart = convert_safely<RealT>(std::variant<RealS>{srcValue.imag()});
+                if (!imagPart) {
+                    return std::unexpected(imagPart.error());
+                }
+                return T{*realPart, *imagPart};
+            }
+        }
+        // 5b) complex->integral or float (only for real-valued complex)
+        else if constexpr (std::is_arithmetic_v<T>) {
+            if (std::imag(srcValue) != 0) {
+                return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}>", //
                     typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
             }
-
-            // 6) source is string
-            else if constexpr (std::is_same_v<S, std::string>) {
-                // 6a) string->enum
-                if constexpr (std::is_enum_v<T>) {
-                    if (auto maybeEnum = magic_enum::enum_cast<T>(srcValue)) {
-                        return *maybeEnum;
-                    }
-                    auto possibleEnumValues = []<typename U>(const U&) -> std::string {
-                        constexpr auto vals  = magic_enum::enum_values<U>();
-                        auto           names = vals | std::views::transform(magic_enum::enum_name<U>);
-                        return std::format("{}", gr::join(names, ", "));
-                    };
-                    return std::unexpected(std::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, magic_enum::enum_type_name<T>(), possibleEnumValues(T{})));
-                }
-                // 6b) string->integral (excluding bool)
-                else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
-                    const auto trimmed = detail::trimAndCutComment(srcValue);
-                    T          parsedVal{};
-                    auto [p, errorCode] = std::from_chars(trimmed.data(), trimmed.data() + trimmed.size(), parsedVal, 10);
-                    if (errorCode == std::errc::invalid_argument || p != trimmed.data() + trimmed.size()) {
-                        return std::unexpected(std::format("cannot parse '{}' as an integer", srcValue));
-                    }
-                    if (errorCode == std::errc::result_out_of_range) {
-                        return std::unexpected(std::format("integer out-of-range: '{}'", srcValue));
-                    }
-                    return parsedVal;
-                }
-                // 6c) string->float
-                else if constexpr (std::is_floating_point_v<T>) {
-                    const auto trimmed = detail::trimAndCutComment(srcValue);
-                    auto       result  = detail::parseStringToFloat<T>(trimmed);
-                    if (!result) {
-                        return std::unexpected(std::format("cannot parse '{}' as floating-point: {}", srcValue, result.error()));
-                    }
-                    return *result;
-                }
-                // 6d) string->bool
-                else if constexpr (std::is_same_v<T, bool>) {
-                    std::string s = srcValue;
-                    std::ranges::transform(s, s.begin(), [](unsigned char c) { return std::tolower(c); });
-                    if (s == "true" || s == "1") {
-                        return true;
-                    } else if (s == "false" || s == "0") {
-                        return false;
-                    }
-                    return std::unexpected(std::format("cannot parse '{}' as bool", srcValue));
-                }
-                // fallback
-                else {
-                    return std::unexpected(std::format("no safe conversion for std::string src = {} -> <{}>", srcValue, typeid(T).name()));
-                }
+            auto conv = convert_safely<T>(std::variant<typename S::value_type>{srcValue.real()});
+            if (conv.has_value()) {
+                return conv.value();
             }
+            return std::unexpected(std::format("cannot convert non-real-valued std:complex<{}> src= {} +{}i -> <{}> reason: {}", //
+                typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name(), conv.error()));
+        }
 
-            // 7) source is enum
-            else if constexpr (std::is_enum_v<S>) {
-                if constexpr (std::is_same_v<T, std::string>) {
-                    return std::string(magic_enum::enum_name(srcValue));
-                }
-                return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", magic_enum::enum_type_name<S>(), magic_enum::enum_name(srcValue), typeid(T).name()));
+        return std::unexpected(std::format("no valid safe conversion for std:complex<{}> src= {} +{}i -> <{}>", //
+            typeid(T).name(), std::real(srcValue), std::imag(srcValue), typeid(T).name()));
+    }
+
+    // 6) source is string
+    else if constexpr (std::is_same_v<S, std::string>) {
+        // 6a) string->enum
+        if constexpr (std::is_enum_v<T>) {
+            if (auto maybeEnum = magic_enum::enum_cast<T>(srcValue)) {
+                return *maybeEnum;
             }
+            auto possibleEnumValues = []<typename U>(const U&) -> std::string {
+                constexpr auto vals  = magic_enum::enum_values<U>();
+                auto           names = vals | std::views::transform(magic_enum::enum_name<U>);
+                return std::format("{}", gr::join(names, ", "));
+            };
+            return std::unexpected(std::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, magic_enum::enum_type_name<T>(), possibleEnumValues(T{})));
+        }
+        // 6b) string->integral (excluding bool)
+        else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
+            const auto trimmed = detail::trimAndCutComment(srcValue);
+            T          parsedVal{};
+            auto [p, errorCode] = std::from_chars(trimmed.data(), trimmed.data() + trimmed.size(), parsedVal, 10);
+            if (errorCode == std::errc::invalid_argument || p != trimmed.data() + trimmed.size()) {
+                return std::unexpected(std::format("cannot parse '{}' as an integer", srcValue));
+            }
+            if (errorCode == std::errc::result_out_of_range) {
+                return std::unexpected(std::format("integer out-of-range: '{}'", srcValue));
+            }
+            return parsedVal;
+        }
+        // 6c) string->float
+        else if constexpr (std::is_floating_point_v<T>) {
+            const auto trimmed = detail::trimAndCutComment(srcValue);
+            auto       result  = detail::parseStringToFloat<T>(trimmed);
+            if (!result) {
+                return std::unexpected(std::format("cannot parse '{}' as floating-point: {}", srcValue, result.error()));
+            }
+            return *result;
+        }
+        // 6d) string->bool
+        else if constexpr (std::is_same_v<T, bool>) {
+            std::string s = srcValue;
+            std::ranges::transform(s, s.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (s == "true" || s == "1") {
+                return true;
+            } else if (s == "false" || s == "0") {
+                return false;
+            }
+            return std::unexpected(std::format("cannot parse '{}' as bool", srcValue));
+        }
+        // fallback
+        else {
+            return std::unexpected(std::format("no safe conversion for std::string src = {} -> <{}>", srcValue, typeid(T).name()));
+        }
+    }
 
-            // fallback
-            return std::unexpected(std::format("no safe conversion for <{}> -> <{}>", typeid(S).name(), typeid(T).name()));
-        },
-        v);
+    // 7) source is enum
+    else if constexpr (std::is_enum_v<S>) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            return std::string(magic_enum::enum_name(srcValue));
+        }
+        return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", magic_enum::enum_type_name<S>(), magic_enum::enum_name(srcValue), typeid(T).name()));
+    }
+
+    // fallback
+    return std::unexpected(std::format("no safe conversion for <{}> -> <{}>", typeid(S).name(), typeid(T).name()));
+}
+
+template<class T, bool strictCheck = false>
+[[nodiscard]] constexpr std::expected<T, std::string> convert_safely(const pmt::Value& v) {
+    std::expected<T, std::string> result;
+    ValueVisitor([&result](const auto& from) { result = convert_safely<T, strictCheck>(from); }).visit(v);
+    return result;
 }
 
 template<typename TMinimalNumericVariant, typename R = std::expected<TMinimalNumericVariant, std::string>>

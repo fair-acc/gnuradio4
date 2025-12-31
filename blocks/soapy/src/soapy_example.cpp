@@ -22,13 +22,13 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
     using TDataType = std::complex<float>;
 
     auto& source = flow.emplaceBlock<SoapyBlock<TDataType, 2UZ>>({
-        {"device", "lime"},                                                                 //
-        {"sample_rate", sampleRate},                                                        //
-        {"rx_channels", std::vector<gr::Size_t>{0U, 1U}},                                   //
-        {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}},                          //
-        {"rx_center_frequency", std::vector<double>{rxCenterFrequency, rxCenterFrequency}}, //
-        {"rx_bandwdith", std::vector<double>{bandwidth, bandwidth}},                        //
-        {"rx_gains", std::vector<double>{rxGains, rxGains}},
+        {"device", gr::pmt::Value("lime")},                                                            //
+        {"sample_rate", gr::pmt::Value(sampleRate)},                                                   //
+        {"rx_channels", gr::pmt::Value(Tensor<gr::Size_t>(data_from, {0U, 1U}))},                      //
+        {"rx_antennae", gr::pmt::Value(Tensor<pmt::Value>{pmt::Value("LNAW"), pmt::Value("LNAW")})},   //
+        {"rx_center_frequency", gr::pmt::Value(Tensor<double>{rxCenterFrequency, rxCenterFrequency})}, //
+        {"rx_bandwdith", gr::pmt::Value(Tensor<double>{bandwidth, bandwidth})},                        //
+        {"rx_gains", gr::pmt::Value(Tensor<double>{rxGains, rxGains})},
     });
     std::println("set parameter:\n   sample_rate: {} SP/s\n   rx_center_frequency: {} Hz\n   rx_bandwdith: {} Hz\n   rx_gains: {} [dB]", //
         sampleRate, rxCenterFrequency, bandwidth, rxGains);
@@ -39,7 +39,7 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink1))) << "error connecting NullSink1";
     } else {
         std::println("write to fileName1: {}", fileName1);
-        auto& fileSink1 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", fileName1}, {"mode", "multi"}, {"max_bytes_per_file", maxFileSize}});
+        auto& fileSink1 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", gr::pmt::Value(fileName1)}, {"mode", gr::pmt::Value("multi")}, {"max_bytes_per_file", gr::pmt::Value(maxFileSize)}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink1))) << "error connecting BasicFileSink1";
     }
 
@@ -49,7 +49,7 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink2))) << "error connecting NullSink2";
     } else {
         std::println("write to fileName2: {}", fileName2);
-        auto& fileSink2 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", fileName2}, {"mode", "multi"}, {"max_bytes_per_file", maxFileSize}});
+        auto& fileSink2 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", gr::pmt::Value(fileName2)}, {"mode", gr::pmt::Value("multi")}, {"max_bytes_per_file", gr::pmt::Value(maxFileSize)}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(fileSink2))) << "error connecting BasicFileSink2";
     }
 

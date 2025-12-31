@@ -5,7 +5,6 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
-#include <pmtv/pmt.hpp>
 
 #include <queue>
 #include <semaphore>
@@ -57,7 +56,7 @@ The result is provided on a single output port as a map with the following keys:
 
     using Block<HttpBlock<T>, BlockingIO<false>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
-    PortOut<pmtv::map_t> out;
+    PortOut<pmt::Value::Map> out;
 
     std::string           url;
     std::string           endpoint = "/";
@@ -67,8 +66,8 @@ The result is provided on a single output port as a map with the following keys:
     GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
 
     // used for queuing GET responses for the consumer
-    std::queue<pmtv::map_t> _backlog;
-    std::mutex              _backlog_mutex;
+    std::queue<pmt::Value::Map> _backlog;
+    std::mutex                  _backlog_mutex;
 
     std::shared_ptr<std::thread> _thread;
     std::atomic_size_t           _pendingRequests = 0;
@@ -81,7 +80,7 @@ The result is provided on a single output port as a map with the following keys:
 
 #ifdef __EMSCRIPTEN__
     void queueWorkEmscripten(emscripten_fetch_t* fetch) {
-        pmtv::map_t result;
+        pmt::Value::Map result;
         result["mime-type"] = "text/plain";
         result["status"]    = static_cast<int>(fetch->status);
         result["raw-data"]  = std::string(fetch->data, static_cast<std::size_t>(fetch->numBytes));
@@ -155,7 +154,7 @@ The result is provided on a single output port as a map with the following keys:
             // it's long polling, be generous with timeouts
             _client->set_read_timeout(1h);
             _client->Get(endpoint, [&](const char* data, size_t len) {
-                pmtv::map_t result;
+                pmt::Value::Map result;
                 result["mime-type"] = "text/plain";
                 result["status"]    = 200;
                 result["raw-data"]  = std::string(data, len);
@@ -174,7 +173,7 @@ The result is provided on a single output port as a map with the following keys:
                     } else {
                         resp = _client->Get(endpoint);
                     }
-                    pmtv::map_t result;
+                    pmt::Value::Map result;
                     if (resp) {
                         result["mime-type"] = "text/plain";
                         result["status"]    = resp->status;
@@ -189,7 +188,7 @@ The result is provided on a single output port as a map with the following keys:
     }
 #endif
 
-    void queueWork(const pmtv::map_t& item) {
+    void queueWork(const pmt::Value::Map& item) {
         {
             std::lock_guard lg{_backlog_mutex};
             _backlog.push(item);
@@ -254,7 +253,7 @@ The result is provided on a single output port as a map with the following keys:
     void stop() { stopThread(); }
 
     [[nodiscard]] constexpr auto processOne() noexcept {
-        pmtv::map_t     result;
+        pmt::Value::Map result;
         std::lock_guard lg{_backlog_mutex};
         if (!_backlog.empty()) {
             result = _backlog.front();
@@ -275,7 +274,7 @@ The result is provided on a single output port as a map with the following keys:
             if (type == RequestType::SUBSCRIBE) {
                 if (m.data.has_value() && m.data.value().contains("active")) {
                     // for long polling, the subscription should stay active, if and only if the messages' "active" member is true
-                    if (std::get<bool>(m.data.value().at("active"))) {
+                    if (m.data.value().at("active").value_or(false)) {
                         if (!_thread) {
                             startThread();
                         }

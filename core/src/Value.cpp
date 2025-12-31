@@ -16,6 +16,7 @@ namespace gr::pmt {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 template<typename T>
+requires(!meta::is_instantiation_of<T, std::vector>)
 bool Value::holds() const noexcept {
     if constexpr (std::same_as<T, Map>) {
         return is_map();
@@ -33,6 +34,7 @@ bool Value::holds() const noexcept {
 }
 
 template<typename T>
+requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>)
 T* Value::get_if() noexcept {
     if (!holds<T>()) [[unlikely]] {
         return nullptr;
@@ -226,6 +228,8 @@ void swap(Value& a, Value& b) noexcept {
 }
 
 Value::Value(std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) { set_types(ValueType::Monostate, ContainerType::Scalar); }
+
+Value::Value(std::monostate, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) { set_types(ValueType::Monostate, ContainerType::Scalar); }
 
 Value::Value(bool v, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
     set_types(ValueType::Bool, ContainerType::Scalar);

@@ -4,19 +4,16 @@
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <format>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <variant>
 
-#include <pmtv/base64/base64.h>
-#include <pmtv/pmt.hpp>
-
-#include <format>
-
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/ValueHelper.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/immutable.hpp>
@@ -35,10 +32,10 @@ namespace gr {
 namespace settings {
 
 template<typename T>
-constexpr bool isSupportedVectorType() {
-    if constexpr (gr::meta::vector_type<T>) {
+constexpr bool isSupportedVectorOrTensorType() {
+    if constexpr (gr::meta::vector_type<T> || is_tensor<T>) {
         using ValueType = typename T::value_type;
-        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType>;
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, pmt::Value>;
     } else {
         return false;
     }
@@ -54,8 +51,8 @@ constexpr bool isReadableMember() {
             return false;
         }
     };
-    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
-           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || isReadableImmutable();
+    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, pmt::Value> || isReadableImmutable();
 }
 
 template<typename T, typename TMember>
@@ -70,25 +67,27 @@ inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_poi
 
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
-inline std::strong_ordering comparePmt(const pmtv::pmt& lhs, const pmtv::pmt& rhs) {
+inline std::strong_ordering comparePmt(const pmt::Value& lhs, const pmt::Value& rhs) {
     // If the types are different, cast rhs to the type of lhs and compare
-    if (lhs.index() != rhs.index()) {
+    if (lhs.container_type() != rhs.container_type()) {
         // TODO: throw if types are not the same?
-        return lhs.index() <=> rhs.index();
+        return lhs.container_type() <=> rhs.container_type();
+    } else if (lhs.value_type() != rhs.value_type()) {
+        return lhs.value_type() <=> rhs.value_type();
     } else {
-        if (std::holds_alternative<std::string>(lhs)) {
-            return std::get<std::string>(lhs) <=> std::get<std::string>(rhs);
-        } else if (std::holds_alternative<int>(lhs)) {
-            return std::get<int>(lhs) <=> std::get<int>(rhs);
+        if (lhs.holds<std::string_view>()) {
+            return lhs.value_or(std::string_view{}) <=> rhs.value_or(std::string_view{});
+        } else if (lhs.holds<int>()) {
+            return lhs.value_or(0) <=> rhs.value_or(0);
         } else {
             throw gr::exception("Invalid CtxSettings context type " + std::string(typeid(lhs).name()));
         }
     }
 }
 
-// pmtv::pmt comparison is needed to use it as a key of std::map
+// pmt::Value comparison is needed to use it as a key of std::map
 struct PMTCompare {
-    bool operator()(const pmtv::pmt& lhs, const pmtv::pmt& rhs) const { return comparePmt(lhs, rhs) == std::strong_ordering::less; }
+    bool operator()(const pmt::Value& lhs, const pmt::Value& rhs) const { return comparePmt(lhs, rhs) == std::strong_ordering::less; }
 };
 
 } // namespace settings
@@ -99,6 +98,18 @@ struct ApplyStagedParametersResult {
 };
 
 namespace detail {
+
+template<typename T>
+pmt::Value unwrap_decorated_value(const T& value) {
+    if constexpr (AnnotatedType<T>) {
+        return pmt::Value(value.value);
+    } else if constexpr (meta::ImmutableType<T>) {
+        return pmt::Value(value.value());
+    } else {
+        return pmt::Value(value);
+    }
+};
+
 template<class T>
 constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
     std::hash<T> hasher;
@@ -106,7 +117,7 @@ constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
     return seed;
 }
 
-std::size_t computeHash(const pmtv::pmt_var_t& value);
+std::size_t computeHash(const pmt::Value& value);
 
 struct PmtHashVisitor {
     template<typename T>
@@ -159,12 +170,13 @@ constexpr bool isEnumOrAnnotatedEnum = std::is_enum_v<U>;
 
 template<typename T>
 requires isEnumOrAnnotatedEnum<T>
-std::expected<T, std::string> tryExtractEnumValue(const pmtv::pmt& pmt, std::string_view key) {
-    if (!std::holds_alternative<std::string>(pmt)) {
+std::expected<T, std::string> tryExtractEnumValue(const pmt::Value& pmt, std::string_view key) {
+
+    auto str = pmt.value_or(std::string_view{});
+    if (str.data() == nullptr) {
         return std::unexpected(std::format("Field '{}' expects enum string, got different type", key));
     }
 
-    const std::string& str = std::get<std::string>(pmt);
     if (auto opt = magic_enum::enum_cast<T>(str); opt.has_value()) {
         return *opt;
     }
@@ -185,12 +197,12 @@ std::string enumToString(T&& enum_value) {
 } // namespace detail
 
 struct SettingsCtx {
-    std::uint64_t time    = 0ULL; // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
-    pmtv::pmt     context = "";   // user-defined multiplexing context for which the setting is valid
+    std::uint64_t time    = 0ULL;                      // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
+    pmt::Value    context = pmt::Value(std::string()); // user-defined multiplexing context for which the setting is valid
 
     bool operator==(const SettingsCtx&) const = default;
 
-    auto operator<=>(const SettingsCtx& other) const {
+    std::partial_ordering operator<=>(const SettingsCtx& other) const {
         // First compare time
         if (auto cmp = time <=> other.time; cmp != std::strong_ordering::equal) {
             return cmp;
@@ -317,7 +329,7 @@ struct SettingsBase {
     /**
      * @brief return available active block setting as key-value pair for a single key
      */
-    [[nodiscard]] virtual std::optional<pmtv::pmt> get(const std::string& parameter_key) const noexcept = 0;
+    [[nodiscard]] virtual std::optional<pmt::Value> get(const std::string& parameter_key) const noexcept = 0;
 
     /**
      * @brief return all (or for selected multiple keys) stored block settings for provided context as key-value pairs
@@ -327,7 +339,7 @@ struct SettingsBase {
     /**
      * @brief return available stored block setting for provided context as key-value pair for a single key
      */
-    [[nodiscard]] virtual std::optional<pmtv::pmt> getStored(const std::string& parameter_key, SettingsCtx ctx = {}) const noexcept = 0;
+    [[nodiscard]] virtual std::optional<pmt::Value> getStored(const std::string& parameter_key, SettingsCtx ctx = {}) const noexcept = 0;
 
     /**
      * @brief return number of all sets of stored parameters
@@ -342,7 +354,7 @@ struct SettingsBase {
     /**
      * @brief return _storedParameters
      */
-    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept = 0;
+    [[nodiscard]] virtual std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept = 0;
 
     /**
      * @brief returns the staged/not-yet-applied new parameters
@@ -390,15 +402,15 @@ class CtxSettings : public SettingsBase {
      * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
      * which indicates that no matches were found and there is no chance of matching anything in a further round.
      */
-    using MatchPredicate = std::function<std::optional<bool>(const pmtv::pmt&, const pmtv::pmt&, std::size_t)>;
+    using MatchPredicate = std::function<std::optional<bool>(const pmt::Value&, const pmt::Value&, std::size_t)>;
 
     TBlock*            _block = nullptr;
     std::atomic_bool   _changed{false};
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
-    property_map                                                                    _defaultParameters{};
+    mutable std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
+    property_map                                                                     _defaultParameters{};
     // Store the initial parameters provided in the Block constructor. These parameters cannot be set directly in the constructor
     // because `_defaultParameters` cannot be initialized using Settings::storeDefaults() within the Block constructor.
     // Instead, we store them now and set them later in the Block::init method.
@@ -448,10 +460,11 @@ public:
                 auto memberName  = std::string(refl::data_member_name<TBlock, kIdx>.view());
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
-                    _block->meta_information.value[memberName + "::description"]   = std::string(RawType::description());
-                    _block->meta_information.value[memberName + "::documentation"] = std::string(RawType::documentation());
-                    _block->meta_information.value[memberName + "::unit"]          = std::string(RawType::unit());
-                    _block->meta_information.value[memberName + "::visible"]       = RawType::visible();
+                    auto& meta_information                                                  = _block->meta_information;
+                    meta_information[convert_string_domain(memberName) + "::description"]   = std::string(RawType::description());
+                    meta_information[convert_string_domain(memberName) + "::documentation"] = std::string(RawType::documentation());
+                    meta_information[convert_string_domain(memberName) + "::unit"]          = std::string(RawType::unit());
+                    meta_information[convert_string_domain(memberName) + "::visible"]       = RawType::visible();
                 }
 
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {

@@ -12,6 +12,8 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
+#include "value_utils.hpp"
+
 namespace gr::testing {
 
 using namespace boost::ut;
@@ -107,22 +109,22 @@ struct ReplyChecker {
 inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string type, property_map properties, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}:{}\n", sourceLocation.file_name(), sourceLocation.line());
     auto reply = testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceBlock, //
-        {{"type", std::move(type)}, {"properties", std::move(properties)}},                                                                       //
+        {{"type", gr::pmt::Value(std::move(type))}, {"properties", gr::pmt::Value(std::move(properties))}},                                       //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kBlockEmplaced});
 
-    return std::get<std::string>(reply.value().data.value().at("unique_name"s));
+    return get_value_or_fail<std::string>(reply.value().data.value().at("unique_name"), sourceLocation);
 };
 
 inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {
     expect(eq(getNReplyMessages(fromGraph), 0UZ)) << std::format("Input port has unconsumed messages. Requested at: {}:{}\n", sourceLocation.file_name(), sourceLocation.line());
-    gr::property_map data = {                                                              //
-        {std::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), sourceBlock},           //
-        {std::string(gr::serialization_fields::EDGE_SOURCE_PORT), sourcePort},             //
-        {std::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), destinationBlock}, //
-        {std::string(gr::serialization_fields::EDGE_DESTINATION_PORT), destinationPort},   //
-        {std::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::Size_t()},       //
-        {std::string(gr::serialization_fields::EDGE_WEIGHT), 0},                           //
-        {std::string(gr::serialization_fields::EDGE_NAME), "unnamed edge"}};
+    gr::property_map data = {                                                                                   //
+        {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_BLOCK), gr::pmt::Value(sourceBlock)},           //
+        {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), gr::pmt::Value(sourcePort)},             //
+        {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), gr::pmt::Value(destinationBlock)}, //
+        {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT), gr::pmt::Value(destinationPort)},   //
+        {std::pmr::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::pmt::Value(gr::Size_t())},       //
+        {std::pmr::string(gr::serialization_fields::EDGE_WEIGHT), gr::pmt::Value(0)},                           //
+        {std::pmr::string(gr::serialization_fields::EDGE_NAME), gr::pmt::Value("unnamed edge")}};
     testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceEdge, data, //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kEdgeEmplaced});
 };

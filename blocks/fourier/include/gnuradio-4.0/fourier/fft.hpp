@@ -228,8 +228,15 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         // setup storage and populate timing events and basic additional meta-information that is not already stored for each signal
-        pmtv::map_t meta_info = {{"sample_rate", sample_rate}, {"window", window}, {"output_in_db", outputInDb}, {"output_in_deg", outputInDeg}, {"unwrap_phase", unwrapPhase}, //
-            {"input_chunk_size", this->input_chunk_size}, {"output_chunk_size", this->output_chunk_size}, {"stride", this->stride}};
+        const auto& meta_info = property_map{                                                 //
+            {std::pmr::string("sample_rate"), pmt::Value(sample_rate)},                       //
+            {std::pmr::string("window"), pmt::Value(window.value)},                           //
+            {std::pmr::string("output_in_db"), pmt::Value(outputInDb)},                       //
+            {std::pmr::string("output_in_deg"), pmt::Value(outputInDeg)},                     //
+            {std::pmr::string("unwrap_phase"), pmt::Value(unwrapPhase)},                      //
+            {std::pmr::string("input_chunk_size"), pmt::Value(this->input_chunk_size)},       //
+            {std::pmr::string("output_chunk_size"), gr::pmt::Value(this->output_chunk_size)}, //
+            {std::pmr::string("stride"), gr::pmt::Value(this->stride)}};
 
         ds.meta_information.resize(nSignals);
         for (std::size_t i = 0UZ; i < nSignals; i++) {

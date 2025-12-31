@@ -19,9 +19,9 @@ const boost::ut::suite TagTests = [] {
     using namespace gr::testing;
 
     static const auto mismatchedKey = [](const property_map& map) {
-        std::vector<std::string> keys;
+        Tensor<pmt::Value> keys;
         for (const auto& pair : map) {
-            keys.push_back(pair.first);
+            keys.push_back(pmt::Value(pair.first));
         }
         return keys;
     };
@@ -34,19 +34,19 @@ const boost::ut::suite TagTests = [] {
         constexpr gr::Size_t n_samples   = 1900;
         constexpr float      sample_rate = 2000.f;
         Graph                testGraph;
-        auto&                src = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}, {"verbose_console", verbose}});
+        auto&                src = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(sample_rate)}, {"n_samples_max", gr::pmt::Value(n_samples)}, {"name", gr::pmt::Value("ClockSource")}, {"verbose_console", gr::pmt::Value(verbose)}});
         src.tags                 = {
-            {0, {{"key", "value@0"}}},       //
-            {1, {{"key", "value@1"}}},       //
-            {100, {{"key", "value@100"}}},   //
-            {150, {{"key", "value@150"}}},   //
-            {1000, {{"key", "value@1000"}}}, //
-            {1001, {{"key", "value@1001"}}}, //
-            {1002, {{"key", "value@1002"}}}, //
-            {1023, {{"key", "value@1023"}}}  //
+            {0, {{"key", gr::pmt::Value("value@0")}}},       //
+            {1, {{"key", gr::pmt::Value("value@1")}}},       //
+            {100, {{"key", gr::pmt::Value("value@100")}}},   //
+            {150, {{"key", gr::pmt::Value("value@150")}}},   //
+            {1000, {{"key", gr::pmt::Value("value@1000")}}}, //
+            {1001, {{"key", gr::pmt::Value("value@1001")}}}, //
+            {1002, {{"key", gr::pmt::Value("value@1002")}}}, //
+            {1023, {{"key", gr::pmt::Value("value@1023")}}}  //
         };
-        auto& sink1 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink1"}});
-        auto& sink2 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink2"}});
+        auto& sink1 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagSink1")}});
+        auto& sink2 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSink2")}});
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink1)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(sink2)));
 
@@ -81,7 +81,7 @@ const boost::ut::suite TagTests = [] {
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
 
         for (const auto& sig : signals) {
-            SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.shortKey(), 2048.f}, {"frequency", 256.}, {"amplitude", 1.}, {"offset", offset}, {"phase", std::numbers::pi / 4}});
+            SignalGenerator<double> signalGen({{"signal_type", gr::pmt::Value(sig)}, {gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(2048.f)}, {"frequency", gr::pmt::Value(256.)}, {"amplitude", gr::pmt::Value(1.)}, {"offset", gr::pmt::Value(offset)}, {"phase", gr::pmt::Value(std::numbers::pi / 4)}});
             signalGen.init(signalGen.progress);
 
             // expected values corresponds to sample_rate = 1024., frequency = 128., amplitude = 1., offset = 0., phase = pi/4.
@@ -99,7 +99,7 @@ const boost::ut::suite TagTests = [] {
         const std::size_t        N = 512; // test points
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
         for (const auto& sig : signals) {
-            SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.shortKey(), 8192.f}, {"frequency", 32.}, {"amplitude", 2.}, {"offset", 0.}, {"phase", std::numbers::pi / 4.}});
+            SignalGenerator<double> signalGen({{"signal_type", gr::pmt::Value(sig)}, {gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(8192.f)}, {"frequency", gr::pmt::Value(32.)}, {"amplitude", gr::pmt::Value(2.)}, {"offset", gr::pmt::Value(0.)}, {"phase", gr::pmt::Value(std::numbers::pi / 4.)}});
             signalGen.init(signalGen.progress);
 
             std::vector<double> xValues(N), yValues(N);
@@ -117,9 +117,9 @@ const boost::ut::suite TagTests = [] {
         constexpr gr::Size_t n_samples   = 200;
         constexpr float      sample_rate = 1000.f;
         Graph                testGraph;
-        auto&                clockSrc  = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", n_samples}, {"name", "ClockSource"}});
-        auto&                signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "SignalGenerator"}});
-        auto&                sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"verbose_console", true}});
+        auto&                clockSrc  = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(sample_rate)}, {"n_samples_max", gr::pmt::Value(n_samples)}, {"name", gr::pmt::Value("ClockSource")}});
+        auto&                signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(sample_rate)}, {"name", gr::pmt::Value("SignalGenerator")}});
+        auto&                sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagSink")}, {"verbose_console", gr::pmt::Value(true)}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"clk_in">(signalGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(signalGen).to<"in">(sink)));
@@ -145,7 +145,7 @@ const boost::ut::suite TagTests = [] {
 
         for (const auto& sig : signals) {
             const property_map params{{createPropertyMapEntry(signal_type, sig), //
-                {gr::tag::SAMPLE_RATE.shortKey(), 128.f},                        //
+                {gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(128.f)},        //
                 createPropertyMapEntry(start_value, startValue),                 //
                 createPropertyMapEntry(final_value, finalValue),                 //
                 createPropertyMapEntry(duration, 1.),                            //
@@ -153,12 +153,12 @@ const boost::ut::suite TagTests = [] {
                 createPropertyMapEntry(impulse_time0, .2),                       //
                 createPropertyMapEntry(impulse_time1, .15)}};
 
-            expect(funcGen.settings().set(params, SettingsCtx{now, static_cast<int>(sig)}).empty());
+            expect(funcGen.settings().set(params, SettingsCtx{now, gr::pmt::Value(static_cast<int>(sig))}).empty());
         }
         expect(eq(funcGen.settings().getNStoredParameters(), 6UZ)); // +1 for default
 
         for (const auto& sig : signals) {
-            expect(funcGen.settings().activateContext(SettingsCtx{now, static_cast<int>(sig)}) != std::nullopt);
+            expect(funcGen.settings().activateContext(SettingsCtx{now, gr::pmt::Value(static_cast<int>(sig))}) != std::nullopt);
             const auto applyResult = funcGen.settings().applyStagedParameters();
             expect(expect(eq(applyResult.forwardParameters.size(), 6UZ))) << std::format("incorrect number of to be forwarded settings. forward keys: {}\n", gr::join(mismatchedKey(applyResult.forwardParameters), ", "));
 
@@ -178,31 +178,31 @@ const boost::ut::suite TagTests = [] {
         constexpr std::uint32_t N           = 1000;
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
-        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(sample_rate)}, {"n_samples_max", gr::pmt::Value(N)}, {"name", gr::pmt::Value("ClockSource")}});
         const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
-        clockSrc.tags = {Tag(0, {{tag::CONTEXT.shortKey(), "1"s}}), //
-            Tag(100, {{tag::CONTEXT.shortKey(), "2"s}}),            //
-            Tag(300, {{tag::CONTEXT.shortKey(), "3"s}}),            //
-            Tag(350, {{tag::CONTEXT.shortKey(), "4"s}}),            //
-            Tag(550, {{tag::CONTEXT.shortKey(), "5"s}}),            //
-            Tag(650, {{tag::CONTEXT.shortKey(), "6"s}}),            //
-            Tag(800, {{tag::CONTEXT.shortKey(), "7"s}}),            //
-            Tag(850, {{tag::CONTEXT.shortKey(), "8"s}})};
+        clockSrc.tags = {Tag(0, {{tag::CONTEXT.shortKey(), gr::pmt::Value("1"s)}}), //
+            Tag(100, {{tag::CONTEXT.shortKey(), gr::pmt::Value("2"s)}}),            //
+            Tag(300, {{tag::CONTEXT.shortKey(), gr::pmt::Value("3"s)}}),            //
+            Tag(350, {{tag::CONTEXT.shortKey(), gr::pmt::Value("4"s)}}),            //
+            Tag(550, {{tag::CONTEXT.shortKey(), gr::pmt::Value("5"s)}}),            //
+            Tag(650, {{tag::CONTEXT.shortKey(), gr::pmt::Value("6"s)}}),            //
+            Tag(800, {{tag::CONTEXT.shortKey(), gr::pmt::Value("7"s)}}),            //
+            Tag(850, {{tag::CONTEXT.shortKey(), gr::pmt::Value("8"s)}})};
 
-        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
-        expect(funcGen.settings().set(createConstPropertyMap("", 5.f), SettingsCtx{now, "1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("", 5.f, 30.f, .2f), SettingsCtx{now, "2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("", 30.f), SettingsCtx{now, "3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap("", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("", 20.f), SettingsCtx{now, "5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap("", 20.f, 10.f, .1f), SettingsCtx{now, "6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("", 10.f), SettingsCtx{now, "7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap("", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "8"}).empty());
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(sample_rate)}, {"name", gr::pmt::Value("FunctionGenerator")}});
+        expect(funcGen.settings().set(createConstPropertyMap("", 5.f), SettingsCtx{now, gr::pmt::Value("1")}).empty());
+        expect(funcGen.settings().set(createLinearRampPropertyMap("", 5.f, 30.f, .2f), SettingsCtx{now, gr::pmt::Value("2")}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("", 30.f), SettingsCtx{now, gr::pmt::Value("3")}).empty());
+        expect(funcGen.settings().set(createParabolicRampPropertyMap("", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, gr::pmt::Value("4")}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("", 20.f), SettingsCtx{now, gr::pmt::Value("5")}).empty());
+        expect(funcGen.settings().set(createCubicSplinePropertyMap("", 20.f, 10.f, .1f), SettingsCtx{now, gr::pmt::Value("6")}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("", 10.f), SettingsCtx{now, gr::pmt::Value("7")}).empty());
+        expect(funcGen.settings().set(createImpulseResponsePropertyMap("", 10.f, 20.f, .02f, .06f), SettingsCtx{now, gr::pmt::Value("8")}).empty());
 
         expect(eq(funcGen.settings().getNStoredParameters(), 9UZ)); // +1 for default
 
-        auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+        auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagSink")}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"clk_in">(funcGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
@@ -237,12 +237,12 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate   = 1'000.f;
 
         Graph      testGraph;
-        auto&      clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        auto&      clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(sample_rate)}, {"n_samples_max", gr::pmt::Value(N)}, {"name", gr::pmt::Value("ClockSource")}});
         const auto now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         auto addTimeTagEntry = []<typename T>(ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
             clockSource.tag_times.value.push_back(timeInNanoseconds);
-            clockSource.tag_values.value.push_back(value);
+            clockSource.tag_values.value.push_back(pmt::Value(value));
         };
 
         // all times are in nanoseconds
@@ -258,19 +258,19 @@ const boost::ut::suite TagTests = [] {
         clockSrc.repeat_period      = 5'000 * ms;
         clockSrc.do_zero_order_hold = true;
 
-        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(sample_rate)}, {"name", gr::pmt::Value("FunctionGenerator")}});
         // all times are in seconds
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=1")}).empty());
+        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=2")}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=3")}).empty());
+        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=4")}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=5")}).empty());
+        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=6")}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=7")}).empty());
+        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=8")}).empty());
 
         expect(eq(funcGen.settings().getNStoredParameters(), 9UZ)); // +1 for default
-        auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+        auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagSink")}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"clk_in">(funcGen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));

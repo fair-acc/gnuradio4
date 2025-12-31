@@ -160,6 +160,7 @@ concept TensorViewOf = TensorOf<Tensor, T> && tensor_traits<std::remove_cvref_t<
 
 template<typename T, bool managed, std::size_t... Ex>
 struct TensorBase {
+    static_assert(!std::is_same_v<T, std::string>);
     using value_type   = T;
     using element_type = std::remove_const_t<T>;
 
@@ -766,7 +767,7 @@ struct TensorBase {
     }
 
     template<typename U, bool OtherManaged, std::size_t... OtherEx>
-    requires std::three_way_comparable_with<T, U>
+    requires std::equality_comparable_with<T, U>
     [[nodiscard]] constexpr bool operator==(const TensorBase<U, OtherManaged, OtherEx...>& other) const noexcept {
         if (rank() != other.rank()) {
             return false;
@@ -853,7 +854,6 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
         return E[idx];
     }
 
-    constexpr Tensor()                              = default;
     Tensor(const Tensor& other)                     = default;
     Tensor(Tensor&& other) noexcept                 = default;
     Tensor& operator=(Tensor&& other) noexcept      = default;
@@ -962,6 +962,7 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully static
             throw std::runtime_error("static Tensor::operator=(Range): size mismatch with existing shape");
         }
         std::copy(vec.begin(), vec.end(), base_t::_data.begin());
+
         return *this;
     }
 
@@ -1042,7 +1043,7 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
         base_t::fill(v);
     }
 
-    explicit Tensor(std::pmr::memory_resource* mr = std::pmr::get_default_resource()) noexcept {
+    Tensor(std::pmr::memory_resource* mr = std::pmr::get_default_resource()) noexcept {
         if constexpr (sizeof...(Ex) == 0UZ) {
             base_t::_metaInfo.rank = 0UZ;
             std::ranges::fill(base_t::_metaInfo.extents, 0UZ);
@@ -1641,6 +1642,7 @@ Tensor(std::pmr::vector<T>&&, std::pmr::memory_resource* = std::pmr::get_default
  */
 template<typename T, std::size_t... Ex>
 struct TensorView : TensorBase<T, false, Ex...> {
+    static_assert(!std::is_same_v<T, std::string>);
     using base_t = TensorBase<T, false, Ex...>;
     using base_t::base_t;
     using value_type      = T;

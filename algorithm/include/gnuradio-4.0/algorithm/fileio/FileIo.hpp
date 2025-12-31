@@ -222,7 +222,7 @@ public:
 
         auto it = msg.data->find(detail::kMessageDataKey);
         if (it != msg.data->end()) {
-            if (auto bytes = std::get_if<std::vector<std::uint8_t>>(&it->second); bytes != nullptr) {
+            if (auto bytes = it->second.get_if<Tensor<std::uint8_t>>(); bytes != nullptr) {
                 if (bytes->size() <= maxSize) {
                     res.data = std::span<const std::uint8_t>(bytes->data(), bytes->size());
                     std::invoke(std::forward<TCallback>(callback), std::move(res));
@@ -285,7 +285,7 @@ inline void publishMessage(ReaderState* state, gr::Message&& m) {
     state->updateCounter.notify_all();
 }
 
-inline void pushData(ReaderState* state, std::vector<std::uint8_t>&& values) {
+inline void pushData(ReaderState* state, Tensor<std::uint8_t>&& values) {
     if (state == nullptr || state->cancelRequested.load(std::memory_order_acquire) || values.empty()) {
         return;
     }
@@ -293,7 +293,7 @@ inline void pushData(ReaderState* state, std::vector<std::uint8_t>&& values) {
     gr::Message msg;
     msg.endpoint = state->uri;
     msg.cmd      = gr::message::Command::Notify;
-    msg.data     = gr::property_map{{std::string(detail::kMessageDataKey), std::move(values)}};
+    msg.data     = gr::property_map{{std::pmr::string(detail::kMessageDataKey), gr::pmt::Value(std::move(values))}};
     publishMessage(state, std::move(msg));
 }
 

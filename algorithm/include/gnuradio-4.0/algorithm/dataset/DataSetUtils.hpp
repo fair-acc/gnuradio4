@@ -204,7 +204,7 @@ DataSet<T> waveform(WaveType waveType, size_t length, T samplingRate, T frequenc
 
         // check for zero crossing by seeing if the signs of previous and current values differ
         if ((previousValue < 0 && currentValue >= 0) || (previousValue > 0 && currentValue <= 0)) {
-            dataSet.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(i), property_map{{"type", "Zero Crossing"}});
+            dataSet.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(i), property_map{{"type", gr::pmt::Value("Zero Crossing")}});
         }
         previousValue = currentValue;
     }
