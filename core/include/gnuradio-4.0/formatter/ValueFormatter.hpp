@@ -52,7 +52,13 @@ inline constexpr auto append_quoted(std::string& out, std::string_view s) {
     out.push_back('"');
 };
 
-inline constexpr std::string value_to_string(const Value::Map& map) {
+inline
+#if defined(__clang__) && __clang_major__ < 20
+/* constexpr */
+#else
+    constexpr
+#endif
+    std::string value_to_string(const Value::Map& map) {
     std::string out;
     out += '{';
     bool first = true;

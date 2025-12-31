@@ -616,7 +616,8 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
             pmt::Value::Map parameters;
             auto            writeMap = [&](const auto& localMap) {
                 for (const auto& [settingsKey, settingsValue] : localMap) {
-                    std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
+                    parameters[settingsKey] = settingsValue; // TODO why was this done with visitor?
+                    // pmt::ValueVisitor([&]<typename T>(const T& value) { parameters[settingsKey] = pmt::Value(value); }).visit(settingsValue);
                 }
             };
             writeMap(settingsMap);

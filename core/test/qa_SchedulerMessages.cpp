@@ -388,6 +388,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         TestScheduler scheduler(std::move(testGraph));
         auto          makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", gr::pmt::Value(x)}, {"y", gr::pmt::Value(y)}}; };
 
+        std::println("makeUiConstraints {}", makeUiConstraints(32, 32));
+
         // Setting ui_constraints property for all blocks, universal
         sendMessage<Set>(scheduler.toScheduler, "", block::property::kSetting, //
             {{"ui_constraints", makeUiConstraints(43, 7070)}}                  // data
@@ -417,8 +419,10 @@ const boost::ut::suite TopologyGraphTests = [] {
                    !uiConstraintsFor(copy1).empty();
         });
 
-        expect(eq(42.f, std::get<float>(uiConstraintsFor(copy1)["x"])));
-        expect(eq(43.f, std::get<float>(uiConstraintsFor(copy2)["x"])));
+        // This fails TODO
+        std::println("uiConstraintsFor(copy1) {}", uiConstraintsFor(copy1));
+        expect(eq(42.f, gr::testing::get_value_or_fail<float>(uiConstraintsFor(copy1)["x"])));
+        expect(eq(43.f, gr::testing::get_value_or_fail<float>(uiConstraintsFor(copy2)["x"])));
 
         // Check if block introspection includes ui_constraints
 

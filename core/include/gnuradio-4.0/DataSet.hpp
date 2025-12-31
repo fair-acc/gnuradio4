@@ -64,7 +64,7 @@ concept TensorLikeV2 = PacketLike<T> && requires(T t, const std::size_t n_items)
 template<typename U, typename T = std::remove_cvref_t<U>>
 concept DataSetLike = TensorLikeV2<T> && requires(T t, const std::size_t n_items) {
     typename T::value_type;
-    typename T::pmt_map;
+    // typename T::pmt_map;
     typename T::tensor_layout_type;
     requires std::is_same_v<decltype(t.timestamp), int64_t>;
 
@@ -81,8 +81,8 @@ concept DataSetLike = TensorLikeV2<T> && requires(T t, const std::size_t n_items
     requires std::is_same_v<decltype(t.signal_ranges), std::vector<Range<typename T::value_type>>>;
 
     // meta data
-    requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::property_map>>>>;
+    // requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
+    // requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::pmt::Value>>>>;
 };
 
 template<typename T>

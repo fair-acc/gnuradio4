@@ -15,7 +15,7 @@ auto factor(const gr::property_map& params) {
     T factor = 1;
     if (auto it = params.find("factor"); it != params.end()) {
         auto& variant = it->second;
-        auto  ptr     = gr::CAP{variant.get_if<T>()};
+        auto  ptr     = gr::checked_access_ptr{variant.get_if<T>()};
         if (ptr != nullptr) {
             factor = *ptr;
         }

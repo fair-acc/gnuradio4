@@ -30,12 +30,12 @@ std::string format_variant(const auto& value) noexcept {
 void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
     for (const auto& [key, newValue] : newMap) {
         if (!oldMap.contains(key)) {
-            std::print("    key added '{}` = {}\n", key, format_variant(newValue));
+            std::print("    key added '{}` = {}\n", std::string_view(key), format_variant(newValue));
         } else {
             const auto& oldValue = oldMap.at(key);
             const bool  areEqual = oldValue == newValue;
             if (!areEqual) {
-                std::print("    key value changed: '{}` = {} -> {}\n", key, format_variant(oldValue), format_variant(newValue));
+                std::print("    key value changed: '{}` = {} -> {}\n", std::string_view(key), format_variant(oldValue), format_variant(newValue));
             }
         }
     }
@@ -78,7 +78,7 @@ struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
             std::println("block '{}' settings changed - update_count: {}", this->name, _updateCount);
             utils::printChanges(oldSettings, newSettings);
             for (const auto& [key, value] : fwdSettings) {
-                std::println(" -- forward: '{}':{}", key, value);
+                std::println(" -- forward: '{}':{}", std::string_view(key), value);
             }
         }
     }

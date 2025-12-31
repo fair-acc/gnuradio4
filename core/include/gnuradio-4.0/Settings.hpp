@@ -119,51 +119,54 @@ constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
 
 std::size_t computeHash(const pmt::Value& value);
 
-struct PmtHashVisitor {
-    template<typename T>
-    constexpr std::size_t operator()(const T& value) const {
-        if constexpr (std::is_same_v<T, std::monostate>) {
-            return 0x9e3779b9UZ; // arbitrary constant seed
-        } else if constexpr (pmtv::Scalar<T>) {
-            if constexpr (gr::meta::complex_like<T>) {
-                using value_t           = typename T::value_type;
-                std::size_t        seed = std::hash<value_t>()(value.real());
-                std::hash<value_t> hasher;
-                seed ^= hasher(value.imag()) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
-                return seed;
-            } else {
-                return std::hash<T>()(value);
-            }
-        } else if constexpr (pmtv::String<T>) {
-            return std::hash<std::string>()(value);
-        } else if constexpr (gr::meta::vector_type<T>) {
-            using value_t    = typename T::value_type;
-            std::size_t seed = 0UZ;
-            for (const auto& elem : value) {
-                if constexpr (pmtv::IsPmt<value_t>) {
-                    seed = detail::hash_combine(seed, std::visit(*this, elem));
-                } else {
-                    seed = detail::hash_combine(seed, (*this)(static_cast<value_t>(elem)));
-                }
-            }
-            return seed;
-        } else if constexpr (pmtv::PmtMap<T>) {
-            std::size_t seed = 0UZ;
-            for (const auto& [key, val] : value) {
-                // static_assert(pmtv::IsPmt<decltype(val)>, "val must be a std::variant");
-                std::size_t kv_seed = std::hash<std::string>()(key);
-                seed                = detail::hash_combine(kv_seed, computeHash(val));
-                seed                = detail::hash_combine(seed, kv_seed);
-            }
-            return seed;
-        } else {
-            static_assert(gr::meta::always_false<T>, "Unhandled type in PmtHashVisitor.");
-            return 0; // unreachable
-        }
-    }
-};
-
-inline std::size_t computeHash(const pmtv::pmt& value) { return std::visit(PmtHashVisitor{}, value); }
+// struct PmtHashVisitor {
+//     template<typename T>
+//     constexpr std::size_t operator()(const T& value) const {
+//         if constexpr (std::is_same_v<T, std::monostate>) {
+//             return 0x9e3779b9UZ; // arbitrary constant seed
+//         } else if constexpr (pmtv::Scalar<T>) {
+//             if constexpr (gr::meta::complex_like<T>) {
+//                 using value_t           = typename T::value_type;
+//                 std::size_t        seed = std::hash<value_t>()(value.real());
+//                 std::hash<value_t> hasher;
+//                 seed ^= hasher(value.imag()) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
+//                 return seed;
+//             } else {
+//                 return std::hash<T>()(value);
+//             }
+//         } else if constexpr (pmtv::String<T>) {
+//             return std::hash<std::string>()(value);
+//         } else if constexpr (gr::meta::vector_type<T>) {
+//             using value_t    = typename T::value_type;
+//             std::size_t seed = 0UZ;
+//             for (const auto& elem : value) {
+//                 if constexpr (pmtv::IsPmt<value_t>) {
+//                     seed = detail::hash_combine(seed, std::visit(*this, elem));
+//                 } else {
+//                     seed = detail::hash_combine(seed, (*this)(static_cast<value_t>(elem)));
+//                 }
+//             }
+//             return seed;
+//         } else if constexpr (pmt::Value::Map<T>) {
+//             std::size_t seed = 0UZ;
+//             for (const auto& [key, val] : value) {
+//                 // static_assert(pmtv::IsPmt<decltype(val)>, "val must be a std::variant");
+//                 std::size_t kv_seed = std::hash<std::string>()(key);
+//                 seed                = detail::hash_combine(kv_seed, computeHash(val));
+//                 seed                = detail::hash_combine(seed, kv_seed);
+//             }
+//             return seed;
+//         } else {
+//             static_assert(gr::meta::always_false<T>, "Unhandled type in PmtHashVisitor.");
+//             return 0; // unreachable
+//         }
+//     }
+// };
+//
+// inline std::size_t computeHash(const pmt::Value& value) {
+//     std::size_t result;
+//     return pmt::ValueVisitor([&](const auto& value) { result = PmtHashVisitor{}(value); }).visit(value);
+// }
 
 template<typename T, typename U = unwrap_if_wrapped_t<std::remove_cvref_t<T>>>
 constexpr bool isEnumOrAnnotatedEnum = std::is_enum_v<U>;
@@ -244,16 +247,46 @@ namespace settings {
  * @brief Convert the given `value` to type `T`. If conversion fails or return diagnostic text.
  */
 template<typename T>
-[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value) {
+[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmt::Value& value) {
     if constexpr (std::is_enum_v<T>) {
         return detail::tryExtractEnumValue<T>(value, key);
     } else {
-        constexpr bool strictChecks = false;
-        auto           converted    = pmtv::convert_safely<T, strictChecks>(value);
-        if (!converted) {
-            return std::unexpected(std::vformat("value for key '{}' has wrong type or can't be converted: {}", std::make_format_args(key, converted.error())));
+        //         std::expected<T, std::string> result;
+        //         pmt::ValueVisitor([&result, &key]<typename TMatched>(const TMatched& _value) {
+        //             if constexpr (requires { result = static_cast<T>(_value); }) {
+        // #pragma GCC diagnostic push
+        // #pragma GCC diagnostic ignored "-Wsign-conversion"
+        // #pragma GCC diagnostic ignored "-Wfloat-conversion"
+        //                 result = static_cast<T>(_value);
+        // #pragma GCC diagnostic pop
+        //
+        //             } else if constexpr (requires { result = {T(_value)}; }) {
+        //                 result = {T(_value)};
+        //
+        //             } else {
+        //                 result = std::unexpected(std::format("value for key '{}' has wrong type {}, needs {}", key, std::string(meta::type_name<TMatched>()), std::string(meta::type_name<T>())));
+        //             }
+        //         }).visit(value);
+        //         return result;
+
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto sv = value.value_or(std::string_view{});
+            if (sv.data()) {
+                return std::string(sv);
+            } else {
+                return std::unexpected(std::format("value {} for key '{}' has wrong type, needs {}", value, key, std::string(meta::type_name<T>())));
+            }
+
+        } else {
+            constexpr bool strictChecks = false;
+            auto           converted    = pmt::convert_safely<T, strictChecks>(value);
+            // auto converted = value.get_if<T>(); // TODO might need conversions -- was convert_safely
+            if (!converted) {
+                return std::unexpected(std::format("value {} for key '{}' has wrong type, needs {}", value, key, std::string(meta::type_name<T>())));
+                // return std::unexpected(std::vformat("value for key '{}' has wrong type", std::make_format_args(key)));
+            }
+            return *converted;
         }
-        return converted;
     }
 }
 
@@ -533,6 +566,7 @@ public:
         storeDefaults();
 
         if (const property_map failed = set(_initBlockParameters); !failed.empty()) {
+            std::terminate();
             throw gr::exception(std::format("settings could not be applied: {}", failed));
         }
 
@@ -559,6 +593,10 @@ public:
             auto& currentAutoUpdateParameters = _autoUpdateParameters[ctx];
 
             for (const auto& [key, value] : parameters) {
+                if (value.is_monostate()) {
+                    continue;
+                }
+                std::println("Setting {} to {}", std::string_view(key), value);
                 bool isSet = false;
                 refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
@@ -568,23 +606,28 @@ public:
                         if (fieldName != key) {
                             return;
                         }
+                        std::println("Found the field for {}, value to set is {}", std::string_view(key), value);
                         if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-                            if (currentAutoUpdateParameters.contains(key)) {
-                                currentAutoUpdateParameters.erase(key);
+                            auto it = currentAutoUpdateParameters.find(std::string(key));
+                            if (it != currentAutoUpdateParameters.end()) {
+                                currentAutoUpdateParameters.erase(it);
                             }
                             if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                                std::println("newParameters.insert_or_assign({}, {})", std::string_view(key), detail::enumToString(convertedValue.value()));
                                 newParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
                             } else {
+                                std::println("newParameters.insert_or_assign({}, {})/2", std::string_view(key), convertedValue.value());
                                 newParameters.insert_or_assign(key, convertedValue.value());
                             }
                             isSet = true;
                         } else {
+                            std::println("Conversion failed");
                             throw gr::exception(convertedValue.error());
                         }
                     }
                 });
                 if (!isSet) {
-                    ret.insert_or_assign(key, pmtv::pmt(value));
+                    ret.insert_or_assign(key, pmt::Value(value));
                 }
             }
             addStoredParameters(newParameters, ctx);
@@ -612,7 +655,7 @@ public:
 
     NO_INLINE void resetDefaults() override {
         // add default parameters to stored and apply the parameters
-        auto ctx = SettingsCtx{settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), ""};
+        auto ctx = SettingsCtx{settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), pmt::Value(std::string())};
 #ifdef __EMSCRIPTEN__
         resolveDuplicateTimestamp(ctx);
 #endif
@@ -630,7 +673,8 @@ public:
     [[nodiscard]] NO_INLINE const SettingsCtx& activeContext() const noexcept override { return _activeCtx; }
 
     [[nodiscard]] NO_INLINE bool removeContext(SettingsCtx ctx) override {
-        if (ctx.context == "") {
+        auto str = ctx.context.value_or(std::string_view{});
+        if (str.empty()) {
             return false; // Forbid removing default context
         }
 
@@ -688,7 +732,7 @@ public:
                 // the following is more compile-time friendly
                 property_map notAutoUpdateParams;
                 for (const auto& pair : parameters.value()) {
-                    if (!currentAutoUpdateParams.contains(pair.first)) {
+                    if (!currentAutoUpdateParams.contains(std::string(pair.first))) {
                         notAutoUpdateParams.insert(pair);
                     }
                 }
@@ -698,9 +742,10 @@ public:
                 setChanged(true);
             }
         } else {
-            std::optional<property_map> parameters = getBestMatchStoredParameters(ctx);
-            if (parameters) {
-                _stagedParameters.insert(parameters.value().begin(), parameters.value().end());
+            std::optional<property_map> _parameters = getBestMatchStoredParameters(ctx);
+            if (_parameters) {
+                auto& parameters = *_parameters;
+                _stagedParameters.insert(parameters.begin(), parameters.end());
                 _activeCtx = bestMatchSettingsCtx.value();
                 setChanged(true);
             } else {
@@ -735,20 +780,20 @@ public:
                 return;
             }
 
-            const property_map& parameters = tag.map;
-            bool                wasChanged = false;
+            const auto& parameters = tag.map;
+            bool        wasChanged = false;
             for (const auto& [key, value] : parameters) {
                 refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
                         if constexpr (std::is_enum_v<Type>) {
-                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<std::string>(value)) {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<std::string>()) {
                                 _stagedParameters.insert_or_assign(key, value);
                                 wasChanged = true;
                             }
                         } else {
-                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<Type>(value)) {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<Type>()) {
                                 _stagedParameters.insert_or_assign(key, value);
                                 wasChanged = true;
                             }
@@ -773,17 +818,18 @@ public:
         }
         property_map ret;
         for (const auto& key : parameterKeys) {
-            if (_activeParameters.contains(key)) {
-                ret.insert_or_assign(key, _activeParameters.at(key));
+            if (_activeParameters.contains(convert_string_domain(key))) {
+                ret.insert_or_assign(convert_string_domain(key), _activeParameters.at(convert_string_domain(key)));
             }
         }
         return ret;
     }
 
-    [[nodiscard]] std::optional<pmtv::pmt> get(const std::string& parameterKey) const noexcept override {
+    [[nodiscard]] std::optional<pmt::Value> get(const std::string& parameterKey) const noexcept override {
         auto res = get(std::array<std::string, 1>({parameterKey}));
-        if (res.contains(parameterKey)) {
-            return res.at(parameterKey);
+        auto it  = res.find(convert_string_domain(parameterKey));
+        if (it != res.end()) {
+            return it->second;
         } else {
             return std::nullopt;
         }
@@ -808,18 +854,18 @@ public:
         }
         property_map ret;
         for (const auto& key : parameterKeys) {
-            if (allBestMatchParameters.value().contains(key)) {
-                ret.insert_or_assign(key, allBestMatchParameters.value().at(key));
+            if (allBestMatchParameters->contains(convert_string_domain(key))) {
+                ret.insert_or_assign(convert_string_domain(key), allBestMatchParameters->at(convert_string_domain(key)));
             }
         }
         return ret;
     }
 
-    [[nodiscard]] std::optional<pmtv::pmt> getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override {
+    [[nodiscard]] std::optional<pmt::Value> getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override {
         auto res = getStored(std::array<std::string, 1>({parameterKey}), ctx);
 
-        if (res != std::nullopt && res.value().contains(parameterKey)) {
-            return res.value().at(parameterKey);
+        if (res.has_value() && res->contains(convert_string_domain(parameterKey))) {
+            return res->at(convert_string_domain(parameterKey));
         } else {
             return std::nullopt;
         }
@@ -839,7 +885,7 @@ public:
         return static_cast<gr::Size_t>(_autoUpdateParameters.size());
     }
 
-    [[nodiscard]] std::map<pmtv::pmt, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
+    [[nodiscard]] std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
 
     [[nodiscard]] const property_map& stagedParameters() const noexcept override {
         std::lock_guard lg(_mutex);
@@ -869,7 +915,7 @@ public:
             }
 
             // check if reset of settings should be performed
-            if (_stagedParameters.contains(gr::tag::RESET_DEFAULTS)) {
+            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
                 resetDefaults();
             }
 
@@ -890,8 +936,34 @@ public:
                         std::expected<Type, std::string> maybe_value;
                         if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
                             maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
+
+                        } else if constexpr (std::is_same_v<Type, std::string>) {
+                            auto str = stagedValue.value_or(std::string_view{});
+                            if (str.data() != nullptr) {
+                                maybe_value = std::string(str);
+                            } else {
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
+
+                        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                            using Value = typename Type::value_type;
+                            auto tensor = checked_access_ptr{stagedValue.get_if<Tensor<Value>>()};
+                            if (tensor != nullptr) {
+                                maybe_value = typename decltype(maybe_value)::value_type{};
+                                if (auto conversionResult = pmt::assignTo(*maybe_value, *tensor); !conversionResult) {
+                                    maybe_value = std::unexpected(conversionResult.error().message);
+                                }
+                            } else {
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
+
                         } else {
-                            maybe_value = std::get<Type>(stagedValue);
+                            auto ptr = checked_access_ptr{stagedValue.get_if<Type>()};
+                            if (ptr != nullptr) {
+                                maybe_value = *ptr;
+                            } else {
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
                         }
 
                         if constexpr (is_annotated<RawType>()) {
@@ -901,11 +973,14 @@ public:
                                     staged.insert_or_assign(key, stagedValue);
                                 }
                             } else {
-                                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", key, stagedValue).c_str(), stderr);
+                                if (key == "output_chunk_size") {
+                                    std::terminate();
+                                }
+                                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", std::string_view(key), stagedValue).c_str(), stderr);
                             }
                         } else {
                             if (!maybe_value) {
-                                std::fputs(std::format("Failed to convert key '{}': {}\n", key, maybe_value.error()).c_str(), stderr);
+                                std::fputs(std::format("Failed to convert key '{}': {}\n", std::string_view(key), maybe_value.error()).c_str(), stderr);
                                 return;
                             }
                             member = *maybe_value;
@@ -915,7 +990,7 @@ public:
                             }
                         }
 
-                        if (_autoForwardParameters.contains(key)) {
+                        if (_autoForwardParameters.contains(convert_string_domain(key))) {
                             result.forwardParameters.insert_or_assign(key, stagedValue);
                         }
                     }
@@ -939,17 +1014,17 @@ public:
             if constexpr (TBlock::ResamplingControl::kEnabled) {
                 if (result.forwardParameters.contains(gr::tag::SAMPLE_RATE.shortKey()) && (_block->input_chunk_size != 1ULL || _block->output_chunk_size != 1ULL)) {
                     const float ratio         = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
-                    const float newSampleRate = ratio * std::get<float>(_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()));
+                    const float newSampleRate = ratio * (*_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()).get_if<float>());
                     result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
                 }
             }
 
-            if (_stagedParameters.contains(gr::tag::STORE_DEFAULTS)) {
+            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::STORE_DEFAULTS))) {
                 storeDefaults();
             }
 
             if constexpr (HasSettingsResetCallback<TBlock>) {
-                if (_stagedParameters.contains(gr::tag::RESET_DEFAULTS)) {
+                if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
                     _block->reset();
                 }
             }
@@ -984,7 +1059,8 @@ public:
             });
 
             if (!isSet) {
-                if (ctx.context == "") { // store meta_information only for default
+                auto str = ctx.context.value_or(std::string_view{});
+                if (str.empty()) { // store meta_information only for default
                     _block->meta_information[key] = value;
                 }
             }
@@ -1006,15 +1082,15 @@ private:
 
             if constexpr (settings::isReadableMember<Type>()) {
                 if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
-                    _activeParameters.insert_or_assign(key, pmtv::pmt(detail::enumToString(member)));
+                    _activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::enumToString(member)));
                 } else {
-                    _activeParameters.insert_or_assign(key, pmtv::pmt(member));
+                    _activeParameters.insert_or_assign(convert_string_domain(key), detail::unwrap_decorated_value(member));
                 }
             }
         });
     }
 
-    [[nodiscard]] NO_INLINE std::optional<pmtv::pmt> findBestMatchCtx(const pmtv::pmt& contextToSearch) const {
+    [[nodiscard]] NO_INLINE std::optional<pmt::Value> findBestMatchCtx(const pmt::Value& contextToSearch) const {
         if (_storedParameters.empty()) {
             return std::nullopt;
         }
@@ -1127,7 +1203,7 @@ private:
                     }
                 });
                 if (!isSet) {
-                    ret.insert_or_assign(key, pmtv::pmt(value));
+                    ret.insert_or_assign(key, pmt::Value(value));
                 }
             }
         }
@@ -1188,9 +1264,10 @@ private:
 
     [[nodiscard]] NO_INLINE std::optional<std::string> contextInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::CONTEXT.shortKey())) {
-            const pmtv::pmt& ctxInfo = tag.map.at(std::string(gr::tag::CONTEXT.shortKey()));
-            if (std::holds_alternative<std::string>(ctxInfo)) {
-                return std::get<std::string>(ctxInfo);
+            const pmt::Value& ctxInfo = tag.map.at(gr::tag::CONTEXT.shortKey());
+            auto              result  = ctxInfo.value_or(std::string_view{});
+            if (result.data() != nullptr) {
+                return {std::string(result)};
             }
         }
         return std::nullopt;
@@ -1198,9 +1275,10 @@ private:
 
     [[nodiscard]] NO_INLINE std::optional<std::uint64_t> triggeredTimeInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
-            const pmtv::pmt& pmtTimeUtcNs = tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
-            if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
-                return std::get<uint64_t>(pmtTimeUtcNs);
+            const pmt::Value& pmtTimeUtcNs = tag.map.at(gr::tag::TRIGGER_TIME.shortKey());
+            auto              result       = checked_access_ptr{pmtTimeUtcNs.get_if<std::uint64_t>()};
+            if (result != nullptr) {
+                return *result;
             }
         }
         return std::nullopt;
@@ -1235,9 +1313,9 @@ private:
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                 if constexpr (settings::isReadableMember<Type>()) {
                     if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                        parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(detail::enumToString(refl::data_member<kIdx>(*_block))));
+                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), pmt::Value(detail::enumToString(refl::data_member<kIdx>(*_block))));
                     } else {
-                        parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*_block)));
+                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), pmt::Value(detail::unwrap_decorated_value(refl::data_member<kIdx>(*_block))));
                     }
                 }
             });

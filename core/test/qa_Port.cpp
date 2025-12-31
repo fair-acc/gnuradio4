@@ -466,7 +466,7 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
         p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
         for (const auto& [key, value] : p) {
-            std::println("k={} val={}:{}/{}", key, value, value.value_type(), value.container_type());
+            std::println("k={} val={}:{}/{}", std::string_view(key), value, value.value_type(), value.container_type());
         }
         expect(!metaInfo.update(p).has_value());
         expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated

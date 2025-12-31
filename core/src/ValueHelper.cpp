@@ -1,3 +1,5 @@
+#include <exception>
+
 #include <gnuradio-4.0/ValueHelper.hpp>
 
 namespace gr::pmt {
