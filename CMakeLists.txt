@@ -368,7 +368,7 @@ FetchContent_Declare(
 
 set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
-if(NOT EMSCRIPTEN)
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   set(GR_HTTP_ENABLED FALSE)
 
   if(NOT
@@ -410,7 +410,7 @@ set(GR_FETCH_MAKE_AVAILABLE_DEPS
     vir-simd
     cpp-httplib)
 
-if(NOT EMSCRIPTEN)
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS cpr)
 endif()
 

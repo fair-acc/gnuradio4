@@ -86,7 +86,7 @@ void testFFT() {
     std::vector<T> signal = generateSinSample<T>(N, sampleRate, frequency, amplitude);
 
     {
-        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT> fft1({{"fftSize", N}});
+        gr::blocks::fft::FFT<T, DataSet<PrecisionType>, FFT> fft1({{"fftSize", gr::pmt::Value(N)}});
         std::ignore = fft1.settings().applyStagedParameters();
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);

@@ -33,6 +33,7 @@ public:
     immutable<T>& operator=(immutable<T>&& other)      = delete;
 
     const T& value() const { return _value; }
+
     operator const T&() const { return _value; }
 
     // Explicitly enable immutable<std::string> to std::string_view conversion
@@ -80,6 +81,9 @@ struct is_immutable : std::false_type {};
 
 template<typename T>
 struct is_immutable<immutable<T>> : std::true_type {};
+
+template<typename T>
+concept ImmutableType = is_immutable<T>::value;
 
 } // namespace gr::meta
 

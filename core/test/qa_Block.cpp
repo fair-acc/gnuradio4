@@ -8,9 +8,12 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include "message_utils.hpp"
 
 #if !DISABLE_SIMD
 namespace gr::test {
@@ -548,8 +551,8 @@ void interpolation_decimation_test(const IntDecTestData& data) {
     using namespace gr::testing;
 
     gr::Graph flow;
-    auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
+    auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(data.n_samples)}, {"mark_tag", gr::pmt::Value(false)}});
+    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::pmt::Value(data.output_chunk_size)}, {"input_chunk_size", gr::pmt::Value(data.input_chunk_size)}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -579,8 +582,8 @@ void stride_test(const StrideTestData& data) {
     const bool write_to_vector{data.exp_in_vector.size() != 0};
 
     gr::Graph flow;
-    auto&     source        = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}, {"stride", data.stride}});
+    auto&     source        = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", gr::pmt::Value(data.n_samples)}, {"mark_tag", gr::pmt::Value(false)}});
+    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::pmt::Value(data.output_chunk_size)}, {"input_chunk_size", gr::pmt::Value(data.input_chunk_size)}, {"stride", gr::pmt::Value(data.stride)}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -618,7 +621,7 @@ void syncOrAsyncTest() {
     using BlockType = SyncOrAsyncBlock<float, isInputAsync, isOutputAsync>;
 
     Graph             testGraph;
-    auto&             tagSrc     = testGraph.emplaceBlock<TagSource<float>>({{"n_samples_max", n_samples}});
+    auto&             tagSrc     = testGraph.emplaceBlock<TagSource<float>>({{"n_samples_max", gr::pmt::Value(n_samples)}});
     auto&             asyncBlock = testGraph.emplaceBlock<BlockType>();
     auto&             sink       = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>();
     const std::string testInfo   = std::format("syncOrAsyncTest<{}, {}>", isInputAsync, isOutputAsync);
@@ -769,19 +772,19 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         using namespace gr::testing;
 
         gr::Graph testGraph;
-        auto&     source = testGraph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(20)}});
+        auto&     source = testGraph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(gr::Size_t(20))}});
         source._tags     = {
-            {0, {{"key0", "value@0"}}},    //
-            {2, {{"key2", "value@2"}}},    //
-            {4, {{"key4", "value@4"}}},    //
-            {6, {{"key6", "value@6"}}},    //
-            {8, {{"ke8", "value@8"}}},     //
-            {10, {{"key10", "value@10"}}}, //
-            {12, {{"key12", "value@12"}}}, //
-            {14, {{"key14", "value@14"}}}  //
+            {0, property_map({{"key0", gr::pmt::Value("value@0")}})},    //
+            {2, property_map({{"key2", gr::pmt::Value("value@2")}})},    //
+            {4, property_map({{"key4", gr::pmt::Value("value@4")}})},    //
+            {6, property_map({{"key6", gr::pmt::Value("value@6")}})},    //
+            {8, property_map({{"ke8", gr::pmt::Value("value@8")}})},     //
+            {10, property_map({{"key10", gr::pmt::Value("value@10")}})}, //
+            {12, property_map({{"key12", gr::pmt::Value("value@12")}})}, //
+            {14, property_map({{"key14", gr::pmt::Value("value@14")}})}  //
         };
 
-        auto& intDecBlock = testGraph.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
+        auto& intDecBlock = testGraph.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::pmt::Value(gr::Size_t(10))}, {"input_chunk_size", gr::pmt::Value(gr::Size_t(10))}});
         auto& sink        = testGraph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(intDecBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(intDecBlock).to<"in">(sink)));
@@ -818,10 +821,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         auto& testNode = graph.emplaceBlock<TestNode>();
 
-        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
-        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
-        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
-        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{3.}}}));
 
         sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
@@ -866,10 +869,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         auto& testNode = graph.emplaceBlock<TestNode>();
 
-        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
-        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
-        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
-        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"values", Tensor{3.}}}));
 
         sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
@@ -920,11 +923,11 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         };
         auto testBlock = gr::BlockWrapper<LocalTestBlock>();
         expect(testBlock.metaInformation().contains("Drawable")) << "drawable";
-        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock.metaInformation().at("Drawable"s));
+        const auto& drawableConfigMap = gr::testing::get_value_or_fail<gr::property_map>(testBlock.metaInformation().at("Drawable"));
         expect(drawableConfigMap.contains("Category"));
-        expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
+        expect(eq(gr::testing::get_value_or_fail<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
-        expect(eq(std::get<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+        expect(eq(gr::testing::get_value_or_fail<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
     };
 
     "ui_constraints"_test = [] {
@@ -940,8 +943,8 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         expect(eq(testBlock.uiConstraints().size(), 2UZ));
         expect(testBlock.uiConstraints().contains("x-position"));
         expect(testBlock.uiConstraints().contains("y-position"));
-        expect(eq(std::get<float>(testBlock.uiConstraints().at("x-position"s)), 3.f));
-        expect(eq(std::get<float>(testBlock.uiConstraints().at("y-position"s)), 4.f));
+        expect(eq(gr::testing::get_value_or_fail<float>(testBlock.uiConstraints().at("x-position")), 3.f));
+        expect(eq(gr::testing::get_value_or_fail<float>(testBlock.uiConstraints().at("y-position")), 4.f));
     };
 };
 
@@ -982,33 +985,33 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
         Graph            testGraph;
 
         auto createSrcTags = [](std::size_t srcNum) -> std::vector<Tag> {
-            const property_map srcParams1 = {                         //
-                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum)}, //
-                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum)}};
+            const property_map srcParams1 = {                                         //
+                {SAMPLE_RATE.shortKey(), gr::pmt::Value(static_cast<float>(srcNum))}, //
+                {SIGNAL_NAME.shortKey(), gr::pmt::Value(std::format("SIGNAL_NAME_{}", srcNum))}};
 
-            const property_map srcParams2 = {                                            //
-                {SIGNAL_QUANTITY.shortKey(), std::format("SIGNAL_QUANTITY_{}", srcNum)}, //
-                {SIGNAL_UNIT.shortKey(), std::format("SIGNAL_UNIT_{}", srcNum)},         //
-                {SIGNAL_MIN.shortKey(), static_cast<float>(srcNum)},                     //
-                {SIGNAL_MAX.shortKey(), static_cast<float>(srcNum)}};
+            const property_map srcParams2 = {                                                            //
+                {SIGNAL_QUANTITY.shortKey(), gr::pmt::Value(std::format("SIGNAL_QUANTITY_{}", srcNum))}, //
+                {SIGNAL_UNIT.shortKey(), gr::pmt::Value(std::format("SIGNAL_UNIT_{}", srcNum))},         //
+                {SIGNAL_MIN.shortKey(), gr::pmt::Value(static_cast<float>(srcNum))},                     //
+                {SIGNAL_MAX.shortKey(), gr::pmt::Value(static_cast<float>(srcNum))}};
 
-            const property_map srcParams3 = {                                //
-                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum) + 10.f}, //
-                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum + 10)}};
+            const property_map srcParams3 = {                                                //
+                {SAMPLE_RATE.shortKey(), gr::pmt::Value(static_cast<float>(srcNum) + 10.f)}, //
+                {SIGNAL_NAME.shortKey(), gr::pmt::Value(std::format("SIGNAL_NAME_{}", srcNum + 10))}};
 
             return std::vector<Tag>{Tag{10 + 5 * srcNum, srcParams1}, Tag{12 + 5 * srcNum, srcParams2}, Tag{50 + 5 * srcNum, srcParams3}};
         };
 
-        auto& src1 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource1"}, {"n_samples_max", nSamples}});
+        auto& src1 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSource1")}, {"n_samples_max", gr::pmt::Value(nSamples)}});
         src1._tags = createSrcTags(1);
-        auto& src2 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource2"}, {"n_samples_max", nSamples}});
+        auto& src2 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSource2")}, {"n_samples_max", gr::pmt::Value(nSamples)}});
         src2._tags = createSrcTags(2);
-        auto& src3 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource3"}, {"n_samples_max", nSamples}});
+        auto& src3 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSource3")}, {"n_samples_max", gr::pmt::Value(nSamples)}});
         src3._tags = createSrcTags(3);
 
-        auto& manyPortsBlock = testGraph.emplaceBlock<PortMetaInfoTestBlockWithManyPorts<float>>({{"name", "PortMetaInfoTestBlockWithManyPorts"}});
+        auto& manyPortsBlock = testGraph.emplaceBlock<PortMetaInfoTestBlockWithManyPorts<float>>({{"name", gr::pmt::Value("PortMetaInfoTestBlockWithManyPorts")}});
 
-        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSink")}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src1).to<"in1">(manyPortsBlock)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src2).to<"in2", 0>(manyPortsBlock)));
@@ -1071,9 +1074,9 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         gr::Size_t nSamples = 1000000;
 
         gr::Graph graph;
-        auto&     src       = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"disconnect_on_done", false}});
-        auto&     testBlock = graph.emplaceBlock<Resampler<float>>({{"disconnect_on_done", false}});
-        auto&     sink      = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", false}});
+        auto&     src       = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"disconnect_on_done", gr::pmt::Value(false)}});
+        auto&     testBlock = graph.emplaceBlock<Resampler<float>>({{"disconnect_on_done", gr::pmt::Value(false)}});
+        auto&     sink      = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", gr::pmt::Value(false)}});
 
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(testBlock)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(testBlock).template to<"in">(sink)));
@@ -1097,7 +1100,7 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         expect(eq(resultBlock.requested_work, 10UZ));
         expect(eq(resultBlock.performed_work, 10UZ));
 
-        expect(testBlock.settings().set({{"output_chunk_size", gr::Size_t(7)}, {"input_chunk_size", gr::Size_t(7)}}).empty());
+        expect(testBlock.settings().set({{"output_chunk_size", gr::pmt::Value(gr::Size_t(7))}, {"input_chunk_size", gr::pmt::Value(gr::Size_t(7))}}).empty());
         expect(testBlock.settings().activateContext() != std::nullopt);
         resultBlock = testBlock.work(8); // requestedWork is applied, process only one `input_chunk_size` which fits to requestedWork
         expect(eq(resultBlock.requested_work, 8UZ));
@@ -1108,7 +1111,7 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         resultBlock = testBlock.work(5); // requestedWork is clamped to `input_chunk_size`
         expect(eq(resultBlock.requested_work, 5UZ));
         expect(eq(resultBlock.performed_work, 7UZ)); // 7 samples are processed
-        expect(testBlock.settings().set({{"output_chunk_size", gr::Size_t(1)}, {"input_chunk_size", gr::Size_t(1)}}).empty());
+        expect(testBlock.settings().set({{"output_chunk_size", gr::pmt::Value(gr::Size_t(1))}, {"input_chunk_size", gr::pmt::Value(gr::Size_t(1))}}).empty());
         expect(testBlock.settings().activateContext() != std::nullopt);
         resultBlock = testBlock.work(); // process last 48 samples
         expect(eq(resultBlock.requested_work, std::numeric_limits<std::size_t>::max()));
@@ -1133,9 +1136,10 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
 
         gr::Graph flow;
         // ClockSource has a BlockingIO attribute
-        auto& source  = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 10.f}, {"n_samples_max", gr::Size_t(0)}});
-        auto& monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
-        auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        auto&                                               source = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(10.f)}, {"n_samples_max", gr::pmt::Value(gr::Size_t(0))}});
+        TagMonitor<float, ProcessFunction::USE_PROCESS_ONE> d(gr::property_map{});
+        auto&                                               monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", gr::pmt::Value(false)}});
+        auto&                                               sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", gr::pmt::Value(false)}});
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 

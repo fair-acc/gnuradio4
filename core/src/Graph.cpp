@@ -26,7 +26,7 @@ Graph::Graph(property_map settings) : gr::Block<Graph>(std::move(settings)), _pl
     throw gr::exception(std::format("Cannot create block '{}'", type));
 }
 
-std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::replaceBlock(const std::string& uniqueName, const std::string& type, const property_map& properties) {
+std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties) {
     auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
     if (it == _blocks.end()) {
         throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
@@ -57,21 +57,28 @@ std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> Graph::repla
 
 std::optional<Message> Graph::propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kRegistryBlockTypes);
-    message.data = property_map{{"types", _pluginLoader->availableBlocks()}};
+    const auto&        availableBlocks = _pluginLoader->availableBlocks();
+    Tensor<pmt::Value> types(availableBlocks | std::views::transform([](const std::string& type) { return pmt::Value(type); }));
+    message.data = property_map{{"types", types}};
     return message;
 }
 
 std::optional<Message> Graph::propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kRegistryBlockTypes);
-    message.data = property_map{{"types", _pluginLoader->availableSchedulers()}};
+    const auto&        availableSchedulers = _pluginLoader->availableSchedulers();
+    Tensor<pmt::Value> types(availableSchedulers | std::views::transform([](const std::string& type) { return pmt::Value(type); }));
+    message.data = property_map{{"types", types}};
     return message;
 }
 
 std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kInspectBlock);
     using namespace std::string_literals;
-    const auto&        data       = message.data.value();
-    const std::string& uniqueName = std::get<std::string>(data.at("uniqueName"s));
+    const auto& data       = message.data.value();
+    const auto  uniqueName = data.at("uniqueName").value_or(std::string_view{});
+    if (uniqueName.empty()) {
+        throw gr::exception(std::format("Invalid block specification"));
+    }
     using namespace std::string_literals;
 
     auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
@@ -88,24 +95,26 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
 std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kGraphInspect);
     message.data = [&] {
-        property_map result;
-        result[std::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
-        result[std::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
-        result[std::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
+        property_map _result;
+        auto&        result = _result;
+
+        result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
+        result[std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
+        result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
 
         property_map serializedChildren;
         for (const auto& child : blocks()) {
-            serializedChildren[std::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
+            serializedChildren[std::pmr::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
         }
-        result[std::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
+        result[std::pmr::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
 
         property_map serializedEdges;
         std::size_t  index = 0UZ;
         for (const auto& edge : edges()) {
-            serializedEdges[std::to_string(index)] = serializeEdge(edge);
+            serializedEdges[convert_string_domain(std::to_string(index))] = serializeEdge(edge);
             index++;
         }
-        result[std::string(serialization_fields::BLOCK_EDGES)] = std::move(serializedEdges);
+        result[std::pmr::string(serialization_fields::BLOCK_EDGES)] = std::move(serializedEdges);
         return result;
     }();
 
