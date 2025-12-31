@@ -129,7 +129,9 @@ inline void reset(property_map& state) noexcept {
 
 [[nodiscard]] inline bool isSingleTrigger(const property_map& state) noexcept {
     if (state.contains(key::kStartDefined) && state.contains(key::kStopDefined)) {
-        return std::get<bool>(state.at(key::kStartDefined)) xor std::get<bool>(state.at(key::kStopDefined));
+        const auto startDefined = CAP{state.at(key::kStartDefined).get_if<bool>()};
+        const auto endDefined   = CAP{state.at(key::kStopDefined).get_if<bool>()};
+        return startDefined != nullptr && endDefined != nullptr && (*startDefined xor *endDefined);
     } else {
         return false;
     }
@@ -138,7 +140,8 @@ inline void reset(property_map& state) noexcept {
 inline void verifyFilterState(std::string_view matchCriteria, property_map& state) {
     using namespace std::string_literals;
     using namespace gr::trigger::detail;
-    if (state.contains(key::kFilter) && std::holds_alternative<std::string>(state.at(key::kFilter)) && (std::get<std::string>(state.at(key::kFilter)) == matchCriteria)) {
+    if (state.contains(key::kFilter) && //
+        (state.at(key::kFilter).value_or(std::string_view{}) == matchCriteria)) {
         return;
     }
 
@@ -179,82 +182,132 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
     }
 
     if (!startPart.empty()) {
-        detail::parse(startPart, std::get<std::string>(state[key::kStartTriggerName]), std::get<bool>(state[key::kStartTriggerNameEnds]), std::get<std::string>(state[key::kStartCtx]), std::get<bool>(state[key::kStartCtxEnds]));
-        state[key::kStartDefined] = true;
+        const auto _startTriggerName    = state[key::kStartTriggerName].value_or(std::string_view{});
+        const auto startTriggerNameEnds = CAP{state[key::kStartTriggerNameEnds].get_if<bool>()};
+        const auto _startCtx            = state[key::kStartCtx].value_or(std::string_view{});
+        const auto startCtxEnds         = CAP{state[key::kStartCtxEnds].get_if<bool>()};
+        if (_startTriggerName.data() == nullptr || startTriggerNameEnds == nullptr || _startCtx.data() == nullptr || startCtxEnds == nullptr) {
+            return;
+        }
+        std::string startTriggerName(_startTriggerName);
+        std::string startCtx(_startCtx);
+        detail::parse(startPart, startTriggerName, *startTriggerNameEnds, startCtx, *startCtxEnds);
+        state[key::kStartTriggerName] = std::move(startTriggerName);
+        state[key::kStartCtx]         = std::move(startCtx);
+        state[key::kStartDefined]     = true;
     } else {
         state[key::kStartTriggerName] = ""s;
         state[key::kStartCtx]         = ""s;
     }
 
     if (!stopPart.empty()) {
-        detail::parse(stopPart, std::get<std::string>(state[key::kStopTriggerName]), std::get<bool>(state[key::kStopTriggerNameEnds]), std::get<std::string>(state[key::kStopCtx]), std::get<bool>(state[key::kStopCtxEnds]));
-        state[key::kStopDefined] = true;
+        const auto _stopTriggerName    = state[key::kStopTriggerName].value_or(std::string_view{});
+        const auto stopTriggerNameEnds = CAP{state[key::kStopTriggerNameEnds].get_if<bool>()};
+        const auto _stopCtx            = state[key::kStopCtx].value_or(std::string_view{});
+        const auto stopCtxEnds         = CAP{state[key::kStopCtxEnds].get_if<bool>()};
+        if (_stopTriggerName.data() == nullptr || stopTriggerNameEnds == nullptr || _stopCtx.data() == nullptr || stopCtxEnds == nullptr) {
+            return;
+        }
+        std::string stopTriggerName(_stopTriggerName);
+        std::string stopCtx(_stopCtx);
+        detail::parse(stopPart, stopTriggerName, *stopTriggerNameEnds, stopCtx, *stopCtxEnds);
+        state[key::kStopTriggerName] = std::move(stopTriggerName);
+        state[key::kStopCtx]         = std::move(stopCtx);
+        state[key::kStopDefined]     = true;
     } else {
         state[key::kStopTriggerName] = ""s;
         state[key::kStopCtx]         = ""s;
     }
 
-    if (isSingleTrigger(state) && std::get<bool>(state[key::kStopDefined])) {
+    if (isSingleTrigger(state) && /* checked in isSingleTrigger*/ *state[key::kStopDefined].get_if<bool>()) {
         std::swap(state[key::kStartTriggerName], state[key::kStopTriggerName]);
         std::swap(state[key::kStartCtx], state[key::kStopCtx]);
         state[key::kStopTriggerName] = ""s;
         state[key::kStopCtx]         = ""s;
     }
 
-    if (std::get<std::string>(state[key::kStartTriggerName]) == std::get<std::string>(state[key::kStopTriggerName]) && std::get<std::string>(state[key::kStartCtx]) == std::get<std::string>(state[key::kStopCtx])) {
+    const auto startTriggerName = state[key::kStartTriggerName].value_or(std::string_view{});
+    const auto stopTriggerName  = state[key::kStopTriggerName].value_or(std::string_view{});
+    const auto startCtx         = state[key::kStartCtx].value_or(std::string_view{});
+    const auto stopCtx          = state[key::kStopCtx].value_or(std::string_view{});
+    assert(startTriggerName.data() && stopTriggerName.data() && startCtx.data() && stopCtx.data());
+    if (startTriggerName == stopTriggerName && startCtx == stopCtx) {
         state[key::kStartDefined]    = true;
         state[key::kStopDefined]     = false;
         state[key::kStopTriggerName] = ""s;
         state[key::kStopCtx]         = ""s;
     }
 
-    state[key::kIsSingleTrigger] = bool(std::get<bool>(state.at(key::kStartDefined)) xor std::get<bool>(state.at(key::kStopDefined)));
+    const auto startDefined      = CAP{state[key::kStartDefined].get_if<bool>()};
+    const auto stopDefined       = CAP{state[key::kStopDefined].get_if<bool>()};
+    state[key::kIsSingleTrigger] = startDefined != nullptr && stopDefined != nullptr && (*startDefined xor *stopDefined);
 }
 
 [[nodiscard]] inline trigger::MatchResult filter(std::string_view filterDefinition, const Tag& tag, property_map& filterState) {
     using namespace gr::trigger::detail;
     verifyFilterState(filterDefinition, filterState); // N.B. automatically generates config and state variables if needed
 
-    const auto startDefined = std::get<bool>(filterState[key::kStartDefined]);
-    const auto stopDefined  = std::get<bool>(filterState[key::kStopDefined]);
-    if ((!startDefined && !stopDefined) || tag.map.empty()) {
+    const auto startDefined = CAP{filterState[key::kStartDefined].get_if<bool>()};
+    const auto stopDefined  = CAP{filterState[key::kStopDefined].get_if<bool>()};
+    if (startDefined == nullptr || stopDefined == nullptr || (!*startDefined && !*stopDefined) || tag.map.empty()) {
         return trigger::MatchResult::Ignore;
     }
-    const auto triggerActive    = std::get<bool>(filterState[key::kTriggerActive]);
-    const auto startTriggerName = std::get<std::string>(filterState[key::kStartTriggerName]);
-    const auto startCtx         = std::get<std::string>(filterState[key::kStartCtx]);
-    const auto stopTriggerName  = std::get<std::string>(filterState[key::kStopTriggerName]);
-    const auto stopCtx          = std::get<std::string>(filterState[key::kStopCtx]);
+    const auto triggerActive    = CAP{filterState[key::kTriggerActive].get_if<bool>()};
+    const auto startTriggerName = filterState[key::kStartTriggerName].value_or(std::string_view{});
+    const auto startCtx         = filterState[key::kStartCtx].value_or(std::string_view{});
+    const auto stopTriggerName  = filterState[key::kStopTriggerName].value_or(std::string_view{});
+    const auto stopCtx          = filterState[key::kStopCtx].value_or(std::string_view{});
+    if (triggerActive == nullptr || startTriggerName.data() == nullptr || startCtx.data() == nullptr || stopTriggerName.data() == nullptr || stopCtx.data() == nullptr) {
+        return trigger::MatchResult::Ignore;
+    }
     /// std::println("filter {} -> '{}'/'{}' & '{}'/'{}'\nfilter state: {}", filterDefinition, startTriggerName, startCtx, stopTriggerName, stopCtx, filterState);
 
     std::string triggerName;
     std::string triggerCtx;
-    if (tag.map.contains(tag::TRIGGER_NAME.shortKey()) && std::holds_alternative<std::string>(tag.map.at(tag::TRIGGER_NAME.shortKey()))) {
-        triggerName = std::get<std::string>(tag.map.at(tag::TRIGGER_NAME.shortKey()));
+    if (tag.map.contains(tag::TRIGGER_NAME.shortKey()) && tag.map.at(tag::TRIGGER_NAME.shortKey()).holds<std::string>()) {
+        const auto str = tag.map.at(tag::TRIGGER_NAME.shortKey()).value_or(std::string_view{});
+        if (str.data() != nullptr) {
+            triggerName = str;
+        }
     }
-    if (tag.map.contains(tag::CONTEXT.shortKey()) && std::holds_alternative<std::string>(tag.map.at(tag::CONTEXT.shortKey()))) {
-        triggerCtx = std::get<std::string>(tag.map.at(tag::CONTEXT.shortKey()));
+    if (tag.map.contains(tag::CONTEXT.shortKey()) && tag.map.at(tag::CONTEXT.shortKey()).holds<std::string>()) {
+        const auto str = tag.map.at(tag::CONTEXT.shortKey()).value_or(std::string_view{});
+        if (str.data()) {
+            triggerCtx = str;
+        }
     }
 
     if (isSingleTrigger(filterState)) {
         bool triggerMatch = startTriggerName.empty() || triggerName == startTriggerName;
         bool contextMatch = startCtx.empty() || startCtx.contains(triggerCtx);
         if (triggerMatch && contextMatch) {
-            filterState[key::kWaitingForStartNonMatch] = std::get<bool>(filterState[key::kStartTriggerNameEnds]) || std::get<bool>(filterState[key::kStartCtxEnds]);
+            const auto startTriggerNameEnds            = CAP{filterState[key::kStartTriggerNameEnds].get_if<bool>()};
+            const auto startCtxEnds                    = CAP{filterState[key::kStartCtxEnds].get_if<bool>()};
+            filterState[key::kWaitingForStartNonMatch] = startTriggerNameEnds != nullptr && startCtxEnds != nullptr && (*startTriggerNameEnds || *startCtxEnds);
             return MatchResult::Matching;
         }
     }
 
-    if (startDefined && stopDefined) {
-        if (!triggerActive || std::get<bool>(filterState[key::kWaitingForStartNonMatch])) {
+    if (*startDefined && *stopDefined) {
+        auto waitingForStartNonMatch = [&] {
+            auto ptr = CAP{filterState[key::kWaitingForStartNonMatch].get_if<bool>()};
+            return ptr != nullptr && *ptr;
+        };
+        auto waitingForStopNonMatch = [&] {
+            auto ptr = CAP{filterState[key::kWaitingForStopNonMatch].get_if<bool>()};
+            return ptr != nullptr && *ptr;
+        };
+        if (!*triggerActive || waitingForStartNonMatch()) {
             const bool triggerMatch = startTriggerName.empty() || triggerName == startTriggerName;
             const bool contextMatch = startCtx.empty() || triggerCtx.contains(startCtx);
 
             if (triggerMatch && contextMatch) {
                 filterState[key::kTriggerActive]           = true;
-                filterState[key::kWaitingForStartNonMatch] = std::get<bool>(filterState[key::kStartTriggerNameEnds]) || std::get<bool>(filterState[key::kStartCtxEnds]);
-                return std::get<bool>(filterState[key::kWaitingForStartNonMatch]) ? MatchResult::Ignore : MatchResult::Matching;
-            } else if (std::get<bool>(filterState[key::kWaitingForStartNonMatch])) {
+                const auto startTriggerNameEnds            = CAP{filterState[key::kStartTriggerNameEnds].get_if<bool>()};
+                const auto startCtxEnds                    = CAP{filterState[key::kStartCtxEnds].get_if<bool>()};
+                filterState[key::kWaitingForStartNonMatch] = startTriggerNameEnds != nullptr && startCtxEnds != nullptr && (*startTriggerNameEnds || *startCtxEnds);
+                return waitingForStartNonMatch() ? MatchResult::Ignore : MatchResult::Matching;
+            } else if (waitingForStartNonMatch()) {
                 filterState[key::kWaitingForStartNonMatch] = false;
                 return MatchResult::Matching;
             }
@@ -262,9 +315,11 @@ inline void verifyFilterState(std::string_view matchCriteria, property_map& stat
             const bool triggerMatch = stopTriggerName.empty() || triggerName == stopTriggerName;
             const bool contextMatch = stopCtx.empty() || triggerCtx.contains(stopCtx);
 
-            if ((triggerMatch && contextMatch) || std::get<bool>(filterState[key::kWaitingForStopNonMatch])) {
-                filterState[key::kWaitingForStopNonMatch] = std::get<bool>(filterState[key::kStopTriggerNameEnds]) || std::get<bool>(filterState[key::kStopCtxEnds]);
-                if (!std::get<bool>(filterState[key::kWaitingForStopNonMatch])) {
+            if ((triggerMatch && contextMatch) || waitingForStopNonMatch()) {
+                const auto stopTriggerNameEnds            = CAP{filterState[key::kStopTriggerNameEnds].get_if<bool>()};
+                const auto stopCtxEnds                    = CAP{filterState[key::kStopCtxEnds].get_if<bool>()};
+                filterState[key::kWaitingForStopNonMatch] = stopTriggerNameEnds != nullptr && stopCtxEnds != nullptr && (*stopTriggerNameEnds || *stopCtxEnds);
+                if (!waitingForStopNonMatch()) {
                     reset(filterState);
                     return MatchResult::NotMatching;
                 } else if (!triggerMatch || !contextMatch) {

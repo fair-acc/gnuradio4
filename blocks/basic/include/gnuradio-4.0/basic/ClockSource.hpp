@@ -44,8 +44,8 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
     gr::Size_t                                                                                                     n_samples_produced{0};
     A<float, "avg. sample rate", Visible>                                                                          sample_rate = 1000.f;
     A<gr::Size_t, "chunk_size", Visible, Doc<"number of samples per update">>                                      chunk_size  = 100;
-    A<std::vector<std::uint64_t>, "tag times", Doc<"times when tags should be emitted [ns]">>                      tag_times;
-    A<std::vector<std::string>, "tag values", Doc<"list of '<trigger name>/<ctx>' formatted tags">>                tag_values;
+    A<Tensor<std::uint64_t>, "tag times", Doc<"times when tags should be emitted [ns]">>                           tag_times;
+    A<Tensor<pmt::Value>, "tag values", Doc<"list of '<trigger name>/<ctx>' formatted tags">>                      tag_values;
     A<std::uint64_t, "repeat period", Visible, Doc<"if repeat_period > last tag_time -> restart tags, in [ns]">>   repeat_period{0U}; //
     A<bool, "perform zero-order-hold", Doc<"if tag_times>tag_values: true=publish last tag, false=publish empty">> do_zero_order_hold{false};
     A<bool, "verbose console">                                                                                     verbose_console = false;
@@ -150,7 +150,7 @@ The 'tag_times[ns]:tag_value(string)' vectors control the emission of tags with 
             }
         } else {
             if (!tag_times.value.empty() && _nextTimeTag < tag_times.value.size() && samplesToNextTimeTag <= samplesToProduce) {
-                const std::string     value = _nextTimeTag < tag_values.value.size() ? tag_values.value[_nextTimeTag] : do_zero_order_hold ? tag_values.value.back() : "";
+                const std::string     value = _nextTimeTag < tag_values.value.size() ? tag_values.value[_nextTimeTag].value_or(std::string()) : do_zero_order_hold ? tag_values.value.back().value_or(std::string()) : "";
                 std::string           triggerName;
                 [[maybe_unused]] bool triggerNameNegated;
                 std::string           triggerContext;

@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cstdint>
 #include <map>
-#include <pmtv/pmt.hpp>
 #include <variant>
 #include <vector>
 
@@ -90,7 +89,7 @@ template<typename T>
 struct DataSet {
     using value_type           = T;
     using tensor_layout_type   = std::variant<LayoutRight, LayoutLeft, std::string>;
-    using pmt_map              = pmtv::map_t;
+    using pmt_map              = gr::property_map;
     using idx_pmt_map          = std::pair<std::ptrdiff_t, pmt_map>;
     T            default_value = T(); // default value for padding, ZOH etc.
     std::int64_t timestamp     = 0;   // UTC timestamp [ns]
@@ -180,7 +179,7 @@ static_assert(DataSetLike<DataSet<double>>, "DataSet<double> concept conformity"
 template<typename T>
 struct Packet {
     using value_type = T;
-    using pmt_map    = pmtv::map_t;
+    using pmt_map    = pmt::Value::Map;
     T default_value  = T(); // default value for padding, ZOH etc.
 
     std::int64_t         timestamp = 0;   // UTC timestamp [ns]

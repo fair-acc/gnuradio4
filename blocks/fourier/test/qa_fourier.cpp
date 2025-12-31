@@ -58,7 +58,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         constexpr gr::Size_t N{256};
         constexpr float      sample_rate{1.f};
         constexpr float      testFrequency{0.1f * sample_rate};
-        FFT<InType, OutType> fftBlock({{"fftSize", N}, {"sample_rate", sample_rate}, {"outputInDb", true}});
+        FFT<InType, OutType> fftBlock({{"fftSize", gr::pmt::Value(N)}, {"sample_rate", gr::pmt::Value(sample_rate)}, {"outputInDb", gr::pmt::Value(true)}});
         fftBlock.init(fftBlock.progress);
 
         expect(eq(fftBlock.algorithm, gr::meta::type_name<algorithm::FFT<InType, std::complex<typename OutType::value_type>>>()));
@@ -122,8 +122,8 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         using namespace boost::ut;
         using Scheduler = gr::scheduler::Simple<>;
         gr::Graph flow1;
-        auto&     source1  = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
-        auto&     fftBlock = flow1.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
+        auto&     source1  = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1024))}, {"mark_tag", gr::pmt::Value(false)}});
+        auto&     fftBlock = flow1.emplaceBlock<FFT<float>>({{"fftSize", gr::pmt::Value(static_cast<gr::Size_t>(16))}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect<"out">(source1).to<"in">(fftBlock)));
         Scheduler sched1;
         ;
@@ -134,8 +134,8 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         // run 2 times to check potential memory problems
         for (int i = 0; i < 2; i++) {
             gr::Graph flow2;
-            auto&     source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
-            auto&     fft2    = flow2.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
+            auto&     source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1024))}, {"mark_tag", gr::pmt::Value(false)}});
+            auto&     fft2    = flow2.emplaceBlock<FFT<float>>({{"fftSize", gr::pmt::Value(static_cast<gr::Size_t>(16))}});
             expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect<"out">(source2).to<"in">(fft2)));
             Scheduler sched2;
             ;
@@ -160,7 +160,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
 
         constexpr gr::Size_t N{8};
         for (const auto& [window, windowName] : magic_enum::enum_entries<gr::algorithm::window::Type>()) {
-            expect(fftBlock.settings().set({{"fftSize", N}, {"window", std::string(windowName)}}).empty());
+            expect(fftBlock.settings().set({{"fftSize", gr::pmt::Value(N)}, {"window", gr::pmt::Value(std::string(windowName))}}).empty());
             expect(fftBlock.settings().activateContext() != std::nullopt);
             std::ignore = fftBlock.settings().applyStagedParameters();
 

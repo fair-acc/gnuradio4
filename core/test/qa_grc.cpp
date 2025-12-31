@@ -24,6 +24,8 @@
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
+#include "value_utils.hpp"
+
 namespace ut = boost::ut;
 
 auto makeTestContext() {
@@ -58,9 +60,9 @@ auto collectEdges(const gr::Graph& graph) {
 }
 
 bool checkAndPrintMissingBlocks(const std::string& first, const std::string& second) {
-
-    gr::property_map firstYaml  = *pmtv::yaml::deserialize(first);
-    gr::property_map secondYaml = *pmtv::yaml::deserialize(second);
+    using namespace gr;
+    gr::property_map firstYaml  = *pmt::yaml::deserialize(first);
+    gr::property_map secondYaml = *pmt::yaml::deserialize(second);
 
     // Basic check for blocks
     using BlockMinData = std::pair<std::string, std::string>;
@@ -68,17 +70,17 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
     std::vector<BlockMinData> secondBlocks;
     std::set<BlockMinData>    seenBlocks;
 
-    for (const auto& block : std::get<std::vector<pmtv::pmt>>(firstYaml.at("blocks"))) {
-        const auto&  blockMap = std::get<gr::property_map>(block);
-        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+    for (const auto& block : testing::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("blocks"))) {
+        const auto&  blockMap = testing::get_value_or_fail<gr::property_map>(block);
+        BlockMinData data{testing::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         firstBlocks.push_back(data);
         seenBlocks.insert(data);
     }
 
-    for (const auto& block : std::get<std::vector<pmtv::pmt>>(secondYaml.at("blocks"))) {
-        const auto& blockMap = std::get<gr::property_map>(block);
+    for (const auto& block : testing::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("blocks"))) {
+        const auto& blockMap = testing::get_value_or_fail<gr::property_map>(block);
         std::println("Current block {}", blockMap);
-        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+        BlockMinData data{testing::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         secondBlocks.push_back(data);
         seenBlocks.erase(data);
     }
@@ -87,7 +89,7 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
         std::print("Missing id={} name={}\n", block.first, block.second);
     }
 
-    if (seenBlocks.empty() && (std::get<std::vector<pmtv::pmt>>(firstYaml.at("connections")).size() == std::get<std::vector<pmtv::pmt>>(secondYaml.at("connections")).size())) {
+    if (seenBlocks.empty() && (testing::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("connections")).size() == testing::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("connections")).size())) {
         return true;
     }
 
@@ -109,14 +111,14 @@ using namespace boost::ut;
 
 namespace gr::qa_grc_test {
 
-template<pmtv::yaml::TypeTagMode tagMode = pmtv::yaml::TypeTagMode::Auto>
+template<pmt::yaml::TypeTagMode tagMode = pmt::yaml::TypeTagMode::Auto>
 std::string ymlDecodeEncode(std::string_view yml, std::source_location location = std::source_location::current()) {
-    const auto yaml = pmtv::yaml::deserialize(yml);
+    const auto yaml = pmt::yaml::deserialize(yml);
     if (!yaml) {
-        throw gr::exception(std::format("Could not parse yaml: \n{}", pmtv::yaml::formatAsLines(yml, yaml.error())), location);
+        throw gr::exception(std::format("Could not parse yaml: \n{}", pmt::yaml::formatAsLines(yml, yaml.error())), location);
     }
 
-    return pmtv::yaml::serialize<tagMode>(yaml.value());
+    return pmt::yaml::serialize<tagMode>(yaml.value());
 }
 
 const boost::ut::suite BasicGrcTests = [] {
@@ -159,7 +161,7 @@ connections:
             for (const auto& block : graph->blocks()) {
                 if (block->name() == "ArraySource<float64>") {
                     expect(block->settings().applyStagedParameters().forwardParameters.empty());
-                    expect(std::get<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
+                    expect(testing::get_value_or_fail<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", gr::pmt::Value(43.f)}, {"y", gr::pmt::Value(7070.f)}});
                 }
             }
 
@@ -222,8 +224,8 @@ connections:
   - [counter, 0, sink, 0]
 )";
 
-            const auto graphSrc1 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::Auto>(pluginsTestGrc);
-            const auto graphSrc2 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::None>(pluginsTestGrc);
+            const auto graphSrc1 = ymlDecodeEncode<pmt::yaml::TypeTagMode::Auto>(pluginsTestGrc);
+            const auto graphSrc2 = ymlDecodeEncode<pmt::yaml::TypeTagMode::None>(pluginsTestGrc);
             std::println("yml-before:\n {}\nwith type-tags:\n{}\nwithout type tags:\n{}", pluginsTestGrc, graphSrc1, graphSrc2);
 
             auto graph  = gr::loadGrc(context->loader, graphSrc1);
@@ -518,8 +520,8 @@ connections:
 
         gr::Graph graph1;
         auto&     arraySink    = graph1.emplaceBlock<gr::testing::ArraySink<double>>();
-        auto&     arraySource0 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource0"}});
-        auto&     arraySource1 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource1"}});
+        auto&     arraySource0 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", gr::pmt::Value("ArraySource0")}});
+        auto&     arraySource1 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", gr::pmt::Value("ArraySource1")}});
 
         expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink)));
         expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink)));
@@ -545,8 +547,8 @@ connections:
 
         gr::Graph graph1;
         auto&     vectorSink    = graph1.emplaceBlock<gr::testing::VectorSink<double>>();
-        auto&     vectorSource0 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource0"}});
-        auto&     vectorSource1 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource1"}});
+        auto&     vectorSource0 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", gr::pmt::Value("VectorSource0")}});
+        auto&     vectorSource1 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", gr::pmt::Value("VectorSource1")}});
 
         expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, {0UZ, 0UZ}, vectorSink, {1UZ, 1UZ})));
         expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, {1UZ, 0UZ}, vectorSink, {0UZ, 0UZ})));
@@ -578,30 +580,31 @@ const boost::ut::suite SettingsTests = [] {
             using namespace gr;
 
             gr::Graph  graph1;
-            const auto expectedString        = std::string("abc");
-            const bool expectedBool          = true;
-            const auto expectedComplex       = std::complex<double>(1., 1.);
-            const auto expectedStringVector  = std::vector<std::string>{"a", "b", "c"};
-            const auto expectedBoolVector    = std::vector<bool>{true, false, true};
-            const auto expectedDoubleVector  = std::vector<double>{1., 2., 3.};
-            const auto expectedInt16Vector   = std::vector<int16_t>{1, 2, 3};
-            const auto expectedComplexVector = std::vector<std::complex<double>>{{1., 1.}, {2., 2.}, {3., 3.}};
+            const auto expectedString       = std::string("abc");
+            const bool expectedBool         = true;
+            const auto expectedComplex      = std::complex<double>(1., 1.);
+            const auto expectedStringVector = Tensor<pmt::Value>{pmt::Value("a"), pmt::Value("b"), pmt::Value("c")};
+            const auto expectedBoolVector   = Tensor<bool>(gr::data_from, {true, false, true});
+            const auto expectedDoubleVector = Tensor<double>{1., 2., 3.};
+            const auto expectedInt16Vector  = Tensor<std::int16_t>(gr::data_from, {1, 2, 3});
 
-            std::ignore = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"bool_setting", bool(expectedBool)}, {"string_setting", expectedString}, {"complex_setting", expectedComplex}, //
-                {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});
+            using cd                         = std::complex<double>;
+            const auto expectedComplexVector = Tensor<std::complex<double>>{cd{1., 1.}, cd{2., 2.}, cd{3., 3.}};
+
+            std::ignore = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"bool_setting", gr::pmt::Value(bool(expectedBool))}, {"string_setting", gr::pmt::Value(expectedString)}, {"complex_setting", gr::pmt::Value(expectedComplex)}, //
+                {"bool_vector", gr::pmt::Value(expectedBoolVector)}, {"string_vector", gr::pmt::Value(expectedStringVector)}, {"double_vector", gr::pmt::Value(expectedDoubleVector)}, {"int16_vector", gr::pmt::Value(expectedInt16Vector)}, {"complex_vector", gr::pmt::Value(expectedComplexVector)}});
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
                 const auto settings = node->settings().get();
-                expect(eq(std::get<bool>(settings.at("bool_setting")), expectedBool));
-                expect(eq(std::get<std::string>(settings.at("string_setting")), expectedString));
-                expect(eq(std::get<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
-                expect(eq(std::get<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
-                expect(eq(std::get<std::vector<std::string>>(settings.at("string_vector")), expectedStringVector));
-                expect(eq(std::get<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
-                expect(eq(std::get<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
-                expect(eq(std::get<std::vector<std::complex<double>>>(settings.at("complex_vector")), expectedComplexVector));
+                expect(eq(testing::get_value_or_fail<bool>(settings.at("bool_setting")), expectedBool));
+                expect(eq(testing::get_value_or_fail<std::string>(settings.at("string_setting")), expectedString));
+                expect(eq(testing::get_value_or_fail<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
+                expect(eq(testing::get_value_or_fail<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
+                expect(eq(testing::get_value_or_fail<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
+                expect(eq(testing::get_value_or_fail<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
+                expect(eq(testing::get_value_or_fail<std::vector<std::complex<double>>>(settings.at("complex_vector")), expectedComplexVector));
             });
 
             expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
@@ -617,13 +620,13 @@ const boost::ut::suite SettingsTests = [] {
             using namespace gr;
 
             gr::Graph  graph1;
-            auto&      block = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"name", "ArraySink0"}});
+            auto&      block = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"name", gr::pmt::Value("ArraySink0")}});
             const auto now   = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-            expect(block.settings().set({{"name", "ArraySink1"}}, SettingsCtx{now, "1"}).empty());
-            expect(block.settings().set({{"name", "ArraySink1+10"}}, SettingsCtx{now + 10'000'000'000ULL, "1"}).empty());
-            expect(block.settings().set({{"name", "ArraySink1+20"}}, SettingsCtx{now + 20'000'000'000ULL, "1"}).empty());
-            expect(block.settings().set({{"name", "ArraySink2"}}, SettingsCtx{now, "2"}).empty());
-            expect(block.settings().set({{"name", "ArraySink3"}}, SettingsCtx{now, 3}).empty()); // int as context name
+            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1")}}, SettingsCtx{now, gr::pmt::Value("1")}).empty());
+            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1+10")}}, SettingsCtx{now + 10'000'000'000ULL, gr::pmt::Value("1")}).empty());
+            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1+20")}}, SettingsCtx{now + 20'000'000'000ULL, gr::pmt::Value("1")}).empty());
+            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink2")}}, SettingsCtx{now, gr::pmt::Value("2")}).empty());
+            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink3")}}, SettingsCtx{now, gr::pmt::Value(3)}).empty()); // int as context name
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);

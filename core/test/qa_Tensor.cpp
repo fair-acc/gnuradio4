@@ -31,6 +31,7 @@ const boost::ut::suite<"Tensor<T> Basic Functionality"> _tensorBasic = [] {
     using namespace boost::ut;
     using namespace boost::ut::literals;
     using namespace std::string_view_literals;
+    using namespace std::string_literals;
     using gr::TensorBase;
     using gr::Tensor;
     using gr::TensorView;

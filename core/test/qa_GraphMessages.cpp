@@ -94,11 +94,11 @@ const boost::ut::suite GraphMessageTests = [] {
             if (reply.data.has_value()) {
                 const auto& dataMap    = reply.data.value();
                 auto        foundTypes = dataMap.find("types");
-                if (foundTypes != dataMap.end() || !std::holds_alternative<std::vector<std::string>>(foundTypes->second)) {
+                if (foundTypes != dataMap.end() || !foundTypes->second.holds<Tensor<pmt::Value>>()) {
                     PluginLoader& loader             = context->loader;
                     auto          expectedBlockTypes = loader.availableBlocks();
                     std::ranges::sort(expectedBlockTypes);
-                    auto blockTypes = std::get<std::vector<std::string>>(foundTypes->second);
+                    auto blockTypes = gr::testing::get_value_or_fail<std::vector<std::string>>(foundTypes->second);
                     std::ranges::sort(blockTypes);
                     expect(eq(expectedBlockTypes, blockTypes));
                 } else {

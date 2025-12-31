@@ -97,11 +97,11 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
-        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                                                  //
-            property_map{{"uniqueBlockName"s, demo.pass2->unique_name}, {"portDirection"s, "output"s}, {"portName"s, "out"s}, {"exportFlag"s, true}, {"exportedName"s, "outExp"}}, //
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                                                                                                                                   //
+            property_map{{"uniqueBlockName", gr::pmt::Value(demo.pass2->unique_name.value())}, {"portDirection", gr::pmt::Value("output")}, {"portName", gr::pmt::Value("out")}, {"exportFlag", gr::pmt::Value(true)}, {"exportedName", gr::pmt::Value("outExp")}}, //
             ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
-        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                                               //
-            property_map{{"uniqueBlockName"s, demo.pass1->unique_name}, {"portDirection"s, "input"s}, {"portName"s, "in"s}, {"exportFlag"s, true}, {"exportedName"s, "inExp"}}, //
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                                                                                                                                //
+            property_map{{"uniqueBlockName", gr::pmt::Value(demo.pass1->unique_name.value())}, {"portDirection", gr::pmt::Value("input")}, {"portName", gr::pmt::Value("in")}, {"exportFlag", gr::pmt::Value(true)}, {"exportedName", gr::pmt::Value("inExp")}}, //
             ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
 
         for (const auto& block : graph.blocks()) {
@@ -124,10 +124,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     }
 
                     const auto& data     = reply.data.value();
-                    const auto& children = std::get<property_map>(data.at("children"s));
+                    const auto& children = get_value_or_fail<property_map>(data.at("children"));
                     expect(eq(children.size(), 3UZ));
 
-                    const auto& edges = std::get<property_map>(data.at("edges"s));
+                    const auto& edges = get_value_or_fail<property_map>(data.at("edges"));
                     expect(eq(edges.size(), 2UZ));
 
                     std::size_t subGraphInConnections  = 0UZ;
@@ -136,11 +136,11 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     // Check that the subgraph is connected properly
 
                     for (const auto& [index, edge_] : edges) {
-                        const auto& edge = std::get<property_map>(edge_);
-                        if (std::get<std::string>(edge.at("destination_block")) == demo.graphUniqueName) {
+                        const auto& edge = get_value_or_fail<property_map>(edge_);
+                        if (get_value_or_fail<std::string>(edge.at("destination_block")) == demo.graphUniqueName) {
                             subGraphInConnections++;
                         }
-                        if (std::get<std::string>(edge.at("source_block")) == demo.graphUniqueName) {
+                        if (get_value_or_fail<std::string>(edge.at("source_block")) == demo.graphUniqueName) {
                             subGraphOutConnections++;
                         }
                     }
@@ -148,9 +148,9 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     expect(eq(subGraphOutConnections, 1UZ));
 
                     // Check subgraph topology
-                    const auto& subGraphData     = std::get<property_map>(children.at(demo.graphUniqueName));
-                    const auto& subGraphChildren = std::get<property_map>(subGraphData.at("children"s));
-                    const auto& subGraphEdges    = std::get<property_map>(subGraphData.at("edges"s));
+                    const auto& subGraphData     = get_value_or_fail<property_map>(children.at(convert_string_domain(demo.graphUniqueName)));
+                    const auto& subGraphChildren = get_value_or_fail<property_map>(subGraphData.at("children"));
+                    const auto& subGraphEdges    = get_value_or_fail<property_map>(subGraphData.at("edges"));
                     expect(eq(subGraphChildren.size(), 2UZ));
                     expect(eq(subGraphEdges.size(), 1UZ));
                     return true;
@@ -265,7 +265,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
 
         // Sending messages to blocks in the subgraph
-        sendMessage<Set>(toScheduler, std::string(demo.settingsRecorder->unique_name) /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"scaling_factor", 42.0f}} /* data  */);
+        sendMessage<Set>(toScheduler, std::string(demo.settingsRecorder->unique_name) /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"scaling_factor", gr::pmt::Value(42.0f)}} /* data  */);
 
         // Stopping scheduler
         scheduler.requestStop();

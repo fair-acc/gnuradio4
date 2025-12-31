@@ -1,6 +1,7 @@
 #ifndef GNURADIO_VALUEFORMATTER_HPP
 #define GNURADIO_VALUEFORMATTER_HPP
 
+#include "gnuradio-4.0/ValueHelper.hpp"
 #include <gnuradio-4.0/Value.hpp>
 
 #include <format>
@@ -45,31 +46,37 @@ inline constexpr std::string type_name(const Value& value) {
     return value_type_name(value.value_type()); // scalar
 }
 
-inline constexpr std::string value_to_string(const Value& v) {
-    constexpr auto append_quoted = [](std::string& out, std::string_view s) {
-        out.push_back('"');
-        out.append(s);
-        out.push_back('"');
-    };
+inline constexpr auto append_quoted(std::string& out, std::string_view s) {
+    out.push_back('"');
+    out.append(s);
+    out.push_back('"');
+};
 
+inline constexpr std::string value_to_string(const Value::Map& map) {
+    std::string out;
+    out += '{';
+    bool first = true;
+    for (const auto& [k, val] : map) {
+        if (!first) {
+            out += ", ";
+        }
+        append_quoted(out, k);
+        out += ": ";
+        out += value_to_string(val); // recursive
+        first = false;
+    }
+    out += '}';
+    return out;
+}
+
+inline constexpr std::string value_to_string(const Value& v) {
     std::string out;
     if (v.is_monostate()) {
         out += "monostate";
     } else if (v.is_map()) {
-        out += '{';
         if (auto* map = v.get_if<Value::Map>()) {
-            bool first = true;
-            for (const auto& [k, val] : *map) {
-                if (!first) {
-                    out += ", ";
-                }
-                append_quoted(out, k);
-                out += ": ";
-                out += value_to_string(val); // recursive
-                first = false;
-            }
+            out += value_to_string(*map);
         }
-        out += '}';
     } else if (v.is_string()) {
         append_quoted(out, v.value_or(std::string_view{}));
     } else if (v.is_complex()) {
@@ -112,7 +119,20 @@ inline constexpr std::string value_to_string(const Value& v) {
         out += std::to_string(v._storage.f64);
     } else if (v.is_tensor()) {
         out += type_name(v);
-        out += "[...]";
+        out += "[";
+        ValueVisitor([&out]<typename T>(const T& t) {
+            if constexpr (is_tensor<T>) {
+                bool first = true;
+                for (const auto& _v : t) {
+                    if (!first) {
+                        out += ",";
+                    }
+                    first = false;
+                    out += std::format("{}", _v);
+                }
+            }
+        }).visit(v);
+        out += "]";
     }
 
     return out;
@@ -141,6 +161,19 @@ struct formatter<gr::pmt::Value, char> {
 
     template<class FormatContext>
     auto format(const gr::pmt::Value& v, FormatContext& ctx) const {
+        std::string s = gr::pmt::detail::value_to_string(v);
+        return _impl.format(std::string_view{s}, ctx);
+    }
+};
+
+template<>
+struct formatter<gr::pmt::Value::Map, char> {
+    formatter<string_view, char> _impl;
+
+    constexpr auto parse(format_parse_context& ctx) { return _impl.parse(ctx); }
+
+    template<class FormatContext>
+    auto format(const gr::pmt::Value::Map& v, FormatContext& ctx) const {
         std::string s = gr::pmt::detail::value_to_string(v);
         return _impl.format(std::string_view{s}, ctx);
     }
