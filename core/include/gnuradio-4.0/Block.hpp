@@ -229,7 +229,13 @@ protected:
         _available.resize(_types.size(), 0UZ);
         _minSamples.resize(_types.size(), 0UZ);
         _maxSamples.resize(_types.size(), gr::undefined_size);
-        getPortConstraints(_self, _minSamples, [](auto& port) { return port.min_samples; });
+        getPortConstraints(_self, _minSamples, [](auto& port) {
+            if constexpr (std::remove_cvref_t<decltype(port)>::isOptional()) {
+                return port.isConnected() ? port.min_samples : 0UZ;
+            } else {
+                return port.min_samples;
+            }
+        });
         getPortConstraints(_self, _maxSamples, [](auto& port) { return port.max_samples; });
         _minSyncRequirement = detail::max_element_masked<PortSync::SYNCHRONOUS>(_minSamples, _types).value_or(0UZ);
         _maxSyncRequirement = detail::min_element_masked<PortSync::SYNCHRONOUS>(_maxSamples, _types).value_or(gr::undefined_size);
@@ -244,7 +250,13 @@ protected:
         if (!_dirtyAvailable) {
             return; // already updated
         }
-        getPortConstraints(_self, _available, [](auto& port) { return port.available(); });
+        getPortConstraints(_self, _available, [](auto& port) {
+            if constexpr (std::remove_cvref_t<decltype(port)>::isOptional()) {
+                return port.isConnected() ? port.available() : gr::undefined_size;
+            } else {
+                return port.available();
+            }
+        });
         _maxSyncAvailable  = detail::min_element_masked<PortSync::SYNCHRONOUS>(_available, _types).value_or(gr::undefined_size);
         _hasASyncAvailable = detail::compareRangesMasked<PortSync::ASYNCHRONOUS>(_available, _minSamples, _types);
         _dirtyAvailable    = false;
@@ -1017,7 +1029,9 @@ public:
                         if constexpr (In::spanReleasePolicy() == Terminate) {
                             std::abort();
                         } else if constexpr (In::spanReleasePolicy() == ProcessAll) {
-                            success = success && in.consume(nSamples);
+                            // for unconnected Optional ports, consume 0 instead of nSamples
+                            const auto toConsume = in.isConnected ? nSamples : 0UZ;
+                            success              = success && in.consume(toConsume);
                         } else if constexpr (In::spanReleasePolicy() == ProcessNone) {
                             success = success && in.consume(0U);
                         }
@@ -1091,7 +1105,7 @@ public:
         // TODO: we still fill _mergedInputTag, but this will be removed in the one of the next PR
         for_each_reader_span(
             [this, untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual](auto& in) {
-                if (in.isSync) {
+                if (in.isSync && in.isConnected) {
                     auto inTags = in.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
                     for (const auto& [_, tagMap] : inTags) {
                         for (const auto& [key, value] : tagMap.get()) {
@@ -1109,7 +1123,7 @@ public:
         allPairViews.reserve(8);
         for_each_reader_span(
             [&allPairViews, untilLocalIndexAdjusted](auto& in) {
-                if (in.isSync) {
+                if (in.isSync && in.isConnected) {
                     auto inTags = in.tags(untilLocalIndexAdjusted);
                     static_assert(std::ranges::input_range<decltype(inTags)>);
                     static_assert(std::ranges::forward_range<decltype(inTags)>);
@@ -1173,9 +1187,12 @@ public:
                     using enum gr::SpanReleasePolicy;
                     if constexpr (std::remove_cvref_t<Port>::kIsInput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
-                            return std::forward<Port>(port).template get<ProcessAll, !backwardTagForwarding>(nSyncSamples);
+                            if constexpr (std::remove_cvref_t<Port>::isOptional()) { // handle unconnected Optional ports: request 0 samples (like async)
+                                return std::forward<Port>(port).template get<ProcessAll, !backwardTagForwarding>(port.isConnected() ? nSyncSamples : 0UZ);
+                            } else {
+                                return std::forward<Port>(port).template get<ProcessAll, !backwardTagForwarding>(nSyncSamples);
+                            }
                         } else {
-                            // return std::forward<Port>(port).template get<ProcessNone>(std::max(port.min_samples, std::min(port.streamReader().available(), port.max_samples)));
                             return std::forward<Port>(port).template get<ProcessNone, !backwardTagForwarding>(port.streamReader().available());
                         }
                     } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {

@@ -562,9 +562,7 @@ struct Port {
     // kIsSynch:
     //   true  -> port participates in synchronous scheduling with other sync ports
     //   false -> port is asynchronous (does not gate scheduling)
-    // Rule: an input marked Optional is implicitly also async (i.e. otherwise it would block the sync block data processing);
-    //       outputs stay synchronous unless explicitly annotated with Async.
-    constexpr static bool kIsSynch    = !(std::disjunction_v<std::is_same<Async, Attributes>...> || (kIsInput && std::disjunction_v<std::is_same<Optional, Attributes>...>));
+    constexpr static bool kIsSynch    = !std::disjunction_v<std::is_same<Async, Attributes>...>;
     constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
 
     std::string_view name;

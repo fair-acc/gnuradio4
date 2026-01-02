@@ -510,6 +510,10 @@ public:
                 continue;
             }
 
+            if (cursorX + 4 > _screen_width) { // need at least 4 chars: color box, ':', ' ', trailing ' '
+                return;
+            }
+
             _screen[cursorY][cursorX++] = std::string(Color::get(colour)) + "█" + Color::get(Color::Type::Default);
             colour                      = Color::next(colour);
 
@@ -518,7 +522,7 @@ public:
             _screen[cursorY][cursorX++].assign(" ");
 
             // add the dataset name
-            for (std::size_t j = 0; j < datasetName.size() && cursorX + j < _screen_width; j++) {
+            for (std::size_t j = 0; j < datasetName.size() && cursorX < _screen_width; j++) {
                 _screen[cursorY][cursorX++] = datasetName[j];
             }
 

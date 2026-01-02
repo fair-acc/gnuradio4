@@ -98,7 +98,6 @@ struct SchmittTrigger {
                 return EdgeDetection::FALLING;
             }
             lastEdgeIdx = lastEdgeIdx > 0 ? 1 : lastEdgeIdx - 1;
-            lastEdgeIdx = lastEdgeIdx > 0 ? 1 : lastEdgeIdx - 1;
             return EdgeDetection::NONE;
         }
 
@@ -115,17 +114,18 @@ struct SchmittTrigger {
                 if (y1 == y2) {
                     return {0, EdgeType{0}};
                 }
-                const EdgeType offset   = (EdgeType(static_cast<float>(_offset)) - y1) / (y2 - y1);
-                std::int32_t   intPart  = static_cast<std::int32_t>(std::floor(gr::value(offset)));
-                EdgeType       fracPart = offset - static_cast<float>(intPart);
+                const EdgeType offset      = (EdgeType(static_cast<float>(_offset)) - y1) / (y2 - y1);
+                const EdgeType crossingPos = EdgeType{-1.0f} + gr::value(offset);
+                std::int32_t   intPart     = static_cast<std::int32_t>(std::round(gr::value(crossingPos)));
+                EdgeType       fracPart    = crossingPos - static_cast<float>(intPart);
                 return {intPart, fracPart};
             };
 
             if (!_lastState && input >= _upperThreshold) { // Rising edge detected
                 lastEdge                 = EdgeDetection::RISING;
                 auto [intPart, fracPart] = computeEdgePosition(EdgeType(static_cast<float>(gr::value(yPrev))), EdgeType(static_cast<float>(gr::value(yCurr))));
-                lastEdgeIdx              = -1 + intPart; // edge occurred intPart samples before the current sample
-                lastEdgeOffset           = fracPart;     // fractional part in [0, 1)
+                lastEdgeIdx              = intPart;
+                lastEdgeOffset           = fracPart;
                 _lastState               = true;
                 return EdgeDetection::RISING;
             }
@@ -133,13 +133,12 @@ struct SchmittTrigger {
             if (_lastState && input <= _lowerThreshold) { // Falling edge detected
                 lastEdge                 = EdgeDetection::FALLING;
                 auto [intPart, fracPart] = computeEdgePosition(EdgeType(static_cast<float>(gr::value(yPrev))), EdgeType(static_cast<float>(gr::value(yCurr))));
-                lastEdgeIdx              = -1 + intPart; // edge occurred intPart samples before the current sample
-                lastEdgeOffset           = fracPart;     // fractional part in [0, 1)
+                lastEdgeIdx              = intPart;
+                lastEdgeOffset           = fracPart;
                 _lastState               = false;
                 return EdgeDetection::FALLING;
             }
 
-            lastEdgeIdx = lastEdgeIdx > 0 ? 1 : lastEdgeIdx - 1;
             lastEdgeIdx = lastEdgeIdx > 0 ? 1 : lastEdgeIdx - 1;
             return EdgeDetection::NONE;
         }
@@ -151,36 +150,39 @@ struct SchmittTrigger {
                 return EdgeDetection::NONE;
             }
 
-            const T yPrev = _historyBuffer[1];
-            const T yCurr = _historyBuffer[0];
+            const T    yPrev     = _historyBuffer[1];
+            const T    yCurr     = _historyBuffer[0];
+            const bool wasInZone = accumulatedSamples > 0;
 
-            if (!_lastState && yPrev <= _lowerThreshold && yCurr > _lowerThreshold) { // detected rising edge -> start accumulating samples
+            if (!wasInZone && !_lastState && yPrev <= _lowerThreshold && yCurr > _lowerThreshold) {
                 accumulatedSamples = 1UZ;
             }
 
-            if (_lastState && yPrev >= _upperThreshold && yCurr < _upperThreshold) { // detected falling edge -> start accumulating samples
+            if (!wasInZone && _lastState && yPrev >= _upperThreshold && yCurr < _upperThreshold) {
                 accumulatedSamples = 1UZ;
+            }
+
+            if (wasInZone) {
+                accumulatedSamples++;
             }
 
             if (accumulatedSamples > 0) {
-                accumulatedSamples++;
-
-                if ((!_lastState && yCurr >= _upperThreshold) || (_lastState && yCurr <= _lowerThreshold)) { // opposite threshold has been crossed
+                if ((!_lastState && yCurr >= _upperThreshold) || (_lastState && yCurr <= _lowerThreshold)) {
                     EdgeDetection detectedEdge = (!_lastState && yCurr >= _upperThreshold) ? EdgeDetection::RISING : EdgeDetection::FALLING;
 
                     // use all accumulated samples in regression
-                    size_t n        = std::min(accumulatedSamples, _historyBuffer.size());
+                    size_t n        = std::min(std::max(accumulatedSamples, 2UZ), _historyBuffer.size());
                     auto   crossing = findCrossingIndexLinearRegression(_historyBuffer, n, _offset);
 
                     if (crossing) {
                         const value_t relativeIndex = gr::value(*crossing) - static_cast<value_t>(n - 1);
 
                         lastEdge    = detectedEdge;
-                        lastEdgeIdx = static_cast<std::int32_t>(std::floor(relativeIndex));
+                        lastEdgeIdx = static_cast<std::int32_t>(std::round(relativeIndex));
                         if constexpr (UncertainValueLike<T>) {
                             lastEdgeOffset = T{relativeIndex - static_cast<float>(gr::value(lastEdgeIdx)), static_cast<float>(gr::uncertainty(*crossing))};
                         } else {
-                            lastEdgeOffset = EdgeType{static_cast<float>(relativeIndex) - static_cast<float>(lastEdgeIdx)}; // ADDED CAST
+                            lastEdgeOffset = EdgeType{static_cast<float>(relativeIndex) - static_cast<float>(lastEdgeIdx)};
                         }
 
                         // update state and reset accumulation
