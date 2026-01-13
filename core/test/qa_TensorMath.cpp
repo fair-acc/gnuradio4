@@ -1160,4 +1160,187 @@ const boost::ut::suite<"Level F: Corner Cases"> _level6_corner = [] {
     };
 };
 
+const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
+    using namespace boost::ut;
+    using namespace boost::ut::literals;
+    using gr::Tensor;
+    using namespace gr::math;
+    using Complex = std::complex<double>;
+
+    "G.1 isFinite"_test = [] {
+        "all finite double"_test = [] {
+            Tensor<double> A({3, 3});
+            A.fill(1.0);
+            expect(isFinite(A));
+        };
+
+        "contains NaN"_test = [] {
+            Tensor<double> A({3, 3});
+            A.fill(1.0);
+            A[1, 1] = std::numeric_limits<double>::quiet_NaN();
+            expect(!isFinite(A));
+        };
+
+        "contains positive Inf"_test = [] {
+            Tensor<double> A({3, 3});
+            A.fill(1.0);
+            A[0, 2] = std::numeric_limits<double>::infinity();
+            expect(!isFinite(A));
+        };
+
+        "contains negative Inf"_test = [] {
+            Tensor<float> A({2, 2});
+            A.fill(1.0f);
+            A[1, 0] = -std::numeric_limits<float>::infinity();
+            expect(!isFinite(A));
+        };
+
+        "complex all finite"_test = [] {
+            Tensor<Complex> A({2, 2});
+            A = {Complex{1, 2}, Complex{3, 4}, Complex{5, 6}, Complex{7, 8}};
+            expect(isFinite(A));
+        };
+
+        "complex with NaN real part"_test = [] {
+            Tensor<Complex> A({2, 2});
+            A.fill(Complex{1.0, 1.0});
+            A[0, 1] = Complex{std::numeric_limits<double>::quiet_NaN(), 1.0};
+            expect(!isFinite(A));
+        };
+
+        "complex with Inf imag part"_test = [] {
+            Tensor<Complex> A({2, 2});
+            A.fill(Complex{1.0, 1.0});
+            A[1, 1] = Complex{1.0, std::numeric_limits<double>::infinity()};
+            expect(!isFinite(A));
+        };
+
+        "integral types always finite"_test = [] {
+            Tensor<int> A(gr::extents_from, {3, 3});
+            A.fill(42);
+            expect(isFinite(A));
+        };
+
+        "empty tensor is finite"_test = [] {
+            Tensor<double> A({0, 0});
+            expect(isFinite(A));
+        };
+    };
+
+    "G.2 squaredMagnitude"_test = [] {
+        "real positive"_test = [] { expect(approx(squaredMagnitude(3.0), 9.0, 1e-10)); };
+
+        "real negative"_test = [] { expect(approx(squaredMagnitude(-4.0), 16.0, 1e-10)); };
+
+        "real zero"_test = [] { expect(approx(squaredMagnitude(0.0f), 0.0f, 1e-10f)); };
+
+        "complex"_test = [] {
+            Complex z{3.0, 4.0}; // |z|^2 = 9 + 16 = 25
+            expect(approx(squaredMagnitude(z), 25.0, 1e-10));
+        };
+
+        "complex pure imaginary"_test = [] {
+            Complex z{0.0, 5.0}; // |z|^2 = 0 + 25 = 25
+            expect(approx(squaredMagnitude(z), 25.0, 1e-10));
+        };
+
+        "complex zero"_test = [] {
+            Complex z{0.0, 0.0};
+            expect(approx(squaredMagnitude(z), 0.0, 1e-10));
+        };
+    };
+
+    "G.3 hypot"_test = [] {
+        "3-4-5 triangle"_test = [] { expect(approx(hypot(3.0, 4.0), 5.0, 1e-10)); };
+
+        "both zero"_test = [] { expect(approx(hypot(0.0, 0.0), 0.0, 1e-10)); };
+
+        "one zero"_test = [] {
+            expect(approx(hypot(5.0, 0.0), 5.0, 1e-10));
+            expect(approx(hypot(0.0, 7.0), 7.0, 1e-10));
+        };
+
+        "negative values"_test = [] {
+            expect(approx(hypot(-3.0, 4.0), 5.0, 1e-10));
+            expect(approx(hypot(3.0, -4.0), 5.0, 1e-10));
+            expect(approx(hypot(-3.0, -4.0), 5.0, 1e-10));
+        };
+
+        "large values avoid overflow"_test = [] {
+            double large = 1e200;
+            double h     = hypot(large, large);
+            expect(std::isfinite(h));
+            expect(approx(h / large, std::sqrt(2.0), 1e-6));
+        };
+
+        "small values avoid underflow"_test = [] {
+            double small = 1e-200;
+            double h     = hypot(small, small);
+            expect(std::isfinite(h));
+            expect(h > 0.0);
+        };
+
+        "float precision"_test = [] { expect(approx(hypot(3.0f, 4.0f), 5.0f, 1e-6f)); };
+    };
+
+    "G.4 conjTranspose"_test = [] {
+        "real matrix"_test = [] {
+            Tensor<double> A({2, 3});
+            A = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
+
+            auto At = conjTranspose(A);
+
+            expect(eq(At.extent(0), 3UZ));
+            expect(eq(At.extent(1), 2UZ));
+            expect(approx(At[0, 0], 1.0, 1e-10));
+            expect(approx(At[0, 1], 4.0, 1e-10));
+            expect(approx(At[1, 0], 2.0, 1e-10));
+            expect(approx(At[1, 1], 5.0, 1e-10));
+            expect(approx(At[2, 0], 3.0, 1e-10));
+            expect(approx(At[2, 1], 6.0, 1e-10));
+        };
+
+        "complex matrix conjugates"_test = [] {
+            Tensor<Complex> A({2, 2});
+            A = {Complex{1, 2}, Complex{3, 4}, Complex{5, 6}, Complex{7, 8}};
+
+            auto Ah = conjTranspose(A);
+
+            expect(eq(Ah.extent(0), 2UZ));
+            expect(eq(Ah.extent(1), 2UZ));
+
+            // transposed and conjugated
+            expect(eq(Ah[0, 0], Complex{1, -2})); // conj(A[0,0])
+            expect(eq(Ah[0, 1], Complex{5, -6})); // conj(A[1,0])
+            expect(eq(Ah[1, 0], Complex{3, -4})); // conj(A[0,1])
+            expect(eq(Ah[1, 1], Complex{7, -8})); // conj(A[1,1])
+        };
+
+        "hermitian matrix self-adjoint"_test = [] {
+            // hermitian: A = A^H
+            Tensor<Complex> H({2, 2});
+            H = {Complex{1, 0}, Complex{2, -1}, Complex{2, 1}, Complex{3, 0}};
+
+            auto Hh = conjTranspose(H);
+
+            for (std::size_t i = 0; i < 2; ++i) {
+                for (std::size_t j = 0; j < 2; ++j) {
+                    expect(approx(Hh[i, j].real(), H[i, j].real(), 1e-10));
+                    expect(approx(Hh[i, j].imag(), H[i, j].imag(), 1e-10));
+                }
+            }
+        };
+
+        "1D tensor throws"_test = [] {
+            Tensor<double> v({5});
+            expect(throws([&] { std::ignore = conjTranspose(v); }));
+        };
+
+        "3D tensor throws"_test = [] {
+            Tensor<double> T({2, 3, 4});
+            expect(throws([&] { std::ignore = conjTranspose(T); }));
+        };
+    };
+};
+
 int main() { /* tests are automatically registered and executed */ return 0; }

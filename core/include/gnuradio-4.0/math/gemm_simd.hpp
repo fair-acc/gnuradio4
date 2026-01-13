@@ -1,8 +1,11 @@
 #ifndef GNURADIO_GEMM_SIMD_HPP
 #define GNURADIO_GEMM_SIMD_HPP
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include <algorithm>
 #include <array>
+#include <complex>
 #include <concepts>
 #include <cstring>
 #include <execution>
@@ -249,10 +252,13 @@ void gemm(ExecutionPolicy&& /*policy*/, TensorC& C, const TensorA& A, const Tens
     // Decision threshold
     constexpr std::size_t CACHE_BLOCK_THRESHOLD = 128UZ;
 
-    if (M <= CACHE_BLOCK_THRESHOLD && N <= CACHE_BLOCK_THRESHOLD && K <= CACHE_BLOCK_THRESHOLD) {
+    // Use SmallGemm for complex types (SIMD doesn't support std::complex) or small matrices
+    if constexpr (gr::meta::complex_like<T>) {
+        SmallGemm<T>::compute(A_op, B_op, C, alpha, beta); // complex types -> use naive algorithm
+    } else if (M <= CACHE_BLOCK_THRESHOLD && N <= CACHE_BLOCK_THRESHOLD && K <= CACHE_BLOCK_THRESHOLD) {
         SmallGemm<T>::compute(A_op, B_op, C, alpha, beta); // small matrices -> use simple algorithm
     } else {
-        CacheOptimizedGemm<T>::compute(A_op, B_op, C, alpha, beta); // // large matrices -> use cache-blocked algorithm with explicit SIMD
+        CacheOptimizedGemm<T>::compute(A_op, B_op, C, alpha, beta); // large matrices -> use cache-blocked algorithm with explicit SIMD
     }
 }
 
