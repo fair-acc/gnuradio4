@@ -1,6 +1,8 @@
 #ifndef GNURADIO_TENSOR_OPS_HPP
 #define GNURADIO_TENSOR_OPS_HPP
 
+#include <gnuradio-4.0/meta/utils.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -717,6 +719,73 @@ std::pair<Tensor<T>, Tensor<T>> broadcast(const Tensor<T>& a, const Tensor<T>& b
 
     throw std::runtime_error("Broadcasting not supported for these tensor shapes");
 }
+
+template<typename T>
+[[nodiscard]] constexpr auto squaredMagnitude(const T& val) noexcept { // complex-safe squared magnitude: |x|^2 for both real and complex types
+    if constexpr (gr::meta::complex_like<T>) {
+        return std::norm(val); // |z|^2 = real^2 + imag^2
+    } else {
+        return val * val;
+    }
+}
+
+template<typename T>
+[[nodiscard]] constexpr T hypot(T a, T b) noexcept {
+    static_assert(std::is_floating_point_v<T>, "hypot requires floating-point type");
+    a = std::abs(a);
+    b = std::abs(b);
+    if (a == T{0}) {
+        return b;
+    }
+    if (b == T{0}) {
+        return a;
+    }
+    if (a < b) {
+        std::swap(a, b);
+    }
+    const T ratio = b / a;
+    return a * std::sqrt(T{1} + ratio * ratio);
+}
+
+template<TensorLike Tensor>
+[[nodiscard]] bool isFinite(const Tensor& t) {
+    using T = typename tensor_traits<std::remove_cvref_t<Tensor>>::value_type;
+    if constexpr (gr::meta::complex_like<T>) {
+        return std::all_of(t.begin(), t.end(), [](const T& x) { return std::isfinite(x.real()) && std::isfinite(x.imag()); });
+    } else if constexpr (std::is_floating_point_v<T>) {
+        return std::all_of(t.begin(), t.end(), [](const T& x) { return std::isfinite(x); });
+    } else {
+        return true; // integral types are always finite
+    }
+}
+
+template<TensorLike Tensor>
+[[nodiscard]] auto conjTranspose(const Tensor& A) {
+    using T = typename tensor_traits<std::remove_cvref_t<Tensor>>::value_type;
+    if (A.rank() != 2) {
+        throw std::runtime_error("conjTranspose requires 2D tensor");
+    }
+
+    auto          extents = A.extents();
+    gr::Tensor<T> result({extents[1], extents[0]});
+
+    if constexpr (gr::meta::complex_like<T>) {
+        for (std::size_t i = 0; i < extents[0]; ++i) {
+            for (std::size_t j = 0; j < extents[1]; ++j) {
+                result[j, i] = std::conj(A[i, j]);
+            }
+        }
+    } else {
+        for (std::size_t i = 0; i < extents[0]; ++i) {
+            for (std::size_t j = 0; j < extents[1]; ++j) {
+                result[j, i] = A[i, j];
+            }
+        }
+    }
+
+    return result;
+}
+
 } // namespace gr::math
 
 #include "math/gemm_simd.hpp"
