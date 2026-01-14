@@ -207,10 +207,11 @@ struct ImChart {
     // second byte: stores bitmask which data set (max: 8) is involved in the screen character
     std::vector<std::vector<uint16_t>> _brailleArray;
 
-    Color::Type              _lastColor = kFirstColor;
-    std::size_t              _n_datasets{0UZ};
-    std::vector<std::string> _datasets{};
-    std::source_location     _location;
+    Color::Type                                      _lastColor = kFirstColor;
+    bool                                             _externalColorManagement{false}; // when true, draw() won't auto-cycle colors
+    std::size_t                                      _n_datasets{0UZ};
+    std::vector<std::pair<std::string, Color::Type>> _datasets{};
+    std::source_location                             _location;
 
 public:
     std::string axis_name_x = "x-axis []";
@@ -260,21 +261,17 @@ public:
             }
         }
 
-#if defined(__EMSCRIPTEN__) || defined(__clang__) // TODO: remove once the CI has a new clang/libc++
-        if (std::ranges::find(_datasets.cbegin(), _datasets.cend(), datasetName) == _datasets.end()) {
-            _datasets.emplace_back(datasetName);
+        // check if dataset name already exists (compare only the name part of the pair)
+        auto nameMatches = [&datasetName](const auto& entry) { return entry.first == datasetName; };
+        if (std::ranges::find_if(_datasets, nameMatches) == _datasets.end()) {
+            _datasets.emplace_back(std::string(datasetName), _lastColor);
         }
-#else
-        if (!std::ranges::contains(_datasets, datasetName)) {
-            _datasets.emplace_back(datasetName);
-        }
-#endif
 
         // clear braille array
         std::ranges::for_each(_brailleArray, [](auto& line) { std::ranges::fill(line, 0UZ); });
         auto updateBrailleArray = [this](const uint16_t oldValue) -> uint16_t {
-            uint16_t increment = ((oldValue & 0xFF) + 1UZ) & 0xFF;     // Increment and mask to first byte
-            uint16_t colorBit  = ((1UZ << _n_datasets) << 8) & 0xFF00; // Shift to the second byte
+            uint16_t increment = ((oldValue & 0xFF) + 1UZ) & 0xFF;           // Increment and mask to first byte
+            uint16_t colorBit  = ((1UZ << (_n_datasets % 8)) << 8) & 0xFF00; // Shift to the second byte (mod 8 to handle >8 datasets)
             return increment | colorBit;
         };
 
@@ -333,7 +330,7 @@ public:
                     }
                 }
 
-                const bool datasetInvolved = (datasetMask & (1UZ << _n_datasets)) > 0;
+                const bool datasetInvolved = (datasetMask & (1UZ << (_n_datasets % 8))) > 0;
                 const bool overlapDetected = std::popcount(datasetMask) > 1;
                 if (dot == 0 && !overlapDetected && (_screen[bRowIdx / kCellHeight][bColIdx / kCellWidth] == " ")) {
                     continue;
@@ -355,7 +352,9 @@ public:
                 screen += Color::get(Color::Type::Default);
             }
         }
-        _lastColor = Color::next(_lastColor);
+        if (!_externalColorManagement) {
+            _lastColor = Color::next(_lastColor);
+        }
     }
 
     void draw(std::source_location caller = std::source_location::current()) {
@@ -371,8 +370,9 @@ public:
     void clearScreen() noexcept {
         std::ranges::for_each(_screen, [](auto& line) { std::ranges::fill(line, " "); });
         std::ranges::for_each(_brailleArray, [](auto& line) { std::ranges::fill(line, 0UZ); });
-        _lastColor  = kFirstColor;
-        _n_datasets = 0UZ;
+        _lastColor               = kFirstColor;
+        _externalColorManagement = false;
+        _n_datasets              = 0UZ;
     }
 
     void reset() const noexcept { std::puts("\033[0;0H"); }
@@ -504,8 +504,7 @@ public:
         const std::size_t cursorY = _screen_height - 1LU; // legend position on last row
         std::size_t       cursorX = getVerticalAxisPositionX() + 2LU;
 
-        auto colour = kFirstColor;
-        for (const auto& datasetName : _datasets) {
+        for (const auto& [datasetName, colour] : _datasets) {
             if (datasetName.empty()) {
                 continue;
             }
@@ -515,10 +514,15 @@ public:
             }
 
             _screen[cursorY][cursorX++] = std::string(Color::get(colour)) + "█" + Color::get(Color::Type::Default);
-            colour                      = Color::next(colour);
 
-            // ad a separator (': ')
+            // add a separator (': ')
+            if (cursorX >= _screen_width) {
+                return;
+            }
             _screen[cursorY][cursorX++].assign(":");
+            if (cursorX >= _screen_width) {
+                return;
+            }
             _screen[cursorY][cursorX++].assign(" ");
 
             // add the dataset name
@@ -553,6 +557,156 @@ public:
         _screen[0][_screen_width - 1]                  = "┐";
         _screen[_screen_height - 1][0]                 = "└";
         _screen[_screen_height - 1][_screen_width - 1] = "┘";
+    }
+
+    /**
+     * @brief Draw multiple traces in mountain-range style with vertical and horizontal offsets
+     *
+     * Each trace is offset from the previous one, creating a stacked/waterfall-like visualization.
+     * Older traces (higher index) appear further back (offset up-right), drawn first so newer
+     * traces are superimposed on top.
+     *
+     * @tparam style drawing style (Braille, Bars, Marker)
+     * @tparam TContainer1 x-values container type
+     * @tparam TContainer2 y-values container type (nested: vector of vectors)
+     * @param xValues shared x-axis values for all traces
+     * @param traces vector of y-value traces (traces[0] = newest, traces[N-1] = oldest)
+     * @param baseLabel base name for traces (will be suffixed with index)
+     * @param xOffsetChars horizontal offset per trace in characters (minimum 0, default 2)
+     * @param yOffsetChars vertical offset per trace in characters (minimum 1, default 2)
+     * @param colorIndex color selection: max() = rotate through colors, otherwise use fixed color index
+     */
+    template<Style style = Style::Braille, std::ranges::input_range TContainer1, std::ranges::input_range TContainer2>
+    void drawMountainRange(const TContainer1& xValues, const TContainer2& traces, std::string_view baseLabel = "trace", std::size_t xOffsetChars = 2UZ, std::size_t yOffsetChars = 2UZ, std::size_t colorIndex = std::numeric_limits<std::size_t>::max()) {
+        using TraceType = std::ranges::range_value_t<TContainer2>;
+        using ValueType = std::ranges::range_value_t<TContainer1>;
+        static_assert(std::ranges::input_range<TraceType>, "traces must be a range of ranges (e.g., vector<vector<T>>)");
+
+        if (xValues.empty() || std::ranges::empty(traces)) {
+            return;
+        }
+
+        const std::size_t nTraces = static_cast<std::size_t>(std::ranges::distance(traces));
+
+        // compute data bounds across all traces first
+        double dataMinX = std::numeric_limits<double>::max();
+        double dataMaxX = std::numeric_limits<double>::lowest();
+        double dataMinY = std::numeric_limits<double>::max();
+        double dataMaxY = std::numeric_limits<double>::lowest();
+
+        for (const auto& x : xValues) {
+            dataMinX = std::min(dataMinX, static_cast<double>(x));
+            dataMaxX = std::max(dataMaxX, static_cast<double>(x));
+        }
+        for (const auto& trace : traces) {
+            for (const auto& y : trace) {
+                dataMinY = std::min(dataMinY, static_cast<double>(y));
+                dataMaxY = std::max(dataMaxY, static_cast<double>(y));
+            }
+        }
+
+        const double dataRangeX = (dataMaxX > dataMinX) ? (dataMaxX - dataMinX) : 1.0;
+        const double dataRangeY = (dataMaxY > dataMinY) ? (dataMaxY - dataMinY) : 1.0;
+
+        // compute total offset needed in data units based on character offsets
+        // each character represents (dataRange / screenSize) data units
+        const double dataPerCharX     = dataRangeX / static_cast<double>(_screen_width);
+        const double dataPerCharY     = dataRangeY / static_cast<double>(_screen_height);
+        const double totalXOffsetData = static_cast<double>(xOffsetChars * (nTraces - 1UZ)) * dataPerCharX;
+        const double totalYOffsetData = static_cast<double>(yOffsetChars * (nTraces - 1UZ)) * dataPerCharY;
+
+        // set axis bounds with room for offsets
+        if (axis_min_x == axis_max_x) {
+            axis_min_x = dataMinX;
+            axis_max_x = dataMaxX + totalXOffsetData;
+        }
+
+        if (axis_min_y == axis_max_y) {
+            constexpr double padding = 0.05;
+            axis_min_y               = dataMinY - padding * dataRangeY;
+            axis_max_y               = dataMaxY + padding * dataRangeY + totalYOffsetData;
+        }
+
+        // compute per-trace offset in data units (guaranteed >= 1 character)
+        const double xRange          = axis_max_x - axis_min_x;
+        const double yRange          = axis_max_y - axis_min_y;
+        const double xOffsetPerTrace = static_cast<double>(xOffsetChars) * xRange / static_cast<double>(_screen_width);
+        const double yOffsetPerTrace = static_cast<double>(yOffsetChars) * yRange / static_cast<double>(_screen_height);
+
+        // we manage colors ourselves in drawMountainRange, disable auto-cycling in draw()
+        _externalColorManagement = true;
+
+        // set fixed color if specified (not max)
+        // colorIndex: 0=Blue, 1=Red, 2=Green, etc. (skips Default which is Color::Type index 0)
+        const bool useFixedColour = (colorIndex != std::numeric_limits<std::size_t>::max());
+        if (useFixedColour) {
+            _lastColor = static_cast<Color::Type>((colorIndex % 16UZ) + 1UZ); // +1 to skip Default (index 0)
+        }
+
+        // draw traces from oldest (back) to newest (front)
+        // oldest traces get more offset (appear in background), newest get less offset (foreground)
+        std::size_t traceIdx = nTraces;
+        for (const auto& trace : traces | std::views::reverse) {
+            --traceIdx;
+
+            // apply offset: older traces (higher traceIdx) are shifted up and right (background)
+            const double thisXOffset = xOffsetPerTrace * static_cast<double>(traceIdx);
+            const double thisYOffset = yOffsetPerTrace * static_cast<double>(traceIdx);
+
+            // create offset copies of the data
+            std::vector<ValueType> offsetX(static_cast<std::size_t>(std::ranges::distance(xValues)));
+            std::vector<ValueType> offsetY(static_cast<std::size_t>(std::ranges::distance(trace)));
+
+            std::ranges::transform(xValues, offsetX.begin(), [thisXOffset](auto x) { return static_cast<ValueType>(static_cast<double>(x) + thisXOffset); });
+
+            std::ranges::transform(trace, offsetY.begin(), [thisYOffset](auto y) { return static_cast<ValueType>(static_cast<double>(y) + thisYOffset); });
+
+            const std::string label = useFixedColour ? std::string(baseLabel) : (std::string(baseLabel) + "[" + std::to_string(traceIdx) + "]");
+            draw<style>(offsetX, offsetY, label);
+
+            if (!useFixedColour) {
+                _lastColor = Color::next(_lastColor);
+            }
+        }
+    }
+
+    /**
+     * @brief Draw Tensor columns as mountain-range traces
+     *
+     * For a 2D tensor, each column becomes a separate trace. For a 1D tensor, it's drawn as a single trace.
+     * X-values are generated as indices [0, 1, 2, ...].
+     */
+    template<Style style = Style::Braille, typename TensorT>
+    requires requires(const TensorT& t) {
+        { t.rank() } -> std::convertible_to<std::size_t>;
+        { t.extent(0) } -> std::convertible_to<std::size_t>;
+        { t.data() };
+    }
+    void drawMountainRange(const TensorT& tensor, std::string_view baseLabel = "col", std::size_t xOffsetChars = 2UZ, std::size_t yOffsetChars = 2UZ, std::size_t colorIndex = std::numeric_limits<std::size_t>::max()) {
+        using ValueType = typename TensorT::value_type;
+
+        if (tensor.rank() == 1UZ) {
+            const std::size_t   n = tensor.extent(0);
+            std::vector<double> xValues(n);
+            std::iota(xValues.begin(), xValues.end(), 0.0);
+            std::vector<std::vector<ValueType>> traces(1);
+            traces[0].assign(tensor.data(), tensor.data() + n);
+            drawMountainRange<style>(xValues, traces, baseLabel, xOffsetChars, yOffsetChars, colorIndex);
+        } else if (tensor.rank() == 2UZ) {
+            const std::size_t                   nRows = tensor.extent(0);
+            const std::size_t                   nCols = tensor.extent(1);
+            std::vector<double>                 xValues(nRows);
+            std::vector<std::vector<ValueType>> traces(nCols);
+
+            std::iota(xValues.begin(), xValues.end(), 0.0);
+            for (std::size_t col = 0UZ; col < nCols; ++col) {
+                traces[col].resize(nRows);
+                for (std::size_t row = 0UZ; row < nRows; ++row) {
+                    traces[col][row] = tensor[row, col];
+                }
+            }
+            drawMountainRange<style>(xValues, traces, baseLabel, xOffsetChars, yOffsetChars, colorIndex);
+        }
     }
 };
 

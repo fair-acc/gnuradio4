@@ -105,6 +105,162 @@ template<DataSetLike TDataSet>
     return true;
 }
 
+struct MountainRangeConfig {
+    std::size_t                chart_width    = 130UZ;
+    std::size_t                chart_height   = 28UZ;
+    std::size_t                x_offset_chars = 2UZ;
+    std::size_t                y_offset_chars = 2UZ;
+    std::size_t                color_index    = std::numeric_limits<std::size_t>::max(); // max = rotating colors
+    gr::graphs::ResetChartView reset_view     = gr::graphs::ResetChartView::KEEP;
+};
+
+/**
+ * @brief Draw a DataSet as a mountain range (waterfall) visualization.
+ *
+ * If the DataSet contains multiple signals, each signal becomes a trace.
+ * Traces are drawn with configurable x/y offsets to create a 3D-like effect.
+ *
+ * @param dataSet The DataSet to visualize
+ * @param config Mountain range configuration (offsets, colors, chart size)
+ * @param location Source location for error reporting
+ * @return true if drawing succeeded, false otherwise
+ */
+template<DataSetLike TDataSet>
+[[maybe_unused]] bool drawMountainRange(const TDataSet& dataSet, const MountainRangeConfig& config = {}, std::source_location location = std::source_location::current()) {
+    using TValueType = typename TDataSet::value_type;
+
+    if (dataSet.signal_values.empty()                                    // check for empty data
+        || dataSet.axis_values.empty() || dataSet.axis_values[0].empty() // empty axis definition
+        || dataSet.signal_ranges.empty()                                 // empty min/max definition
+    ) {
+        return false;
+    }
+
+    std::expected<void, gr::Error> dsCheck = dataset::checkConsistency(dataSet);
+    if (!dsCheck) {
+        throw gr::exception(std::format("drawMountainRange(const DataSet&, ...) - DataSet is not consistent - Error:\n{}", dsCheck.error().message), location);
+    }
+
+    if (config.reset_view == gr::graphs::ResetChartView::RESET) {
+        gr::graphs::resetView();
+    }
+
+    // compute global y-range across all signals
+    TValueType yMin = std::numeric_limits<TValueType>::max();
+    TValueType yMax = std::numeric_limits<TValueType>::lowest();
+    if constexpr (std::is_arithmetic_v<TValueType>) {
+        const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values);
+        yMin                  = *min;
+        yMax                  = *max;
+    } else if constexpr (gr::meta::complex_like<TValueType>) {
+        const auto [min, max] = std::ranges::minmax_element(dataSet.signal_values, [](const TValueType& a, const TValueType& b) { return std::abs(a) < std::abs(b); });
+        yMin                  = *min;
+        yMax                  = *max;
+    }
+
+    auto adjustRange = [](TValueType min, TValueType max) {
+        min                     = std::min(min, TValueType(0));
+        max                     = std::max(max, TValueType(0));
+        const TValueType margin = (max - min) * static_cast<TValueType>(0.2);
+        return std::pair<double, double>{min - margin, max + margin};
+    };
+
+    const TValueType xMin = dataSet.axisValues(0UZ).front();
+    const TValueType xMax = dataSet.axisValues(0UZ).back();
+
+    auto chart        = gr::graphs::ImChart<std::dynamic_extent, std::dynamic_extent>({{xMin, xMax}, adjustRange(yMin, yMax)}, config.chart_width, config.chart_height);
+    chart.axis_name_x = std::format("{} [{}]", dataSet.axisName(0UZ), dataSet.axisUnit(0UZ));
+    chart.axis_name_y = std::format("{} [{}]", dataSet.signalQuantity(0UZ), dataSet.signalUnit(0UZ));
+
+    // collect all signals as traces for the mountain range
+    const std::size_t                    nSignals = dataSet.size();
+    std::vector<std::vector<TValueType>> traces;
+    traces.reserve(nSignals);
+    for (std::size_t i = 0UZ; i < nSignals; ++i) {
+        auto signalSpan = dataSet.signalValues(i);
+        traces.emplace_back(signalSpan.begin(), signalSpan.end());
+    }
+
+    // determine base label from DataSet or use generic name
+    std::string baseLabel = dataSet.signal_names.empty() ? "signal" : dataSet.signal_names[0];
+    if (nSignals == 1UZ && !dataSet.signal_names.empty()) {
+        baseLabel = dataSet.signal_names[0];
+    } else {
+        baseLabel = "trace";
+    }
+
+    chart.drawMountainRange(dataSet.axisValues(0UZ), traces, baseLabel, config.x_offset_chars, config.y_offset_chars, config.color_index);
+    chart.draw();
+
+    return true;
+}
+
+/**
+ * @brief Draw multiple DataSets as a mountain range (waterfall) visualization.
+ *
+ * Each DataSet (assumed to have a single signal) becomes one trace.
+ *
+ * @param dataSets Vector of DataSets to visualize
+ * @param config Mountain range configuration
+ * @param location Source location for error reporting
+ * @return true if drawing succeeded, false otherwise
+ */
+template<DataSetLike TDataSet>
+[[maybe_unused]] bool drawMountainRange(const std::vector<TDataSet>& dataSets, const MountainRangeConfig& config = {}, [[maybe_unused]] std::source_location location = std::source_location::current()) {
+    using TValueType = typename TDataSet::value_type;
+
+    if (dataSets.empty()) {
+        return false;
+    }
+
+    // use the first DataSet as reference for axis
+    const auto& refDataSet = dataSets.front();
+    if (refDataSet.signal_values.empty() || refDataSet.axis_values.empty() || refDataSet.axis_values[0].empty()) {
+        return false;
+    }
+
+    if (config.reset_view == gr::graphs::ResetChartView::RESET) {
+        gr::graphs::resetView();
+    }
+
+    // compute global y-range across all DataSets
+    TValueType yMin = std::numeric_limits<TValueType>::max();
+    TValueType yMax = std::numeric_limits<TValueType>::lowest();
+    for (const auto& ds : dataSets) {
+        if constexpr (std::is_arithmetic_v<TValueType>) {
+            const auto [min, max] = std::ranges::minmax_element(ds.signal_values);
+            yMin                  = std::min(yMin, *min);
+            yMax                  = std::max(yMax, *max);
+        }
+    }
+
+    auto adjustRange = [](TValueType min, TValueType max) {
+        min                     = std::min(min, TValueType(0));
+        max                     = std::max(max, TValueType(0));
+        const TValueType margin = (max - min) * static_cast<TValueType>(0.2);
+        return std::pair<double, double>{min - margin, max + margin};
+    };
+
+    const TValueType xMin = refDataSet.axisValues(0UZ).front();
+    const TValueType xMax = refDataSet.axisValues(0UZ).back();
+
+    auto chart        = gr::graphs::ImChart<std::dynamic_extent, std::dynamic_extent>({{xMin, xMax}, adjustRange(yMin, yMax)}, config.chart_width, config.chart_height);
+    chart.axis_name_x = std::format("{} [{}]", refDataSet.axisName(0UZ), refDataSet.axisUnit(0UZ));
+    chart.axis_name_y = std::format("{} [{}]", refDataSet.signalQuantity(0UZ), refDataSet.signalUnit(0UZ));
+
+    // collect all signals as traces
+    std::vector<std::vector<TValueType>> traceData;
+    traceData.reserve(dataSets.size());
+    for (const auto& ds : dataSets) {
+        traceData.emplace_back(ds.signalValues(0UZ).begin(), ds.signalValues(0UZ).end());
+    }
+
+    chart.drawMountainRange(refDataSet.axisValues(0UZ), traceData, "trace", config.x_offset_chars, config.y_offset_chars, config.color_index);
+    chart.draw();
+
+    return true;
+}
+
 template<typename T>
 void updateMinMax(DataSet<T>& dataSet) {
     if constexpr (std::is_arithmetic_v<T>) {

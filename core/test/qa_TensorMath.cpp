@@ -1341,6 +1341,324 @@ const boost::ut::suite<"Level G: Helper Functions"> _level7_helpers = [] {
             expect(throws([&] { std::ignore = conjTranspose(T); }));
         };
     };
+
+    "G.5 norm2"_test = [] {
+        "zero vector"_test = [] {
+            Tensor<double> v({5});
+            v.fill(0.0);
+            expect(approx(norm2(v), 0.0, 1e-10));
+        };
+
+        "unit vector"_test = [] {
+            Tensor<double> v({3});
+            v = {1.0, 0.0, 0.0};
+            expect(approx(norm2(v), 1.0, 1e-10));
+        };
+
+        "known vector"_test = [] {
+            Tensor<double> v({4});
+            v = {1.0, 2.0, 3.0, 4.0};
+            expect(approx(norm2(v), std::sqrt(30.0), 1e-10));
+        };
+
+        "complex vector"_test = [] {
+            Tensor<Complex> v({2});
+            v = {Complex{3, 4}, Complex{0, 0}};
+            expect(approx(norm2(v), 5.0, 1e-10));
+        };
+
+        "empty vector"_test = [] {
+            Tensor<double> v({0});
+            expect(approx(norm2(v), 0.0, 1e-10));
+        };
+    };
+
+    "G.6 normFrobenius"_test = [] {
+        "zero matrix"_test = [] {
+            Tensor<double> A({3, 3});
+            A.fill(0.0);
+            expect(approx(normFrobenius(A), 0.0, 1e-10));
+        };
+
+        "identity matrix"_test = [] {
+            Tensor<double> I({3, 3});
+            I.fill(0.0);
+            I[0, 0] = 1.0;
+            I[1, 1] = 1.0;
+            I[2, 2] = 1.0;
+            expect(approx(normFrobenius(I), std::sqrt(3.0), 1e-10));
+        };
+
+        "known matrix"_test = [] {
+            Tensor<double> A({2, 2});
+            A = {1.0, 2.0, 3.0, 4.0};
+            expect(approx(normFrobenius(A), std::sqrt(30.0), 1e-10));
+        };
+
+        "complex matrix"_test = [] {
+            Tensor<Complex> A({2, 2});
+            A = {Complex{3, 4}, Complex{0, 0}, Complex{0, 0}, Complex{0, 0}};
+            expect(approx(normFrobenius(A), 5.0, 1e-10));
+        };
+
+        "empty matrix"_test = [] {
+            Tensor<double> A({0, 0});
+            expect(approx(normFrobenius(A), 0.0, 1e-10));
+        };
+    };
+
+    "G.7 hankel"_test = [] {
+        "basic 3x4 Hankel"_test = [] {
+            std::vector<double> signal = {1, 2, 3, 4, 5, 6};
+            auto                result = hankel<double>(signal, 3);
+            expect(result.has_value());
+            const auto& H = result.value();
+            expect(eq(H.extent(0), 3UZ));
+            expect(eq(H.extent(1), 4UZ));
+            expect(approx(H[0, 0], 1.0, 1e-10));
+            expect(approx(H[0, 1], 2.0, 1e-10));
+            expect(approx(H[1, 0], 2.0, 1e-10));
+            expect(approx(H[1, 1], 3.0, 1e-10));
+            expect(approx(H[2, 3], 6.0, 1e-10));
+        };
+
+        "Hankel rows = signal size"_test = [] {
+            std::vector<double> signal = {1, 2, 3, 4, 5, 6};
+            auto                result = hankel<double>(signal, 6);
+            expect(result.has_value());
+            const auto& H = result.value();
+            expect(eq(H.extent(0), 6UZ));
+            expect(eq(H.extent(1), 1UZ));
+        };
+
+        "Hankel rows = 1"_test = [] {
+            std::vector<double> signal = {1, 2, 3, 4, 5, 6};
+            auto                result = hankel<double>(signal, 1);
+            expect(result.has_value());
+            const auto& H = result.value();
+            expect(eq(H.extent(0), 1UZ));
+            expect(eq(H.extent(1), 6UZ));
+        };
+
+        "complex Hankel"_test = [] {
+            std::vector<Complex> signal = {Complex{1, 0}, Complex{2, 1}, Complex{3, 2}};
+            auto                 result = hankel<Complex>(signal, 2);
+            expect(result.has_value());
+            const auto& H = result.value();
+            expect(eq(H.extent(0), 2UZ));
+            expect(eq(H.extent(1), 2UZ));
+            expect(eq(H[0, 0], Complex{1, 0}));
+            expect(eq(H[0, 1], Complex{2, 1}));
+            expect(eq(H[1, 0], Complex{2, 1}));
+            expect(eq(H[1, 1], Complex{3, 2}));
+        };
+
+        "error: nRows = 0"_test = [] {
+            std::vector<double> signal = {1, 2, 3};
+            auto                result = hankel<double>(signal, 0);
+            expect(!result.has_value());
+        };
+
+        "error: nRows > signal size"_test = [] {
+            std::vector<double> signal = {1, 2, 3};
+            auto                result = hankel<double>(signal, 5);
+            expect(!result.has_value());
+        };
+    };
+
+    "G.8 hankelAverage"_test = [] {
+        "perfect reconstruction"_test = [] {
+            std::vector<double> original      = {1, 2, 3, 4, 5, 6, 7, 8};
+            auto                H             = hankel<double>(original, 4).value();
+            auto                reconstructed = hankelAverage(H).value();
+
+            expect(eq(reconstructed.size(), original.size()));
+            for (std::size_t i = 0; i < original.size(); ++i) {
+                expect(approx(reconstructed[i], original[i], 1e-10)) << "mismatch at index " << i;
+            }
+        };
+
+        "complex reconstruction"_test = [] {
+            std::vector<Complex> original      = {Complex{1, 0}, Complex{2, 1}, Complex{3, 2}, Complex{4, 3}};
+            auto                 H             = hankel<Complex>(original, 2).value();
+            auto                 reconstructed = hankelAverage(H).value();
+
+            expect(eq(reconstructed.size(), original.size()));
+            for (std::size_t i = 0; i < original.size(); ++i) {
+                expect(approx(reconstructed[i].real(), original[i].real(), 1e-10));
+                expect(approx(reconstructed[i].imag(), original[i].imag(), 1e-10));
+            }
+        };
+
+        "tall matrix reconstruction"_test = [] {
+            std::vector<double> original      = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+            auto                H             = hankel<double>(original, 9).value();
+            auto                reconstructed = hankelAverage(H).value();
+
+            expect(eq(reconstructed.size(), original.size()));
+            for (std::size_t i = 0; i < original.size(); ++i) {
+                expect(approx(reconstructed[i], original[i], 1e-10));
+            }
+        };
+
+        "wide matrix reconstruction"_test = [] {
+            std::vector<double> original      = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+            auto                H             = hankel<double>(original, 2).value();
+            auto                reconstructed = hankelAverage(H).value();
+
+            expect(eq(reconstructed.size(), original.size()));
+            for (std::size_t i = 0; i < original.size(); ++i) {
+                expect(approx(reconstructed[i], original[i], 1e-10));
+            }
+        };
+
+        "error: 1D tensor"_test = [] {
+            Tensor<double> H({5});
+            auto           result = hankelAverage(H);
+            expect(!result.has_value());
+        };
+
+        "error: 3D tensor"_test = [] {
+            Tensor<double> H({2, 3, 4});
+            auto           result = hankelAverage(H);
+            expect(!result.has_value());
+        };
+    };
+
+    "G.9 givens"_test = [] {
+        "eliminate second element"_test = [] {
+            double a = 3.0, b = 4.0;
+            double c, s, r;
+            givens(a, b, c, s, r);
+
+            // verify: c*a + s*b = r
+            expect(approx(c * a + s * b, r, 1e-10));
+            // verify: -s*a + c*b = 0
+            expect(approx(-s * a + c * b, 0.0, 1e-10));
+            // verify: c^2 + s^2 = 1
+            expect(approx(c * c + s * s, 1.0, 1e-10));
+            // verify: r = sqrt(a^2 + b^2)
+            expect(approx(r, 5.0, 1e-10));
+        };
+
+        "b is zero"_test = [] {
+            double a = 5.0, b = 0.0;
+            double c, s, r;
+            givens(a, b, c, s, r);
+
+            expect(approx(c, 1.0, 1e-10));
+            expect(approx(s, 0.0, 1e-10));
+            expect(approx(r, 5.0, 1e-10));
+        };
+
+        "a is zero"_test = [] {
+            double a = 0.0, b = 5.0;
+            double c, s, r;
+            givens(a, b, c, s, r);
+
+            expect(approx(c, 0.0, 1e-10));
+            expect(approx(std::abs(s), 1.0, 1e-10));
+            expect(approx(r, 5.0, 1e-10));
+        };
+
+        "both zero"_test = [] {
+            double a = 0.0, b = 0.0;
+            double c, s, r;
+            givens(a, b, c, s, r);
+
+            expect(approx(c, 1.0, 1e-10));
+            expect(approx(s, 0.0, 1e-10));
+            expect(approx(r, 0.0, 1e-10));
+        };
+
+        "negative values"_test = [] {
+            double a = -3.0, b = 4.0;
+            double c, s, r;
+            givens(a, b, c, s, r);
+
+            expect(approx(c * a + s * b, r, 1e-10));
+            expect(approx(-s * a + c * b, 0.0, 1e-10));
+            expect(approx(c * c + s * s, 1.0, 1e-10));
+        };
+
+        "float precision"_test = [] {
+            float a = 3.0f, b = 4.0f;
+            float c, s, r;
+            givens(a, b, c, s, r);
+
+            expect(approx(c * a + s * b, r, 1e-5f));
+            expect(approx(-s * a + c * b, 0.0f, 1e-5f));
+            expect(approx(c * c + s * s, 1.0f, 1e-5f));
+        };
+    };
+
+    "G.10 applyGivensLeft"_test = [] {
+        "2x2 matrix"_test = [] {
+            Tensor<double> A({2, 2});
+            A = {3.0, 1.0, 4.0, 2.0};
+
+            double c, s, r;
+            givens(A[0, 0], A[1, 0], c, s, r);
+
+            applyGivensLeft<double>(A, 0, 1, c, s, 0, 2);
+
+            // first column should be [r, 0]
+            expect(approx(A[0, 0], r, 1e-10));
+            expect(approx(A[1, 0], 0.0, 1e-10));
+        };
+
+        "3x3 matrix partial columns"_test = [] {
+            Tensor<double> A({3, 3});
+            A = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
+
+            double c, s, r;
+            givens(A[0, 1], A[1, 1], c, s, r);
+
+            // only apply to columns 1 and 2
+            applyGivensLeft<double>(A, 0, 1, c, s, 1, 3);
+
+            // column 0 should be unchanged
+            expect(approx(A[0, 0], 1.0, 1e-10));
+            expect(approx(A[1, 0], 4.0, 1e-10));
+
+            // A[1,1] should be zeroed
+            expect(approx(A[1, 1], 0.0, 1e-10));
+        };
+    };
+
+    "G.11 applyGivensRight"_test = [] {
+        "2x2 matrix"_test = [] {
+            Tensor<double> A({2, 2});
+            A = {3.0, 4.0, 1.0, 2.0};
+
+            double c, s, r;
+            givens(A[0, 0], A[0, 1], c, s, r);
+
+            applyGivensRight<double>(A, 0, 1, c, s, 0, 2);
+
+            // first row should be [r, 0]
+            expect(approx(A[0, 0], r, 1e-10));
+            expect(approx(A[0, 1], 0.0, 1e-10));
+        };
+
+        "3x3 matrix partial rows"_test = [] {
+            Tensor<double> A({3, 3});
+            A = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0};
+
+            double c, s, r;
+            givens(A[1, 0], A[1, 1], c, s, r);
+
+            // only apply to rows 1 and 2
+            applyGivensRight<double>(A, 0, 1, c, s, 1, 3);
+
+            // row 0 should be unchanged
+            expect(approx(A[0, 0], 1.0, 1e-10));
+            expect(approx(A[0, 1], 2.0, 1e-10));
+
+            // A[1,1] should be zeroed
+            expect(approx(A[1, 1], 0.0, 1e-10));
+        };
+    };
 };
 
 int main() { /* tests are automatically registered and executed */ return 0; }

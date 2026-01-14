@@ -7,9 +7,14 @@
 #include <cmath>
 #include <complex>
 #include <execution>
+#include <expected>
 #include <functional>
 #include <numeric>
+#include <span>
 #include <type_traits>
+
+#include <format>
+#include <gnuradio-4.0/Message.hpp>
 
 namespace gr::math {
 namespace config {
@@ -784,6 +789,200 @@ template<TensorLike Tensor>
     }
 
     return result;
+}
+
+/**
+ * @brief Euclidean (L2) norm of a vector: ||x||_2 = sqrt(Σ|x_i|²)
+ */
+template<TensorLike TensorX>
+[[nodiscard]] auto norm2(const TensorX& x) noexcept {
+    using T     = typename tensor_traits<std::remove_cvref_t<TensorX>>::value_type;
+    using RealT = gr::meta::fundamental_base_value_type_t<T>;
+    if (x.empty()) {
+        return RealT{0};
+    }
+    RealT sumSq{0};
+    for (const auto& val : x) {
+        sumSq += squaredMagnitude(val);
+    }
+    return std::sqrt(sumSq);
+}
+
+/**
+ * @brief Frobenius norm of a matrix: ||A||_F = sqrt(Σ|a_ij|²)
+ */
+template<TensorLike TensorA>
+[[nodiscard]] auto normFrobenius(const TensorA& A) noexcept {
+    using T     = typename tensor_traits<std::remove_cvref_t<TensorA>>::value_type;
+    using RealT = gr::meta::fundamental_base_value_type_t<T>;
+    if (A.empty()) {
+        return RealT{0};
+    }
+    RealT sumSq{0};
+    for (const auto& val : A) {
+        sumSq += squaredMagnitude(val);
+    }
+    return std::sqrt(sumSq);
+}
+
+/**
+ * @brief Build Hankel matrix from signal: H[i,j] = signal[i + j]
+ *
+ * For signal length N and nRows rows, produces nRows × (N - nRows + 1) matrix.
+ *
+ * @param signal Input signal of length N
+ * @param nRows Number of rows in the Hankel matrix (1 ≤ nRows ≤ N)
+ * @param loc Source location for error reporting
+ * @return Hankel matrix or error if dimensions are invalid
+ */
+template<typename T>
+[[nodiscard]] std::expected<gr::Tensor<T>, gr::Error> hankel(std::span<const T> signal, std::size_t nRows, std::source_location loc = std::source_location::current()) {
+    const std::size_t N = signal.size();
+    if (nRows == 0UZ || nRows > N) {
+        return std::unexpected(gr::Error(std::format("hankel: nRows ({}) must be in range [1, {}]", nRows, N), loc));
+    }
+
+    const std::size_t nCols = N - nRows + 1UZ;
+    gr::Tensor<T>     H({nRows, nCols});
+
+    for (std::size_t i = 0UZ; i < nRows; ++i) {
+        for (std::size_t j = 0UZ; j < nCols; ++j) {
+            H[i, j] = signal[i + j];
+        }
+    }
+    return H;
+}
+
+/**
+ * @brief Reconstruct signal from Hankel matrix by averaging anti-diagonals.
+ *
+ * This is the inverse operation of hankel() for exact Hankel matrices.
+ * For approximate Hankel matrices, returns the best rank-preserving reconstruction.
+ *
+ * @param H Input Hankel matrix of shape [L × K]
+ * @param loc Source location for error reporting
+ * @return Reconstructed signal of length L + K - 1, or error if input is invalid
+ */
+template<typename T>
+[[nodiscard]] std::expected<std::vector<T>, gr::Error> hankelAverage(const gr::Tensor<T>& H, std::source_location loc = std::source_location::current()) {
+    if (H.rank() != 2) {
+        return std::unexpected(gr::Error(std::format("hankelAverage: input must be 2D tensor, got rank {}", H.rank()), loc));
+    }
+
+    const std::size_t L = H.extent(0);
+    const std::size_t K = H.extent(1);
+    const std::size_t N = L + K - 1UZ;
+
+    std::vector<T>           signal(N, T{0});
+    std::vector<std::size_t> counts(N, 0UZ);
+
+    for (std::size_t i = 0UZ; i < L; ++i) {
+        for (std::size_t j = 0UZ; j < K; ++j) {
+            signal[i + j] += H[i, j];
+            ++counts[i + j];
+        }
+    }
+
+    for (std::size_t d = 0UZ; d < N; ++d) {
+        if (counts[d] > 0UZ) {
+            using RealT = gr::meta::fundamental_base_value_type_t<T>;
+            signal[d] /= static_cast<RealT>(counts[d]);
+        }
+    }
+    return signal;
+}
+
+/**
+ * @brief Compute Givens rotation parameters to zero out element b.
+ *
+ * Computes c, s, r such that:
+ *   [c  s] [a]   [r]
+ *   [-s c] [b] = [0]
+ *
+ * where c² + s² = 1 and r = sqrt(a² + b²).
+ *
+ * @param a First element
+ * @param b Element to be zeroed
+ * @param[out] c Cosine of rotation angle
+ * @param[out] s Sine of rotation angle
+ * @param[out] r Resulting non-zero element (hypotenuse)
+ */
+template<typename T>
+void givens(T a, T b, T& c, T& s, T& r) noexcept {
+    static_assert(std::is_floating_point_v<T>, "givens requires floating-point type");
+    if (b == T{0}) {
+        c = (a >= T{0}) ? T{1} : T{-1};
+        s = T{0};
+        r = std::abs(a);
+    } else if (a == T{0}) {
+        c = T{0};
+        s = (b >= T{0}) ? T{1} : T{-1};
+        r = std::abs(b);
+    } else if (std::abs(b) > std::abs(a)) {
+        const T t = a / b;
+        const T u = std::copysign(std::sqrt(T{1} + t * t), b);
+        s         = T{1} / u;
+        c         = s * t;
+        r         = b * u;
+    } else {
+        const T t = b / a;
+        const T u = std::copysign(std::sqrt(T{1} + t * t), a);
+        c         = T{1} / u;
+        s         = c * t;
+        r         = a * u;
+    }
+}
+
+/**
+ * @brief Apply Givens rotation from the left to rows i and k of matrix A.
+ *
+ * For each column j in [colStart, colEnd):
+ *   [A[i,j]]   [c  s] [A[i,j]]
+ *   [A[k,j]] = [-s c] [A[k,j]]
+ *
+ * @param A Matrix to modify in-place
+ * @param i First row index
+ * @param k Second row index
+ * @param c Cosine of rotation
+ * @param s Sine of rotation
+ * @param colStart Starting column (inclusive)
+ * @param colEnd Ending column (exclusive)
+ */
+template<typename T, TensorLike TensorA>
+void applyGivensLeft(TensorA& A, std::size_t i, std::size_t k, T c, T s, std::size_t colStart, std::size_t colEnd) noexcept {
+    using ElemT = typename tensor_traits<std::remove_cvref_t<TensorA>>::value_type;
+    for (std::size_t j = colStart; j < colEnd; ++j) {
+        const ElemT ai = A[i, j];
+        const ElemT ak = A[k, j];
+        A[i, j]        = static_cast<ElemT>(c) * ai + static_cast<ElemT>(s) * ak;
+        A[k, j]        = static_cast<ElemT>(c) * ak - static_cast<ElemT>(s) * ai;
+    }
+}
+
+/**
+ * @brief Apply Givens rotation from the right to columns i and k of matrix A.
+ *
+ * For each row r in [rowStart, rowEnd):
+ *   [A[r,i] A[r,k]] = [A[r,i] A[r,k]] [c -s]
+ *                                      [s  c]
+ *
+ * @param A Matrix to modify in-place
+ * @param i First column index
+ * @param k Second column index
+ * @param c Cosine of rotation
+ * @param s Sine of rotation
+ * @param rowStart Starting row (inclusive)
+ * @param rowEnd Ending row (exclusive)
+ */
+template<typename T, TensorLike TensorA>
+void applyGivensRight(TensorA& A, std::size_t i, std::size_t k, T c, T s, std::size_t rowStart, std::size_t rowEnd) noexcept {
+    using ElemT = typename tensor_traits<std::remove_cvref_t<TensorA>>::value_type;
+    for (std::size_t r = rowStart; r < rowEnd; ++r) {
+        const ElemT ai = A[r, i];
+        const ElemT ak = A[r, k];
+        A[r, i]        = static_cast<ElemT>(c) * ai + static_cast<ElemT>(s) * ak;
+        A[r, k]        = static_cast<ElemT>(c) * ak - static_cast<ElemT>(s) * ai;
+    }
 }
 
 } // namespace gr::math

@@ -39,23 +39,6 @@ struct Config {
 
 namespace detail {
 
-template<TensorLike TensorA>
-auto frobeniusNorm(const TensorA& A) {
-    using T             = typename TensorA::value_type;
-    using BaseValueType = gr::meta::fundamental_base_value_type_t<T>;
-    return std::sqrt(std::transform_reduce(A.begin(), A.end(), BaseValueType{0}, std::plus<>{}, [](const T& val) { return squaredMagnitude(val); }));
-}
-
-template<TensorLike TensorX>
-auto norm2(const TensorX& x) {
-    using T             = typename TensorX::value_type;
-    using BaseValueType = gr::meta::fundamental_base_value_type_t<T>;
-    if (x.rank() != 1) {
-        throw std::runtime_error("norm2: requires 1D tensor");
-    }
-    return std::sqrt(std::transform_reduce(x.begin(), x.end(), BaseValueType{0}, std::plus<>{}, [](const T& val) { return squaredMagnitude(val); }));
-}
-
 template<typename T>
 constexpr auto sign(T val) {
     if constexpr (gr::meta::complex_like<T>) {
@@ -435,55 +418,6 @@ void bidiagonalise(Tensor<T>& A, std::vector<BaseValueType>& tauU, std::vector<B
 }
 
 template<typename T, typename BaseValueType = gr::meta::fundamental_base_value_type_t<T>>
-void givensRotation(BaseValueType a, BaseValueType b, BaseValueType& c, BaseValueType& s, BaseValueType& r) {
-    // compute Givens rotation: [c, s] such that [c, -conj(s); s, c] * [a; b] = [r; 0]
-
-    if (b == BaseValueType{0}) {
-        c = (a >= BaseValueType{0}) ? BaseValueType{1} : BaseValueType{-1};
-        s = BaseValueType{0};
-        r = std::abs(a);
-    } else if (a == BaseValueType{0}) {
-        c = BaseValueType{0};
-        s = (b >= BaseValueType{0}) ? BaseValueType{1} : BaseValueType{-1};
-        r = std::abs(b);
-    } else if (std::abs(b) > std::abs(a)) {
-        BaseValueType t = a / b;
-        BaseValueType u = std::copysign(std::sqrt(BaseValueType{1} + t * t), b);
-        s               = BaseValueType{1} / u;
-        c               = s * t;
-        r               = b * u;
-    } else {
-        BaseValueType t = b / a;
-        BaseValueType u = std::copysign(std::sqrt(BaseValueType{1} + t * t), a);
-        c               = BaseValueType{1} / u;
-        s               = c * t;
-        r               = a * u;
-    }
-}
-
-template<typename T, typename BaseValueType = gr::meta::fundamental_base_value_type_t<T>>
-void applyGivensLeft(Tensor<T>& A, std::size_t i, std::size_t k, BaseValueType c, BaseValueType s, std::size_t colStart, std::size_t colEnd) {
-    // apply Givens rotation to rows i and k of columns [colStart, colEnd)
-
-    for (std::size_t j = colStart; j < colEnd; ++j) {
-        T temp  = c * A[i, j] + s * A[k, j];
-        A[k, j] = -s * A[i, j] + c * A[k, j];
-        A[i, j] = temp;
-    }
-}
-
-template<typename T, typename BaseValueType = gr::meta::fundamental_base_value_type_t<T>>
-void applyGivensRight(Tensor<T>& A, std::size_t i, std::size_t k, BaseValueType c, BaseValueType s, std::size_t rowStart, std::size_t rowEnd) {
-    // apply Givens rotation to columns i and k of rows [rowStart, rowEnd)
-
-    for (std::size_t j = rowStart; j < rowEnd; ++j) {
-        T temp  = c * A[j, i] + s * A[j, k];
-        A[j, k] = -s * A[j, i] + c * A[j, k];
-        A[j, i] = temp;
-    }
-}
-
-template<typename T, typename BaseValueType = gr::meta::fundamental_base_value_type_t<T>>
 bool bidiagonalQRStep(std::vector<BaseValueType>& diag, std::vector<BaseValueType>& superdiag, Tensor<T>* U, Tensor<T>* V, std::size_t start, std::size_t end, BaseValueType tol) {
     // one implicit QR step on bidiagonal matrix B with Wilkinson shift
     // B is stored as diag (length n) and superdiag (length n-1)
@@ -521,7 +455,7 @@ bool bidiagonalQRStep(std::vector<BaseValueType>& diag, std::vector<BaseValueTyp
     for (std::size_t k = start; k < end - 1; ++k) {
         // Right Givens: zero out z using rotation on columns k and k+1
         BaseValueType c, s, r;
-        givensRotation<T>(x, z, c, s, r);
+        gr::math::givens(x, z, c, s, r);
 
         // For k > start, the bulge from previous iteration is at (k-1, k)
         // The right Givens zeros it: superdiag[k-1] = r
@@ -547,12 +481,12 @@ bool bidiagonalQRStep(std::vector<BaseValueType>& diag, std::vector<BaseValueTyp
 
         // accumulate V: V := V * G^T
         if (V) {
-            applyGivensRight(*V, k, k + 1, c, s, 0, V->extent(0));
+            gr::math::applyGivensRight<BaseValueType>(*V, k, k + 1, c, s, 0, V->extent(0));
         }
 
         // Left Givens: zero out bulge at (k+1, k)
         // Rotate rows k and k+1 to zero bulge
-        givensRotation<T>(diag[k], bulge, c, s, r);
+        gr::math::givens(diag[k], bulge, c, s, r);
 
         // Apply left Givens to bidiagonal: B := G * B
         // G = [[c, s], [-s, c]] applied to rows k, k+1
@@ -581,7 +515,7 @@ bool bidiagonalQRStep(std::vector<BaseValueType>& diag, std::vector<BaseValueTyp
 
         // accumulate U: U := U * G
         if (U) {
-            applyGivensRight(*U, k, k + 1, c, s, 0, U->extent(0));
+            gr::math::applyGivensRight<BaseValueType>(*U, k, k + 1, c, s, 0, U->extent(0));
         }
     }
 
@@ -743,7 +677,7 @@ svd::Status svdGolubReinsch(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& s
                 if (i < end - 1 && std::abs(superdiag[i]) > tol * std::numeric_limits<BaseValueType>::epsilon()) {
                     for (std::size_t j = i + 1; j < end; ++j) {
                         BaseValueType c, s, r;
-                        givensRotation<T>(diag[j], superdiag[i], c, s, r);
+                        gr::math::givens(diag[j], superdiag[i], c, s, r);
                         diag[j] = r;
                         if (j < end - 1) {
                             BaseValueType temp = superdiag[j];
@@ -752,7 +686,7 @@ svd::Status svdGolubReinsch(Tensor<T>& A, Tensor<T>* V, Tensor<BaseValueType>& s
                         } else {
                             superdiag[i] = BaseValueType{0};
                         }
-                        applyGivensRight(Umat, j, i, c, -s, 0, m);
+                        gr::math::applyGivensRight<BaseValueType>(Umat, j, i, c, -s, 0, m);
                     }
                 }
                 break;
