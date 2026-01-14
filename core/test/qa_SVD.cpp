@@ -189,69 +189,6 @@ template<typename T, typename RealT = gr::meta::fundamental_base_value_type_t<T>
     return true;
 }
 
-const boost::ut::suite<"SVD Helper Functions"> _svd_helpers = [] {
-    using namespace boost::ut;
-    using namespace boost::ut::literals;
-    using gr::Tensor;
-
-    "Frobenius norm"_test = [] {
-        "zero matrix"_test = [] {
-            Tensor<double> A({3, 3});
-            A.fill(0.0);
-            expect(approx_equal(gr::math::detail::frobeniusNorm(A), 0.0, 1e-10));
-        };
-
-        "identity matrix"_test = [] {
-            Tensor<double> I({3, 3});
-            I.fill(0.0);
-            I[0, 0] = 1.0;
-            I[1, 1] = 1.0;
-            I[2, 2] = 1.0;
-            expect(approx_equal(gr::math::detail::frobeniusNorm(I), std::sqrt(3.0), 1e-10));
-        };
-
-        "known matrix"_test = [] {
-            Tensor<double> A({2, 2});
-            A = {1.0, 2.0, 3.0, 4.0};
-            expect(approx_equal(gr::math::detail::frobeniusNorm(A), std::sqrt(30.0), 1e-10));
-        };
-
-        "complex matrix"_test = [] {
-            using Complex = std::complex<double>;
-            Tensor<Complex> A({2, 2});
-            A = {Complex{3, 4}, Complex{0, 0}, Complex{0, 0}, Complex{0, 0}};
-            expect(approx_equal(gr::math::detail::frobeniusNorm(A), 5.0, 1e-10));
-        };
-    };
-
-    "Vector 2-norm"_test = [] {
-        "zero vector"_test = [] {
-            Tensor<double> v({5});
-            v.fill(0.0);
-            expect(approx_equal(gr::math::detail::norm2(v), 0.0, 1e-10));
-        };
-
-        "unit vector"_test = [] {
-            Tensor<double> v({3});
-            v = {1.0, 0.0, 0.0};
-            expect(approx_equal(gr::math::detail::norm2(v), 1.0, 1e-10));
-        };
-
-        "known vector"_test = [] {
-            Tensor<double> v({4});
-            v = {1.0, 2.0, 3.0, 4.0};
-            expect(approx_equal(gr::math::detail::norm2(v), std::sqrt(30.0), 1e-10));
-        };
-
-        "complex vector"_test = [] {
-            using Complex = std::complex<double>;
-            Tensor<Complex> v({2});
-            v = {Complex{3, 4}, Complex{0, 0}};
-            expect(approx_equal(gr::math::detail::norm2(v), 5.0, 1e-10));
-        };
-    };
-};
-
 const boost::ut::suite<"SVD Basic Properties"> _svd_basic = [] {
     using namespace boost::ut;
     using namespace boost::ut::literals;

@@ -29,20 +29,24 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
     PortIn<T> in;
 
-    A<float, "sample rate", Visible, Doc<"Sampling frequency in Hz">, Unit<"Hz">, Limits<float(0), std::numeric_limits<float>::max()>>                    sample_rate      = 1000.0f;
-    A<std::string, "signal name", Visible, Doc<"human-readable identifier for the signal">>                                                               signal_name      = "unknown signal";
-    A<int, "signal index", Doc<"which sub-DataSet-signal to display. -1: plot all">>                                                                      signal_index     = -1;
-    A<gr::Size_t, "history length", Doc<"number of samples retained in ring buffer">>                                                                     n_history        = isDataSetLike ? 3ULL : 1000ULL;
-    A<gr::Size_t, "tag history length", Doc<"number of tag entries retained in tag buffer">>                                                              n_tag_history    = 20ULL;
-    A<bool, "reset view", Doc<"true: triggers a view reset">>                                                                                             reset_view       = true;
-    A<bool, "plot graph", Doc<"controls whether to draw the main data graph">>                                                                            plot_graph       = true;
-    A<bool, "plot timing", Doc<"controls whether to display timing info">>                                                                                plot_timing      = false;
-    A<bool, "plot merged tags", Doc<"controls whether to display merged timing info">>                                                                    plot_merged_tags = false;
-    A<std::uint64_t, "timeout", Unit<"ms">, Limits<std::uint64_t(0), std::numeric_limits<std::uint64_t>::max()>, Doc<"Timeout duration in milliseconds">> timeout_ms       = 40ULL;
-    A<gr::Size_t, "chart width", Doc<"chart character width in terminal">>                                                                                chart_width      = 130U;
-    A<gr::Size_t, "chart heigth", Doc<"chart character width in terminal">>                                                                               chart_height     = 28U;
+    A<float, "sample rate", Visible, Doc<"Sampling frequency in Hz">, Unit<"Hz">, Limits<float(0), std::numeric_limits<float>::max()>>                    sample_rate          = 1000.0f;
+    A<std::string, "signal name", Visible, Doc<"human-readable identifier for the signal">>                                                               signal_name          = "unknown signal";
+    A<int, "signal index", Doc<"which sub-DataSet-signal to display. -1: plot all">>                                                                      signal_index         = -1;
+    A<gr::Size_t, "history length", Doc<"number of samples retained in ring buffer">>                                                                     n_history            = isDataSetLike ? 3ULL : 1000ULL;
+    A<gr::Size_t, "tag history length", Doc<"number of tag entries retained in tag buffer">>                                                              n_tag_history        = 20ULL;
+    A<bool, "reset view", Doc<"true: triggers a view reset">>                                                                                             reset_view           = true;
+    A<bool, "plot graph", Doc<"controls whether to draw the main data graph">>                                                                            plot_graph           = true;
+    A<bool, "plot timing", Doc<"controls whether to display timing info">>                                                                                plot_timing          = false;
+    A<bool, "plot merged tags", Doc<"controls whether to display merged timing info">>                                                                    plot_merged_tags     = false;
+    A<std::uint64_t, "timeout", Unit<"ms">, Limits<std::uint64_t(0), std::numeric_limits<std::uint64_t>::max()>, Doc<"Timeout duration in milliseconds">> timeout_ms           = 40ULL;
+    A<gr::Size_t, "chart width", Doc<"chart character width in terminal">>                                                                                chart_width          = 130U;
+    A<gr::Size_t, "chart heigth", Doc<"chart character width in terminal">>                                                                               chart_height         = 28U;
+    A<bool, "mountain range", Doc<"enable mountain range (waterfall) visualization for DataSet inputs">>                                                  mountain_range       = false;
+    A<gr::Size_t, "mountain x offset", Doc<"horizontal offset in characters per trace for mountain range">>                                               mountain_x_offset    = 2U;
+    A<gr::Size_t, "mountain y offset", Doc<"vertical offset in characters per trace for mountain range">>                                                 mountain_y_offset    = 2U;
+    A<gr::Size_t, "mountain color index", Doc<"color index for mountain range (max=rotating, 0=blue, 1=red, etc.)">>                                      mountain_color_index = std::numeric_limits<gr::Size_t>::max();
 
-    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, plot_merged_tags, timeout_ms, chart_width, chart_height);
+    GR_MAKE_REFLECTABLE(ImChartMonitor, in, sample_rate, signal_name, n_history, n_tag_history, reset_view, plot_graph, plot_timing, plot_merged_tags, timeout_ms, chart_width, chart_height, mountain_range, mountain_x_offset, mountain_y_offset, mountain_color_index);
 
     HistoryBuffer<T> _historyBufferX{n_history};
     HistoryBuffer<T> _historyBufferY{n_history};
@@ -169,12 +173,31 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
             if (_historyBufferY.empty()) {
                 return;
             }
-            std::size_t signalIdx = signal_index < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(signal_index);
-            gr::dataset::draw(_historyBufferY[0],
-                {.chart_width     = static_cast<std::size_t>(chart_width),  //
-                    .chart_height = static_cast<std::size_t>(chart_height), //
-                    .reset_view   = reset_view ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP},
-                signalIdx, _location);
+
+            const auto& latestDataSet   = _historyBufferY[0];
+            const bool  hasMultiSignals = latestDataSet.size() > 1UZ;
+
+            if (mountain_range && (hasMultiSignals || _historyBufferY.size() > 1UZ)) {
+                // mountain range mode
+                dataset::MountainRangeConfig mrConfig{.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .x_offset_chars = static_cast<std::size_t>(mountain_x_offset), .y_offset_chars = static_cast<std::size_t>(mountain_y_offset), .color_index = static_cast<std::size_t>(mountain_color_index), .reset_view = reset_view ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP};
+
+                if (hasMultiSignals) {
+                    // multi-signal DataSet: use signals as traces (replace on each update)
+                    gr::dataset::drawMountainRange(latestDataSet, mrConfig, _location);
+                } else {
+                    // single-signal DataSets: accumulate in history as traces
+                    std::vector<T> dataSetsVec;
+                    dataSetsVec.reserve(_historyBufferY.size());
+                    for (const auto& ds : _historyBufferY) {
+                        dataSetsVec.push_back(ds);
+                    }
+                    gr::dataset::drawMountainRange(dataSetsVec, mrConfig, _location);
+                }
+            } else {
+                // regular single-plot mode
+                std::size_t signalIdx = signal_index < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(signal_index);
+                gr::dataset::draw(latestDataSet, {.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .reset_view = reset_view ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP}, signalIdx, _location);
+            }
         }
     }
 
