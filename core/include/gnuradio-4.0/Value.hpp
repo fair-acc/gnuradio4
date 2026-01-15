@@ -197,7 +197,7 @@ private:
             return ValueType::UInt16;
         } else if constexpr (std::same_as<T, std::uint32_t>) {
             return ValueType::UInt32;
-        } else if constexpr (std::same_as<T, std::uint64_t>) {
+        } else if constexpr (std::same_as<T, std::uint64_t> || std::same_as<T, std::size_t>) {
             return ValueType::UInt64;
         } else if constexpr (std::same_as<T, float>) {
             return ValueType::Float32;
@@ -278,6 +278,10 @@ public:
     explicit Value(const char* v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     explicit Value(std::monostate, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
+#ifdef __EMSCRIPTEN__
+    explicit Value(std::size_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+#endif
+
     // copy/move/destructor
     Value(const Value& other) : Value(other, std::pmr::get_default_resource()) {}
     Value(const Value& other, std::pmr::memory_resource* resource) : _value_type(other._value_type), _container_type(other._container_type), _storage{}, _resource(ensure_resource(resource ? resource : other._resource)) { copy_from(other); }
@@ -296,6 +300,11 @@ public:
     Value& operator=(uint16_t v);
     Value& operator=(uint32_t v);
     Value& operator=(uint64_t v);
+
+#ifdef __EMSCRIPTEN__
+    Value& operator=(std::size_t v);
+#endif
+
     Value& operator=(float v);
     Value& operator=(double v);
     Value& operator=(std::complex<float> v);
@@ -369,7 +378,11 @@ public:
     /// Safe pointer access - returns nullptr on type mismatch
     /// @note For std::string/std::string_view, use value_or() instead (requires conversion)
     template<typename T>
-    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>)
+    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>
+#ifdef __EMSCRIPTEN__
+             && !std::is_same_v<T, std::size_t>
+#endif
+        )
     [[nodiscard]] T* get_if() noexcept;
 
     template<typename T>
@@ -751,6 +764,10 @@ GR_PMT_VALUE_SCALAR_TYPES
 // string type specializations (convertible from pmr::string)
 extern template bool Value::holds<std::string>() const noexcept;
 extern template bool Value::holds<std::string_view>() const noexcept;
+
+#ifdef __EMSCRIPTEN__
+extern template bool               Value::holds<std::size_t>() const noexcept;
+#endif
 
 // clang-format on
 
