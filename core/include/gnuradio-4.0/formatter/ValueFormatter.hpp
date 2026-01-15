@@ -52,7 +52,14 @@ inline constexpr auto append_quoted(std::string& out, std::string_view s) {
     out.push_back('"');
 };
 
-inline constexpr std::string value_to_string(const Value::Map& map) {
+inline
+#if defined(__clang__) && __clang_major__ < 20
+/* constexpr */
+#else
+    constexpr
+#endif
+    std::string
+    map_value_to_string(const Value::Map& map) {
     std::string out;
     out += '{';
     bool first = true;
@@ -75,7 +82,7 @@ inline constexpr std::string value_to_string(const Value& v) {
         out += "monostate";
     } else if (v.is_map()) {
         if (auto* map = v.get_if<Value::Map>()) {
-            out += value_to_string(*map);
+            out += map_value_to_string(*map);
         }
     } else if (v.is_string()) {
         append_quoted(out, v.value_or(std::string_view{}));

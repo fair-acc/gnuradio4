@@ -65,7 +65,7 @@ struct DiagString {
     ~DiagString() { ++g_diag_counters.dtor; }
 
     bool operator==(const DiagString& o) const { return data == o.data; }
-         operator std::string_view() const { return std::string_view{data}; }
+    operator std::string_view() const { return std::string_view{data}; }
 };
 
 template<>

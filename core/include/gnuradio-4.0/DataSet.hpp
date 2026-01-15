@@ -82,7 +82,7 @@ concept DataSetLike = TensorLikeV2<T> && requires(T t, const std::size_t n_items
 
     // meta data
     requires std::is_same_v<decltype(t.meta_information), std::vector<typename T::pmt_map>>;
-    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::property_map>>>>;
+    requires std::is_same_v<decltype(t.timing_events), std::vector<std::vector<std::pair<std::ptrdiff_t, gr::pmt::Value::Map>>>>;
 };
 
 template<typename T>

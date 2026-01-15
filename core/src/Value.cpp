@@ -719,7 +719,7 @@ std::size_t hash<gr::pmt::Value>::hashTensor(const gr::pmt::Value& v) noexcept {
     if (auto* p = v.get_if<gr::Tensor<std::complex<double>>>()) {
         return hashTensorElements(*p);
     }
-    if (auto* p = v.get_if<gr::Tensor<std::string>>()) {
+    if (auto* p = v.get_if<gr::Tensor<gr::pmt::Value>>()) {
         return hashTensorElements(*p);
     }
     return 0;

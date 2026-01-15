@@ -165,7 +165,7 @@ const boost::ut::suite TagTests = [] {
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
             std::ranges::generate(yValues, [&funcGen]() { return funcGen.generateSample(); });
-            std::println("Chart {}\n\n", toString(sig));
+            std::println("Chart {}\n\n", std::string_view(toString(sig)));
             auto chart = gr::graphs::ImChart<128, 32>({{0., static_cast<double>(N)}, {7., 22.}});
             chart.draw(xValues, yValues, toString(sig));
             chart.draw();

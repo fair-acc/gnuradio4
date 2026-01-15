@@ -232,6 +232,9 @@ struct TensorBase {
     constexpr void                                       recomputeStrides() noexcept
     requires(!detail::all_static_v<Ex...>)
     {
+        if (rank() == 0) {
+            return;
+        }
         std::span<std::size_t> strides{_metaInfo.strides.data(), rank()};
         strides.back() = 1UZ;
         for (std::size_t i = strides.size(); i-- > 1UZ;) {

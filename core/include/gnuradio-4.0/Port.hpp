@@ -251,7 +251,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
                             std::ignore = member.validate_and_set(*converted);
                         } else {
                             maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key {} (expected:{}, got:{} {}, value:{})", //
-                                                                   key, gr::meta::type_name<Type>(), value.value_type(), value.container_type(), value),
+                                                                   std::string_view(key), gr::meta::type_name<Type>(), value.value_type(), value.container_type(), value),
                                 location});
                         }
                     }

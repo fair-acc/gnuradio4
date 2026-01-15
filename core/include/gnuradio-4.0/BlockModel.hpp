@@ -616,7 +616,7 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
             pmt::Value::Map parameters;
             auto            writeMap = [&](const auto& localMap) {
                 for (const auto& [settingsKey, settingsValue] : localMap) {
-                    std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
+                    parameters[settingsKey] = settingsValue;
                 }
             };
             writeMap(settingsMap);
@@ -648,10 +648,13 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
                     using T = std::decay_t<decltype(arg)>;
                     if constexpr (std::is_same_v<T, std::string>) {
                         contextStr = arg;
+                    } else if constexpr (std::is_same_v<std::string_view, T> || std::is_same_v<std::pmr::string, T>) {
+                        contextStr = std::string(arg);
                     } else if constexpr (std::is_arithmetic_v<T>) {
                         contextStr = std::to_string(arg);
+                    } else {
+                        contextStr.clear();
                     }
-                    contextStr.clear();
                 }).visit(ctxTime.context);
 
                 ctxParam.emplace(gr::tag::CONTEXT.shortKey(), contextStr);

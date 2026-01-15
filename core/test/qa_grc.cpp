@@ -623,13 +623,19 @@ const boost::ut::suite SettingsTests = [] {
             auto&      block = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"name", gr::pmt::Value("ArraySink0")}});
             const auto now   = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
             expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1")}}, SettingsCtx{now, gr::pmt::Value("1")}).empty());
+            expect(block.settings().getStoredAll().size() == 2);
             expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1+10")}}, SettingsCtx{now + 10'000'000'000ULL, gr::pmt::Value("1")}).empty());
+            expect(block.settings().getStoredAll().size() == 2);
             expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1+20")}}, SettingsCtx{now + 20'000'000'000ULL, gr::pmt::Value("1")}).empty());
+            expect(block.settings().getStoredAll().size() == 2);
             expect(block.settings().set({{"name", gr::pmt::Value("ArraySink2")}}, SettingsCtx{now, gr::pmt::Value("2")}).empty());
+            expect(block.settings().getStoredAll().size() == 3);
             expect(block.settings().set({{"name", gr::pmt::Value("ArraySink3")}}, SettingsCtx{now, gr::pmt::Value(3)}).empty()); // int as context name
+            expect(block.settings().getStoredAll().size() == 4);
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-            const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
+
+            const auto graph2 = gr::loadGrc(context->loader, graph1Saved);
 
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
                 const auto& stored = node->settings().getStoredAll();
@@ -637,19 +643,19 @@ const boost::ut::suite SettingsTests = [] {
                 for (const auto& [ctx, ctxParameters] : stored) {
                     for (const auto& [ctxTime, settingsMap] : ctxParameters) {
                         std::string expectedName = "ArraySink0";
-                        if (ctxTime.context == "1" && ctxTime.time == now) {
+                        if (ctxTime.context == gr::pmt::Value("1") && ctxTime.time == now) {
                             expectedName = "ArraySink1";
-                        } else if (ctxTime.context == "1" && ctxTime.time == now + 10'000'000'000ULL) {
+                        } else if (ctxTime.context == gr::pmt::Value("1") && ctxTime.time == now + 10'000'000'000ULL) {
                             expectedName = "ArraySink1+10";
-                        } else if (ctxTime.context == "1" && ctxTime.time == now + 20'000'000'000ULL) {
+                        } else if (ctxTime.context == gr::pmt::Value("1") && ctxTime.time == now + 20'000'000'000ULL) {
                             expectedName = "ArraySink1+20";
-                        } else if (ctxTime.context == "2" && ctxTime.time == now) {
+                        } else if (ctxTime.context == gr::pmt::Value("2") && ctxTime.time == now) {
                             expectedName = "ArraySink2";
-                        } else if (ctxTime.context == "3" && ctxTime.time == now) {
+                        } else if (ctxTime.context == gr::pmt::Value("3") && ctxTime.time == now) {
                             expectedName = "ArraySink3";
                         }
 
-                        expect(eq(std::get<std::string>(settingsMap.at("name")), expectedName));
+                        expect(eq(testing::get_value_or_fail<std::string>(settingsMap.at("name")), expectedName));
                     }
                 }
             });

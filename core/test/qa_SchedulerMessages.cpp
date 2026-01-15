@@ -402,9 +402,9 @@ const boost::ut::suite TopologyGraphTests = [] {
             property_map result{};
             pmt::ValueVisitor(meta::overloaded{
                                   //
-                                  [&result]<typename... Args>(const std::map<Args...>& map) { result = gr::property_map(map); },
+                                  [&result]<typename... Args>(const gr::property_map& map) { result = gr::property_map(map); },
                                   //
-                                  [&result](const auto& /*v*/) { result = gr::property_map{}; }
+                                  [&result]<typename Other>(const Other& /*v*/) { result = gr::property_map{}; }
                                   //
                               })
                 .visit(block->settings().get("ui_constraints").value());
@@ -417,8 +417,8 @@ const boost::ut::suite TopologyGraphTests = [] {
                    !uiConstraintsFor(copy1).empty();
         });
 
-        expect(eq(42.f, std::get<float>(uiConstraintsFor(copy1)["x"])));
-        expect(eq(43.f, std::get<float>(uiConstraintsFor(copy2)["x"])));
+        expect(eq(42.f, gr::testing::get_value_or_fail<float>(uiConstraintsFor(copy1)["x"])));
+        expect(eq(43.f, gr::testing::get_value_or_fail<float>(uiConstraintsFor(copy2)["x"])));
 
         // Check if block introspection includes ui_constraints
 

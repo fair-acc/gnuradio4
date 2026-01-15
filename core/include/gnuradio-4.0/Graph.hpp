@@ -142,7 +142,7 @@ protected:
             const auto  uniqueBlockName     = data.at("uniqueBlockName").value_or(std::string_view{});
             const auto  portDirectionString = data.at("portDirection").value_or(std::string_view{});
             const auto  portName            = data.at("portName").value_or(std::string_view{});
-            const auto  exportFlag          = CAP{data.at("exportFlag").get_if<bool>()};
+            const auto  exportFlag          = checked_access_ptr{data.at("exportFlag").get_if<bool>()};
             if (uniqueBlockName.data() == nullptr || portDirectionString.data() == nullptr || portName.data() == nullptr || exportFlag == nullptr) {
                 message.data = std::unexpected(Error{std::format("Invalid definition for the kSubgraphExportPort message {}", message)});
                 return message;

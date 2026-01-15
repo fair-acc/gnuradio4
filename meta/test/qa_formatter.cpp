@@ -125,11 +125,25 @@ const boost::ut::suite propertyMapFormatter = [] {
     using namespace std::literals::string_literals;
 
     "std::formatter<gr::property_map>"_test = [] {
-        gr::property_map pmInt{{"key0", gr::pmt::Value(0)}, {"key1", gr::pmt::Value(1)}, {"key2", gr::pmt::Value(2)}};
-        expect(eq("{\"key2\": 2, \"key1\": 1, \"key0\": 0}"s, std::format("{}", pmInt)));
+        {
+            gr::property_map pmInt{{"key0", gr::pmt::Value(0)}, {"key1", gr::pmt::Value(1)}, {"key2", gr::pmt::Value(2)}};
+            // Ordering is not guaranteed, we want to test this:
+            // expect(eq("{\"key2\": 2, \"key1\": 1, \"key0\": 0}"s, std::format("{}", pmInt)));
+            auto formatted = std::format("{}", pmInt);
+            expect(formatted.contains("\"key2\": 2"));
+            expect(formatted.contains("\"key1\": 1"));
+            expect(formatted.contains("\"key0\": 0"));
+        }
 
-        gr::property_map pmFloat{{"key0", gr::pmt::Value(0.01f)}, {"key1", gr::pmt::Value(1.01f)}, {"key2", gr::pmt::Value(2.01f)}};
-        expect(eq("{\"key2\": 2.010000, \"key1\": 1.010000, \"key0\": 0.010000}"s, std::format("{}", pmFloat)));
+        {
+            gr::property_map pmFloat{{"key0", gr::pmt::Value(0.01f)}, {"key1", gr::pmt::Value(1.01f)}, {"key2", gr::pmt::Value(2.01f)}};
+            // Ordering is not guaranteed, we want to test this:
+            // expect(eq("{\"key2\": 2.010000, \"key1\": 1.010000, \"key0\": 0.010000}"s, std::format("{}", pmFloat)));
+            auto formatted = std::format("{}", pmFloat);
+            expect(formatted.contains("\"key2\": 2.010000"));
+            expect(formatted.contains("\"key1\": 1.010000"));
+            expect(formatted.contains("\"key0\": 0.010000"));
+        }
     };
 };
 

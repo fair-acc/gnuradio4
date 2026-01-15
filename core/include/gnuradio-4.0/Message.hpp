@@ -19,7 +19,11 @@ struct exception : public std::exception {
     std::source_location                  sourceLocation;
     std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
 
-    exception(std::string_view msg = "unknown exception", std::source_location location = std::source_location::current()) noexcept : message(msg), sourceLocation(location) {}
+    exception(std::string_view msg = "unknown exception", std::source_location location = std::source_location::current()) noexcept : message(msg), sourceLocation(location) {
+#ifndef NDEBUG
+        std::println("Exception thrown: {} at {}:{}", msg, location.file_name(), location.line());
+#endif
+    }
 
     [[nodiscard]] const char* what() const noexcept override {
         if (formattedMessage.empty()) {

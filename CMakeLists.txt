@@ -421,10 +421,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
   find_package(SoapySDR CONFIG)
 endif()
 
-add_library(pmtv INTERFACE)
-target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
-target_link_libraries(pmtv INTERFACE)
-
 install(DIRECTORY ${pmt_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 add_library(vir INTERFACE)

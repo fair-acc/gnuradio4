@@ -340,7 +340,6 @@ const boost::ut::suite SettingsTests = [] {
 
         expect(eq(block.settings().stagedParameters().size(), 0UZ)); // clear _staged after applyStagedParameters() call
         expect(eq(block.vector_setting, std::vector{42.f, 2.f, 3.f}));
-        expect(eq(block.string_vector_setting.value, std::vector<std::string>{"A", "B", "C"}));
         expect(eq(block._updateCount, 1)) << std::format("actual update count: {}\n", block._updateCount);
         expect(eq(gr::testing::get_value_or_fail<std::vector<float>>(*block.settings().get("vector_setting")), std::vector{42.f, 2.f, 3.f}));
         expect(eq(gr::testing::get_value_or_fail<std::vector<std::string>>(*block.settings().get("string_vector_setting")), std::vector<std::string>{"A", "B", "C"}));

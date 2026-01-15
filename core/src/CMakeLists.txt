@@ -9,12 +9,7 @@ if(NOT EMSCRIPTEN)
   target_include_directories(
     gnuradio-plugin PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
                            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}> $<INSTALL_INTERFACE:include/>)
-  target_link_libraries(
-    gnuradio-plugin
-    PUBLIC gnuradio-core
-           gnuradio-blocklib-core
-           gnuradio-options
-           pmtv)
+  target_link_libraries(gnuradio-plugin PUBLIC gnuradio-core gnuradio-blocklib-core gnuradio-options)
 
   install(
     TARGETS gnuradio-plugin

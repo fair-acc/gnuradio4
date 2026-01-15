@@ -21,7 +21,7 @@ inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) no
         std::print("{} @index= {}: map: {{ <empty map> }}\n", prefix, tag.index);
         return;
     }
-    std::print("{} @index= {}: map: {{ {} }}\n", prefix, tag.index, gr::join(tag.map, ", "));
+    std::print("{} @index= {}: map: {{ {} }}\n", prefix, tag.index, gr::join(tag.map | std::views::transform([](const auto& kvp) { return std::make_pair(std::string_view(kvp.first), kvp.second); }), ", "));
 }
 
 template<typename MapType>
@@ -34,9 +34,9 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         }
         const auto it = map2.find(key);
         if (it == map2.end()) {
-            std::print("    key '{}' is present in {} but not in {}\n", key, name1, name2);
+            std::print("    key '{}' is present in {} but not in {}\n", std::string_view(key), name1, name2);
         } else if (it->second != value) {
-            std::print("    key '{}' has different values ('{}' vs '{}')\n", key, value, it->second);
+            std::print("    key '{}' has different values ('{}' vs '{}')\n", std::string_view(key), value, it->second);
         }
     }
 
@@ -44,7 +44,7 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         if (skipKey(key) || map1.contains(key)) {
             continue;
         }
-        std::print("    key '{}' is present in {} but not in {}\n", key, name2, name1);
+        std::print("    key '{}' is present in {} but not in {}\n", std::string_view(key), name2, name1);
     }
 }
 

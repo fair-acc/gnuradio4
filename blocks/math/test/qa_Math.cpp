@@ -100,18 +100,16 @@ std::complex<float>, std::complex<double>*/>();
 
     "Divide"_test = []<typename T>(const T&) {
         test_block<T, Divide<T>>({
-            .inputs = {gr::Tensor<T>(gr::data_from,{1, 2, 8, 17})},//
-            .output = gr::Tensor<T>(gr::data_from,{ 1, 2, 8, 17})//
+            .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
+            .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Divide<T>>({
-            .inputs = {gr::Tensor<T>(gr::data_from,{T(9), T(4), T(5), T(7.0)}),//
-                       gr::Tensor<T>(gr::data_from,{T(3), T(4), T(1), T(2.0)})},//
-            .output = gr::Tensor<T>(gr::data_from,{ T(3), T(1), T(5), T(3.5)})});
-        test_block<T, Divide<T>>({
-            .inputs = {gr::Tensor<T>(gr::data_from,{0, 10, 40, 80}),//
-                       gr::Tensor<T>(gr::data_from,{1,  2,  4, 20}),//
-                       gr::Tensor<T>(gr::data_from,{1,  5,  5,  2})},//
-            .output = gr::Tensor<T>(gr::data_from,{ 0,  1,  2,  2})});
+        test_block<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(4), T(5), T(7.0)}), //
+                                      gr::Tensor<T>(gr::data_from, {T(3), T(4), T(1), T(2.0)})},       //
+            .output                       = gr::Tensor<T>(gr::data_from, {T(3), T(1), T(5), T(3.5)})});
+        test_block<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {0, 10, 40, 80}), //
+                                      gr::Tensor<T>(gr::data_from, {1, 2, 4, 20}),          //
+                                      gr::Tensor<T>(gr::data_from, {1, 5, 5, 2})},          //
+            .output                       = gr::Tensor<T>(gr::data_from, {0, 1, 2, 2})});
     } | kArithmeticTypes;
 
     "AddConst"_test = []<typename T>(const T&) {

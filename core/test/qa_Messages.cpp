@@ -521,8 +521,8 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(times.size(), 3UZ));
                 expect(eq(contexts, std::vector{gr::pmt::Value(""), pmt::Value("new_context"), pmt::Value("test_context")}));
                 // We do not check the default context as it's time is now()
-                expect(eq(times[1], allStored.at("new_context")[0].context.time)); // We need internal time since wasm change our time
-                expect(eq(times[2], allStored.at("test_context")[0].context.time));
+                expect(eq(times[1], allStored.at(pmt::Value("new_context"))[0].context.time)); // We need internal time since wasm change our time
+                expect(eq(times[2], allStored.at(pmt::Value("test_context"))[0].context.time));
             };
 
             "remove new_context - w/o explicit serviceName"_test = [&] {

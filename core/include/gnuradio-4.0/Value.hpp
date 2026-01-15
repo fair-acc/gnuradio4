@@ -278,12 +278,6 @@ public:
     explicit Value(const char* v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     explicit Value(std::monostate, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
-    // fallback for prettier errors
-    // template<typename T>
-    // Value(const T&) {
-    //     meta::print_types<T, meta::message_type<"Type not supported by pmr::Value">>{};
-    // }
-
     // copy/move/destructor
     Value(const Value& other) : Value(other, std::pmr::get_default_resource()) {}
     Value(const Value& other, std::pmr::memory_resource* resource) : _value_type(other._value_type), _container_type(other._container_type), _storage{}, _resource(ensure_resource(resource ? resource : other._resource)) { copy_from(other); }
