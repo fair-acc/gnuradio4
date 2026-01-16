@@ -309,7 +309,7 @@ inline void pushData(ReaderState* state, std::span<const std::uint8_t> data) {
         const std::size_t n     = std::min(chunk, total - pos);
         auto              first = std::next(data.begin(), static_cast<std::ptrdiff_t>(pos));
         auto              last  = std::next(first, static_cast<std::ptrdiff_t>(n));
-        pushData(state, std::vector<std::uint8_t>(first, last));
+        pushData(state, Tensor<std::uint8_t>(first, last));
         pos += n;
     }
 }

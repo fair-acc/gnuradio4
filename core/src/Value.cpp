@@ -153,7 +153,10 @@ void Value::copy_from(const Value& other) {
 }
 
 void Value::destroy() noexcept {
-    assert(_resource != nullptr);
+    if (!_resource) {
+        // moved from value
+        return;
+    }
 #if defined(__cpp_assume) && __cpp_assume >= 202207L
     [[assume(_resource != nullptr)]];
 #endif
@@ -329,6 +332,7 @@ Value::Value(Map map, std::pmr::memory_resource* resource) : _resource(ensure_re
 Value::Value(Value&& other) noexcept : _value_type(other._value_type), _container_type(other._container_type), _storage(other._storage), _resource(other._resource) {
     other.set_types(ValueType::Monostate, ContainerType::Scalar);
     other._storage.u64 = 0UZ;
+    other._resource    = nullptr;
 }
 
 Value::~Value() { destroy(); }

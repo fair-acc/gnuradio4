@@ -58,8 +58,7 @@ inline
 #else
     constexpr
 #endif
-    std::string
-    map_value_to_string(const Value::Map& map) {
+    std::string map_value_to_string(const Value::Map& map) {
     std::string out;
     out += '{';
     bool first = true;
@@ -84,6 +83,22 @@ inline constexpr std::string value_to_string(const Value& v) {
         if (auto* map = v.get_if<Value::Map>()) {
             out += map_value_to_string(*map);
         }
+    } else if (v.is_tensor()) {
+        out += type_name(v);
+        out += "[";
+        ValueVisitor([&out]<typename T>(const T& t) {
+            if constexpr (is_tensor<T>) {
+                bool first = true;
+                for (const auto& _v : t) {
+                    if (!first) {
+                        out += ",";
+                    }
+                    first = false;
+                    out += std::format("{}", _v);
+                }
+            }
+        }).visit(v);
+        out += "]";
     } else if (v.is_string()) {
         append_quoted(out, v.value_or(std::string_view{}));
     } else if (v.is_complex()) {
@@ -124,22 +139,6 @@ inline constexpr std::string value_to_string(const Value& v) {
         out += std::to_string(v._storage.f32);
     } else if (v.value_type() == Value::ValueType::Float64) {
         out += std::to_string(v._storage.f64);
-    } else if (v.is_tensor()) {
-        out += type_name(v);
-        out += "[";
-        ValueVisitor([&out]<typename T>(const T& t) {
-            if constexpr (is_tensor<T>) {
-                bool first = true;
-                for (const auto& _v : t) {
-                    if (!first) {
-                        out += ",";
-                    }
-                    first = false;
-                    out += std::format("{}", _v);
-                }
-            }
-        }).visit(v);
-        out += "]";
     }
 
     return out;

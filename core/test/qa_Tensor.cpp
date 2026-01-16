@@ -528,7 +528,7 @@ const boost::ut::suite<"Tensor<T> STL Compatibility"> _tensorSTL = [] {
             static_assert(std::contiguous_iterator<decltype(staticTensor.begin())>);
 
             auto it = staticTensor.begin();
-            expect(eq(it + 5, staticTensor.begin() + 5));
+            expect(it + 5 == staticTensor.begin() + 5);
             expect(eq(std::to_address(it + 5), staticTensor.data() + 5));
         };
 

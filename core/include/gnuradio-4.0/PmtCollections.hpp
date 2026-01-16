@@ -10,6 +10,9 @@ struct vector;
 
 template<class T>
 struct vector<T, false> { // trivially copyable, no lifetime management
+    using iterator       = T*;
+    using const_iterator = const T*;
+
     std::pmr::memory_resource* _resource{std::pmr::get_default_resource()};
     std::size_t                _size{0UZ};
     std::size_t                _capacity{0UZ};
@@ -110,6 +113,8 @@ inline constexpr bool iter_yields_nonconst_T_ref = std::same_as<std::remove_cvre
 
 template<class T>
 struct vector<T, true> { // managed vector
+    using iterator       = T*;
+    using const_iterator = const T*;
     std::pmr::memory_resource* _resource{std::pmr::get_default_resource()};
     std::size_t                _size{0UZ};
     std::size_t                _capacity{0UZ};
@@ -201,7 +206,7 @@ struct vector<T, true> { // managed vector
                         std::uninitialized_move(first, last, _data);
 #else
                         if constexpr (detail::iter_yields_nonconst_T_ref<T, decltype(first)> && !std::is_integral_v<T>) {
-                            std::uninitialized_move(first, last, _data); // only use move for non-integral types where it matters
+                            std::uninitialized_copy(first, last, _data); // only use move for non-integral types where it matters
                         } else {
                             std::uninitialized_copy(first, last, _data);
                         }
