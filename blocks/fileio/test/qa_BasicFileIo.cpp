@@ -47,8 +47,8 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         std::string testCaseName = std::format("BasicFileSink: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
         gr::Graph   flow;
 
-        auto& source   = flow.emplaceBlock<ConstantSource<DataType>>({{"n_samples_max", nSamples}});
-        auto& fileSink = flow.emplaceBlock<BasicFileSink<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"max_bytes_per_file", maxFileSize}});
+        auto& source   = flow.emplaceBlock<ConstantSource<DataType>>({{"n_samples_max", gr::pmt::Value(nSamples)}});
+        auto& fileSink = flow.emplaceBlock<BasicFileSink<DataType>>({{"file_name", gr::pmt::Value(fileName)}, {"mode", gr::pmt::Value(modeName)}, {"max_bytes_per_file", gr::pmt::Value(maxFileSize)}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(source).template to<"in">(fileSink)));
 
         scheduler sched;
@@ -87,7 +87,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
     "BasicFileSource"_test = [&] { // NOSONAR capture all
         std::string testCaseName = std::format("BasicFileSource: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
         gr::Graph   flow;
-        auto&       fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}});
+        auto&       fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", gr::pmt::Value(fileName)}, {"mode", gr::pmt::Value(modeName)}});
         auto&       sink       = flow.emplaceBlock<CountingSink<DataType>>();
 
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));
@@ -113,7 +113,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         constexpr gr::Size_t lengthSamples = 8U;
         std::string          testCaseName  = std::format("BasicFileSource with offset and length: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
         gr::Graph            flow;
-        auto&                fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"offset", offsetSamples}, {"length", lengthSamples}});
+        auto&                fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", gr::pmt::Value(fileName)}, {"mode", gr::pmt::Value(modeName)}, {"offset", gr::pmt::Value(offsetSamples)}, {"length", gr::pmt::Value(lengthSamples)}});
         auto&                sink       = flow.emplaceBlock<CountingSink<DataType>>();
 
         expect(eq(gr::ConnectionResult::SUCCESS, flow.template connect<"out">(fileSource).template to<"in">(sink)));

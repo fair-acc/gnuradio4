@@ -14,7 +14,7 @@ namespace gr::blocks::math {
 
 GR_REGISTER_BLOCK(gr::blocks::math::Rotator, [T], [ std::complex<float>, std::complex<double> ])
 
-template<pmtv::Complex T>
+template<typename T>
 struct Rotator : gr::Block<Rotator<T>> {
     using value_type  = typename T::value_type;
     using Description = Doc<R""(

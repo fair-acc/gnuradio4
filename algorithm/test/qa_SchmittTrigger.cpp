@@ -3,6 +3,8 @@
 #include <format>
 #include <vector>
 
+#include "gnuradio-4.0/Tag.hpp"
+#include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/algorithm/SchmittTrigger.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
@@ -13,9 +15,9 @@ namespace {
 using namespace gr::trigger;
 
 template<typename T>
-std::vector<T> convert_signal(const std::vector<double>& input) {
+gr::Tensor<T> convert_signal(const gr::Tensor<double>& input) {
     using value_t = gr::meta::fundamental_base_value_type_t<T>;
-    std::vector<T> signal;
+    gr::Tensor<T> signal;
     signal.reserve(input.size());
     for (auto v : input) {
         if constexpr (std::is_arithmetic_v<T>) {
@@ -28,7 +30,7 @@ std::vector<T> convert_signal(const std::vector<double>& input) {
 }
 
 template<typename T, gr::fixed_string testCaseName, typename Trigger, typename EdgeType = gr::UncertainValue<float>> // always float precision similar to `sample_rate` definition
-void test_schmitt_trigger_with_signal(Trigger& trigger, const std::vector<T>& signal, const std::vector<std::tuple<EdgeDetection, EdgeType>>& expected_edges) {
+void test_schmitt_trigger_with_signal(Trigger& trigger, const gr::Tensor<T>& signal, const std::vector<std::tuple<EdgeDetection, EdgeType>>& expected_edges) {
     using enum gr::trigger::EdgeDetection;
     using value_t                  = gr::meta::fundamental_base_value_type_t<T>;
     const std::string fullTestName = std::format("{} - data: {}({})", testCaseName.c_str(), gr::meta::type_name<T>(), gr::join(signal));
@@ -167,26 +169,26 @@ const suite<"SchmittTrigger"> SchmittTriggerTests = [] {
         "integer-type: no interpolation"_test = [] {
             SchmittTrigger<T> trigger(value_t(1) /* threshold */, value_t(5) /* offset */);
 
-            test_schmitt_trigger_with_signal<T, "slow rising edge (no interpolation)">(trigger,                                      //
-                convert_signal<T>({0, 1, 5 /* RISING */, 7 /* >= offset + threshold */, 7, 7, 8, 0 /* <= offset - threshold */, 0}), //
+            test_schmitt_trigger_with_signal<T, "slow rising edge (no interpolation)">(trigger,                                                                         //
+                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 1, 5 /* RISING */, 7 /* >= offset + threshold */, 7, 7, 8, 0 /* <= offset - threshold */, 0})), //
                 {{RISING, 3}, {FALLING, 7}});
 
             trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (no interpolation)">(trigger, //
-                convert_signal<T>({0, 10 /* RISING */, 0 /* FALLING */, 7 /* RISING */}),                //
+            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (no interpolation)">(trigger,                     //
+                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 10 /* RISING */, 0 /* FALLING */, 7 /* RISING */})), //
                 {{RISING, 1}, {FALLING, 2}, {RISING, 3}});
         };
 
         "integer-type: basic interpolation"_test = [] {
             SchmittTrigger<T, BASIC_LINEAR_INTERPOLATION> trigger(value_t(1) /* threshold */, value_t(5) /* offset */);
 
-            test_schmitt_trigger_with_signal<T, "slow rising edge (basic interpolation)">(trigger,                      //
-                convert_signal<T>({0, 1, 5 /* >= offset + threshold */, 7, 7, 7, 8 /* <= offset - threshold */, 0, 0}), //
+            test_schmitt_trigger_with_signal<T, "slow rising edge (basic interpolation)">(trigger,                                                         //
+                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 1, 5 /* >= offset + threshold */, 7, 7, 7, 8 /* <= offset - threshold */, 0, 0})), //
                 {{RISING, 2}, {FALLING, 6.375f}});
 
             trigger.reset();
-            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (basic interpolation)">(trigger, //
-                convert_signal<T>({0 /* RISING */, 10 /* FALLING */, 0 /* RISING */, 8}),                   //
+            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (basic interpolation)">(trigger,                  //
+                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0 /* RISING */, 10 /* FALLING */, 0 /* RISING */, 8})), //
                 {{RISING, 0.5f}, {FALLING, 1.5f}, {RISING, 2.625f}});
         };
     } | std::tuple<uint8_t, int16_t>{};

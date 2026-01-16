@@ -20,6 +20,8 @@ if(NOT EMSCRIPTEN)
     else()
       target_compile_options(${BM_NAME} PRIVATE -O3 -march=native)
     endif()
+
+    target_include_directories(${BM_NAME} PRIVATE "../test")
   endfunction()
 
   add_gr_benchmark(bm_Buffer)

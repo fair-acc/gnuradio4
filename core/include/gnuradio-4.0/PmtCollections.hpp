@@ -10,6 +10,9 @@ struct vector;
 
 template<class T>
 struct vector<T, false> { // trivially copyable, no lifetime management
+    using iterator       = T*;
+    using const_iterator = const T*;
+
     std::pmr::memory_resource* _resource{std::pmr::get_default_resource()};
     std::size_t                _size{0UZ};
     std::size_t                _capacity{0UZ};
