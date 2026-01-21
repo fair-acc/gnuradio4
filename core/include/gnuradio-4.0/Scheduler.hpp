@@ -38,15 +38,11 @@ inline void waitUntilChanged(gr::Sequence& sequence, T oldValue, [[maybe_unused]
     }
     do {
 #ifdef __EMSCRIPTEN__
-        if (emscripten_is_main_runtime_thread()) {
-            emscripten_sleep(delay_ms); // yields control back to browser, may need to disable/remove this depending on Emscripten flags
-        } else {
 #ifdef __EMSCRIPTEN_PTHREADS__
-            sequence.wait(oldValue); // only works in worker threads with PThreads
+        sequence.wait(oldValue); // only works in worker threads with PThreads
 #else
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms)); // fallback spin sleep
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms)); // fallback spin sleep
 #endif
-        }
 #else
         sequence.wait(oldValue); // C++ native
 #endif

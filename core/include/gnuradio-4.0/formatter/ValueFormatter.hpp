@@ -58,7 +58,8 @@ inline
 #else
     constexpr
 #endif
-    std::string map_value_to_string(const Value::Map& map) {
+    std::string
+    map_value_to_string(const Value::Map& map) {
     std::string out;
     out += '{';
     bool first = true;
