@@ -107,3 +107,19 @@ if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_app_test(qa_plugin_schedulers_test)
   target_link_libraries(qa_plugin_schedulers_test PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
 endif()
+
+if(GR_USE_ADAPTIVE_CPP)
+  add_executable(qa_adaptivecpp qa_adaptivecpp.cpp)
+
+  target_compile_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
+  target_link_options(qa_adaptivecpp PRIVATE --acpp-targets=omp)
+
+  add_test(NAME qa_adaptivecpp COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:qa_adaptivecpp>)
+
+  set_tests_properties(
+    qa_adaptivecpp
+    PROPERTIES LABELS
+               "sycl;adaptivecpp"
+               TIMEOUT
+               60)
+endif()

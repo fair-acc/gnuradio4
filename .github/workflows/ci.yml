@@ -58,12 +58,12 @@ jobs:
           tags: ${{ steps.docker-label.outputs.label }}
 
   build:
-    name: "${{ matrix.compiler.cc }} | ${{ matrix.cmake-build-type }}"
+    name: "${{ matrix.compiler.label || matrix.compiler.cc }} | ${{ matrix.cmake-build-type }}"
     needs: buildAndPublishDocker
     runs-on: "ubuntu-latest"
     concurrency:
       # Cancel running builds inside work (PR) branches, build all revisions for the main branch
-      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
+      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
       cancel-in-progress: true
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
@@ -79,12 +79,13 @@ jobs:
           - cc: gcc-15
             cxx: g++-15
             cmake_flags: "-DADDRESS_SANITIZER=ON"
-          - cc: clang-18
-            cxx: clang++-18
-            cmake_flags: "-DADDRESS_SANITIZER=ON -DCMAKE_LINKER=/usr/bin/clang-18"
           - cc: clang-20
             cxx: clang++-20
             cmake_flags: "-DADDRESS_SANITIZER=ON -DCMAKE_LINKER=/usr/bin/clang-20"
+          - label: "AdaptiveCpp"
+            cc: clang-20
+            cxx: acpp
+            cmake_flags: "-DADDRESS_SANITIZER=OFF -DUB_SANITIZER=OFF -DTHREAD_SANITIZER=OFF"
           - cmake_wrapper: emcmake
             cc: emcc
             cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14"
@@ -99,9 +100,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/work/ccache
-          key: ccache-${{ runner.os }}-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
+          key: ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
+            ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
 
       - name: Configure ccache
         run: |
@@ -120,14 +121,27 @@ jobs:
             fetchContent-${{ runner.os }}-${{ matrix.compiler }}
 
       - name: Configure
-        if: matrix.compiler.cmake_wrapper == null
+        if: matrix.compiler.cmake_wrapper == null && matrix.compiler.cxx != 'acpp'
         shell: bash
         env:
           CC: "${{ matrix.compiler.cc }}"
           CXX: "${{ matrix.compiler.cxx }}"
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=On -DENABLE_COVERAGE=OFF
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=On -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
+
+      - name: Configure AdaptiveCpp
+        if: matrix.compiler.cxx == 'acpp'
+        shell: bash
+        env:
+          CC: "${{ matrix.compiler.cc }}"
+          CXX: "${{ matrix.compiler.cxx }}"
+          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
+          ACPP_TARGETS: omp
+        run: |
+          which acpp
+          acpp --version
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=On -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
 
       - name: Configure CMake Emscripten
         if: matrix.compiler.cmake_wrapper == 'emcmake'
@@ -147,6 +161,7 @@ jobs:
         shell: bash
         run: |
           test -f $EMSDK_HOME/emsdk_env.sh && source $EMSDK_HOME/emsdk_env.sh
+          if [ "${{ matrix.compiler.cxx }}" = "acpp" ]; then export ACPP_TARGETS=omp; fi
           cmake --build ../build
 
       - name: execute tests

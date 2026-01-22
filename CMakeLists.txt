@@ -96,6 +96,12 @@ if(NOT DEFINED GR_TOPLEVEL_PROJECT)
   endif()
 endif()
 
+set(GR_USE_ADAPTIVE_CPP OFF) # Detect AdaptiveCpp via compiler executable name
+if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*" OR CMAKE_CXX_COMPILER MATCHES ".*adaptivecpp.*")
+  set(GR_USE_ADAPTIVE_CPP ON)
+  message(STATUS "Detected AdaptiveCpp based on compiler path: ${CMAKE_CXX_COMPILER}")
+endif()
+
 # Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
 option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
 option(USE_CCACHE "Use ccache if available" ON)
@@ -162,6 +168,16 @@ if((ADDRESS_SANITIZER AND UB_SANITIZER)
    OR (ADDRESS_SANITIZER AND THREAD_SANITIZER)
    OR (UB_SANITIZER AND THREAD_SANITIZER))
   message(FATAL_ERROR "Only one sanitizer can be enabled at a time.")
+endif()
+
+if(GR_USE_ADAPTIVE_CPP
+   AND ((ADDRESS_SANITIZER
+         OR UB_SANITIZER
+         OR THREAD_SANITIZER)))
+  message(
+    FATAL_ERROR
+      "SYCL is incompatible with ADDRESS_SANITIZER=${ADDRESS_SANITIZER} or UB_SANITIZER=${UB_SANITIZER} or THREAD_SANITIZER=${THREAD_SANITIZER}."
+  )
 endif()
 
 include(cmake/CompilerWarnings.cmake)
@@ -240,14 +256,19 @@ string(
           "${ALL_COMPILER_FLAGS}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
-  add_compile_options(-stdlib=libc++)
+  if(NOT GR_USE_ADAPTIVE_CPP)
+    message(STATUS "Using plain Clang – enabling libc++")
+    add_compile_options(-stdlib=libc++)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
+  else()
+    message(STATUS "AdaptiveCpp detected – skipping libc++ settings")
+  endif()
   if(TIMETRACE)
     add_compile_options(-ftime-trace)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -ftime-trace")
     message(STATUS "Enable TIMETRACE: ${TIMETRACE}")
   endif()
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(ENABLE_TBB)
     find_package(TBB REQUIRED)
@@ -597,6 +618,7 @@ message(STATUS "------------------------------------------------")
 message(STATUS "Toolchain details")
 message(STATUS "------------------------------------------------")
 message(STATUS "C++ compiler ID          : ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "GR_USE_ADAPTIVE_CPP?     : ${GR_USE_ADAPTIVE_CPP}")
 message(STATUS "C++ compiler path        : ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ compiler version     : ${CMAKE_CXX_COMPILER_VERSION}")
 string(
