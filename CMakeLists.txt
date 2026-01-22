@@ -342,6 +342,13 @@ set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-
 
 include(FetchContent)
 FetchContent_Declare(
+  cpptrace
+  GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
+  GIT_TAG        v1.0.4
+)
+FetchContent_MakeAvailable(cpptrace)
+
+FetchContent_Declare(
   pmt
   GIT_REPOSITORY https://github.com/gnuradio/pmt.git
   GIT_TAG 5960738cd35827acceb5a4de9e1c4005d2d02305 # latest as of 2025-08-13

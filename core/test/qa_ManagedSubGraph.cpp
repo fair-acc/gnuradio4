@@ -15,6 +15,9 @@
 #include "message_utils.hpp"
 #include "value_utils.hpp"
 
+#include <cpptrace/cpptrace.hpp>
+#include <csignal>
+
 namespace gr::subgraph_test {
 
 using namespace std::chrono_literals;
@@ -25,6 +28,19 @@ using namespace gr;
 using namespace gr::message;
 
 using namespace gr::testing;
+
+int install_handler = []() {
+    cpptrace::register_terminate_handler();
+    std::signal(SIGSEGV, [](int) {
+        cpptrace::generate_trace().print();
+        std::_Exit(128 + SIGSEGV);
+    });
+    std::signal(SIGABRT, [](int) {
+        cpptrace::generate_trace().print();
+        std::_Exit(128 + SIGSEGV);
+    });
+    return 42;
+}();
 
 template<typename T>
 struct DemoSubSchedulerResult {
