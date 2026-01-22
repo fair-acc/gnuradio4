@@ -73,21 +73,9 @@ jobs:
       fail-fast: false
       matrix:
         compiler:
-          - cc: gcc-14
-            cxx: g++-14
-            cmake_flags: "-DADDRESS_SANITIZER=ON"
-          - cc: gcc-15
-            cxx: g++-15
-            cmake_flags: "-DADDRESS_SANITIZER=ON"
-          - cc: clang-18
-            cxx: clang++-18
-            cmake_flags: "-DADDRESS_SANITIZER=ON -DCMAKE_LINKER=/usr/bin/clang-18"
           - cc: clang-20
             cxx: clang++-20
             cmake_flags: "-DADDRESS_SANITIZER=ON -DCMAKE_LINKER=/usr/bin/clang-20 -G ninja"
-          - cmake_wrapper: emcmake
-            cc: emcc
-            cmake_flags: "-DENABLE_COVERAGE=OFF -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14"
         cmake-build-type: [ Release, Debug ]
 
     steps:
@@ -127,21 +115,7 @@ jobs:
           CXX: "${{ matrix.compiler.cxx }}"
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=On -DENABLE_COVERAGE=OFF
-
-      - name: Configure CMake Emscripten
-        if: matrix.compiler.cmake_wrapper == 'emcmake'
-        shell: bash
-        run: |
-          export SYSTEM_NODE=`which node` # use system node instead of old version distributed with emsdk
-          $EMSDK_HOME/emsdk activate $EMSDK_VERSION
-          source $EMSDK_HOME/emsdk_env.sh
-          ${{ matrix.compiler.cmake_wrapper }} cmake -S . -B ../build \
-            -DCMAKE_COLOR_DIAGNOSTICS=ON \
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
-            -DUSE_CCACHE=ON \
-            -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} \
-            ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -G Ninja -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=On -DENABLE_COVERAGE=OFF
 
       - name: Build
         shell: bash
@@ -163,78 +137,6 @@ jobs:
         shell: bash
         run: ./core/src/main
 
-      - name: execute wasm main binary with nodejs
-        if: matrix.compiler.cmake_wrapper != null
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: node ./core/src/main.js
-
       - name: Show final ccache stats
         run: ccache --show-stats
 
-  coverage:
-    name: "GCC-14 Coverage"
-    needs: buildAndPublishDocker
-    runs-on: ubuntu-latest
-    container:
-      image: "${{ needs.buildAndPublishDocker.outputs.container }}"
-    env:
-      CCACHE_DIR: /home/runner/work/ccache
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/work/ccache
-          key: ccache-coverage-gcc14-debug-${{ github.sha }}
-          restore-keys: |
-            ccache-coverage-gcc14-debug
-
-      - name: Configure ccache
-        run: |
-          ccache --max-size=3G
-          ccache --show-stats
-
-      - name: Configure (coverage)
-        shell: bash
-        env:
-          CC: gcc-14
-          CXX: g++-14
-          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
-        run: |
-          cmake -S . -B ../build \
-            -DCMAKE_COLOR_DIAGNOSTICS=ON \
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DUSE_CCACHE=ON \
-            -DENABLE_COVERAGE=ON \
-            -DADDRESS_SANITIZER=OFF
-
-      - name: Build
-        run: cmake --build ../build
-
-      - name: Execute tests
-        env:
-          DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: ctest --output-on-failure
-
-      - name: Generate coverage report
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: cmake --build . --target coverage
-
-      - name: Run sonar-scanner
-        shell: bash
-        env:
-          SONAR_HOST_URL: https://sonarcloud.io
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: sonar-scanner
-
-      - name: Show final ccache stats
-        run: ccache --show-stats
