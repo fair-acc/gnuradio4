@@ -497,7 +497,8 @@ if(ENABLE_TESTING
     qa_DataSink
     qa_DynamicPort
     qa_DynamicBlock
-    qa_HierBlock
+    qa_UnmanagedSubGraph
+    qa_ManagedSubGraph
     qa_filter
     qa_Settings
     qa_Tags
@@ -519,7 +520,8 @@ if(ENABLE_TESTING
     qa_DataSink
     qa_DynamicPort
     qa_DynamicBlock
-    qa_HierBlock
+    qa_UnmanagedSubGraph
+    qa_ManagedSubGraph
     qa_filter
     qa_Settings
     qa_Tags
