@@ -1,4 +1,4 @@
-FROM ubuntu:25.04
+FROM ubuntu:25.10
 LABEL authors="akrimm"
 
 # test locally via: docker build -f Dockerfile -t test-image:ubuntu25 .
@@ -25,12 +25,12 @@ ENV JAVA_HOME=/opt/java/openjdk \
 # && wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - && add-apt-repository 'deb http://apt.llvm.org/mantic/ llvm-toolchain-mantic-18 main'
 # && wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null && echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' | tee -a /etc/apt/sources.list.d/kitware.list >/dev/null
 RUN apt-get update -y \
-    && apt-get install --no-install-recommends -qqy wget gpg ca-certificates software-properties-common bash file locales python3-pip npm sudo cmake git make ninja-build clang-18 clang-tools-18 clang-20 clang-tools-20 libc++-20-dev libc++abi-20-dev gdb lldb-20 gcc-14 g++-14 gcc-15 g++-15 ccache mold libcurl4-openssl-dev \
+    && apt-get install --no-install-recommends -qqy wget gpg ca-certificates software-properties-common bash file locales python3-pip npm sudo cmake git make ninja-build clang-20 clang-tools-20 libc++-20-dev libc++abi-20-dev libclang-20-dev libclang-rt-20-dev libomp-20-dev llvm-20-dev lld-20 gdb lldb-20 gcc-14 g++-14 gcc-15 g++-15 ccache mold libcurl4-openssl-dev libngtcp2-dev libnghttp2-dev libnghttp3-dev libonnxruntime-dev libonnxruntime1.21 libonnxruntime-providers onnxruntime-tools \
     && locale-gen en_US.UTF-8 && echo 'LANG="en_US.UTF-8"'>/etc/default/locale \
     && useradd -m -g users user \
     && echo user ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/user && chmod 0440 /etc/sudoers.d/user \
     && dpkg-reconfigure --frontend=noninteractive locales && update-locale LANG=en_US.UTF-8 \
-    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 110 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-20 110 \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 110 --slave /usr/bin/g++ g++ /usr/bin/g++-14 --slave /usr/bin/gcov gcov /usr/bin/gcov-14 \
     && python3 -m pip install --no-cache-dir --no-warn-script-location --break-system-packages gcovr \
     && apt-get clean \
@@ -78,6 +78,25 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get install gh -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Adaptive-cpp
+ARG ACPP_INSTALL_PREFIX=/opt/adaptivecpp
+ARG ACPP_GIT_REF=v25.10.0
+
+RUN git clone --depth 1 --branch ${ACPP_GIT_REF} https://github.com/AdaptiveCpp/AdaptiveCpp.git /tmp/AdaptiveCpp \
+ && cmake -S /tmp/AdaptiveCpp -B /tmp/AdaptiveCpp/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=${ACPP_INSTALL_PREFIX} \
+      -DACPP_COMPILER_FEATURE_PROFILE=full \
+      -DCMAKE_C_COMPILER=/usr/bin/clang-20 \
+      -DCMAKE_CXX_COMPILER=/usr/bin/clang++-20 \
+      -DLLVM_DIR=/usr/lib/llvm-20/lib/cmake/llvm \
+      -DClang_DIR=/usr/lib/llvm-20/lib/cmake/clang \
+ && cmake --build /tmp/AdaptiveCpp/build \
+ && cmake --install /tmp/AdaptiveCpp/build \
+ && rm -rf /tmp/AdaptiveCpp
+
+ENV PATH="${ACPP_INSTALL_PREFIX}/bin:${PATH}"
 
 USER user
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
