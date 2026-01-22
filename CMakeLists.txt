@@ -341,6 +341,7 @@ set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-
 # include exprtk header-only - END
 
 include(FetchContent)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 FetchContent_Declare(
   cpptrace
   GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
