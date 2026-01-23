@@ -121,7 +121,7 @@ jobs:
         shell: bash
         run: |
           test -f $EMSDK_HOME/emsdk_env.sh && source $EMSDK_HOME/emsdk_env.sh
-          cmake --build ../build
+          cmake --build ../build -j 1
 
       - name: execute tests
         if: matrix.compiler.cc != 'gcc-14' || matrix.cmake-build-type != 'Debug'
