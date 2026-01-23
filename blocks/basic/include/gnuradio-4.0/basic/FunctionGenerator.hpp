@@ -23,17 +23,17 @@ constexpr auto SignalTypeList = magic_enum::enum_values<SignalType>();
 
 template<typename T>
 requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
-constexpr std::string toString(T type) {
-    return std::string(magic_enum::enum_name(type));
+constexpr std::pmr::string toString(T type) {
+    return std::pmr::string(magic_enum::enum_name(type));
 }
 
 template<typename EnumType, typename T>
 requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, ParameterType>
-[[nodiscard]] std::pair<std::string, pmtv::pmt> createPropertyMapEntry(EnumType enumType, T value) {
+[[nodiscard]] std::pair<std::pmr::string, pmt::Value> createPropertyMapEntry(EnumType enumType, T value) {
     if constexpr (std::is_same_v<T, SignalType>) {
-        return {toString(enumType), static_cast<pmtv::pmt>(toString(value))};
+        return {toString(enumType), static_cast<pmt::Value>(toString(value))};
     } else {
-        return {toString(enumType), static_cast<pmtv::pmt>(value)};
+        return {toString(enumType), static_cast<pmt::Value>(value)};
     }
 }
 
@@ -49,7 +49,9 @@ constexpr T parse(std::string_view name) {
 
 template<typename T>
 [[nodiscard]] property_map createConstPropertyMap(std::string_view triggerName, T startValue) {
-    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue)};
+    return property_map{createPropertyMapEntry(signal_trigger, std::string(triggerName)), //
+        createPropertyMapEntry(signal_type, Const),                                       //
+        createPropertyMapEntry(start_value, startValue)};
 }
 
 template<typename T>
@@ -126,21 +128,21 @@ Operating modes:
     void stop() { this->blockingSyncStop(); }
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        if (newSettings.contains(function_generator::toString(function_generator::signal_type))) {
+        if (newSettings.contains(convert_string_domain(function_generator::toString(function_generator::signal_type)))) {
             if (signal_trigger.value.empty()) {
                 _currentTime = T(0.);
             } else if (newSettings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
-                std::string newTrigger = std::get<std::string>(newSettings.at(gr::tag::TRIGGER_NAME.shortKey()));
+                std::string newTrigger = newSettings.at(gr::tag::TRIGGER_NAME.shortKey()).value_or(std::string());
                 if (newTrigger == signal_trigger.value) {
                     _currentTime = T(0.);
                 } else {
                     // trigger does not match required signal_trigger -- revert to previous
-                    start_value    = std::get<T>(oldSettings.at("start_value"));
-                    final_value    = std::get<T>(oldSettings.at("final_value"));
-                    duration       = std::get<T>(oldSettings.at("duration"));
-                    round_off_time = std::get<T>(oldSettings.at("round_off_time"));
-                    impulse_time0  = std::get<T>(oldSettings.at("impulse_time0"));
-                    impulse_time1  = std::get<T>(oldSettings.at("impulse_time1"));
+                    start_value    = oldSettings.at("start_value").value_or(T{});
+                    final_value    = oldSettings.at("final_value").value_or(T{});
+                    duration       = oldSettings.at("duration").value_or(T{});
+                    round_off_time = oldSettings.at("round_off_time").value_or(T{});
+                    impulse_time0  = oldSettings.at("impulse_time0").value_or(T{});
+                    impulse_time1  = oldSettings.at("impulse_time1").value_or(T{});
                 }
             }
         }

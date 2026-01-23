@@ -45,7 +45,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
         std::size_t tagsForwarded = 0;
         for (gr::Tag tag : inSamples.rawTags) {
             if (tag.index < (inSamples.streamIndex + (inSamples.size() + 1) / 2)) {
-                tag.insert_or_assign("offset", sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex));
+                tag.insert_or_assign("offset", gr::pmt::Value(sampling_rate * static_cast<double>(tag.index - inSamples.streamIndex)));
                 outSamples.publishTag(tag.map, 0);
                 tagsForwarded++;
             } else {
@@ -171,7 +171,7 @@ const boost::ut::suite TagTests = [] {
         using namespace std::string_view_literals;
         Tag testTag{};
 
-        testTag.insert_or_assign(tag::SAMPLE_RATE, pmtv::pmt(3.0f));
+        testTag.insert_or_assign(tag::SAMPLE_RATE, pmt::Value(3.0f));
         testTag.insert_or_assign(tag::SAMPLE_RATE(4.0f));
         // testTag.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
         expect(testTag.at(tag::SAMPLE_RATE) == 4.0f);
@@ -230,27 +230,27 @@ const boost::ut::suite TagPropagation = [] {
         Graph            testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
-        const property_map srcParametersOnlyAutoForward = {{SAMPLE_RATE.shortKey(), 42.f},    //
-            {SIGNAL_NAME.shortKey(), "SIGNAL_NAME_42"},                                       //
-            {SIGNAL_QUANTITY.shortKey(), "SIGNAL_QUANTITY_42"},                               //
-            {SIGNAL_UNIT.shortKey(), "SIGNAL_UNIT_42"},                                       //
-            {SIGNAL_MIN.shortKey(), 42.f},                                                    //
-            {SIGNAL_MAX.shortKey(), 42.f},                                                    //
-            {N_DROPPED_SAMPLES.shortKey(), gr::Size_t(42)},                                   //
-            {TRIGGER_NAME.shortKey(), "TRIGGER_NAME_42"},                                     //
-            {TRIGGER_TIME.shortKey(), uint64_t(42)},                                          //
-            {TRIGGER_OFFSET.shortKey(), 42.f},                                                //
-            {TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}, //
-            {CONTEXT.shortKey(), "CONTEXT_42"},                                               //
-            {CONTEXT_TIME.shortKey(), std::uint64_t(42)}};
+        const property_map srcParametersOnlyAutoForward = {{SAMPLE_RATE.shortKey(), gr::pmt::Value(42.f)},    //
+            {SIGNAL_NAME.shortKey(), gr::pmt::Value("SIGNAL_NAME_42")},                                       //
+            {SIGNAL_QUANTITY.shortKey(), gr::pmt::Value("SIGNAL_QUANTITY_42")},                               //
+            {SIGNAL_UNIT.shortKey(), gr::pmt::Value("SIGNAL_UNIT_42")},                                       //
+            {SIGNAL_MIN.shortKey(), gr::pmt::Value(42.f)},                                                    //
+            {SIGNAL_MAX.shortKey(), gr::pmt::Value(42.f)},                                                    //
+            {N_DROPPED_SAMPLES.shortKey(), gr::pmt::Value(gr::Size_t(42))},                                   //
+            {TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER_NAME_42")},                                     //
+            {TRIGGER_TIME.shortKey(), gr::pmt::Value(std::uint64_t(42))},                                     //
+            {TRIGGER_OFFSET.shortKey(), gr::pmt::Value(42.f)},                                                //
+            {TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", gr::pmt::Value(42.f)}}}, //
+            {CONTEXT.shortKey(), gr::pmt::Value("CONTEXT_42")},                                               //
+            {CONTEXT_TIME.shortKey(), gr::pmt::Value(std::uint64_t(42))}};
 
         property_map srcParameter = srcParametersOnlyAutoForward;
-        srcParameter.insert({"not_auto_forward_parameter", 42.f});
+        srcParameter.insert({"not_auto_forward_parameter", gr::pmt::Value(42.f)});
         //
-        auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}});
+        auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSource")}, {"n_samples_max", gr::pmt::Value(nSamples)}});
         auto& autoForwardBlock = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>(srcParameter);
-        auto& monitor          = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitor"}});
-        auto& sink             = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
+        auto& monitor          = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagMonitor")}});
+        auto& sink             = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSink")}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(autoForwardBlock)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(autoForwardBlock).to<"in">(monitor)));
@@ -292,31 +292,31 @@ const boost::ut::suite TagPropagation = [] {
         Graph            testGraph;
 
         // "reset_default", "store_default", "end_of_stream" are not included because they have special meaning
-        const std::vector<Tag> tagsOnlyAutoForward = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), 42.f}}),          //
-            gr::Tag(2UZ, {{SIGNAL_NAME.shortKey(), "SIGNAL_NAME_42"}}),                                        //
-            gr::Tag(3UZ, {{SIGNAL_QUANTITY.shortKey(), "SIGNAL_QUANTITY_42"}}),                                //
-            gr::Tag(4UZ, {{SIGNAL_UNIT.shortKey(), "SIGNAL_UNIT_42"}}),                                        //
-            gr::Tag(5UZ, {{SIGNAL_MIN.shortKey(), 42.f}}),                                                     //
-            gr::Tag(6UZ, {{SIGNAL_MAX.shortKey(), 42.f}}),                                                     //
-            gr::Tag(7UZ, {{N_DROPPED_SAMPLES.shortKey(), gr::Size_t(42)}}),                                    //
-            gr::Tag(8UZ, {{TRIGGER_NAME.shortKey(), "TRIGGER_NAME_42"}}),                                      //
-            gr::Tag(9UZ, {{TRIGGER_TIME.shortKey(), uint64_t(42)}}),                                           //
-            gr::Tag(10UZ, {{TRIGGER_OFFSET.shortKey(), 42.f}}),                                                //
-            gr::Tag(11UZ, {{TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}}), //
-            gr::Tag(12UZ, {{CONTEXT.shortKey(), "CONTEXT_42"}}),                                               //
-            gr::Tag(13UZ, {{CONTEXT_TIME.shortKey(), std::uint64_t(42)}})};
+        const std::vector<Tag> tagsOnlyAutoForward = {gr::Tag(1UZ, {{SAMPLE_RATE.shortKey(), gr::pmt::Value(42.f)}}),          //
+            gr::Tag(2UZ, {{SIGNAL_NAME.shortKey(), gr::pmt::Value("SIGNAL_NAME_42")}}),                                        //
+            gr::Tag(3UZ, {{SIGNAL_QUANTITY.shortKey(), gr::pmt::Value("SIGNAL_QUANTITY_42")}}),                                //
+            gr::Tag(4UZ, {{SIGNAL_UNIT.shortKey(), gr::pmt::Value("SIGNAL_UNIT_42")}}),                                        //
+            gr::Tag(5UZ, {{SIGNAL_MIN.shortKey(), gr::pmt::Value(42.f)}}),                                                     //
+            gr::Tag(6UZ, {{SIGNAL_MAX.shortKey(), gr::pmt::Value(42.f)}}),                                                     //
+            gr::Tag(7UZ, {{N_DROPPED_SAMPLES.shortKey(), gr::pmt::Value(gr::Size_t(42))}}),                                    //
+            gr::Tag(8UZ, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER_NAME_42")}}),                                      //
+            gr::Tag(9UZ, {{TRIGGER_TIME.shortKey(), gr::pmt::Value(std::uint64_t(42))}}),                                      //
+            gr::Tag(10UZ, {{TRIGGER_OFFSET.shortKey(), gr::pmt::Value(42.f)}}),                                                //
+            gr::Tag(11UZ, {{TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", gr::pmt::Value(42.f)}}}}), //
+            gr::Tag(12UZ, {{CONTEXT.shortKey(), gr::pmt::Value("CONTEXT_42")}}),                                               //
+            gr::Tag(13UZ, {{CONTEXT_TIME.shortKey(), gr::pmt::Value(std::uint64_t(42))}})};
 
         std::vector<Tag> tags = tagsOnlyAutoForward;
-        tags.push_back(gr::Tag(14UZ, {{"not_auto_forward_parameter", 42.f}}));
+        tags.push_back(gr::Tag(14UZ, {{"not_auto_forward_parameter", gr::pmt::Value(42.f)}}));
 
-        auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource"}, {"n_samples_max", nSamples}, {"verbose_console", true && verbose}});
+        auto& src              = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSource")}, {"n_samples_max", gr::pmt::Value(nSamples)}, {"verbose_console", gr::pmt::Value(true && verbose)}});
         src._tags              = tags;
-        auto& monitorOne       = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"verbose_console", true && verbose}});
-        auto& monitorBulk1     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk1"}, {"verbose_console", true && verbose}});
-        auto& autoForwardBlock = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>({{"name", "AutoForwardParametersBlock"}});
-        auto& monitorBulk2     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk2"}, {"verbose_console", true && verbose}});
-        auto& sinkOne          = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"verbose_console", true && verbose}});
-        auto& sinkBulk         = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkBulk"}, {"verbose_console", true && verbose}});
+        auto& monitorOne       = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagMonitorOne")}, {"verbose_console", gr::pmt::Value(true && verbose)}});
+        auto& monitorBulk1     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagMonitorBulk1")}, {"verbose_console", gr::pmt::Value(true && verbose)}});
+        auto& autoForwardBlock = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>({{"name", gr::pmt::Value("AutoForwardParametersBlock")}});
+        auto& monitorBulk2     = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagMonitorBulk2")}, {"verbose_console", gr::pmt::Value(true && verbose)}});
+        auto& sinkOne          = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagSinkOne")}, {"verbose_console", gr::pmt::Value(true && verbose)}});
+        auto& sinkBulk         = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSinkBulk")}, {"verbose_console", gr::pmt::Value(true && verbose)}});
 
         // - monitorOne receives *all* Tags from src, but only publishes autoForward Tags.
         // - monitorBulk1 receives 'autoForward' Tags and republishes them.
@@ -390,21 +390,21 @@ const boost::ut::suite TagPropagation = [] {
     "CustomTagHandling"_test = []() {
         gr::Size_t         n_samples = 1024;
         Graph              testGraph;
-        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
+        const property_map srcParameter = {{"n_samples_max", gr::pmt::Value(n_samples)}, {"name", gr::pmt::Value("TagSource")}, {gr::tag::SIGNAL_NAME.shortKey(), gr::pmt::Value("tagStream")}, {"verbose_console", gr::pmt::Value(true)}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
         src._tags                       = {
-            {0, {{"key", "value@0"}, {"key0", "value@0"}}},          //
-            {1, {{"key", "value@1"}, {"key1", "value@1"}}},          //
-            {100, {{"key", "value@100"}, {"key2", "value@100"}}},    //
-            {150, {{"key", "value@150"}, {"key3", "value@150"}}},    //
-            {1000, {{"key", "value@1000"}, {"key4", "value@1000"}}}, //
-            {1001, {{"key", "value@1001"}, {"key5", "value@1001"}}}, //
-            {1002, {{"key", "value@1002"}, {"key6", "value@1002"}}}, //
-            {1023, {{"key", "value@1023"}, {"key7", "value@1023"}}}  //
+            {0, gr::property_map{{"key", gr::pmt::Value("value@0")}, {"key0", gr::pmt::Value("value@0")}}},          //
+            {1, gr::property_map{{"key", gr::pmt::Value("value@1")}, {"key1", gr::pmt::Value("value@1")}}},          //
+            {100, gr::property_map{{"key", gr::pmt::Value("value@100")}, {"key2", gr::pmt::Value("value@100")}}},    //
+            {150, gr::property_map{{"key", gr::pmt::Value("value@150")}, {"key3", gr::pmt::Value("value@150")}}},    //
+            {1000, gr::property_map{{"key", gr::pmt::Value("value@1000")}, {"key4", gr::pmt::Value("value@1000")}}}, //
+            {1001, gr::property_map{{"key", gr::pmt::Value("value@1001")}, {"key5", gr::pmt::Value("value@1001")}}}, //
+            {1002, gr::property_map{{"key", gr::pmt::Value("value@1002")}, {"key6", gr::pmt::Value("value@1002")}}}, //
+            {1023, gr::property_map{{"key", gr::pmt::Value("value@1023")}, {"key7", gr::pmt::Value("value@1023")}}}  //
         };
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
         auto& realign = testGraph.emplaceBlock<RealignTagsToChunks<float>>();
-        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true}});
+        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("TagSinkN")}, {"n_samples_expected", gr::pmt::Value(n_samples)}, {"verbose_console", gr::pmt::Value(true)}});
 
         // [ TagSource ] -> [ tag realign block ] -> [ TagSink ]
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"inPort">(realign)));
@@ -426,21 +426,21 @@ const boost::ut::suite TagPropagation = [] {
         gr::Size_t decim    = 10;
 
         Graph testGraph;
-        auto& src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
+        auto& src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"verbose_console", gr::pmt::Value(true)}});
         src._tags = {
-            {0, {{"key", "value@0"}, {"key0", "value@0"}}},     //
-            {4, {{"key", "value@4"}, {"key4", "value@4"}}},     //
-            {5, {{"key", "value@5"}, {"key5", "value@5"}}},     //
-            {15, {{"key", "value@15"}, {"key15", "value@15"}}}, //
-            {20, {{"key", "value@20"}, {"key20", "value@20"}}}, //
-            {25, {{"key", "value@25"}, {"key25", "value@25"}}}, //
-            {35, {{"key", "value@35"}, {"key35", "value@35"}}}  //
+            {0, gr::property_map{{"key", pmt::Value("value@0")}, {"key0", pmt::Value("value@0")}}},     //
+            {4, gr::property_map{{"key", pmt::Value("value@4")}, {"key4", pmt::Value("value@4")}}},     //
+            {5, gr::property_map{{"key", pmt::Value("value@5")}, {"key5", pmt::Value("value@5")}}},     //
+            {15, gr::property_map{{"key", pmt::Value("value@15")}, {"key15", pmt::Value("value@15")}}}, //
+            {20, gr::property_map{{"key", pmt::Value("value@20")}, {"key20", pmt::Value("value@20")}}}, //
+            {25, gr::property_map{{"key", pmt::Value("value@25")}, {"key25", pmt::Value("value@25")}}}, //
+            {35, gr::property_map{{"key", pmt::Value("value@35")}, {"key35", pmt::Value("value@35")}}}  //
         };
 
-        auto&                    decimator             = testGraph.emplaceBlock<TDecimator>({{"decim", decim}});
+        auto&                    decimator             = testGraph.emplaceBlock<TDecimator>({{"decim", gr::pmt::Value(decim)}});
         std::vector<std::string> customAutoForwardKeys = {"key", "key0", "key4", "key5", "key15", "key20", "key25", "key35"};
         decimator.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
-        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", true}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", gr::pmt::Value(true)}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(decimator)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(decimator).template to<"in">(sink)));
@@ -459,20 +459,20 @@ const boost::ut::suite TagPropagation = [] {
     };
 
     "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                             //
-            {0, {{"key", "value@0"}, {"key0", "value@0"}}},                           //
-            {1, {{"key", "value@5"}, {"key4", "value@4"}, {"key5", "value@5"}}},      //
-            {2, {{"key", "value@20"}, {"key15", "value@15"}, {"key20", "value@20"}}}, //
-            {3, {{"key", "value@25"}, {"key25", "value@25"}}}};
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                                                                                     //
+            {0, gr::property_map{{"key", pmt::Value("value@0")}, {"key0", pmt::Value("value@0")}}},                                           //
+            {1, gr::property_map{{"key", pmt::Value("value@5")}, {"key4", pmt::Value("value@4")}, {"key5", gr::pmt::Value("value@5")}}},      //
+            {2, gr::property_map{{"key", pmt::Value("value@20")}, {"key15", pmt::Value("value@15")}, {"key20", gr::pmt::Value("value@20")}}}, //
+            {3, gr::property_map{{"key", pmt::Value("value@25")}, {"key25", pmt::Value("value@25")}}}};
         runPolicyTest.template operator()<DecimatorForward<float>>(expectedTags);
     };
 
     "Tag propagation with decimation - Backward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                                             //
-            {0, {{"key", "value@5"}, {"key0", "value@0"}, {"key4", "value@4"}, {"key5", "value@5"}}}, //
-            {1, {{"key", "value@15"}, {"key15", "value@15"}}},                                        //
-            {2, {{"key", "value@25"}, {"key20", "value@20"}, {"key25", "value@25"}}},                 //
-            {3, {{"key", "value@35"}, {"key35", "value@35"}}}};
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                                                                                                                     //
+            {0, gr::property_map{{"key", pmt::Value("value@5")}, {"key0", pmt::Value("value@0")}, {"key4", gr::pmt::Value("value@4")}, {"key5", gr::pmt::Value("value@5")}}}, //
+            {1, gr::property_map{{"key", pmt::Value("value@15")}, {"key15", pmt::Value("value@15")}}},                                                                        //
+            {2, gr::property_map{{"key", pmt::Value("value@25")}, {"key20", pmt::Value("value@20")}, {"key25", gr::pmt::Value("value@25")}}},                                 //
+            {3, gr::property_map{{"key", pmt::Value("value@35")}, {"key35", pmt::Value("value@35")}}}};
         runPolicyTest.template operator()<DecimatorBackward<float>>(expectedTags);
     };
 };
@@ -486,12 +486,17 @@ const boost::ut::suite RepeatedTags = [] {
     auto runTest = []<auto srcType>(bool verbose = true) {
         gr::Size_t         n_samples = 30U;
         Graph              testGraph;
-        const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
+        const property_map srcParameter = {{"n_samples_max", gr::pmt::Value(n_samples)}, {"name", gr::pmt::Value("TagSource")}, {"verbose_console", gr::pmt::Value(true && verbose)}, {"repeat_tags", gr::pmt::Value(true)}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
-        src._tags                       = {{2, {{SAMPLE_RATE.shortKey(), 2.f}}}, {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, {8, {{SAMPLE_RATE.shortKey(), 8.f}}}};
+        src._tags                       = {
+            {2, {{SAMPLE_RATE.shortKey(), gr::pmt::Value(2.f)}}}, //
+            {3, {{SAMPLE_RATE.shortKey(), gr::pmt::Value(3.f)}}}, //
+            {5, {{SAMPLE_RATE.shortKey(), gr::pmt::Value(5.f)}}}, //
+            {8, {{SAMPLE_RATE.shortKey(), gr::pmt::Value(8.f)}}}  //
+        };
 
-        auto& monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
-        auto& sinkOne    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
+        auto& monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagMonitorOne")}, {"n_samples_expected", gr::pmt::Value(n_samples)}, {"verbose_console", gr::pmt::Value(false && verbose)}});
+        auto& sinkOne    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagSinkOne")}, {"n_samples_expected", gr::pmt::Value(n_samples)}, {"verbose_console", gr::pmt::Value(false && verbose)}});
 
         // src -> monitorOne -> sinkOne
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(monitorOne)));

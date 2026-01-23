@@ -47,6 +47,7 @@ function(set_project_warnings project_name)
       -Wdouble-promotion # warn if float is implicit promoted to double
       -Wformat=2 # warn on security issues around functions that format output (ie printf)
       -Wno-unknown-pragmas # ignore IDE, GCC/CLANG specific pragmas
+      -Wno-unused-command-line-argument # don't report extra arguments to the compiler
   )
 
   if(WARNINGS_AS_ERRORS)

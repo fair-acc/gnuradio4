@@ -237,9 +237,9 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         if (!_emittedStartTrigger && !trigger_name.value.empty()) {
             dataOut.publishTag(
                 property_map{
-                    {std::string(tag::TRIGGER_NAME.shortKey()), trigger_name.value},                                                     //
-                    {std::string(tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(std::chrono::system_clock::now())}, //
-                    {std::string(tag::TRIGGER_OFFSET.shortKey()), 0.f}                                                                   //
+                    {std::pmr::string(tag::TRIGGER_NAME.shortKey()), pmt::Value(trigger_name.value)},                                                     //
+                    {std::pmr::string(tag::TRIGGER_TIME.shortKey()), pmt::Value(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()))}, //
+                    {std::pmr::string(tag::TRIGGER_OFFSET.shortKey()), pmt::Value(0.f)}                                                                   //
                 },
                 0UZ);
             _emittedStartTrigger = true;

@@ -193,8 +193,8 @@ template<std::floating_point T>
 [[nodiscard]] inline Colour fromPropertyMap(Colour, const property_map& m) {
     Colour out{};
     if (auto it = m.find("colour"); it != m.end()) {
-        if (auto pstr = std::get_if<std::string>(&it->second)) {
-            if (auto c = parseHexRGB(*pstr)) {
+        if (auto str = it->second.value_or(std::string_view{}); !str.empty()) {
+            if (auto c = parseHexRGB(str)) {
                 out = *c; // else default {}
             }
         }
@@ -393,20 +393,20 @@ requires std::ranges::random_access_range<Range> && std::ranges::sized_range<Ran
 [[nodiscard]] inline Style fromPropertyMap(Style, const property_map& m) {
     Style s{};
     if (auto it = m.find("fgSet"); it != m.end()) {
-        if (auto pb = std::get_if<bool>(&it->second)) {
+        if (auto pb = it->second.get_if<bool>()) {
             s.fgSet = *pb;
         }
     }
 
     if (auto it = m.find("bgSet"); it != m.end()) {
-        if (auto pb = std::get_if<bool>(&it->second)) {
+        if (auto pb = it->second.get_if<bool>()) {
             s.bgSet = *pb;
         }
     }
 
     if (auto it = m.find("fg"); it != m.end()) {
-        if (auto pstr = std::get_if<std::string>(&it->second)) {
-            if (auto c = color::parseHexRGB(*pstr)) {
+        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
+            if (auto c = color::parseHexRGB(str)) {
                 s.fg    = *c;
                 s.fgSet = true;
             }
@@ -414,8 +414,8 @@ requires std::ranges::random_access_range<Range> && std::ranges::sized_range<Ran
     }
 
     if (auto it = m.find("bg"); it != m.end()) {
-        if (auto pstr = std::get_if<std::string>(&it->second)) {
-            if (auto c = color::parseHexRGB(*pstr)) {
+        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
+            if (auto c = color::parseHexRGB(str)) {
                 s.bg    = *c;
                 s.bgSet = true;
             }
@@ -424,7 +424,7 @@ requires std::ranges::random_access_range<Range> && std::ranges::sized_range<Ran
 
     auto asBool = [&](std::string_view k) -> bool {
         if (auto it = m.find(std::string{k}); it != m.end()) {
-            if (auto pb = std::get_if<bool>(&it->second)) {
+            if (auto pb = it->second.get_if<bool>()) {
                 return *pb;
             }
         }
@@ -502,8 +502,8 @@ enum class Direction : std::uint8_t {
 }
 [[nodiscard]] inline Direction fromPropertyMap(Direction /*tag*/, const property_map& m) {
     if (auto it = m.find("direction"); it != m.end()) {
-        if (auto pstr = std::get_if<std::string>(&it->second)) {
-            if (auto e = magic_enum::enum_cast<Direction>(*pstr)) {
+        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
+            if (auto e = magic_enum::enum_cast<Direction>(str)) {
                 return *e;
             }
         }
@@ -793,8 +793,8 @@ constexpr Point<T> max(Point<T> p1, Point<T> p2 = {0, 0}) {
 
 template<class T>
 [[nodiscard]] inline property_map toPropertyMap(const Point<T>& p) {
-    gr::property_map       m;
-    std::vector<pmtv::pmt> arr(2UZ);
+    gr::property_map   m;
+    Tensor<pmt::Value> arr(gr::extents_from, {2ULL});
     if constexpr (std::is_integral_v<T>) {
         arr[0UZ] = static_cast<std::int64_t>(p.x);
         arr[1UZ] = static_cast<std::int64_t>(p.y);
@@ -810,13 +810,13 @@ template<class T>
 [[nodiscard]] inline Point<T> fromPropertyMap(Point<T> /*tag*/, const property_map& m) {
     Point<T> p{};
     if (auto it = m.find("point"); it != m.end()) {
-        if (auto parr = std::get_if<std::vector<pmtv::pmt>>(&it->second)) {
+        if (auto parr = it->second.get_if<Tensor<pmt::Value>>()) {
             if (parr->size() >= 2) {
-                auto get = [](const pmtv::pmt& pr) -> std::optional<long double> {
-                    if (auto pi = std::get_if<std::int64_t>(&pr)) {
+                auto get = [](const pmt::Value& pr) -> std::optional<long double> {
+                    if (auto pi = pr.get_if<std::int64_t>()) {
                         return static_cast<long double>(*pi);
                     }
-                    if (auto pd = std::get_if<double>(&pr)) {
+                    if (auto pd = pr.get_if<double>()) {
                         return static_cast<long double>(*pd);
                     }
                     return std::nullopt;

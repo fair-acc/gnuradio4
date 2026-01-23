@@ -8,8 +8,6 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include <pmtv/pmt.hpp>
-
 #include <expected>
 #include <source_location>
 #include <string_view>
@@ -21,7 +19,11 @@ struct exception : public std::exception {
     std::source_location                  sourceLocation;
     std::chrono::system_clock::time_point errorTime = std::chrono::system_clock::now();
 
-    exception(std::string_view msg = "unknown exception", std::source_location location = std::source_location::current()) noexcept : message(msg), sourceLocation(location) {}
+    exception(std::string_view msg = "unknown exception", std::source_location location = std::source_location::current()) noexcept : message(msg), sourceLocation(location) {
+#ifndef NDEBUG
+        std::println("Exception thrown: {} at {}:{}", msg, location.file_name(), location.line());
+#endif
+    }
 
     [[nodiscard]] const char* what() const noexcept override {
         if (formattedMessage.empty()) {
@@ -138,7 +140,7 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
 }
 
 template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::string, pmtv::pmt>> userMessage, std::string_view clientRequestID = "") {
+void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> userMessage, std::string_view clientRequestID = "") {
     detail::sendMessage<cmd, property_map>(port, serviceName, endpoint, property_map(userMessage), clientRequestID);
 }
 

@@ -103,6 +103,8 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
         expect(!static_cast<bool>(v));
         expect(!v.is_arithmetic());
         expect(!v.is_string());
+        expect(!v.holds<std::string>());
+        expect(!v.holds<std::string_view>());
         expect(!v.is_tensor());
         expect(!v.is_map());
         expect(eq(v.value_type(), Value::ValueType::Monostate));
@@ -220,6 +222,19 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
         expect(eq(vs.value_or(std::string_view{""}), std::string_view{"test string"}));
     };
 
+    "std::string_view data and empty"_test = [] {
+        std::string empty_str = "";
+        Value       empty_str_value{empty_str};
+        expect(empty_str_value.is_string());
+        expect(eq(empty_str_value.value_or(std::string_view{""}), std::string_view{""}));
+
+        Value empty_value;
+        Value int_value(42);
+        expect(empty_str_value.value_or(std::string_view{}).data() != nullptr);
+        expect(empty_value.value_or(std::string_view{}).data() == nullptr);
+        expect(int_value.value_or(std::string_view{}).data() == nullptr);
+    };
+
     "pmr resource usage and propagation"_test = [] {
         "copy uses target's PMR resource"_test = [] {
             counting_resource source_mr;
@@ -314,6 +329,14 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             expect(t2 != nullptr);
             expect(eq((*t2)[0, 0], 42.0f));
         };
+
+        "Empty tensor is a tensor"_test = [] {
+            Tensor<float> t{};
+            Value         v{std::move(t)};
+            expect(!v.is_monostate()) << "empty tensor is not monostate";
+            expect(v.is_tensor()) << "empty tensor is a tensor";
+            expect(v.holds<Tensor<float>>()) << "empty tensor is a tensor";
+        };
     };
 };
 
@@ -363,6 +386,16 @@ const boost::ut::suite<"Value - String Conversion"> _string_conversion_suite = [
         expect(v.holds<std::string>()) << "std::string is convertible from pmr::string";
         expect(v.holds<std::string_view>()) << "std::string_view is convertible from pmr::string";
         expect(v.holds<std::pmr::string>()) << "exact type match";
+    };
+
+    "string and string_view are indistinguishable"_test = [] {
+        Value v1{std::string_view{"hello"}};
+        Value v2{std::string{"hello"}};
+
+        expect(v1 == v2);
+
+        std::hash<gr::pmt::Value> vh;
+        expect(vh(v1) == vh(v2));
     };
 
     "holds<std::string> returns false for non-string Value"_test = [] {
@@ -639,6 +672,23 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
             Value v2{std::move(map2)};
 
             expect(v1 != v2);
+        };
+
+        "Map emplace test"_test = [] {
+            Value::Map map1;
+            map1.emplace("key1", std::string("value1"));
+            map1.emplace("key2", std::string_view("value2"));
+            map1.emplace("key3", 3);
+
+            Value::Map map2{               //
+                {"key1", Value("value1")}, //
+                {"key2", Value("value2")}, //
+                {"key3", Value(3)}};
+
+            expect(map1 == map2);
+            expect(map1["key1"].holds<std::string>());
+            expect(map1["key2"].holds<std::string>());
+            expect(map1["key3"].holds<int>());
         };
     };
 };
@@ -1373,9 +1423,17 @@ const boost::ut::suite<"Value - L8b Type Strictness"> type_strictness_suite = []
 
     "value_or exact type match float"_test = [] {
         Value v{3.14f}; // float
+        expect(v.holds<float>());
         float result = v.value_or<float>(0.0f);
         expect(eq(result, 3.14f));
         // Note: v.value_or<double>(0.0) would NOT compile due to type strictness
+    };
+
+    "value_or exact type match float"_test = [] {
+        Value v{3.14}; // double
+        expect(v.holds<double>());
+        double result = v.value_or<double>(0.0);
+        expect(eq(result, 3.14));
     };
 
     "value_or exact type match int32"_test = [] {

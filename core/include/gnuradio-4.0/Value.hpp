@@ -6,7 +6,6 @@
 #include <concepts>
 #include <cstdint>
 #include <memory_resource>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -133,7 +132,24 @@ public:
     // clang-format on
     enum class ContainerType : uint8_t { Scalar = 0U, Complex = 1U, String = 2U, Tensor = 3U, Map = 4U };
 
-    using Map = std::pmr::unordered_map<std::pmr::string, Value>; // TODO: replace with std::flat_map or other more simpler key-value map once available (libc++ >=20, stdlibc++ >=15)
+    struct MapHash {
+        using is_transparent = void;
+
+        std::size_t operator()(const char* txt) const { return std::hash<std::string_view>{}(txt); }
+        std::size_t operator()(std::string_view txt) const { return std::hash<std::string_view>{}(txt); }
+        template<typename CharT, typename Traits, typename Alloc>
+        std::size_t operator()(const std::basic_string<CharT, Traits, Alloc>& txt) const {
+            return std::hash<std::basic_string<CharT, Traits, Alloc>>{}(txt);
+        }
+    };
+
+    struct MapEqual {
+        using is_transparent = void;
+
+        bool operator()(const auto& left, const auto& right) const { return std::string_view(left) == std::string_view(right); }
+    };
+
+    using Map = std::pmr::unordered_map<std::pmr::string, Value, MapHash, MapEqual>; // TODO: replace with std::flat_map or other more simpler key-value map once available (libc++ >=20, stdlibc++ >=15)
 
     uint8_t _value_type : 4 {0U};
     uint8_t _container_type : 4 {0U};
@@ -152,6 +168,7 @@ public:
         void*         ptr;
 
         Storage() : u64(0) {}
+
     } _storage{};
     std::pmr::memory_resource* _resource;
 
@@ -161,10 +178,6 @@ private:
     void set_types(ValueType vt, ContainerType ct) noexcept;
     void copy_from(const Value& other);
     void destroy() noexcept;
-    void clear() noexcept {
-        destroy();
-        set_types(ValueType::Monostate, ContainerType::Scalar);
-    }
 
     template<typename T>
     static constexpr ValueType get_value_type() {
@@ -184,7 +197,7 @@ private:
             return ValueType::UInt16;
         } else if constexpr (std::same_as<T, std::uint32_t>) {
             return ValueType::UInt32;
-        } else if constexpr (std::same_as<T, std::uint64_t>) {
+        } else if constexpr (std::same_as<T, std::uint64_t> || std::same_as<T, std::size_t>) {
             return ValueType::UInt64;
         } else if constexpr (std::same_as<T, float>) {
             return ValueType::Float32;
@@ -263,6 +276,11 @@ public:
     explicit Value(std::string_view v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     explicit Value(const std::string& v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     explicit Value(const char* v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    explicit Value(std::monostate, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+
+#ifdef __EMSCRIPTEN__
+    explicit Value(std::size_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+#endif
 
     // copy/move/destructor
     Value(const Value& other) : Value(other, std::pmr::get_default_resource()) {}
@@ -282,6 +300,11 @@ public:
     Value& operator=(uint16_t v);
     Value& operator=(uint32_t v);
     Value& operator=(uint64_t v);
+
+#ifdef __EMSCRIPTEN__
+    Value& operator=(std::size_t v);
+#endif
+
     Value& operator=(float v);
     Value& operator=(double v);
     Value& operator=(std::complex<float> v);
@@ -349,14 +372,21 @@ public:
     ///   - holds<std::string>() returns true if is_string() (auto-convertible)
     ///   - holds<std::string_view>() returns true if is_string() (zero-copy view)
     template<typename T>
+    requires(!meta::is_instantiation_of<T, std::vector>)
     [[nodiscard]] bool holds() const noexcept;
 
     /// Safe pointer access - returns nullptr on type mismatch
     /// @note For std::string/std::string_view, use value_or() instead (requires conversion)
     template<typename T>
+    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>
+#ifdef __EMSCRIPTEN__
+             && !std::is_same_v<T, std::size_t>
+#endif
+        )
     [[nodiscard]] T* get_if() noexcept;
 
     template<typename T>
+    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>> && !std::is_same_v<T, std::monostate>)
     [[nodiscard]] const T* get_if() const noexcept {
         return const_cast<Value*>(this)->get_if<T>();
     }
@@ -432,7 +462,7 @@ public:
     }
 
     template<typename T> // const value_or — only T and const T& (not T& or T&&)
-    requires(!detail::is_string_convertible_v<std::remove_cvref_t<T>>) && (!std::is_reference_v<T> || detail::is_const_ref_v<T>)
+    requires(!std::is_same_v<T, std::monostate> && !detail::is_string_convertible_v<std::remove_cvref_t<T>>) && (!std::is_reference_v<T> || detail::is_const_ref_v<T>)
     [[nodiscard]] auto value_or(T&& default_val) const& -> detail::return_t<T> {
         using Raw = std::remove_cvref_t<T>;
         if constexpr (std::is_lvalue_reference_v<T>) {
@@ -670,6 +700,11 @@ public:
     template<detail::ValueComparable T>
     friend bool operator==(const T&, const Value&);
 
+    void clear() noexcept {
+        destroy();
+        set_types(ValueType::Monostate, ContainerType::Scalar);
+    }
+
     friend constexpr std::string detail::value_to_string(const Value&);
     friend void                  swap(Value& a, Value& b) noexcept;
 };
@@ -729,6 +764,10 @@ GR_PMT_VALUE_SCALAR_TYPES
 // string type specializations (convertible from pmr::string)
 extern template bool Value::holds<std::string>() const noexcept;
 extern template bool Value::holds<std::string_view>() const noexcept;
+
+#ifdef __EMSCRIPTEN__
+extern template bool               Value::holds<std::size_t>() const noexcept;
+#endif
 
 // clang-format on
 

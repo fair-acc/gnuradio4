@@ -2,9 +2,9 @@ add_library(
   gnuradio-core STATIC
   src/Value.cpp
   src/ValueHelper.cpp
-  src/PmtTypeHelpers.cpp
   src/Graph.cpp
-  src/PluginLoader.cpp)
+  src/PluginLoader.cpp
+  src/PmtTypeHelpers.cpp)
 
 set(public_headers
     include/gnuradio-4.0/annotated.hpp
@@ -57,7 +57,6 @@ target_link_libraries(
   PUBLIC gnuradio-options
          gnuradio-meta
          magic_enum
-         pmtv
          vir)
 
 add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)

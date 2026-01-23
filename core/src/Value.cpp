@@ -16,6 +16,7 @@ namespace gr::pmt {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 template<typename T>
+requires(!meta::is_instantiation_of<T, std::vector>)
 bool Value::holds() const noexcept {
     if constexpr (std::same_as<T, Map>) {
         return is_map();
@@ -33,6 +34,11 @@ bool Value::holds() const noexcept {
 }
 
 template<typename T>
+requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>
+#ifdef __EMSCRIPTEN__
+         && !std::is_same_v<T, std::size_t>
+#endif
+    )
 T* Value::get_if() noexcept {
     if (!holds<T>()) [[unlikely]] {
         return nullptr;
@@ -147,7 +153,10 @@ void Value::copy_from(const Value& other) {
 }
 
 void Value::destroy() noexcept {
-    assert(_resource != nullptr);
+    if (!_resource) {
+        // moved from value
+        return;
+    }
 #if defined(__cpp_assume) && __cpp_assume >= 202207L
     [[assume(_resource != nullptr)]];
 #endif
@@ -227,6 +236,8 @@ void swap(Value& a, Value& b) noexcept {
 
 Value::Value(std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) { set_types(ValueType::Monostate, ContainerType::Scalar); }
 
+Value::Value(std::monostate, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) { set_types(ValueType::Monostate, ContainerType::Scalar); }
+
 Value::Value(bool v, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
     set_types(ValueType::Bool, ContainerType::Scalar);
     _storage.b = v;
@@ -271,6 +282,10 @@ Value::Value(uint64_t v, std::pmr::memory_resource* resource) : _resource(ensure
     set_types(ValueType::UInt64, ContainerType::Scalar);
     _storage.u64 = v;
 }
+
+#ifdef __EMSCRIPTEN__
+Value::Value(std::size_t v, std::pmr::memory_resource* resource) : Value(static_cast<uint64_t>(v), resource) {}
+#endif
 
 Value::Value(float v, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
     set_types(ValueType::Float32, ContainerType::Scalar);
@@ -317,6 +332,7 @@ Value::Value(Map map, std::pmr::memory_resource* resource) : _resource(ensure_re
 Value::Value(Value&& other) noexcept : _value_type(other._value_type), _container_type(other._container_type), _storage(other._storage), _resource(other._resource) {
     other.set_types(ValueType::Monostate, ContainerType::Scalar);
     other._storage.u64 = 0UZ;
+    other._resource    = nullptr;
 }
 
 Value::~Value() { destroy(); }
@@ -411,6 +427,15 @@ Value& Value::operator=(uint64_t v) {
     _storage.u64 = v;
     return *this;
 }
+
+#ifdef __EMSCRIPTEN__
+Value& Value::operator=(std::size_t v) {
+    destroy();
+    set_types(ValueType::UInt64, ContainerType::Scalar);
+    _storage.u64 = static_cast<uint64_t>(v);
+    return *this;
+}
+#endif
 
 Value& Value::operator=(float v) {
     destroy();
@@ -628,6 +653,10 @@ template bool              Value::holds<std::string_view>() const noexcept;
 template Value::Map*       Value::get_if<Value::Map>() noexcept;
 template const Value::Map* Value::get_if<Value::Map>() const noexcept;
 
+#ifdef __EMSCRIPTEN__
+template bool Value::holds<std::size_t>() const noexcept;
+#endif
+
 } // namespace gr::pmt
 
 namespace std {
@@ -715,7 +744,7 @@ std::size_t hash<gr::pmt::Value>::hashTensor(const gr::pmt::Value& v) noexcept {
     if (auto* p = v.get_if<gr::Tensor<std::complex<double>>>()) {
         return hashTensorElements(*p);
     }
-    if (auto* p = v.get_if<gr::Tensor<std::string>>()) {
+    if (auto* p = v.get_if<gr::Tensor<gr::pmt::Value>>()) {
         return hashTensorElements(*p);
     }
     return 0;
