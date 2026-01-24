@@ -56,7 +56,7 @@ struct eq_collection_result {
     std::string          message{};
     std::source_location location = std::source_location::current();
 
-    operator bool() const { return success; }
+                         operator bool() const { return success; }
     friend std::ostream& operator<<(std::ostream& os, const eq_collection_result& r) { return os << r.message; }
 };
 

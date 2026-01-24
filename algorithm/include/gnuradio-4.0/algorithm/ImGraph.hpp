@@ -347,7 +347,7 @@ public:
 
     void preferredSide(Side newSide) noexcept {
         _preferredSide = newSide;
-        updateUIConstraints("side", gr::pmt::Value(static_cast<int>(newSide)));
+        updateUIConstraints("side", static_cast<int>(newSide));
     }
 
     void position(Point<double> newPos) noexcept {
@@ -355,8 +355,8 @@ public:
         // write unified "pos"
         updateUIConstraints(gr::utf8::toPropertyMap(Point<double>{_position.x, _position.y}));
         // keep legacy too (optional; remove if you want to stop emitting them)
-        updateUIConstraints("pos_x", gr::pmt::Value(_position.x));
-        updateUIConstraints("pos_y", gr::pmt::Value(_position.y));
+        updateUIConstraints("pos_x", _position.x);
+        updateUIConstraints("pos_y", _position.y);
     }
 
     void exitDir(Direction newDir) noexcept {
@@ -369,7 +369,7 @@ public:
         updateUIConstraints(gr::utf8::toPropertyMap(_style)); // fg/bg/bold/…
         // also maintain simple legacy hex for tooling that still reads it
         if (_style.fgSet) {
-            updateUIConstraints("colour", gr::pmt::Value(gr::utf8::color::toHexRGB(_style.fg)));
+            updateUIConstraints("colour", gr::utf8::color::toHexRGB(_style.fg));
         }
     }
 

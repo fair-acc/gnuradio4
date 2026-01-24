@@ -348,7 +348,7 @@ private:
         dataSet.signal_units.emplace_back(signal_unit);
         dataSet.signal_ranges.resize(1UZ);  // one data set
         dataSet.meta_information.resize(1); // one data set
-        dataSet.meta_information[0]["ctx"]    = pmt::Value(filter.value);
+        dataSet.meta_information[0]["ctx"]    = filter.value;
         dataSet.meta_information[0]["n_pre"]  = n_pre;
         dataSet.meta_information[0]["n_post"] = n_post;
         dataSet.meta_information[0]["n_max"]  = n_max;

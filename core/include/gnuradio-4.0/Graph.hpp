@@ -221,7 +221,7 @@ public:
                     collectedPortNames.clear();
                 }
                 collectedPortNames[convert_string_domain(portNameMap.internalName)] = gr::property_map{
-                    {"exportedName", pmt::Value(portNameMap.exportedName)} //
+                    {"exportedName", portNameMap.exportedName} //
                 };
                 previousUniqueName = blockUniqueName;
             }

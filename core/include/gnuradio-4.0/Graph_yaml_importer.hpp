@@ -198,7 +198,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                         throw gr::exception(std::format("Missing context values for loadParametersFromPropertyMap"));
                     }
 
-                    currentBlock->settings().loadParametersFromPropertyMap(*ctxParameters, SettingsCtx{*ctxTime, pmt::Value(ctxName)});
+                    currentBlock->settings().loadParametersFromPropertyMap(*ctxParameters, SettingsCtx{*ctxTime, ctxName});
                 }
             }
 
@@ -309,7 +309,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                     exportedPortsData.push_back(Tensor<pmt::Value>(data_from, {gr::pmt::Value(blockName), gr::pmt::Value("OUTPUT"s), gr::pmt::Value(portName)}));
                 }
 
-                graphYaml["exported_ports"] = pmt::Value(std::move(exportedPortsData));
+                graphYaml["exported_ports"] = std::move(exportedPortsData);
                 map.emplace("graph"s, std::move(graphYaml));
 
                 // TODO: a unit-test that this is working
@@ -344,27 +344,27 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
                                    if (_definition.subIndex != meta::invalid_index) {
                                        Tensor<pmt::Value> seqPort;
                                        seqPort.reserve(2);
-                                       seqPort.push_back(pmt::Value(std::int64_t(_definition.topLevel)));
-                                       seqPort.push_back(pmt::Value(std::int64_t(_definition.subIndex)));
+                                       seqPort.push_back(std::int64_t(_definition.topLevel));
+                                       seqPort.push_back(std::int64_t(_definition.subIndex));
                                        seq.push_back(std::move(seqPort));
                                    } else {
-                                       seq.push_back(pmt::Value(std::int64_t(_definition.topLevel)));
+                                       seq.push_back(std::int64_t(_definition.topLevel));
                                    }
                                },                                                    //
                                [&](const PortDefinition::StringBased& _definition) { //
-                                   seq.push_back(pmt::Value(_definition.name));
+                                   seq.push_back(_definition.name);
                                }),
                     definition.definition);
             };
 
-            seq.push_back(pmt::Value(edge.sourceBlock()->name()));
+            seq.push_back(edge.sourceBlock()->name());
             writePortDefinition(edge.sourcePortDefinition());
 
-            seq.push_back(pmt::Value(edge.destinationBlock()->name()));
+            seq.push_back(edge.destinationBlock()->name());
             writePortDefinition(edge.destinationPortDefinition());
 
             if (edge.minBufferSize() != std::numeric_limits<std::size_t>::max()) {
-                seq.push_back(pmt::Value(edge.minBufferSize()));
+                seq.push_back(edge.minBufferSize());
             }
 
             serializedConnections.emplace_back(std::move(seq));

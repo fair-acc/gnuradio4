@@ -373,13 +373,13 @@ struct Metadata {
     float       signalMax;
 
     property_map toTagMap() const {
-        return property_map{                                                                 //
-            {std::pmr::string(tag::SIGNAL_RATE.shortKey()), pmt::Value(sampleRate)},         //
-            {std::pmr::string(tag::SIGNAL_NAME.shortKey()), pmt::Value(signalName)},         //
-            {std::pmr::string(tag::SIGNAL_QUANTITY.shortKey()), pmt::Value(signalQuantity)}, //
-            {std::pmr::string(tag::SIGNAL_UNIT.shortKey()), pmt::Value(signalUnit)},         //
-            {std::pmr::string(tag::SIGNAL_MIN.shortKey()), pmt::Value(signalMin)},           //
-            {std::pmr::string(tag::SIGNAL_MAX.shortKey()), pmt::Value(signalMax)}};
+        return property_map{                                                     //
+            {std::pmr::string(tag::SIGNAL_RATE.shortKey()), sampleRate},         //
+            {std::pmr::string(tag::SIGNAL_NAME.shortKey()), signalName},         //
+            {std::pmr::string(tag::SIGNAL_QUANTITY.shortKey()), signalQuantity}, //
+            {std::pmr::string(tag::SIGNAL_UNIT.shortKey()), signalUnit},         //
+            {std::pmr::string(tag::SIGNAL_MIN.shortKey()), signalMin},           //
+            {std::pmr::string(tag::SIGNAL_MAX.shortKey()), signalMax}};
     }
 };
 

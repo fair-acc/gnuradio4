@@ -673,16 +673,16 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
                                   [](const gr::DynamicPort& port) {
                                       return property_map{
                                           //
-                                          {"name", pmt::Value(std::string(port.name))}, //
-                                          {"type", pmt::Value(port.typeName())}         //
+                                          {"name", std::string(port.name)}, //
+                                          {"type", port.typeName()}         //
                                       };
                                   },
                                   [](const BlockModel::NamedPortCollection& namedCollection) {
                                       return property_map{
                                           //
-                                          {"name", pmt::Value(std::string(namedCollection.name))},                                                               //
-                                          {"size", pmt::Value(namedCollection.ports.size())},                                                                    //
-                                          {"type", pmt::Value(namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()))} //
+                                          {"name", std::string(namedCollection.name)},                                                               //
+                                          {"size", namedCollection.ports.size()},                                                                    //
+                                          {"type", namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName())} //
                                       };
                                   }},
                 portOrCollection);

@@ -268,7 +268,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
         refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { //
-            metaInfo.insert_or_assign(std::pmr::string(refl::data_member_name<PortMetaInfo, kIdx>.view()), pmt::Value(refl::data_member<kIdx>(*this).value));
+            metaInfo.insert_or_assign(std::pmr::string(refl::data_member_name<PortMetaInfo, kIdx>.view()), refl::data_member<kIdx>(*this).value);
         });
 
         return metaInfo;

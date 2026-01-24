@@ -286,7 +286,7 @@ public:
         return _nRunningJobs->value() > 0UZ;
     }
 
-    void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", gr::pmt::Value(std::string(magic_enum::enum_name(newState)))}}); }
+    void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _graph->blocks(); }
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _graph->blocks(); }
@@ -1066,7 +1066,7 @@ protected:
 
         auto& pluginLoader = gr::globalPluginLoader();
         if (message.cmd == message::Command::Get) {
-            message.data = property_map{{"value", pmt::Value(gr::saveGrc(pluginLoader, *_graph))}};
+            message.data = property_map{{"value", gr::saveGrc(pluginLoader, *_graph)}};
         } else if (message.cmd == message::Command::Set) {
             const auto& messageData = message.data.value();
             auto        yamlContent = messageData.at("value").value_or(std::string_view{});
@@ -1085,7 +1085,7 @@ protected:
                         return {};
                     }
 
-                    message.data = property_map{{"originalSchedulerState", pmt::Value(static_cast<int>(originalState))}};
+                    message.data = property_map{{"originalSchedulerState", static_cast<int>(originalState)}};
                 } catch (const std::exception& e) {
                     message.data = std::unexpected(Error{std::format("Error parsing YAML: {}", e.what())});
                 }

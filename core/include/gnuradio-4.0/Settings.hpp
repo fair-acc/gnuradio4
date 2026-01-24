@@ -198,8 +198,8 @@ std::string enumToString(T&& enum_value) {
 } // namespace detail
 
 struct SettingsCtx {
-    std::uint64_t time    = 0ULL;                      // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
-    pmt::Value    context = pmt::Value(std::string()); // user-defined multiplexing context for which the setting is valid
+    std::uint64_t time    = 0ULL;          // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
+    pmt::Value    context = std::string(); // user-defined multiplexing context for which the setting is valid
 
     bool operator==(const SettingsCtx&) const = default;
 
@@ -600,7 +600,7 @@ public:
                     }
                 });
                 if (!isSet) {
-                    ret.insert_or_assign(key, pmt::Value(value));
+                    ret.insert_or_assign(key, value);
                 }
             }
             addStoredParameters(newParameters, ctx);
@@ -628,7 +628,7 @@ public:
 
     NO_INLINE void resetDefaults() override {
         // add default parameters to stored and apply the parameters
-        auto ctx = SettingsCtx{settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), pmt::Value(std::string())};
+        auto ctx = SettingsCtx{settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), std::string()};
 #ifdef __EMSCRIPTEN__
         resolveDuplicateTimestamp(ctx);
 #endif
@@ -1052,7 +1052,7 @@ private:
 
             if constexpr (settings::isReadableMember<Type>()) {
                 if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
-                    _activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::enumToString(member)));
+                    _activeParameters.insert_or_assign(convert_string_domain(key), detail::enumToString(member));
                 } else {
                     _activeParameters.insert_or_assign(convert_string_domain(key), detail::unwrap_decorated_value(member));
                 }
@@ -1173,7 +1173,7 @@ private:
                     }
                 });
                 if (!isSet) {
-                    ret.insert_or_assign(key, pmt::Value(value));
+                    ret.insert_or_assign(key, value);
                 }
             }
         }
@@ -1283,9 +1283,9 @@ private:
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                 if constexpr (settings::isReadableMember<Type>()) {
                     if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), pmt::Value(detail::enumToString(refl::data_member<kIdx>(*_block))));
+                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), detail::enumToString(refl::data_member<kIdx>(*_block)));
                     } else {
-                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), pmt::Value(detail::unwrap_decorated_value(refl::data_member<kIdx>(*_block))));
+                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), detail::unwrap_decorated_value(refl::data_member<kIdx>(*_block)));
                     }
                 }
             });

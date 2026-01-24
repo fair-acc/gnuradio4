@@ -293,7 +293,7 @@ inline void pushData(ReaderState* state, Tensor<std::uint8_t>&& values) {
     gr::Message msg;
     msg.endpoint = state->uri;
     msg.cmd      = gr::message::Command::Notify;
-    msg.data     = gr::property_map{{std::pmr::string(detail::kMessageDataKey), gr::pmt::Value(std::move(values))}};
+    msg.data     = gr::property_map{{std::pmr::string(detail::kMessageDataKey), std::move(values)}};
     publishMessage(state, std::move(msg));
 }
 

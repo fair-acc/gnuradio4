@@ -827,10 +827,10 @@ const boost::ut::suite CtxSettingsTests = [] {
         src._tags.push_back({18, {{gr::tag::SAMPLE_RATE.shortKey(), 18.f}, {gr::tag::TRIGGER_TIME.shortKey(), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
                                      {gr::tag::TRIGGER_NAME.shortKey(), "name10"}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}});
 
-        auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", pmt::Value("TagMonitorBulk")}, {"n_samples_expected", pmt::Value(n_samples)}, {"verbose_console", pmt::Value(verboseConsole)}});
-        auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", pmt::Value("TagMonitorOne")}, {"n_samples_expected", pmt::Value(n_samples)}, {"verbose_console", pmt::Value(verboseConsole)}});
-        auto& sinkBulk    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", pmt::Value("TagSinkBulk")}, {"n_samples_expected", pmt::Value(n_samples)}, {"verbose_console", pmt::Value(verboseConsole)}});
-        auto& sinkOne     = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", pmt::Value("TagSinkOne")}, {"n_samples_expected", pmt::Value(n_samples)}, {"verbose_console", pmt::Value(verboseConsole)}});
+        auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& sinkBulk    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
+        auto& sinkOne     = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
 
         //                                  -> sinkOne
         // src -> monitorBulk -> monitorOne -> sinkBulk

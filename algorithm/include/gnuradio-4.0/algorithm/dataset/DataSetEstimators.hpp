@@ -116,7 +116,7 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
     }
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
         if (locMax >= 0) {
-            dataSet.timing_events[signalIndex].push_back({static_cast<std::ptrdiff_t>(locMax), {{"gr:maximum", gr::pmt::Value(gr::value(maxVal))}}});
+            dataSet.timing_events[signalIndex].push_back({static_cast<std::ptrdiff_t>(locMax), {{"gr:maximum", gr::value(maxVal)}}});
         }
     }
 
@@ -142,7 +142,7 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
     }
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
         if (locMin >= 0) {
-            dataSet.timing_events[signalIndex].push_back({static_cast<std::ptrdiff_t>(locMin), {{"gr:minimum", gr::pmt::Value(gr::value(minVal))}}});
+            dataSet.timing_events[signalIndex].push_back({static_cast<std::ptrdiff_t>(locMin), {{"gr:minimum", gr::value(minVal)}}});
         }
     }
 
@@ -472,10 +472,10 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(value)) * period;
         const std::uint64_t timeUncertainty = static_cast<std::uint64_t>(gr::uncertainty(value)) * period;
-        property_map        data            = property_map{                                                                                                                                                 //
-            {gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold))},                                              //
-            {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(time)}, {"trigger_time_error", gr::pmt::Value(timeUncertainty)}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}, //
-            {gr::tag::CONTEXT.shortKey(), gr::pmt::Value(context)}};
+        property_map        data            = property_map{                                                                                                 //
+            {gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)},              //
+            {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+            {gr::tag::CONTEXT.shortKey(), context}};
         dataSet.timing_events[signalIndex].push_back({idx, std::move(data)});
     }
     return value;
@@ -544,9 +544,9 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(xAxis[index])) * period;
         const std::uint64_t timeUncertainty = 0UZ;
-        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold))},                 //
-                              {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(time)}, {"trigger_time_error", gr::pmt::Value(timeUncertainty)}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}, //
-                              {gr::tag::CONTEXT.shortKey(), gr::pmt::Value(context)}};
+        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //
+                              {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},                 //
+                              {gr::tag::CONTEXT.shortKey(), context}};
         ds.timing_events[signalIndex].push_back({index, std::move(data)});
     }
     return StepStartDetectionResult<T>{.index = index, .initialValue = initial, .minValue = min_val, .maxValue = max_val, .isRising = isRising};
@@ -602,9 +602,9 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(xAxis[idx])) * period;
         const std::uint64_t timeUncertainty = 0UZ;
-        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value("SETTLING_TIME")}, {"gr:settling_level", gr::pmt::Value(gr::value(settlingLevel))},            //
-                              {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(time)}, {"trigger_time_error", gr::pmt::Value(timeUncertainty)}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}, //
-                              {gr::tag::CONTEXT.shortKey(), gr::pmt::Value(context)}};
+        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), "SETTLING_TIME"}, {"gr:settling_level", gr::value(settlingLevel)}, //
+                              {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},      //
+                              {gr::tag::CONTEXT.shortKey(), context}};
         dataSet.timing_events[signalIndex].push_back({idx, std::move(data)});
     }
 

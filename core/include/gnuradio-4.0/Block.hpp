@@ -1243,12 +1243,12 @@ public:
     }
 
     inline constexpr void publishEoS() noexcept {
-        const property_map tag_data{{static_cast<std::pmr::string>(gr::tag::END_OF_STREAM), pmt::Value(true)}};
+        const property_map tag_data{{static_cast<std::pmr::string>(gr::tag::END_OF_STREAM), true}};
         for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
-        const property_map& tagData{{gr::tag::END_OF_STREAM, gr::pmt::Value(true)}};
+        const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
         for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<std::size_t>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
@@ -1257,7 +1257,7 @@ public:
     constexpr void processScheduledMessages() {
         using namespace std::chrono;
         const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
-        notifyListeners(block::property::kHeartbeat, pmt::Value::Map{{"heartbeat", pmt::Value(nanoseconds_count)}});
+        notifyListeners(block::property::kHeartbeat, pmt::Value::Map{{"heartbeat", nanoseconds_count}});
 
         auto processPort = [this]<PortLike TPort>(TPort& inPort) {
             const auto available = inPort.streamReader().available();
@@ -1292,7 +1292,7 @@ protected:
 
         if (message.cmd == Set || message.cmd == Get) {
             std::uint64_t nanoseconds_count = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-            message.data                    = pmt::Value::Map{{"heartbeat", pmt::Value(nanoseconds_count)}};
+            message.data                    = pmt::Value::Map{{"heartbeat", nanoseconds_count}};
             return message;
         } else if (message.cmd == Subscribe) {
             if (!message.clientRequestID.empty()) {
@@ -1351,7 +1351,7 @@ protected:
         }
 
         if (message.cmd == Get) { // Merged 'else if' with 'if'
-            message.data = pmt::Value::Map{{"state", pmt::Value(std::string(magic_enum::enum_name(this->state())))}};
+            message.data = pmt::Value::Map{{"state", std::string(magic_enum::enum_name(this->state()))}};
             return message;
         }
 
@@ -1501,7 +1501,7 @@ protected:
 
             auto ctx = settings().activateContext(SettingsCtx{
                 .time    = time,
-                .context = pmt::Value(contextStr),
+                .context = contextStr,
             });
 
             if (!ctx.has_value()) {
@@ -1512,8 +1512,8 @@ protected:
         if (message.cmd == Get || message.cmd == Set) {
             const auto& ctx = settings().activeContext();
             message.data    = property_map{
-                   {gr::tag::CONTEXT.shortKey(), pmt::Value(ctx.context)},  //
-                   {gr::tag::CONTEXT_TIME.shortKey(), pmt::Value(ctx.time)} //
+                   {gr::tag::CONTEXT.shortKey(), ctx.context},  //
+                   {gr::tag::CONTEXT_TIME.shortKey(), ctx.time} //
             };
             return message;
         }
@@ -1551,7 +1551,7 @@ protected:
 
         SettingsCtx ctx{
             .time    = time,
-            .context = pmt::Value(contextStr),
+            .context = contextStr,
         };
 
         pmt::Value::Map parameters;
@@ -1619,14 +1619,14 @@ protected:
                         continue;
                     }
                     const auto str = ctx.context.value_or(std::string_view{});
-                    contexts.push_back(pmt::Value(str));
+                    contexts.push_back(str);
                     times.push_back(ctx.time);
                 }
             }
 
             message.data = pmt::Value::Map{
-                {"contexts", pmt::Value(std::move(contexts))},
-                {"times", pmt::Value(std::move(times))},
+                {"contexts", std::move(contexts)},
+                {"times", std::move(times)},
             };
             return message;
         }
