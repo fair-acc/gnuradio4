@@ -72,7 +72,7 @@ def process_bulk(ins, outs):
     print('Stop Python processing - time: {} seconds'.format(time.time() - start))
 )";
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", gr::pmt::Value(3U)}, {"n_outputs", gr::pmt::Value(3U)}, {"pythonScript", gr::pmt::Value(pythonScript)}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
         myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         int                                        count = 0;
@@ -133,7 +133,7 @@ def process_bulk(ins, outs):
         outs[i][:] = ins[i] * 2
 )";
 
-        PythonBlock<std::int32_t> myBlock({{"n_inputs", gr::pmt::Value(3U)}, {"n_outputs", gr::pmt::Value(3U)}, {"pythonScript", gr::pmt::Value(pythonScript)}});
+        PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
 
         bool throws = false;
         try {
@@ -155,7 +155,7 @@ def process_bulk(ins, outs):
         outs[i][:] = ins[i] * 2/0 # <- (N.B. division by zero)
 )";
 
-        PythonBlock<float> myBlock({{"n_inputs", gr::pmt::Value(3U)}, {"n_outputs", gr::pmt::Value(3U)}, {"pythonScript", gr::pmt::Value(pythonScript)}});
+        PythonBlock<float> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
         myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         std::vector<float>                  data1 = {1, 2, 3};
@@ -185,9 +185,9 @@ def process_bulk(ins, outs):
 
         using namespace gr::testing;
         Graph graph;
-        auto& src   = graph.emplaceBlock<TagSource<int32_t>>({{"n_samples_max", gr::pmt::Value(5U)}, {"mark_tag", gr::pmt::Value(false)}});
-        auto& block = graph.emplaceBlock<PythonBlock<int32_t>>({{"n_inputs", gr::pmt::Value(1U)}, {"n_outputs", gr::pmt::Value(1U)}, {"pythonScript", gr::pmt::Value(pythonScript)}});
-        auto& sink  = graph.emplaceBlock<TagSink<int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", gr::pmt::Value(5U)}, {"verbose_console", gr::pmt::Value(true)}});
+        auto& src   = graph.emplaceBlock<TagSource<int32_t>>({{"n_samples_max", 5U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<int32_t>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        auto& sink  = graph.emplaceBlock<TagSink<int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
         expect(gr::ConnectionResult::SUCCESS == graph.connect(src, "out"s, block, "inputs#0"s));
         expect(gr::ConnectionResult::SUCCESS == graph.connect(block, "outputs#0"s, sink, "in"s));
@@ -250,9 +250,9 @@ def process_bulk(ins, outs):
 
         using namespace gr::testing;
         Graph graph;
-        auto& src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", gr::pmt::Value(5U)}, {"mark_tag", gr::pmt::Value(false)}});
-        auto& block = graph.emplaceBlock<PythonBlock<float>>({{"n_inputs", gr::pmt::Value(1U)}, {"n_outputs", gr::pmt::Value(1U)}, {"pythonScript", gr::pmt::Value(pythonScript)}});
-        auto& sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", gr::pmt::Value(5U)}, {"verbose_console", gr::pmt::Value(true)}});
+        auto& src   = graph.emplaceBlock<TagSource<float>>({{"n_samples_max", 5U}, {"mark_tag", false}});
+        auto& block = graph.emplaceBlock<PythonBlock<float>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
+        auto& sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
         expect(gr::ConnectionResult::SUCCESS == graph.connect(src, "out"s, block, "inputs#0"s));
         expect(gr::ConnectionResult::SUCCESS == graph.connect(block, "outputs#0"s, sink, "in"s));

@@ -152,13 +152,13 @@ gr::Graph getGraphLinear(std::shared_ptr<Tracer> tracer) {
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
     // Generators
-    auto& source1      = flow.emplaceBlock<CountSource<int>>({{"name", gr::pmt::Value("s1")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& source1      = flow.emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer     = tracer;
-    auto& scaleBlock1  = flow.emplaceBlock<Scale<int>>({{"name", gr::pmt::Value("mult1")}, {"scale_factor", gr::pmt::Value(2)}});
+    auto& scaleBlock1  = flow.emplaceBlock<Scale<int>>({{"name", "mult1"}, {"scale_factor", 2}});
     scaleBlock1.tracer = tracer;
-    auto& scaleBlock2  = flow.emplaceBlock<Scale<int>>({{"name", gr::pmt::Value("mult2")}, {"scale_factor", gr::pmt::Value(4)}});
+    auto& scaleBlock2  = flow.emplaceBlock<Scale<int>>({{"name", "mult2"}, {"scale_factor", 4}});
     scaleBlock2.tracer = tracer;
-    auto& sink         = flow.emplaceBlock<ExpectSink<int>>({{"name", gr::pmt::Value("out")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& sink         = flow.emplaceBlock<ExpectSink<int>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
     sink.tracer        = tracer;
     sink.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 8 * count; };
 
@@ -179,20 +179,20 @@ gr::Graph getGraphParallel(std::shared_ptr<Tracer> tracer) {
     // Blocks need to be alive for as long as the flow is
     gr::Graph flow;
     // Generators
-    auto& source1       = flow.emplaceBlock<CountSource<int>>({{"name", gr::pmt::Value("s1")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& source1       = flow.emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer      = tracer;
-    auto& scaleBlock1a  = flow.emplaceBlock<Scale<int>>({{"name", gr::pmt::Value("mult1a")}, {"scale_factor", gr::pmt::Value(2)}});
+    auto& scaleBlock1a  = flow.emplaceBlock<Scale<int>>({{"name", "mult1a"}, {"scale_factor", 2}});
     scaleBlock1a.tracer = tracer;
-    auto& scaleBlock2a  = flow.emplaceBlock<Scale<int>>({{"name", gr::pmt::Value("mult2a")}, {"scale_factor", gr::pmt::Value(3)}});
+    auto& scaleBlock2a  = flow.emplaceBlock<Scale<int>>({{"name", "mult2a"}, {"scale_factor", 3}});
     scaleBlock2a.tracer = tracer;
-    auto& sinkA         = flow.emplaceBlock<ExpectSink<int>>({{"name", gr::pmt::Value("outa")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& sinkA         = flow.emplaceBlock<ExpectSink<int>>({{"name", "outa"}, {"n_samples_max", nMaxSamples}});
     sinkA.tracer        = tracer;
     sinkA.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 6 * count; };
-    auto& scaleBlock1b  = flow.emplaceBlock<Scale<int>>({{"name", gr::pmt::Value("mult1b")}, {"scale_factor", gr::pmt::Value(3)}});
+    auto& scaleBlock1b  = flow.emplaceBlock<Scale<int>>({{"name", "mult1b"}, {"scale_factor", 3}});
     scaleBlock1b.tracer = tracer;
-    auto& scaleBlock2b  = flow.emplaceBlock<Scale<int>>({{"name", gr::pmt::Value("mult2b")}, {"scale_factor", gr::pmt::Value(5)}});
+    auto& scaleBlock2b  = flow.emplaceBlock<Scale<int>>({{"name", "mult2b"}, {"scale_factor", 5}});
     scaleBlock2b.tracer = tracer;
-    auto& sinkB         = flow.emplaceBlock<ExpectSink<int>>({{"name", gr::pmt::Value("outb")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& sinkB         = flow.emplaceBlock<ExpectSink<int>>({{"name", "outb"}, {"n_samples_max", nMaxSamples}});
     sinkB.tracer        = tracer;
     sinkB.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 15 * count; };
 
@@ -233,15 +233,15 @@ gr::Graph getGraphScaledSum(std::shared_ptr<Tracer> tracer, std::source_location
     gr::Graph flow;
 
     // Generators
-    auto& source1     = flow.emplaceBlock<CountSource<int>>({{"name", gr::pmt::Value("s1")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& source1     = flow.emplaceBlock<CountSource<int>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer    = tracer;
-    auto& source2     = flow.emplaceBlock<CountSource<int>>({{"name", gr::pmt::Value("s2")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& source2     = flow.emplaceBlock<CountSource<int>>({{"name", "s2"}, {"n_samples_max", nMaxSamples}});
     source2.tracer    = tracer;
-    auto& scaleBlock  = flow.emplaceBlock<Scale<int>>({{"name", gr::pmt::Value("mult")}, {"scale_factor", gr::pmt::Value(2)}});
+    auto& scaleBlock  = flow.emplaceBlock<Scale<int>>({{"name", "mult"}, {"scale_factor", 2}});
     scaleBlock.tracer = tracer;
-    auto& addBlock    = flow.emplaceBlock<Adder<int>>({{"name", gr::pmt::Value("add")}});
+    auto& addBlock    = flow.emplaceBlock<Adder<int>>({{"name", "add"}});
     addBlock.tracer   = tracer;
-    auto& sink        = flow.emplaceBlock<ExpectSink<int>>({{"name", gr::pmt::Value("out")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& sink        = flow.emplaceBlock<ExpectSink<int>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
     sink.tracer       = tracer;
     sink.checker      = [](std::uint64_t count, std::uint64_t data) -> bool { return data == (2 * count) + count; };
 
@@ -257,18 +257,18 @@ gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_locat
     using namespace boost::ut;
 
     gr::Size_t       nMaxSamples{2};
-    gr::property_map layout_auto{{"layout_pref", gr::pmt::Value(std::string("auto"))}};
+    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
-    auto&     source1 = flow.emplaceBlock<CountSource<float>>({{"name", gr::pmt::Value("s1")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto&     source1 = flow.emplaceBlock<CountSource<float>>({{"name", "s1"}, {"n_samples_max", nMaxSamples}});
     source1.tracer    = tracer;
-    auto& scale1      = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("alpha")}, {"scale_factor", gr::pmt::Value(0.9f)}});
+    auto& scale1      = flow.emplaceBlock<Scale<float>>({{"name", "alpha"}, {"scale_factor", 0.9f}});
     scale1.tracer     = tracer;
-    auto& scale2      = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("1-alpha")}, {"scale_factor", gr::pmt::Value(0.1f)}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& scale2      = flow.emplaceBlock<Scale<float>>({{"name", "1-alpha"}, {"scale_factor", 0.1f}, {"ui_constraints", layout_auto}});
     scale2.tracer     = tracer;
-    auto& sum         = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("sum")}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& sum         = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
     sum.tracer        = tracer;
-    auto& sink        = flow.emplaceBlock<ExpectSink<float>>({{"name", gr::pmt::Value("out")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& sink        = flow.emplaceBlock<ExpectSink<float>>({{"name", "out"}, {"n_samples_max", nMaxSamples}});
     sink.tracer       = tracer;
     sink.checker      = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
@@ -288,22 +288,22 @@ gr::Graph getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_
 
     gr::Size_t       nMaxSamples{10};
     gr::Size_t       ratio{5};
-    gr::property_map layout_auto{{"layout_pref", gr::pmt::Value(std::string("auto"))}};
+    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
-    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", gr::pmt::Value("src")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
     source.tracer    = tracer;
-    auto& adder      = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("sum")}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& adder      = flow.emplaceBlock<Adder<float>>({{"name", "sum"}, {"ui_constraints", layout_auto}});
     adder.tracer     = tracer;
-    auto& sink       = flow.emplaceBlock<ExpectSink<float>>({{"name", gr::pmt::Value("snk")}, {"n_samples_max", gr::pmt::Value(nMaxSamples / ratio)}});
+    auto& sink       = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples / ratio}});
     sink.tracer      = tracer;
     sink.checker     = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     // Decimator: 5 input samples → 1 output sample
-    auto& decimator  = flow.emplaceBlock<Resampler<float>>({{"name", gr::pmt::Value("dec")}, {"input_chunk_size", gr::pmt::Value(ratio)}, {"output_chunk_size", gr::pmt::Value(1)}});
+    auto& decimator  = flow.emplaceBlock<Resampler<float>>({{"name", "dec"}, {"input_chunk_size", ratio}, {"output_chunk_size", 1}});
     decimator.tracer = tracer;
     // Interpolator: 1 input sample → 5 output samples
-    auto& interpolator  = flow.emplaceBlock<Resampler<float>>({{"name", gr::pmt::Value("int")}, {"input_chunk_size", gr::pmt::Value(1)}, {"output_chunk_size", gr::pmt::Value(ratio)}});
+    auto& interpolator  = flow.emplaceBlock<Resampler<float>>({{"name", "int"}, {"input_chunk_size", 1}, {"output_chunk_size", ratio}});
     interpolator.tracer = tracer;
 
     // forward path: source → decimator → sum → sink
@@ -322,29 +322,29 @@ gr::Graph getMultipleNestedFeedbackLoops(std::shared_ptr<Tracer> tracer, std::so
     using namespace boost::ut;
 
     gr::Size_t       nMaxSamples{2};
-    gr::property_map layout_auto{{"layout_pref", gr::pmt::Value(std::string("auto"))}};
+    gr::property_map layout_auto{{"layout_pref", std::string("auto")}};
 
     gr::Graph flow;
-    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", gr::pmt::Value("src")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto&     source = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
     source.tracer    = tracer;
 
     // feedback loop #1: scale1 ⟷ scale2
-    auto& scale1  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("s1")}, {"scale_factor", gr::pmt::Value(0.8f)}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& scale1  = flow.emplaceBlock<Scale<float>>({{"name", "s1"}, {"scale_factor", 0.8f}, {"ui_constraints", layout_auto}});
     scale1.tracer = tracer;
-    auto& scale2  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("s2")}, {"scale_factor", gr::pmt::Value(0.9f)}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& scale2  = flow.emplaceBlock<Scale<float>>({{"name", "s2"}, {"scale_factor", 0.9f}, {"ui_constraints", layout_auto}});
     scale2.tracer = tracer;
-    auto& adder1  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("sum1")}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& adder1  = flow.emplaceBlock<Adder<float>>({{"name", "sum1"}, {"ui_constraints", layout_auto}});
     adder1.tracer = tracer;
 
     // feedback loop #2: scale3 ⟷ scale4
-    auto& scale3  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("s3")}, {"scale_factor", gr::pmt::Value(0.7f)}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& scale3  = flow.emplaceBlock<Scale<float>>({{"name", "s3"}, {"scale_factor", 0.7f}, {"ui_constraints", layout_auto}});
     scale3.tracer = tracer;
-    auto& scale4  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("s4")}, {"scale_factor", gr::pmt::Value(0.6f)}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& scale4  = flow.emplaceBlock<Scale<float>>({{"name", "s4"}, {"scale_factor", 0.6f}, {"ui_constraints", layout_auto}});
     scale4.tracer = tracer;
-    auto& adder2  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("sum2")}, {"ui_constraints", gr::pmt::Value(layout_auto)}});
+    auto& adder2  = flow.emplaceBlock<Adder<float>>({{"name", "sum2"}, {"ui_constraints", layout_auto}});
     adder2.tracer = tracer;
 
-    auto& sink   = flow.emplaceBlock<ExpectSink<float>>({{"name", gr::pmt::Value("snk")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& sink   = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples}});
     sink.tracer  = tracer;
     sink.checker = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
@@ -374,52 +374,52 @@ gr::Graph getIIRFormII(std::shared_ptr<Tracer> tracer, std::source_location loc 
     gr::Graph flow;
 
     // source and sink
-    auto& source  = flow.emplaceBlock<CountSource<float>>({{"name", gr::pmt::Value("src")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& source  = flow.emplaceBlock<CountSource<float>>({{"name", "src"}, {"n_samples_max", nMaxSamples}});
     source.tracer = tracer;
-    auto& sink    = flow.emplaceBlock<ExpectSink<float>>({{"name", gr::pmt::Value("snk")}, {"n_samples_max", gr::pmt::Value(nMaxSamples)}});
+    auto& sink    = flow.emplaceBlock<ExpectSink<float>>({{"name", "snk"}, {"n_samples_max", nMaxSamples}});
     sink.tracer   = tracer;
     sink.checker  = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     // delay block (mocks)
-    auto& d1  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("d1")}, {"scale_factor", gr::pmt::Value(1.0f)}}); // z^-1
+    auto& d1  = flow.emplaceBlock<Scale<float>>({{"name", "d1"}, {"scale_factor", 1.0f}}); // z^-1
     d1.tracer = tracer;
-    auto& d2  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("d2")}, {"scale_factor", gr::pmt::Value(1.0f)}}); // z^-1
+    auto& d2  = flow.emplaceBlock<Scale<float>>({{"name", "d2"}, {"scale_factor", 1.0f}}); // z^-1
     d2.tracer = tracer;
-    auto& d3  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("d3")}, {"scale_factor", gr::pmt::Value(1.0f)}}); // z^-1
+    auto& d3  = flow.emplaceBlock<Scale<float>>({{"name", "d3"}, {"scale_factor", 1.0f}}); // z^-1
     d3.tracer = tracer;
 
     // feed-forward coefficients
-    auto& b0  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("b0")}, {"scale_factor", gr::pmt::Value(1.0f)}});
+    auto& b0  = flow.emplaceBlock<Scale<float>>({{"name", "b0"}, {"scale_factor", 1.0f}});
     b0.tracer = tracer;
-    auto& b1  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("b1")}, {"scale_factor", gr::pmt::Value(1.0f)}});
+    auto& b1  = flow.emplaceBlock<Scale<float>>({{"name", "b1"}, {"scale_factor", 1.0f}});
     b1.tracer = tracer;
-    auto& b2  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("b2")}, {"scale_factor", gr::pmt::Value(1.0f)}});
+    auto& b2  = flow.emplaceBlock<Scale<float>>({{"name", "b2"}, {"scale_factor", 1.0f}});
     b2.tracer = tracer;
-    auto& b3  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("b3")}, {"scale_factor", gr::pmt::Value(1.0f)}});
+    auto& b3  = flow.emplaceBlock<Scale<float>>({{"name", "b3"}, {"scale_factor", 1.0f}});
     b3.tracer = tracer;
 
     // feedback coefficients
-    auto& a1  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("a1")}, {"scale_factor", gr::pmt::Value(-1.0f)}});
+    auto& a1  = flow.emplaceBlock<Scale<float>>({{"name", "a1"}, {"scale_factor", -1.0f}});
     a1.tracer = tracer;
-    auto& a2  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("a2")}, {"scale_factor", gr::pmt::Value(-1.0f)}});
+    auto& a2  = flow.emplaceBlock<Scale<float>>({{"name", "a2"}, {"scale_factor", -1.0f}});
     a2.tracer = tracer;
-    auto& a3  = flow.emplaceBlock<Scale<float>>({{"name", gr::pmt::Value("a3")}, {"scale_factor", gr::pmt::Value(-1.0f)}});
+    auto& a3  = flow.emplaceBlock<Scale<float>>({{"name", "a3"}, {"scale_factor", -1.0f}});
     a3.tracer = tracer;
 
     // adders for cascaded feedback signal summation
-    auto& feedbackSum0  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("fbSum0")}});
+    auto& feedbackSum0  = flow.emplaceBlock<Adder<float>>({{"name", "fbSum0"}});
     feedbackSum0.tracer = tracer;
-    auto& feedbackSum1  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("fbSum1")}}); // combines a2 and a3
+    auto& feedbackSum1  = flow.emplaceBlock<Adder<float>>({{"name", "fbSum1"}}); // combines a2 and a3
     feedbackSum1.tracer = tracer;
-    auto& feedbackSum2  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("fbSum2")}}); // combines a1 with (a2+a3)
+    auto& feedbackSum2  = flow.emplaceBlock<Adder<float>>({{"name", "fbSum2"}}); // combines a1 with (a2+a3)
     feedbackSum2.tracer = tracer;
 
     // adders for cascaded feed-forward signal summation
-    auto& outputSum0  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("ffSum0")}}); // combines b0 and sum(b1,b2,b3)
+    auto& outputSum0  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum0"}}); // combines b0 and sum(b1,b2,b3)
     outputSum0.tracer = tracer;
-    auto& outputSum1  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("ffSum1")}}); // combines b2 and b3
+    auto& outputSum1  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum1"}}); // combines b2 and b3
     outputSum1.tracer = tracer;
-    auto& outputSum2  = flow.emplaceBlock<Adder<float>>({{"name", gr::pmt::Value("ffSum2")}}); // combines b1 with (b2+b3)
+    auto& outputSum2  = flow.emplaceBlock<Adder<float>>({{"name", "ffSum2"}}); // combines b1 with (b2+b3)
     outputSum2.tracer = tracer;
 
     // main path src -> sum (feedback branches) -> b0 -> sum (feed-forward branches) -> snk
@@ -567,7 +567,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
             expect(false) << std::format("couldn't initialise scheduler. error: {}", ret.error()) << fatal;
         }
 
-        auto ret1 = sched.settings().set({{"timeout_ms", gr::pmt::Value(gr::Size_t(6))}});
+        auto ret1 = sched.settings().set({{"timeout_ms", gr::Size_t(6)}});
         expect(ret1.empty()) << "setting one known parameter";
         expect(sched.settings().stagedParameters().empty());          // set(...) does not change stagedParameters
         expect(not sched.settings().changed()) << "settings changed"; // set(...) does not change changed()
@@ -583,7 +583,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
 
         sched.settings().updateActiveParameters();
 
-        auto ret2 = sched.settings().set({{"timeout_ms", gr::pmt::Value(gr::Size_t(42))}});
+        auto ret2 = sched.settings().set({{"timeout_ms", gr::Size_t(42)}});
         expect(ret2.empty()) << "setting one known parameter";
         expect(sched.settings().stagedParameters().empty());          // set(...) does not change stagedParameters
         expect(not sched.settings().changed()) << "settings changed"; // set(...) does not change changed()
@@ -971,7 +971,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         using namespace gr::testing;
         gr::Graph flow;
 
-        auto& source  = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", gr::pmt::Value(1024U)}});
+        auto& source  = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", 1024U}});
         auto& monitor = flow.emplaceBlock<Copy<float>>();
         auto& sink    = flow.emplaceBlock<CountingSink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
@@ -997,7 +997,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         gr::Graph flow;
 
         auto& source  = flow.emplaceBlock<NullSource<float>>();
-        auto& monitor = flow.emplaceBlock<HeadBlock<float>>({{"n_samples_max", gr::pmt::Value(1024U)}});
+        auto& monitor = flow.emplaceBlock<HeadBlock<float>>({{"n_samples_max", 1024U}});
         auto& sink    = flow.emplaceBlock<CountingSink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
@@ -1023,7 +1023,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
         auto& source  = flow.emplaceBlock<NullSource<float>>();
         auto& monitor = flow.emplaceBlock<Copy<float>>();
-        auto& sink    = flow.emplaceBlock<CountingSink<float>>({{"n_samples_max", gr::pmt::Value(1024U)}});
+        auto& sink    = flow.emplaceBlock<CountingSink<float>>({{"n_samples_max", 1024U}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
@@ -1121,9 +1121,9 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         using TBlock = Scale<int>;
         gr::Graph graph;
 
-        TBlock& A = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("A")}});
-        TBlock& B = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("B")}});
-        TBlock& C = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("C")}});
+        TBlock& A = graph.emplaceBlock<TBlock>({{"name", "A"}});
+        TBlock& B = graph.emplaceBlock<TBlock>({{"name", "B"}});
+        TBlock& C = graph.emplaceBlock<TBlock>({{"name", "C"}});
 
         expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
         expect(eq(graph.connect<"scaled">(B).to<"original">(C), ConnectionResult::SUCCESS));
@@ -1146,9 +1146,9 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         using TBlock = Scale<int>;
         gr::Graph graph;
 
-        TBlock& A = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("A")}});
-        TBlock& B = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("B")}});
-        TBlock& C = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("C")}});
+        TBlock& A = graph.emplaceBlock<TBlock>({{"name", "A"}});
+        TBlock& B = graph.emplaceBlock<TBlock>({{"name", "B"}});
+        TBlock& C = graph.emplaceBlock<TBlock>({{"name", "C"}});
 
         expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
         expect(eq(graph.connect<"scaled">(A).to<"original">(C), ConnectionResult::SUCCESS));
@@ -1195,10 +1195,10 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         using TBlock = Scale<int>;
         gr::Graph graph;
 
-        TBlock& blockA = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("A")}});
-        TBlock& blockB = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("B")}});
-        TBlock& blockC = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("C")}});
-        TBlock& blockD = graph.emplaceBlock<TBlock>({{"name", gr::pmt::Value("D")}}); // isolated
+        TBlock& blockA = graph.emplaceBlock<TBlock>({{"name", "A"}});
+        TBlock& blockB = graph.emplaceBlock<TBlock>({{"name", "B"}});
+        TBlock& blockC = graph.emplaceBlock<TBlock>({{"name", "C"}});
+        TBlock& blockD = graph.emplaceBlock<TBlock>({{"name", "D"}}); // isolated
 
         expect(eq(graph.connect<"scaled">(blockA).to<"original">(blockB), ConnectionResult::SUCCESS));
         expect(eq(graph.connect<"scaled">(blockB).to<"original">(blockC), ConnectionResult::SUCCESS));

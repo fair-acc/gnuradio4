@@ -54,22 +54,22 @@ void execute_selector_test(TestParams params, std::source_location location = st
     std::ranges::transform(params.mapping, mapIn.begin(), [](auto& p) { return p.first; });
     std::ranges::transform(params.mapping, mapOut.begin(), [](auto& p) { return p.second; });
 
-    selector = std::addressof(graph.emplaceBlock<gr::basic::Selector<double>>({{"n_inputs", gr::pmt::Value(nSources)}, {"n_outputs", gr::pmt::Value(nSinks)}, {"map_in", gr::pmt::Value(mapIn)}, {"map_out", gr::pmt::Value(mapOut)}, {"back_pressure", gr::pmt::Value(params.backPressure)}, {"sync_combined_ports", gr::pmt::Value(params.syncCombinedPorts)}, {"disconnect_on_done", gr::pmt::Value(false)}}));
+    selector = std::addressof(graph.emplaceBlock<gr::basic::Selector<double>>({{"n_inputs", nSources}, {"n_outputs", nSinks}, {"map_in", mapIn}, {"map_out", mapOut}, {"back_pressure", params.backPressure}, {"sync_combined_ports", params.syncCombinedPorts}, {"disconnect_on_done", false}}));
 
     for (gr::Size_t i = 0; i < nSources; ++i) {
-        sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", gr::pmt::Value(params.nSamples)}, {"values", gr::pmt::Value(params.inValues[i])}, {"disconnect_on_done", gr::pmt::Value(false)}})));
+        sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", params.nSamples}, {"values", params.inValues[i]}, {"disconnect_on_done", false}})));
         expect(sources[i]->settings().applyStagedParameters().forwardParameters.empty());
         sources[i]->_tags = params.inTags[i];
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, *selector, "inputs#"s + std::to_string(i)));
     }
 
     for (gr::Size_t i = 0; i < nSinks; ++i) {
-        sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", gr::pmt::Value(false)}})));
+        sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", false}})));
         expect(sinks[i]->settings().applyStagedParameters().forwardParameters.empty());
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
     }
 
-    TagSink<double, ProcessFunction::USE_PROCESS_ONE>* monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", gr::pmt::Value(false)}}));
+    TagSink<double, ProcessFunction::USE_PROCESS_ONE>* monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", false}}));
     expect(monitorSink->settings().applyStagedParameters().forwardParameters.empty());
     expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
 
@@ -102,7 +102,7 @@ const boost::ut::suite SelectorTest = [] {
     using namespace gr::basic;
 
     "Selector<T> constructor"_test = [] {
-        Selector<double> block_nop({{"name", gr::pmt::Value("block_nop")}});
+        Selector<double> block_nop({{"name", "block_nop"}});
         block_nop.init(block_nop.progress);
         expect(eq(block_nop.n_inputs, 0U));
         expect(eq(block_nop.n_outputs, 0U));
@@ -110,7 +110,7 @@ const boost::ut::suite SelectorTest = [] {
         expect(eq(block_nop.outputs.size(), 0U));
         expect(eq(block_nop._internalMappingInOut.size(), 0U));
 
-        Selector<double> block({{"name", gr::pmt::Value("block")}, {"n_inputs", gr::pmt::Value(4U)}, {"n_outputs", gr::pmt::Value(3U)}});
+        Selector<double> block({{"name", "block"}, {"n_inputs", 4U}, {"n_outputs", 3U}});
         block.init(block.progress);
         expect(eq(block.n_inputs, 4U));
         expect(eq(block.n_outputs, 3U));
@@ -122,7 +122,7 @@ const boost::ut::suite SelectorTest = [] {
     "basic Selector<T>"_test = [] {
         using T = double;
         const Tensor<uint32_t> outputMap{data_from, {1U, 0U}};
-        Selector<T>            block({{"n_inputs", gr::pmt::Value(3U)}, {"n_outputs", gr::pmt::Value(2U)}, {"map_in", gr::pmt::Value(Tensor<gr::Size_t>(data_from, {0U, 1U}))}, {"map_out", gr::pmt::Value(outputMap)}}); // N.B. 3rd input is unconnected
+        Selector<T>            block({{"n_inputs", 3U}, {"n_outputs", 2U}, {"map_in", Tensor<gr::Size_t>(data_from, {0U, 1U})}, {"map_out", outputMap}}); // N.B. 3rd input is unconnected
         block.init(block.progress);
         expect(eq(block._internalMappingInOut.size(), 2U));
 
@@ -130,9 +130,9 @@ const boost::ut::suite SelectorTest = [] {
         expect(block._internalMappingInOut == internal_mapping_t{{0U, {outputMap[0]}}, {1U, {outputMap[1]}}});
     };
 
-    gr::Tag tag1{1, {{"key1", gr::pmt::Value("value1")}}};
-    gr::Tag tag2{2, {{"key2", gr::pmt::Value("value2")}}};
-    gr::Tag tag3{3, {{"key3", gr::pmt::Value("value3")}}};
+    gr::Tag tag1{1, {{"key1", "value1"}}};
+    gr::Tag tag2{2, {{"key2", "value2"}}};
+    gr::Tag tag3{3, {{"key3", "value3"}}};
 
     // Tests without the back pressure
 

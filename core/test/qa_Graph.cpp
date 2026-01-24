@@ -98,7 +98,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         const std::size_t  nIterations      = 10;
         gr::Size_t         nMaxSamples      = static_cast<gr::Size_t>(nIterations * customBufferSize);
         Tensor<gr::Size_t> activeIndices    = {gr::data_from, {0}};
-        auto&              src              = graph.emplaceBlock<MultiPortTestSource<float, 3>>({{"n_samples_max", pmt::Value(nMaxSamples)}, {"active_indices", pmt::Value(activeIndices)}});
+        auto&              src              = graph.emplaceBlock<MultiPortTestSource<float, 3>>({{"n_samples_max", nMaxSamples}, {"active_indices", activeIndices}});
         auto&              sink1            = graph.emplaceBlock<NullSink<float>>();
 
         // only the first port is connected

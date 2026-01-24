@@ -161,7 +161,7 @@ connections:
             for (const auto& block : graph->blocks()) {
                 if (block->name() == "ArraySource<float64>") {
                     expect(block->settings().applyStagedParameters().forwardParameters.empty());
-                    expect(testing::get_value_or_fail<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", gr::pmt::Value(43.f)}, {"y", gr::pmt::Value(7070.f)}});
+                    expect(testing::get_value_or_fail<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
                 }
             }
 
@@ -520,8 +520,8 @@ connections:
 
         gr::Graph graph1;
         auto&     arraySink    = graph1.emplaceBlock<gr::testing::ArraySink<double>>();
-        auto&     arraySource0 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", gr::pmt::Value("ArraySource0")}});
-        auto&     arraySource1 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", gr::pmt::Value("ArraySource1")}});
+        auto&     arraySource0 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource0"}});
+        auto&     arraySource1 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource1"}});
 
         expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 0>(arraySource0).to<"inB", 1>(arraySink)));
         expect(eq(ConnectionResult::SUCCESS, graph1.connect<"outA", 1>(arraySource1).to<"inB", 0>(arraySink)));
@@ -547,8 +547,8 @@ connections:
 
         gr::Graph graph1;
         auto&     vectorSink    = graph1.emplaceBlock<gr::testing::VectorSink<double>>();
-        auto&     vectorSource0 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", gr::pmt::Value("VectorSource0")}});
-        auto&     vectorSource1 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", gr::pmt::Value("VectorSource1")}});
+        auto&     vectorSource0 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource0"}});
+        auto&     vectorSource1 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource1"}});
 
         expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, {0UZ, 0UZ}, vectorSink, {1UZ, 1UZ})));
         expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, {1UZ, 0UZ}, vectorSink, {0UZ, 0UZ})));
@@ -583,7 +583,7 @@ const boost::ut::suite SettingsTests = [] {
             const auto expectedString       = std::string("abc");
             const bool expectedBool         = true;
             const auto expectedComplex      = std::complex<double>(1., 1.);
-            const auto expectedStringVector = Tensor<pmt::Value>{pmt::Value("a"), pmt::Value("b"), pmt::Value("c")};
+            const auto expectedStringVector = Tensor<pmt::Value>{"a", "b", "c"};
             const auto expectedBoolVector   = Tensor<bool>(gr::data_from, {true, false, true});
             const auto expectedDoubleVector = Tensor<double>{1., 2., 3.};
             const auto expectedInt16Vector  = Tensor<std::int16_t>(gr::data_from, {1, 2, 3});
@@ -591,8 +591,8 @@ const boost::ut::suite SettingsTests = [] {
             using cd                         = std::complex<double>;
             const auto expectedComplexVector = Tensor<std::complex<double>>{cd{1., 1.}, cd{2., 2.}, cd{3., 3.}};
 
-            std::ignore = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"bool_setting", gr::pmt::Value(bool(expectedBool))}, {"string_setting", gr::pmt::Value(expectedString)}, {"complex_setting", gr::pmt::Value(expectedComplex)}, //
-                {"bool_vector", gr::pmt::Value(expectedBoolVector)}, {"string_vector", gr::pmt::Value(expectedStringVector)}, {"double_vector", gr::pmt::Value(expectedDoubleVector)}, {"int16_vector", gr::pmt::Value(expectedInt16Vector)}, {"complex_vector", gr::pmt::Value(expectedComplexVector)}});
+            std::ignore = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"bool_setting", bool(expectedBool)}, {"string_setting", expectedString}, {"complex_setting", expectedComplex}, //
+                {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
@@ -620,17 +620,17 @@ const boost::ut::suite SettingsTests = [] {
             using namespace gr;
 
             gr::Graph  graph1;
-            auto&      block = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"name", gr::pmt::Value("ArraySink0")}});
+            auto&      block = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"name", "ArraySink0"}});
             const auto now   = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1")}}, SettingsCtx{now, gr::pmt::Value("1")}).empty());
+            expect(block.settings().set({{"name", "ArraySink1"}}, SettingsCtx{now, "1"}).empty());
             expect(block.settings().getStoredAll().size() == 2);
-            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1+10")}}, SettingsCtx{now + 10'000'000'000ULL, gr::pmt::Value("1")}).empty());
+            expect(block.settings().set({{"name", "ArraySink1+10"}}, SettingsCtx{now + 10'000'000'000ULL, "1"}).empty());
             expect(block.settings().getStoredAll().size() == 2);
-            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink1+20")}}, SettingsCtx{now + 20'000'000'000ULL, gr::pmt::Value("1")}).empty());
+            expect(block.settings().set({{"name", "ArraySink1+20"}}, SettingsCtx{now + 20'000'000'000ULL, "1"}).empty());
             expect(block.settings().getStoredAll().size() == 2);
-            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink2")}}, SettingsCtx{now, gr::pmt::Value("2")}).empty());
+            expect(block.settings().set({{"name", "ArraySink2"}}, SettingsCtx{now, "2"}).empty());
             expect(block.settings().getStoredAll().size() == 3);
-            expect(block.settings().set({{"name", gr::pmt::Value("ArraySink3")}}, SettingsCtx{now, gr::pmt::Value(3)}).empty()); // int as context name
+            expect(block.settings().set({{"name", "ArraySink3"}}, SettingsCtx{now, 3}).empty()); // int as context name
             expect(block.settings().getStoredAll().size() == 4);
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
@@ -643,15 +643,15 @@ const boost::ut::suite SettingsTests = [] {
                 for (const auto& [ctx, ctxParameters] : stored) {
                     for (const auto& [ctxTime, settingsMap] : ctxParameters) {
                         std::string expectedName = "ArraySink0";
-                        if (ctxTime.context == gr::pmt::Value("1") && ctxTime.time == now) {
+                        if (ctxTime.context == "1" && ctxTime.time == now) {
                             expectedName = "ArraySink1";
-                        } else if (ctxTime.context == gr::pmt::Value("1") && ctxTime.time == now + 10'000'000'000ULL) {
+                        } else if (ctxTime.context == "1" && ctxTime.time == now + 10'000'000'000ULL) {
                             expectedName = "ArraySink1+10";
-                        } else if (ctxTime.context == gr::pmt::Value("1") && ctxTime.time == now + 20'000'000'000ULL) {
+                        } else if (ctxTime.context == "1" && ctxTime.time == now + 20'000'000'000ULL) {
                             expectedName = "ArraySink1+20";
-                        } else if (ctxTime.context == gr::pmt::Value("2") && ctxTime.time == now) {
+                        } else if (ctxTime.context == "2" && ctxTime.time == now) {
                             expectedName = "ArraySink2";
-                        } else if (ctxTime.context == gr::pmt::Value("3") && ctxTime.time == now) {
+                        } else if (ctxTime.context == "3" && ctxTime.time == now) {
                             expectedName = "ArraySink3";
                         }
 

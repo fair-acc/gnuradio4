@@ -23,9 +23,9 @@ void test_block(const TestParameters<T> p) {
 
     // build test graph
     Graph graph;
-    auto& block = graph.emplaceBlock<BlockUnderTest>({{"n_inputs", gr::pmt::Value(n_inputs)}});
+    auto& block = graph.emplaceBlock<BlockUnderTest>({{"n_inputs", n_inputs}});
     for (Size_t i = 0; i < n_inputs; ++i) {
-        auto& src = graph.emplaceBlock<TagSource<T>>({{"values", gr::pmt::Value(p.inputs[i])}, {"n_samples_max", gr::pmt::Value(static_cast<Size_t>(p.inputs[i].size()))}});
+        auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.inputs[i]}, {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
         expect(eq(graph.connect(src, "out"s, block, "in#"s + std::to_string(i)), ConnectionResult::SUCCESS)) << std::format("Failed to connect output port of src {} to input port 'in#{}' of block", i, i);
     }
     auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_ONE>>();
@@ -114,28 +114,28 @@ std::complex<float>, std::complex<double>*/>();
 
     "AddConst"_test = []<typename T>(const T&) {
         expect(eq(AddConst<T>().processOne(T(4)), T(4) + T(1))) << std::format("AddConst test for type {}\n", meta::type_name<T>());
-        auto block = AddConst<T>(property_map{{"value", gr::pmt::Value(T(2))}});
+        auto block = AddConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress);
         expect(eq(block.processOne(T(4)), T(4) + T(2))) << std::format("AddConst(2) test for type {}\n", meta::type_name<T>());
     } | kArithmeticTypes;
 
     "SubtractConst"_test = []<typename T>(const T&) {
         expect(eq(SubtractConst<T>().processOne(T(4)), T(4) - T(1))) << std::format("SubtractConst test for type {}\n", meta::type_name<T>());
-        auto block = SubtractConst<T>(property_map{{"value", gr::pmt::Value(T(2))}});
+        auto block = SubtractConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress);
         expect(eq(block.processOne(T(4)), T(4) - T(2))) << std::format("SubtractConst(2) test for type {}\n", meta::type_name<T>());
     } | kArithmeticTypes;
 
     "MultiplyConst"_test = []<typename T>(const T&) {
         expect(eq(MultiplyConst<T>().processOne(T(4)), T(4) * T(1))) << std::format("MultiplyConst test for type {}\n", meta::type_name<T>());
-        auto block = MultiplyConst<T>(property_map{{"value", gr::pmt::Value(T(2))}});
+        auto block = MultiplyConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress);
         expect(eq(block.processOne(T(4)), T(4) * T(2))) << std::format("MultiplyConst(2) test for type {}\n", meta::type_name<T>());
     } | kArithmeticTypes;
 
     "DivideConst"_test = []<typename T>(const T&) {
         expect(eq(DivideConst<T>().processOne(T(4)), T(4) / T(1))) << std::format("SubtractConst test for type {}\n", meta::type_name<T>());
-        auto block = DivideConst<T>(property_map{{"value", gr::pmt::Value(T(2))}});
+        auto block = DivideConst<T>(property_map{{"value", T(2)}});
         block.init(block.progress);
         expect(eq(block.processOne(T(4)), T(4) / T(2))) << std::format("SubtractConst(2) test for type {}\n", meta::type_name<T>());
     } | kArithmeticTypes;

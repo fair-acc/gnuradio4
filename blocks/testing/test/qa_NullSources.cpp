@@ -18,7 +18,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
 
         Graph g;
         auto& src  = g.emplaceBlock<NullSource<T>>();
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", gr::pmt::Value(N)}});
+        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
@@ -35,7 +35,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr T          start_value = T(3);
 
         Graph g;
-        auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", gr::pmt::Value(start_value)}, {"n_samples_max", gr::pmt::Value(N_total)}});
+        auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", start_value}, {"n_samples_max", N_total}});
         auto& sink = g.emplaceBlock<NullSink<T>>();
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
@@ -52,9 +52,9 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr T          value = T(7);
 
         Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", gr::pmt::Value(value)}, {"n_samples_max", gr::pmt::Value(N)}});
+        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", value}, {"n_samples_max", N}});
         auto& copy = g.emplaceBlock<Copy<T>>();
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", gr::pmt::Value(N)}});
+        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
         expect(eq(g.connect(src, "out"s, copy, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(copy, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
@@ -73,9 +73,9 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr T          start_value = T(5);
 
         Graph g;
-        auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", gr::pmt::Value(start_value)}, {"n_samples_max", gr::pmt::Value(N_total)}});
-        auto& head = g.emplaceBlock<HeadBlock<T>>(property_map{{"n_samples_max", gr::pmt::Value(N_head)}});
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", gr::pmt::Value(N_head)}});
+        auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", start_value}, {"n_samples_max", N_total}});
+        auto& head = g.emplaceBlock<HeadBlock<T>>(property_map{{"n_samples_max", N_head}});
+        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N_head}});
 
         expect(eq(g.connect(src, "out"s, head, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(head, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
@@ -92,7 +92,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr gr::Size_t N = 5;
 
         Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", gr::pmt::Value(T(99))}, {"n_samples_max", gr::pmt::Value(N)}});
+        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", T(99)}, {"n_samples_max", N}});
         auto& sink = g.emplaceBlock<NullSink<T>>();
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
@@ -108,8 +108,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr gr::Size_t N = 3;
 
         Graph g;
-        auto& src  = g.emplaceBlock<SlowSource<T>>(property_map{{"default_value", gr::pmt::Value(T(77))}, {"delay", gr::pmt::Value(10U)}});
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", gr::pmt::Value(N)}});
+        auto& src  = g.emplaceBlock<SlowSource<T>>(property_map{{"default_value", T(77)}, {"delay", 10U}});
+        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
         expect(eq(g.connect(src, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
 
@@ -125,9 +125,9 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr gr::Size_t N = 8;
 
         Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", gr::pmt::Value(T(5))}, {"n_samples_max", gr::pmt::Value(N)}});
-        auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", gr::pmt::Value(0.0f)}, {"busy_wait", gr::pmt::Value(true)}});
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", gr::pmt::Value(N)}});
+        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", T(5)}, {"n_samples_max", N}});
+        auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", 0.0f}, {"busy_wait", true}});
+        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
         expect(eq(g.connect(src, "out"s, sim, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(sim, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
@@ -144,9 +144,9 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr gr::Size_t N = 8;
 
         Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", gr::pmt::Value(T(5))}, {"n_samples_max", gr::pmt::Value(N)}});
-        auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", gr::pmt::Value(1.0f)}, {"busy_wait", gr::pmt::Value(true)}});
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", gr::pmt::Value(N)}});
+        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", T(5)}, {"n_samples_max", N}});
+        auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", 1.0f}, {"busy_wait", true}});
+        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
         expect(eq(g.connect(src, "out"s, sim, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(sim, "out"s, sink, "in"s), ConnectionResult::SUCCESS));
@@ -163,9 +163,9 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr gr::Size_t N = 6;
 
         Graph g;
-        auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", gr::pmt::Value(T(0))}, {"n_samples_max", gr::pmt::Value(N)}});
-        auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", gr::pmt::Value(2.0f)}, {"busy_wait", gr::pmt::Value(false)}});
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", gr::pmt::Value(N)}});
+        auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", T(0)}, {"n_samples_max", N}});
+        auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", 2.0f}, {"busy_wait", false}});
+        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
         expect(eq(g.connect(src, "out"s, sim, "in"s), ConnectionResult::SUCCESS));
         expect(eq(g.connect(sim, "out"s, sink, "in"s), ConnectionResult::SUCCESS));

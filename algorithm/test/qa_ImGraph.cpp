@@ -46,10 +46,10 @@ inline static gr::Graph example_base1() {
     gr::Graph graph;
 
     // Create blocks using emplaceBlock (similar to qa_Scheduler examples)
-    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("src#1")}});
-    auto& src2 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("src#2")}});
-    auto& add  = graph.emplaceBlock<GenericBlock<float, 2, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("add")}});
-    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#1")}});
+    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
+    auto& src2 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#2"}});
+    auto& add  = graph.emplaceBlock<GenericBlock<float, 2, 0, 0, 1, 0, 0>>({{"name", "add"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
 
     // Connect using the actual gr::Graph API
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0UZ>(add)));
@@ -64,10 +64,10 @@ inline static gr::Graph example_base2() {
 
     gr::Graph graph;
 
-    auto& src1  = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 0, 1, 0>>({{"name", gr::pmt::Value("src#1")}});
-    auto& split = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 2, 0>>({{"name", gr::pmt::Value("split")}});
-    auto& snk1  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#1")}});
-    auto& snk2  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#2")}});
+    auto& src1  = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 0, 1, 0>>({{"name", "src#1"}});
+    auto& split = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 2, 0>>({{"name", "split"}});
+    auto& snk1  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", "snk#1"}});
+    auto& snk2  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", "snk#2"}});
 
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(src1).to<"in2", 0>(split)));
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(split).to<"in2", 0>(snk1)));
@@ -81,12 +81,12 @@ inline static gr::Graph example_cyclic_A() {
 
     gr::Graph graph;
 
-    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("src#1")}});
-    auto& sum  = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", gr::pmt::Value("Σ")}});
-    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("D(s)")}});
-    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("G(s)")}});
-    auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", gr::pmt::Value("M(s)")}});
-    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#1")}});
+    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
+    auto& sum  = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", "Σ"}});
+    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}});
+    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}});
+    auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
 
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
@@ -103,15 +103,15 @@ inline static gr::Graph example_cyclic_B() {
 
     gr::Graph graph;
 
-    auto&            src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("src#1")}});
-    gr::property_map prop{{"layout_pref", gr::pmt::Value("vertical")}};
-    auto&            sum = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", gr::pmt::Value("Σ")}, {"ui_constraints", gr::pmt::Value(prop)}});
+    auto&            src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
+    gr::property_map prop{{"layout_pref", "vertical"}};
+    auto&            sum = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", "Σ"}, {"ui_constraints", prop}});
     // setLayoutPref(gr::graph::findBlock(graph, sum.unique_name).value(), LayoutPref::VERTICAL);
 
-    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("D(s)")}});
-    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("G(s)")}});
-    auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", gr::pmt::Value("M(s)")}});
-    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#1")}});
+    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}});
+    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}});
+    auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
 
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
@@ -128,14 +128,14 @@ inline static gr::Graph example_auto() {
 
     gr::Graph graph;
 
-    gr::property_map prop{{"layout_pref", gr::pmt::Value("auto")}};
-    auto&            src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("src#1")}, {"ui_constraints", gr::pmt::Value(prop)}});
-    auto&            sum  = graph.emplaceBlock<GenericBlock<float, 2, 0, 0, 0, 1, 0>>({{"name", gr::pmt::Value("Σ")}, {"ui_constraints", gr::pmt::Value(prop)}});
-    auto&            ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("D(s)")}, {"ui_constraints", gr::pmt::Value(prop)}});
-    auto&            gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("G(s)")}, {"ui_constraints", gr::pmt::Value(prop)}});
-    auto&            snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#1")}, {"ui_constraints", gr::pmt::Value(prop)}});
+    gr::property_map prop{{"layout_pref", "auto"}};
+    auto&            src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}, {"ui_constraints", prop}});
+    auto&            sum  = graph.emplaceBlock<GenericBlock<float, 2, 0, 0, 0, 1, 0>>({{"name", "Σ"}, {"ui_constraints", prop}});
+    auto&            ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}, {"ui_constraints", prop}});
+    auto&            gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}, {"ui_constraints", prop}});
+    auto&            snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}, {"ui_constraints", prop}});
 
-    auto& ms = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", gr::pmt::Value("M(s)")}});
+    auto& ms = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
     // setLayoutPref(std::shared_ptr<gr::BlockModel>(graph.findBlock(ms.unique_name).value()), LayoutPref::HORIZONTAL);
 
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
@@ -152,29 +152,29 @@ inline static gr::Graph example_large() {
     using namespace boost::ut;
 
     gr::Graph        graph;
-    gr::property_map prop_auto{{"layout_pref", gr::pmt::Value("auto")}};
-    gr::property_map prop_ver{{"layout_pref", gr::pmt::Value("vertical")}};
-    gr::property_map prop_hor{{"layout_pref", gr::pmt::Value("horizontal")}};
+    gr::property_map prop_auto{{"layout_pref", "auto"}};
+    gr::property_map prop_ver{{"layout_pref", "vertical"}};
+    gr::property_map prop_hor{{"layout_pref", "horizontal"}};
 
     // Create all blocks
-    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("src#1")}});
+    auto& src1 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#1"}});
 
-    auto& sum = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", gr::pmt::Value("Σ")}, {"ui_constraints", gr::pmt::Value(prop_auto)}});
+    auto& sum = graph.emplaceBlock<GenericBlock<float, 1, 1, 0, 0, 1, 0>>({{"name", "Σ"}, {"ui_constraints", prop_auto}});
     // Set bottom side for second input port
     // auto sumBlock = graph.findBlock(sum.unique_name).value();
     // in(sumBlock, 1).preferredSide(Side::Bottom);
 
-    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("D(s)")}});
-    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("G(s)")}});
-    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#1")}});
+    auto& ds   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "D(s)"}});
+    auto& gs   = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "G(s)"}});
+    auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
 
-    auto& ms  = graph.emplaceBlock<GenericBlock<float, 0, 2, 0, 1, 1, 0>>({{"name", gr::pmt::Value("M(s)")}});
-    auto& m2s = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("M2(s)")}, {"ui_constraints", gr::pmt::Value(prop_hor)}});
+    auto& ms  = graph.emplaceBlock<GenericBlock<float, 0, 2, 0, 1, 1, 0>>({{"name", "M(s)"}});
+    auto& m2s = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "M2(s)"}, {"ui_constraints", prop_hor}});
 
-    auto& src2 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", gr::pmt::Value("src#2")}});
-    auto& snk2 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#2")}});
-    auto& snk3 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", gr::pmt::Value("snk#3")}});
-    auto& m3s  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", gr::pmt::Value("M3(s)")}, {"ui_constraints", gr::pmt::Value(prop_auto)}});
+    auto& src2 = graph.emplaceBlock<GenericBlock<float, 0, 0, 0, 1, 0, 0>>({{"name", "src#2"}});
+    auto& snk2 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#2"}});
+    auto& snk3 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#3"}});
+    auto& m3s  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M3(s)"}, {"ui_constraints", prop_auto}});
 
     // Main connections
     expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));

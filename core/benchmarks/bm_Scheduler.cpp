@@ -32,8 +32,8 @@ void create_cascade(gr::Graph& testGraph, Sink& src, Source& sink, std::size_t d
     std::vector<MultiplyConst<T>*> mult1;
     std::vector<DivideConst<T>*>   mult2;
     for (std::size_t i = 0; i < depth; i++) {
-        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"value", gr::pmt::Value(T(2))}, {"name", gr::pmt::Value(std::format("mult.{}", i))}})));
-        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"value", gr::pmt::Value(T(2))}, {"name", gr::pmt::Value(std::format("div.{}", i))}})));
+        mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"value", T(2)}, {"name", std::format("mult.{}", i)}})));
+        mult2.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"value", T(2)}, {"name", std::format("div.{}", i)}})));
     }
 
     for (std::size_t i = 0; i < mult1.size(); i++) {
@@ -51,7 +51,7 @@ template<typename T>
 gr::Graph test_graph_linear(std::size_t depth = 1) {
     gr::Graph testGraph;
 
-    auto& src  = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+    auto& src  = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({{"n_samples_max", N_SAMPLES}});
     auto& sink = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
 
     create_cascade<T>(testGraph, src, sink, depth);
@@ -65,7 +65,7 @@ gr::Graph test_graph_bifurcated(std::size_t depth = 1) {
     using namespace benchmark;
     gr::Graph testGraph;
 
-    auto& src   = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+    auto& src   = testGraph.emplaceBlock<gr::testing::ConstantSource<T>>({{"n_samples_max", N_SAMPLES}});
     auto& sink1 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
     auto& sink2 = testGraph.emplaceBlock<gr::testing::NullSink<T>>();
 
@@ -156,10 +156,10 @@ void exec_bm(auto& scheduler, const std::string& test_case, [[maybe_unused]] Tes
 template<typename T>
 auto& createSource(gr::Graph& graph) {
     using namespace gr::testing;
-    auto& src = graph.emplaceBlock<TagSource<T, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("source")}, {"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+    auto& src = graph.emplaceBlock<TagSource<T, ProcessFunction::USE_PROCESS_BULK>>({{"name", "source"}, {"n_samples_max", N_SAMPLES}});
     src._tags = {
-        {0UZ, {{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value("first")}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(static_cast<uint64_t>(0))}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}}},             //
-        {(N_SAMPLES - 1UZ), {{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value("last")}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(static_cast<uint64_t>(0))}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}}} //
+        {0UZ, {{gr::tag::TRIGGER_NAME.shortKey(), "first"}, {gr::tag::TRIGGER_TIME.shortKey(), static_cast<uint64_t>(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}},             //
+        {(N_SAMPLES - 1UZ), {{gr::tag::TRIGGER_NAME.shortKey(), "last"}, {gr::tag::TRIGGER_TIME.shortKey(), static_cast<uint64_t>(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}} //
     };
     src._tagCallback = [](const gr::Tag& tag) {
         std::string triggerName = gr::testing::get_value_or_fail<std::string>(tag.map.at(gr::tag::TRIGGER_NAME.shortKey()));
@@ -178,7 +178,7 @@ template<typename T>
 auto& createSink(gr::Graph& graph, std::size_t idx = gr::meta::invalid_index, bool instrumentalise = true) {
     using namespace gr::testing;
     std::string sinkName = idx == gr::meta::invalid_index ? "sink" : std::format("sink#{}", idx);
-    auto&       sink     = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value(sinkName)}});
+    auto&       sink     = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_BULK>>({{"name", sinkName}});
     if (!instrumentalise) {
         return sink;
     }
@@ -238,7 +238,7 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
         SimCompute<T>* lastBlock;
         for (std::size_t i = 0UZ; i < depth; i++) {
             std::string blockName = std::format("sim{}", depth - i);
-            auto&       simBlock  = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value(blockName)}});
+            auto&       simBlock  = graph.emplaceBlock<SimCompute<T>>({{"name", blockName}});
             if (i == 0UZ) {
                 expect(eq(graph.connect(simBlock, "out"s, sink, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
             } else {
@@ -252,19 +252,19 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
     case GraphTopology::FORKED: { // deliberately 4 sim blocks to mimic the total time of the linear test-case
         auto& src = createSource<T>(graph);
         // branch #1
-        auto& simBlock1 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim1")}});
+        auto& simBlock1 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim1"}});
         expect(eq(graph.connect(src, "out"s, simBlock1, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
         // branch #2
-        auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim2")}});
+        auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim2"}});
         expect(eq(graph.connect(src, "out"s, simBlock2, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim3")}});
+        auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim3"}});
         expect(eq(graph.connect(simBlock2, "out"s, simBlock3, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
         // merge branch #1 & #2
-        auto& adder = graph.emplaceBlock<gr::blocks::math::Add<T>>({{"name", gr::pmt::Value("adder")}, {"n_inputs", gr::pmt::Value(2U)}});
+        auto& adder = graph.emplaceBlock<gr::blocks::math::Add<T>>({{"name", "adder"}, {"n_inputs", 2U}});
         expect(eq(graph.connect(simBlock1, "out"s, adder, "in#0"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
         expect(eq(graph.connect(simBlock3, "out"s, adder, "in#1"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
 
-        auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim4")}});
+        auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}});
         expect(eq(graph.connect(adder, "out"s, simBlock4, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
 
         // final sink
@@ -273,13 +273,13 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
     } break;
     case GraphTopology::SPLIT: { // deliberately 4 sim blocks to mimic the total time of the linear test-case
         auto& src       = createSource<T>(graph);
-        auto& simBlock1 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim1")}});
+        auto& simBlock1 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim1"}});
         expect(eq(graph.connect(src, "out"s, simBlock1, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim2")}});
+        auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim2"}});
         expect(eq(graph.connect(simBlock1, "out"s, simBlock2, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim3")}});
+        auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim3"}});
         expect(eq(graph.connect(simBlock2, "out"s, simBlock3, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim4")}});
+        auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}});
         expect(eq(graph.connect(simBlock3, "out"s, simBlock4, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
 
         auto& sink1 = createSink<T>(graph, 0UZ, false);
@@ -290,17 +290,17 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
     case GraphTopology::FEEDBACK: {              // graph with feedback edge
         constexpr float targetThroughput = 10e9; // 10 GS/s disables CPU rate limit for testing until further improved
         auto&           src              = createSource<T>(graph);
-        auto&           simBlock1        = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim1")}, {"target_throughput", gr::pmt::Value(targetThroughput)}});
+        auto&           simBlock1        = graph.emplaceBlock<SimCompute<T>>({{"name", "sim1"}, {"target_throughput", targetThroughput}});
         expect(eq(graph.connect(src, "out"s, simBlock1, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        gr::property_map prop_auto{{"layout_pref", gr::pmt::Value("auto")}};
-        auto&            adder = graph.emplaceBlock<gr::blocks::math::Add<T>>({{"name", gr::pmt::Value("Σ")}, {"n_inputs", gr::pmt::Value(2U)}, {"ui_constraints", gr::pmt::Value(prop_auto)}});
+        gr::property_map prop_auto{{"layout_pref", "auto"}};
+        auto&            adder = graph.emplaceBlock<gr::blocks::math::Add<T>>({{"name", "Σ"}, {"n_inputs", 2U}, {"ui_constraints", prop_auto}});
         expect(eq(graph.connect(simBlock1, "out"s, adder, {0UZ, 0UZ}, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS)); // '{0UZ, 0UZ}' is a workaround for broken connect
         // expect(eq(graph.connect(simBlock1, "out"s, adder, "in#0"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim2")}, {"target_throughput", gr::pmt::Value(targetThroughput)}});
+        auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim2"}, {"target_throughput", targetThroughput}});
         expect(eq(graph.connect(adder, "out"s, simBlock2, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim3")}, {"target_throughput", gr::pmt::Value(targetThroughput)}});
+        auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim3"}, {"target_throughput", targetThroughput}});
         expect(eq(graph.connect(simBlock2, "out"s, simBlock3, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
-        auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", gr::pmt::Value("sim4")}, {"target_throughput", gr::pmt::Value(targetThroughput)}});
+        auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}, {"target_throughput", targetThroughput}});
         expect(eq(graph.connect(simBlock3, "out"s, simBlock4, "in"s, N_BUFFER_SIZE), gr::ConnectionResult::SUCCESS));
 
         // feedback edge
@@ -345,13 +345,13 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
         }
         ::benchmark::benchmark(std::format("BFS scheduler - unlimited work - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&breathFirstSched1](TestMarker& marker) { exec_bm(breathFirstSched1, "test case #2", marker); };
 
-        gr::scheduler::DepthFirst depthFirstSched2({{"max_work_items", gr::pmt::Value(1024UZ)}});
+        gr::scheduler::DepthFirst depthFirstSched2({{"max_work_items", 1024UZ}});
         if (auto ret = depthFirstSched2.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         ::benchmark::benchmark(std::format("DFS scheduler - work limited to 1024 - {}", topologyName)).repeat<N_ITER>(N_SAMPLES) = [&depthFirstSched2](TestMarker& marker) { exec_bm(depthFirstSched2, "test case #2", marker); };
 
-        gr::scheduler::BreadthFirst breathFirstSched2({{"max_work_items", gr::pmt::Value(1024UZ)}});
+        gr::scheduler::BreadthFirst breathFirstSched2({{"max_work_items", 1024UZ}});
         if (auto ret = breathFirstSched2.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }

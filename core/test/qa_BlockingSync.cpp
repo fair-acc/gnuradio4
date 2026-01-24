@@ -353,8 +353,8 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         constexpr float      sampleRate = 1000.f;
 
         Graph testGraph;
-        auto& src  = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"sample_rate", gr::pmt::Value(sampleRate)}, {"chunk_size", gr::pmt::Value(gr::Size_t{50})}, {"name", gr::pmt::Value("ClockSource")}});
-        auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("Sink")}});
+        auto& src  = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", nSamples}, {"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{50}}, {"name", "ClockSource"}});
+        auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
@@ -371,11 +371,11 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         constexpr float      sampleRate = 1000.f;
 
         Graph testGraph;
-        auto& src = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"sample_rate", gr::pmt::Value(sampleRate)}, {"chunk_size", gr::pmt::Value(gr::Size_t{50})}, {"name", gr::pmt::Value("ClockSourceTags")}});
+        auto& src = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", nSamples}, {"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{50}}, {"name", "ClockSourceTags"}});
 
-        src.tags = {{0, {{"key", gr::pmt::Value("value@0")}}}, {25, {{"key", gr::pmt::Value("value@25")}}}, {50, {{"key", gr::pmt::Value("value@50")}}}, {100, {{"key", gr::pmt::Value("value@100")}}}, {150, {{"key", gr::pmt::Value("value@150")}}}};
+        src.tags = {{0, {{"key", "value@0"}}}, {25, {{"key", "value@25"}}}, {50, {{"key", "value@50"}}}, {100, {{"key", "value@100"}}}, {150, {{"key", "value@150"}}}};
 
-        auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("Sink")}});
+        auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
@@ -390,8 +390,8 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
 
     "generator free-running mode"_test = [] {
         Graph testGraph;
-        auto& gen  = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", gr::pmt::Value(1000.f)}, {"chunk_size", gr::pmt::Value(gr::Size_t{50})}, {"name", gr::pmt::Value("FreeRunningGen")}});
-        auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("Sink")}});
+        auto& gen  = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", 1000.f}, {"chunk_size", gr::Size_t{50}}, {"name", "FreeRunningGen"}});
+        auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         // clk_in not connected -> free-running mode
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(gen).to<"in">(sink)));
@@ -414,9 +414,9 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         constexpr float      sampleRate = 1000.f;
 
         Graph testGraph;
-        auto& clock = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"sample_rate", gr::pmt::Value(sampleRate)}, {"chunk_size", gr::pmt::Value(gr::Size_t{50})}, {"name", gr::pmt::Value("ClockSource")}});
-        auto& gen   = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", gr::pmt::Value(sampleRate)}, {"chunk_size", gr::pmt::Value(gr::Size_t{100})}, {"name", gr::pmt::Value("ConnectedGen")}});
-        auto& sink  = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("Sink")}});
+        auto& clock = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", nSamples}, {"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{50}}, {"name", "ClockSource"}});
+        auto& gen   = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{100}}, {"name", "ConnectedGen"}});
+        auto& sink  = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clock).to<"clk_in">(gen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(gen).to<"in">(sink)));
@@ -436,16 +436,16 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         constexpr float      sampleRate = 1000.f;
 
         Graph testGraph;
-        auto& clock = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"sample_rate", gr::pmt::Value(sampleRate)}, {"chunk_size", gr::pmt::Value(gr::Size_t{50})}, {"name", gr::pmt::Value("ClockSource")}});
+        auto& clock = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", nSamples}, {"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{50}}, {"name", "ClockSource"}});
 
-        clock.tags = {{0, {{"sample_rate", gr::pmt::Value(sampleRate)}}}, {50, {{"trigger", gr::pmt::Value("event1")}}}, {100, {{"trigger", gr::pmt::Value("event2")}}}, {150, {{"trigger", gr::pmt::Value("event3")}}}};
+        clock.tags = {{0, {{"sample_rate", sampleRate}}}, {50, {{"trigger", "event1"}}}, {100, {{"trigger", "event2"}}}, {150, {{"trigger", "event3"}}}};
 
-        auto& gen = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", gr::pmt::Value(sampleRate)}, {"chunk_size", gr::pmt::Value(gr::Size_t{100})}, {"name", gr::pmt::Value("ConnectedGen")}});
+        auto& gen = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{100}}, {"name", "ConnectedGen"}});
 
         // enable forwarding of custom 'trigger' key
         gen.settings().autoForwardParameters().insert("trigger");
 
-        auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("Sink")}});
+        auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clock).to<"clk_in">(gen)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(gen).to<"in">(sink)));
@@ -467,9 +467,9 @@ const boost::ut::suite<"Scheduler-driven free-running"> schedulerDriven = [] {
         constexpr float      sampleRate = 10000.f;
 
         Graph testGraph;
-        auto& src = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", gr::pmt::Value(nSamples)}, {"sample_rate", gr::pmt::Value(sampleRate)}, {"chunk_size", gr::pmt::Value(gr::Size_t{50})}, {"use_internal_thread", gr::pmt::Value(false)}, {"name", gr::pmt::Value("SchedulerDrivenSource")}});
+        auto& src = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", nSamples}, {"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{50}}, {"use_internal_thread", false}, {"name", "SchedulerDrivenSource"}});
 
-        auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("Sink")}});
+        auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 

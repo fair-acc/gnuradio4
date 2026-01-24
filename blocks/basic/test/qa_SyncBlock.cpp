@@ -32,7 +32,7 @@ void runTest(const TestParams& par) {
 
     std::size_t nPorts = par.inValues.size();
 
-    property_map syncBlockParams = {{"n_ports", gr::pmt::Value(static_cast<gr::Size_t>(nPorts))}};
+    property_map syncBlockParams = {{"n_ports", static_cast<gr::Size_t>(nPorts)}};
     if (par.maxHistorySize != 0) {
         syncBlockParams.insert_or_assign("max_history_size", par.maxHistorySize);
     }
@@ -48,7 +48,7 @@ void runTest(const TestParams& par) {
     std::vector<TagSink<int, ProcessFunction::USE_PROCESS_BULK>*>   sinks;
 
     for (std::size_t i = 0; i < nPorts; i++) {
-        property_map srcParams = {{"values", gr::pmt::Value(par.inValues[i])}, {"verbose_console", gr::pmt::Value(false)}, {"disconnect_on_done", gr::pmt::Value(false)}};
+        property_map srcParams = {{"values", par.inValues[i]}, {"verbose_console", false}, {"disconnect_on_done", false}};
         if (par.nSamples != 0) {
             srcParams.insert_or_assign("n_samples_max", par.nSamples);
         } else {
@@ -61,7 +61,7 @@ void runTest(const TestParams& par) {
     }
 
     for (std::size_t i = 0; i < nPorts; i++) {
-        property_map sinkParams = {{"verbose_console", gr::pmt::Value(false)}, {"disconnect_on_done", gr::pmt::Value(false)}};
+        property_map sinkParams = {{"verbose_console", false}, {"disconnect_on_done", false}};
         if (par.expectedValues.empty()) {
             sinkParams.insert_or_assign("log_samples", false);
         }
@@ -89,15 +89,15 @@ void runTest(const TestParams& par) {
 }
 
 gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(triggerName)}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(triggerTime)}}};
+    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
 };
 
 gr::Tag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), gr::pmt::Value(nSamplesDropped)}}};
+    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}}};
 };
 
 gr::Tag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), gr::pmt::Value(nSamplesDropped)}, {gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(triggerName)}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(triggerTime)}}};
+    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
 };
 
 const boost::ut::suite SyncBlockTests = [] {

@@ -106,7 +106,7 @@ struct Matcher {
     }
 };
 
-static Tag makeTag(std::size_t index, int year, int month, int day) { return Tag{index, {{"YEAR", gr::pmt::Value(year)}, {"MONTH", gr::pmt::Value(month)}, {"DAY", gr::pmt::Value(day)}}}; }
+static Tag makeTag(std::size_t index, int year, int month, int day) { return Tag{index, {{"YEAR", year}, {"MONTH", month}, {"DAY", day}}}; }
 
 static std::vector<Tag> makeTestTags(std::size_t firstIndex, std::size_t interval) {
     std::vector<Tag> tags;
@@ -275,11 +275,11 @@ const boost::ut::suite DataSinkTests = [] {
         const auto srcTags = makeTestTags(0, 1000);
 
         gr::Graph                testGraph;
-        auto&                    src                   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}, {"signal_name", gr::pmt::Value("test source")}, {"signal_unit", gr::pmt::Value("test unit")}, {"signal_min", gr::pmt::Value(-42.f)}, {"signal_max", gr::pmt::Value(42.f)}});
-        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
+        auto&                    src                   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test source"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
+        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
         delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
-        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test source")}});
+        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test source"}});
         src._tags  = srcTags;
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
@@ -381,12 +381,12 @@ const boost::ut::suite DataSinkTests = [] {
 
         gr::Graph  testGraph;
         const auto tags                                = makeTestTags(0, 1000);
-        auto&      src                                 = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}, {"signal_name", gr::pmt::Value("test signal")}, {"signal_unit", gr::pmt::Value("test unit")}, {"signal_min", gr::pmt::Value(-42.f)}, {"signal_max", gr::pmt::Value(42.f)}});
+        auto&      src                                 = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"signal_min", -42.f}, {"signal_max", 42.f}});
         src._tags                                      = tags;
-        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
+        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
         delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
-        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -473,12 +473,12 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
 
-        const auto tags = std::vector<Tag>{{3000, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER")}}}, {8000, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("NO_TRIGGER")}}}, {180000, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER")}}}};
+        const auto tags = std::vector<Tag>{{3000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}, {8000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER"}}}, {180000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
         src._tags       = tags;
-        auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}, {"signal_unit", gr::pmt::Value("none")}, {"signal_min", gr::pmt::Value(-2.0f)}, {"signal_max", gr::pmt::Value(2.0f)}});
+        auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
+        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", -2.0f}, {"signal_max", 2.0f}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -541,11 +541,11 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr gr::Size_t kSamples = 40000000;
 
         gr::Graph  testGraph;
-        auto&      src  = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}, {"signal_name", gr::pmt::Value("test signal")}, {"signal_unit", gr::pmt::Value("no unit")}, {"signal_min", gr::pmt::Value(-2.f)}, {"signal_max", gr::pmt::Value(2.f)}});
-        const auto tags = std::vector<Tag>{{39000000, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER")}}}};
+        auto&      src  = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {"signal_name", "test signal"}, {"signal_unit", "no unit"}, {"signal_min", -2.f}, {"signal_max", 2.f}});
+        const auto tags = std::vector<Tag>{{39000000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
         src._tags       = tags;
-        auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"signal_name", gr::pmt::Value("test signal")}});
+        auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
+        auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -606,10 +606,10 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr gr::Size_t kSamples = 200000;
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}, {gr::tag::SAMPLE_RATE.shortKey(), gr::pmt::Value(10000.f)}, {"signal_name", gr::pmt::Value("test signal")}, {"signal_unit", gr::pmt::Value("none")}, {"signal_min", gr::pmt::Value(0.f)}, {"signal_max", gr::pmt::Value(static_cast<float>(kSamples - 1))}});
-        src._tags     = {{3000, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER")}}}, {8000, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("NO_TRIGGER")}}}, {180000, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER")}}}};
-        auto& delay   = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", kSamples}, {"mark_tag", false}, {gr::tag::SAMPLE_RATE.shortKey(), 10000.f}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", 0.f}, {"signal_max", static_cast<float>(kSamples - 1)}});
+        src._tags     = {{3000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}, {8000, {{TRIGGER_NAME.shortKey(), "NO_TRIGGER"}}}, {180000, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}}};
+        auto& delay   = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
+        auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -681,12 +681,12 @@ const boost::ut::suite DataSinkTests = [] {
 
         const gr::Size_t n_samples = static_cast<gr::Size_t>(tags.size() * 10000 + 100000);
         gr::Graph        testGraph;
-        auto&            src                           = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", gr::pmt::Value(n_samples)}, {"mark_tag", gr::pmt::Value(false)}});
+        auto&            src                           = testGraph.emplaceBlock<gr::testing::TagSource<int32_t>>({{"n_samples_max", n_samples}, {"mark_tag", false}});
         src._tags                                      = tags;
-        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", gr::pmt::Value(2500u)}});
+        auto&                    delay                 = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", 2500u}});
         std::vector<std::string> customAutoForwardKeys = {"DAY", "MONTH", "YEAR"};
         delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
-        auto& sink = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto& sink = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -780,14 +780,14 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::size_t   kTriggers = 300;
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
 
         for (std::size_t i = 0; i < kTriggers; ++i) {
-            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER")}}});
+            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}});
         }
 
-        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -845,14 +845,14 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::size_t   kTriggers = 300;
 
         gr::Graph testGraph;
-        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}});
+        auto&     src = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
 
         for (std::size_t i = 0; i < kTriggers; ++i) {
-            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), gr::pmt::Value("TRIGGER")}}});
+            src._tags.push_back(Tag{60000UZ + i, {{TRIGGER_NAME.shortKey(), "TRIGGER"}}});
         }
 
-        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -891,9 +891,9 @@ const boost::ut::suite DataSinkTests = [] {
         constexpr std::uint32_t kSamples = 200000;
 
         gr::Graph testGraph;
-        auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", gr::pmt::Value(kSamples)}, {"mark_tag", gr::pmt::Value(false)}});
-        auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto&     src   = testGraph.emplaceBlock<gr::testing::TagSource<float>>({{"n_samples_max", kSamples}, {"mark_tag", false}});
+        auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(delay)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(sink)));
@@ -934,17 +934,17 @@ const boost::ut::suite DataSinkTests = [] {
 
     "data set poller"_test = [] {
         gr::Graph testGraph;
-        auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1024))}, {"signal_name", gr::pmt::Value("test signal")}, {"signal_unit", gr::pmt::Value("test unit")}, {"mark_tag", gr::pmt::Value(false)}});
-        auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", gr::pmt::Value("CMD_DIAG_TRIGGER1")}, {"n_pre", gr::pmt::Value(static_cast<gr::Size_t>(100))}, {"n_post", gr::pmt::Value(static_cast<gr::Size_t>(200))}});
-        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
+        auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
+        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(delay)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
-            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(triggerName)}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(std::uint64_t(0))}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}, //
-                                  {gr::tag::CONTEXT.shortKey(), gr::pmt::Value(triggerCtx)},                                                                                                                                     //
+            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+                                  {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
                                   {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
         };
 
@@ -993,17 +993,17 @@ const boost::ut::suite DataSinkTests = [] {
 
     "data set callback"_test = [] {
         gr::Graph testGraph;
-        auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1024))}, {"signal_name", gr::pmt::Value("test signal")}, {"signal_unit", gr::pmt::Value("test unit")}, {"mark_tag", gr::pmt::Value(false)}});
-        auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", gr::pmt::Value(kProcessingDelayMs)}});
-        auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", gr::pmt::Value("CMD_DIAG_TRIGGER1")}, {"n_pre", gr::pmt::Value(static_cast<gr::Size_t>(100))}, {"n_post", gr::pmt::Value(static_cast<gr::Size_t>(200))}});
-        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", gr::pmt::Value("test_sink")}, {"signal_name", gr::pmt::Value("test signal")}});
+        auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"signal_name", "test signal"}, {"signal_unit", "test unit"}, {"mark_tag", false}});
+        auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
+        auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
+        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(delay)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(delay).to<"in">(streamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(streamToDataSet).to<"in">(sink)));
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
-            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(triggerName)}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(std::uint64_t(0))}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}, //
-                                  {gr::tag::CONTEXT.shortKey(), gr::pmt::Value(triggerCtx)},                                                                                                                                     //
+            return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+                                  {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
                                   {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
         };
 

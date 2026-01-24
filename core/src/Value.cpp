@@ -317,6 +317,8 @@ Value::Value(std::string_view v, std::pmr::memory_resource* resource) : _resourc
 
 Value::Value(const std::string& v, std::pmr::memory_resource* resource) : Value(std::string_view(v), resource) {}
 
+Value::Value(const std::pmr::string& v, std::pmr::memory_resource* resource) : Value(std::string_view(v), resource) {}
+
 Value::Value(const char* v, std::pmr::memory_resource* resource) : Value(std::string_view(v), resource) {}
 
 Value::Value(Map map, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
@@ -476,6 +478,7 @@ Value& Value::operator=(std::string_view v) {
 }
 
 Value& Value::operator=(const std::string& v) { return operator=(std::string_view(v)); }
+Value& Value::operator=(const std::pmr::string& v) { return operator=(std::string_view(v)); }
 
 Value& Value::operator=(const char* v) { return operator=(std::string_view(v)); }
 

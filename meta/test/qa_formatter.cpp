@@ -126,7 +126,7 @@ const boost::ut::suite propertyMapFormatter = [] {
 
     "std::formatter<gr::property_map>"_test = [] {
         {
-            gr::property_map pmInt{{"key0", gr::pmt::Value(0)}, {"key1", gr::pmt::Value(1)}, {"key2", gr::pmt::Value(2)}};
+            gr::property_map pmInt{{"key0", 0}, {"key1", 1}, {"key2", 2}};
             // Ordering is not guaranteed, we want to test this:
             // expect(eq("{\"key2\": 2, \"key1\": 1, \"key0\": 0}"s, std::format("{}", pmInt)));
             auto formatted = std::format("{}", pmInt);
@@ -136,7 +136,7 @@ const boost::ut::suite propertyMapFormatter = [] {
         }
 
         {
-            gr::property_map pmFloat{{"key0", gr::pmt::Value(0.01f)}, {"key1", gr::pmt::Value(1.01f)}, {"key2", gr::pmt::Value(2.01f)}};
+            gr::property_map pmFloat{{"key0", 0.01f}, {"key1", 1.01f}, {"key2", 2.01f}};
             // Ordering is not guaranteed, we want to test this:
             // expect(eq("{\"key2\": 2.010000, \"key1\": 1.010000, \"key0\": 0.010000}"s, std::format("{}", pmFloat)));
             auto formatted = std::format("{}", pmFloat);

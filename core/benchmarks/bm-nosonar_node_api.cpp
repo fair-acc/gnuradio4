@@ -366,12 +366,12 @@ inline const boost::ut::suite _constexpr_bm = [] {
     using gr::merge;
 
     {
-        auto mergedBlock                                            = merge<"out", "in">(bm::test::source<float>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}}), bm::test::sink<float>());
+        auto mergedBlock                                            = merge<"out", "in">(bm::test::source<float>({{"n_samples_max", N_SAMPLES}}), bm::test::sink<float>());
         "merged src->sink work"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_work(mergedBlock); };
     }
 
     {
-        auto mergedBlock = merge<"out", "in">(merge<"out", "in">(bm::test::source<float>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}}), copy<float>()), bm::test::sink<float>());
+        auto mergedBlock = merge<"out", "in">(merge<"out", "in">(bm::test::source<float>({{"n_samples_max", N_SAMPLES}}), copy<float>()), bm::test::sink<float>());
 #if !DISABLE_SIMD
         static_assert(gr::traits::block::can_processOne_simd<copy<float>>);
         // bm::test::sink cannot process SIMD because it wants to be non-const
@@ -382,29 +382,29 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto mergedBlock                                                = merge<"out", "in">(merge<"out", "in">(bm::test::source<float>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}}), bm::test::cascade<10, copy<float>>(copy<float>())), bm::test::sink<float>());
+        auto mergedBlock                                                = merge<"out", "in">(merge<"out", "in">(bm::test::source<float>({{"n_samples_max", N_SAMPLES}}), bm::test::cascade<10, copy<float>>(copy<float>())), bm::test::sink<float>());
         "merged src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     }
 
     {
-        auto mergedBlock                                                                                      = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(bm::test::source<float, 1024, 1024>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}}), copy<float, 1, 128>()), copy<float, 1, 1024>()), copy<float, 32, 128>()), bm::test::sink<float>());
+        auto mergedBlock                                                                                      = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(bm::test::source<float, 1024, 1024>({{"n_samples_max", N_SAMPLES}}), copy<float, 1, 128>()), copy<float, 1, 1024>()), copy<float, 32, 128>()), bm::test::sink<float>());
         "merged src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char* test_name) {
         auto gen_mult_block = [&factor] {
-            return merge<"out", "in">(MultiplyConst<T>({{{"value", gr::pmt::Value(factor)}}}), //
-                merge<"out", "in">(DivideConst<T>({{{"factor", gr::pmt::Value(factor)}}}), add<T, -1>()));
+            return merge<"out", "in">(MultiplyConst<T>({{{"value", factor}}}), //
+                merge<"out", "in">(DivideConst<T>({{{"factor", factor}}}), add<T, -1>()));
         };
-        auto mergedBlock                                                 = merge<"out", "in">(merge<"out", "in">(bm::test::source<T>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}}), gen_mult_block()), bm::test::sink<T>());
+        auto mergedBlock                                                 = merge<"out", "in">(merge<"out", "in">(bm::test::source<T>({{"n_samples_max", N_SAMPLES}}), gen_mult_block()), bm::test::sink<T>());
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     };
     templated_cascaded_test(static_cast<float>(2.0), "merged src->mult(2.0)->DivideConst(2.0)->add(-1)->sink - float");
     templated_cascaded_test(static_cast<int>(2.0), "merged src->mult(2.0)->DivideConst(2.0)->add(-1)->sink - int");
 
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char* test_name) {
-        auto gen_mult_block                                              = [&factor] { return merge<"out", "in">(MultiplyConst<T>({{{"value", gr::pmt::Value(factor)}}}), merge<"out", "in">(DivideConst<T>({{{"factor", gr::pmt::Value(factor)}}}), add<T, -1>())); };
-        auto mergedBlock                                                 = merge<"out", "in">(merge<"out", "in">(bm::test::source<T>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}}), //
+        auto gen_mult_block                                              = [&factor] { return merge<"out", "in">(MultiplyConst<T>({{{"value", factor}}}), merge<"out", "in">(DivideConst<T>({{{"factor", factor}}}), add<T, -1>())); };
+        auto mergedBlock                                                 = merge<"out", "in">(merge<"out", "in">(bm::test::source<T>({{"n_samples_max", N_SAMPLES}}), //
                                                                                                   bm::test::cascade<10, decltype(gen_mult_block())>(gen_mult_block(), gen_mult_block)),
                                                             bm::test::sink<T>());
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
@@ -429,7 +429,7 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", N_SAMPLES}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
 
@@ -442,7 +442,7 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", N_SAMPLES}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
         auto&     cpy  = testGraph.emplaceBlock<copy<float>>();
 
@@ -458,13 +458,13 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", N_SAMPLES}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
 
         using copy = ::copy<float, 1, N_MAX, true, true>;
         std::vector<copy*> cpy(10);
         for (std::size_t i = 0; i < cpy.size(); i++) {
-            cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({{"name", gr::pmt::Value(std::format("copy {} at {}", i, std::source_location::current()))}}));
+            cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({{"name", std::format("copy {} at {}", i, std::source_location::current())}}));
 
             if (i == 0) {
                 expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*cpy[i])));
@@ -484,7 +484,7 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<float, 1, 1024>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<float, 1, 1024>>({{"n_samples_max", N_SAMPLES}});
         auto&     b1   = testGraph.emplaceBlock<copy<float, 1, 128>>();
         auto&     b2   = testGraph.emplaceBlock<copy<float, 1024, 1024>>();
         auto&     b3   = testGraph.emplaceBlock<copy<float, 32, 128>>();
@@ -504,9 +504,9 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char* test_name) {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
-        auto&     mult = testGraph.emplaceBlock<MultiplyConst<T>>({{{"factor", gr::pmt::Value(factor)}}});
-        auto&     div  = testGraph.emplaceBlock<DivideConst<T>>({{{"factor", gr::pmt::Value(factor)}}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", N_SAMPLES}});
+        auto&     mult = testGraph.emplaceBlock<MultiplyConst<T>>({{{"factor", factor}}});
+        auto&     div  = testGraph.emplaceBlock<DivideConst<T>>({{{"factor", factor}}});
         auto&     add1 = testGraph.emplaceBlock<add<T, -1>>();
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<T>>();
 
@@ -526,15 +526,15 @@ inline const boost::ut::suite _runtime_tests = [] {
 
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char* test_name) {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", N_SAMPLES}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<T>>();
 
         std::vector<MultiplyConst<T>*> mult1;
         std::vector<DivideConst<T>*>   div1;
         std::vector<add<T, -1>*>       add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"factor", gr::pmt::Value(factor)}, {"name", gr::pmt::Value(std::format("mult1.{}", i))}})));
-            div1.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"factor", gr::pmt::Value(factor)}, {"name", gr::pmt::Value(std::format("div1.{}", i))}})));
+            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<MultiplyConst<T>>({{"factor", factor}, {"name", std::format("mult1.{}", i)}})));
+            div1.emplace_back(std::addressof(testGraph.emplaceBlock<DivideConst<T>>({{"factor", factor}, {"name", std::format("div1.{}", i)}})));
             add1.emplace_back(std::addressof(testGraph.emplaceBlock<add<T, -1>>()));
         }
 
@@ -571,10 +571,10 @@ inline const boost::ut::suite _simd_tests = [] {
 
     {
         gr::Graph testGraph;
-        auto&     src   = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
-        auto&     mult1 = testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", gr::pmt::Value(2.0f)}});
-        auto&     mult2 = testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", gr::pmt::Value(0.5f)}});
-        auto&     add1  = testGraph.emplaceBlock<add_SIMD<float>>({{"value", gr::pmt::Value(-1.0f)}});
+        auto&     src   = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", N_SAMPLES}});
+        auto&     mult1 = testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 2.0f}});
+        auto&     mult2 = testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 0.5f}});
+        auto&     add1  = testGraph.emplaceBlock<add_SIMD<float>>({{"value", -1.0f}});
         auto&     sink  = testGraph.emplaceBlock<bm::test::sink<float>>();
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(mult1)));
@@ -597,16 +597,16 @@ inline const boost::ut::suite _simd_tests = [] {
 
     {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", N_SAMPLES}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
 
         std::vector<multiply_SIMD<float>*> mult1;
         std::vector<multiply_SIMD<float>*> mult2;
         std::vector<add_SIMD<float>*>      add1;
         for (std::size_t i = 0; i < 10; i++) {
-            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", gr::pmt::Value(2.0f)}, {"name", gr::pmt::Value(std::format("mult1.{}", i))}})));
-            mult2.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", gr::pmt::Value(0.5f)}, {"name", gr::pmt::Value(std::format("mult2.{}", i))}})));
-            add1.emplace_back(std::addressof(testGraph.emplaceBlock<add_SIMD<float>>({{"value", gr::pmt::Value(-1.0f)}, {"name", gr::pmt::Value(std::format("add.{}", i))}})));
+            mult1.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 2.0f}, {"name", std::format("mult1.{}", i)}})));
+            mult2.emplace_back(std::addressof(testGraph.emplaceBlock<multiply_SIMD<float>>({{"value", 0.5f}, {"name", std::format("mult2.{}", i)}})));
+            add1.emplace_back(std::addressof(testGraph.emplaceBlock<add_SIMD<float>>({{"value", -1.0f}, {"name", std::format("add.{}", i)}})));
         }
 
         for (std::size_t i = 0; i < add1.size(); i++) {
@@ -641,9 +641,9 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char* test_name) {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
-        auto&     mult = testGraph.emplaceBlock<MultiplyConst<T>>({{{"factor", gr::pmt::Value(factor)}}});
-        auto&     div  = testGraph.emplaceBlock<DivideConst<T>>({{{"factor", gr::pmt::Value(factor)}}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", N_SAMPLES}});
+        auto&     mult = testGraph.emplaceBlock<MultiplyConst<T>>({{{"factor", factor}}});
+        auto&     div  = testGraph.emplaceBlock<DivideConst<T>>({{{"factor", factor}}});
         auto&     add1 = testGraph.emplaceBlock<add<T, -1>>();
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<T>>();
 
@@ -669,10 +669,10 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
 
     constexpr auto templated_cascaded_test_bulk = []<typename T>(T factor, const char* test_name) {
         gr::Graph testGraph;
-        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", gr::pmt::Value(N_SAMPLES)}});
-        auto&     mult = testGraph.emplaceBlock<multiply_bulk<T>>({{"value", gr::pmt::Value(factor)}});
-        auto&     div  = testGraph.emplaceBlock<divide_bulk<T>>({{"value", gr::pmt::Value(factor)}});
-        auto&     add1 = testGraph.emplaceBlock<add_bulk<T>>({{"value", gr::pmt::Value(static_cast<T>(-1.f))}});
+        auto&     src  = testGraph.emplaceBlock<bm::test::source<T>>({{"n_samples_max", N_SAMPLES}});
+        auto&     mult = testGraph.emplaceBlock<multiply_bulk<T>>({{"value", factor}});
+        auto&     div  = testGraph.emplaceBlock<divide_bulk<T>>({{"value", factor}});
+        auto&     add1 = testGraph.emplaceBlock<add_bulk<T>>({{"value", static_cast<T>(-1.f)}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<T>>();
 
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));

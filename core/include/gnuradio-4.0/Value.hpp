@@ -259,27 +259,28 @@ public:
     // CONSTRUCTION
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
-    explicit Value(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(bool v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(int8_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(int16_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(int32_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(int64_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(uint8_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(uint16_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(uint32_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(uint64_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(float v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(double v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(std::complex<float> v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(std::complex<double> v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(std::string_view v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(const std::string& v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(const char* v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
-    explicit Value(std::monostate, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(bool v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(int8_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(int16_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(int32_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(int64_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(uint8_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(uint16_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(uint32_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(uint64_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(float v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(double v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(std::complex<float> v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(std::complex<double> v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(std::string_view v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(const std::string& v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(const std::pmr::string& v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(const char* v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(std::monostate, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
 #ifdef __EMSCRIPTEN__
-    explicit Value(std::size_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+    Value(std::size_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 #endif
 
     // copy/move/destructor
@@ -311,6 +312,7 @@ public:
     Value& operator=(std::complex<double> v);
     Value& operator=(std::string_view v);
     Value& operator=(const std::string& v);
+    Value& operator=(const std::pmr::string& v);
     Value& operator=(const char* v);
 
     template<TensorLike TensorCollection>

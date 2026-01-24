@@ -69,7 +69,7 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     "Rotator - basic test"_test = []<typename T> {
         using value_t          = typename T::value_type;
         value_t    phase_shift = std::numbers::pi_v<value_t> / value_t(2);
-        Rotator<T> rot({{"phase_increment", gr::pmt::Value(phase_shift)}, {"initial_phase", gr::pmt::Value(value_t(0))}, {"sample_rate", gr::pmt::Value(1.f)}});
+        Rotator<T> rot({{"phase_increment", phase_shift}, {"initial_phase", value_t(0)}, {"sample_rate", 1.f}});
         rot.settings().init();
         std::ignore = rot.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
 
@@ -97,7 +97,7 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
 
     tag("visual") / "RotatorTest - DC->2 Hz shift"_test = [] {
         std::vector<std::complex<double>> input(nSamp, std::complex<double>(std::sqrt(2.0) / 2.0, std::sqrt(2.0) / 2.0));
-        auto                              output = execRotator(input, {{"frequency_shift", gr::pmt::Value(+2.f)}, {"sample_rate", gr::pmt::Value(fs)}});
+        auto                              output = execRotator(input, {{"frequency_shift", +2.f}, {"sample_rate", fs}});
         plotTimeDomain(input, output, fs, "DC->+2 Hz");
     };
 
@@ -108,7 +108,7 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
             double angle = 2.0 * std::numbers::pi * 0.5 * t; // 0.5 Hz
             input[i]     = {std::cos(angle), std::sin(angle)};
         }
-        auto output = execRotator(input, {{"frequency_shift", gr::pmt::Value(+1.5f)}, {"sample_rate", gr::pmt::Value(fs)}});
+        auto output = execRotator(input, {{"frequency_shift", +1.5f}, {"sample_rate", fs}});
         plotTimeDomain(input, output, fs, ".5->2 Hz");
     };
 
@@ -119,7 +119,7 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
             double angle = 2.0 * std::numbers::pi * 2.0 * t; // 2 Hz
             input[i]     = {std::cos(angle), std::sin(angle)};
         }
-        auto output = execRotator(input, {{"frequency_shift", gr::pmt::Value(-1.5f)}, {"sample_rate", gr::pmt::Value(fs)}});
+        auto output = execRotator(input, {{"frequency_shift", -1.5f}, {"sample_rate", fs}});
         plotTimeDomain(input, output, fs, "2->.5 Hz");
     };
 };

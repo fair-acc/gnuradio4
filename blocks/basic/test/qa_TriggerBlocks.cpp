@@ -31,7 +31,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
 
             // create blocks
             auto& clockSrc = graph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({//
-                {"sample_rate", gr::pmt::Value(sample_rate)}, {"n_samples_max", gr::pmt::Value(1000U)}, {"name", gr::pmt::Value("ClockSource")},
+                {"sample_rate", sample_rate}, {"n_samples_max", 1000U}, {"name", "ClockSource"},
                 {"tag_times", Tensor<std::uint64_t>(data_from,
                                   {
                                       0U,           // 0 ms - start - 50ms of bottom plateau
@@ -42,30 +42,30 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                                   })},
                 {"tag_values",
                     Tensor<pmt::Value>{
-                        pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=0"), //
-                        pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"), //
-                        pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"), //
-                        pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"), //
-                        pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4")  //
+                        "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=0", //
+                        "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1", //
+                        "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2", //
+                        "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3", //
+                        "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"  //
                     }},
-                {"do_zero_order_hold", gr::pmt::Value(true)}});
+                {"do_zero_order_hold", true}});
 
-            auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", gr::pmt::Value(sample_rate)}, {"name", gr::pmt::Value("FunctionGenerator")}, {"start_value", gr::pmt::Value(0.1f)}});
+            auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}, {"start_value", 0.1f}});
             using namespace function_generator;
-            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=0")}).empty());
-            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 0.1f, 1.1f, .3f, 0.02f), SettingsCtx{.context = gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=1")}).empty());
-            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 1.1f), SettingsCtx{.context = gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=2")}).empty());
-            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 1.1f, 0.1f, .3f, 0.02f), SettingsCtx{.context = gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=3")}).empty());
-            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=4")}).empty());
+            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=0"}).empty());
+            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 0.1f, 1.1f, .3f, 0.02f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 1.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 1.1f, 0.1f, .3f, 0.02f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
 
             auto& schmittTrigger = graph.emplaceBlock<gr::blocks::basic::SchmittTrigger<float, Method::value>>({
-                {"name", gr::pmt::Value("SchmittTrigger")},                      //
-                {"threshold", gr::pmt::Value(.1f)},                              //
-                {"offset", gr::pmt::Value(.6f)},                                 //
-                {"trigger_name_rising_edge", gr::pmt::Value("MY_RISING_EDGE")},  //
-                {"trigger_name_falling_edge", gr::pmt::Value("MY_FALLING_EDGE")} //
+                {"name", "SchmittTrigger"},                      //
+                {"threshold", .1f},                              //
+                {"offset", .6f},                                 //
+                {"trigger_name_rising_edge", "MY_RISING_EDGE"},  //
+                {"trigger_name_falling_edge", "MY_FALLING_EDGE"} //
             });
-            auto& tagSink        = graph.emplaceBlock<TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("TagSink")}, {"log_tags", gr::pmt::Value(true)}, {"log_samples", gr::pmt::Value(false)}, {"verbose_console", gr::pmt::Value(false)}});
+            auto& tagSink        = graph.emplaceBlock<TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"log_tags", true}, {"log_samples", false}, {"verbose_console", false}});
 
             // connect non-UI blocks
             expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"clk_in">(funcGen))) << "connect clockSrc->funcGen";
@@ -73,8 +73,8 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(tagSink))) << "connect schmittTrigger->tagSink";
             std::thread uiLoop;
             if (enableVisualTests) {
-                auto& uiSink1 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", gr::pmt::Value("ImChartSink1")}});
-                auto& uiSink2 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", gr::pmt::Value("ImChartSink2")}});
+                auto& uiSink1 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink1"}});
+                auto& uiSink2 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink2"}});
                 // connect UI blocks
                 expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(uiSink1))) << "connect funcGen->uiSink1";
                 expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(uiSink2))) << "connect schmittTrigger->uiSink2";
@@ -84,7 +84,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                     while (drawUI) {
                         using enum gr::work::Status;
                         drawUI = false;
-                        drawUI |= uiSink1.draw({{"reset_view", gr::pmt::Value(true)}}) != DONE;
+                        drawUI |= uiSink1.draw({{"reset_view", true}}) != DONE;
                         drawUI |= uiSink2.draw({}) != DONE;
                         std::this_thread::sleep_for(std::chrono::milliseconds(40));
                     }

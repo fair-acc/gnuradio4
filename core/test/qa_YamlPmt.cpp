@@ -193,7 +193,7 @@ const boost::ut::suite<"GrepTests"> _GrepTests = [] {
         }
         {
             gr::property_map map;
-            map["answer"] = Tensor<pmt::Value>(data_from, {pmt::Value("42"s), pmt::Value("43"s), pmt::Value("44"s)});
+            map["answer"] = Tensor<pmt::Value>(data_from, {"42"s, "43"s, "44"s});
             grepTest(map, {"42", "43", "44", "answer"});
         }
     };
@@ -301,7 +301,7 @@ map:
         expected["string1"]  = "Hello1";
         expected["string2"]  = "Hello2";
         expected["null"]     = gr::pmt::Value();
-        expected["number"]   = gr::pmt::Value(static_cast<int64_t>(42));
+        expected["number"]   = static_cast<int64_t>(42);
         expected["list"]     = gr::Tensor<gr::pmt::Value>{};
         expected["list2"]    = gr::Tensor<gr::pmt::Value>{pmt::Value(static_cast<int64_t>(42))};
         expected["map"]      = gr::property_map{};
@@ -662,15 +662,15 @@ vectorWithColons:
         expected["flowString2"]                = Tensor<pmt::Value>{pmt::Value("Hello2"), pmt::Value("World2"), pmt::Value("Single2")};
         expected["flowString3"]                = Tensor<pmt::Value>{pmt::Value("Hello3"), pmt::Value("World3"), pmt::Value("Single3")};
         expected["flowMultiline"]              = Tensor<pmt::Value>{pmt::Value("Hello, "), pmt::Value("]["), pmt::Value("World"), pmt::Value("Multiple\nlines")};
-        expected["nestedVector"]               = Tensor<pmt::Value>{gr::pmt::Value(Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}), gr::pmt::Value(Tensor<pmt::Value>{pmt::Value(static_cast<int64_t>(3)), pmt::Value(static_cast<int64_t>(4))})};
-        expected["nestedFlow"]                 = Tensor<pmt::Value>{gr::pmt::Value(Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}), gr::pmt::Value(Tensor<pmt::Value>{pmt::Value(static_cast<int64_t>(3)), pmt::Value(static_cast<int64_t>(4))})};
+        expected["nestedVector"]               = Tensor<pmt::Value>{Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}, Tensor<pmt::Value>{pmt::Value(static_cast<int64_t>(3)), pmt::Value(static_cast<int64_t>(4))}};
+        expected["nestedFlow"]                 = Tensor<pmt::Value>{Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}, Tensor<pmt::Value>{pmt::Value(static_cast<int64_t>(3)), pmt::Value(static_cast<int64_t>(4))}};
         expected["nestedVector2"]              = Tensor<pmt::Value>{                                                   //
             pmt::Value(static_cast<int64_t>(42)),                                                         //
             pmt::Value(Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}),                             //
             pmt::Value(Tensor<pmt::Value>{pmt::Value("3"), pmt::Value("4")}),                             //
             pmt::Value(gr::property_map{{"key", Tensor<pmt::Value>{pmt::Value("5"), pmt::Value("6")}}})}; //
-        expected["vectorWithBlockMap"]         = Tensor<pmt::Value>{gr::property_map{{"name", gr::pmt::Value("ArraySink")}, {"id", gr::pmt::Value("gr::testing::ArraySink<double>")}, {"parameters", gr::pmt::Value(gr::property_map{{"name", gr::pmt::Value("Block")}})}}};
-        expected["vectorWithColons"]           = Tensor<pmt::Value>{gr::pmt::Value("key: value"), gr::pmt::Value("key2: value2")};
+        expected["vectorWithBlockMap"]         = Tensor<pmt::Value>{gr::property_map{{"name", "ArraySink"}, {"id", "gr::testing::ArraySink<double>"}, {"parameters", gr::property_map{{"name", "Block"}}}}};
+        expected["vectorWithColons"]           = Tensor<pmt::Value>{"key: value", "key2: value2"};
 
         testYAML(src1, expected);
 
@@ -746,16 +746,16 @@ last: # End of document, null value
 )yaml";
 
         gr::property_map expected;
-        expected["simple"]         = gr::property_map{{"key1", gr::pmt::Value(static_cast<int8_t>(42))}, {"key2", gr::pmt::Value(static_cast<int8_t>(43))}};
+        expected["simple"]         = gr::property_map{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
         expected["empty"]          = gr::property_map{};
-        expected["nested"]         = gr::property_map{{"key1", gr::property_map{{"key2", gr::pmt::Value(static_cast<int8_t>(42))}, {"unknown_property", gr::pmt::Value(static_cast<int64_t>(42))}, {"key3", gr::pmt::Value(static_cast<int8_t>(43))}}}, {"key4", gr::property_map{{"key5", gr::pmt::Value(static_cast<int8_t>(44))}, {"key6", gr::pmt::Value(static_cast<int8_t>(45))}}}};
-        expected["flow"]           = gr::property_map{{"key1", gr::pmt::Value(static_cast<int8_t>(42))}, {"key2", gr::pmt::Value(static_cast<int8_t>(43))}};
-        expected["flow2"]          = gr::property_map{{"key1", gr::pmt::Value("value1")}, {"key2", gr::pmt::Value("value2")}};
-        expected["flow3"]          = gr::property_map{{"key1", gr::pmt::Value(" value1  ")}, {"key2", gr::pmt::Value("value2   ")}};
-        expected["flow4"]          = gr::property_map{{"key1", gr::pmt::Value("value1")}, {"key2", gr::pmt::Value("value2")}};
-        expected["flow_multiline"] = gr::property_map{{"key1", gr::pmt::Value(static_cast<int8_t>(42))}, {"key2", gr::pmt::Value(static_cast<int8_t>(43))}};
-        expected["flow_nested"]    = gr::property_map{{"key1", gr::property_map{{"key2", gr::pmt::Value(static_cast<int8_t>(42))}, {"key3", gr::pmt::Value(static_cast<int8_t>(43))}}}, {"key4", gr::property_map{{"key5", gr::pmt::Value(static_cast<int8_t>(44))}, {"key6", gr::pmt::Value(static_cast<int8_t>(45))}}}};
-        expected["flow_braces"]    = gr::property_map{{"}{", gr::pmt::Value(static_cast<int8_t>(42))}};
+        expected["nested"]         = gr::property_map{{"key1", gr::property_map{{"key2", static_cast<int8_t>(42)}, {"unknown_property", static_cast<int64_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", gr::property_map{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
+        expected["flow"]           = gr::property_map{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["flow2"]          = gr::property_map{{"key1", "value1"}, {"key2", "value2"}};
+        expected["flow3"]          = gr::property_map{{"key1", " value1  "}, {"key2", "value2   "}};
+        expected["flow4"]          = gr::property_map{{"key1", "value1"}, {"key2", "value2"}};
+        expected["flow_multiline"] = gr::property_map{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["flow_nested"]    = gr::property_map{{"key1", gr::property_map{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", gr::property_map{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
+        expected["flow_braces"]    = gr::property_map{{"}{", static_cast<int8_t>(42)}};
         expected["last"]           = pmt::Value();
         testYAML(src, expected);
 
@@ -825,11 +825,11 @@ connections:
         gr::property_map block1;
         block1["name"]       = "ArraySink<double>";
         block1["id"]         = "gr::testing::ArraySink<double>";
-        block1["parameters"] = gr::property_map{{"name", gr::pmt::Value("ArraySink<double>")}};
+        block1["parameters"] = gr::property_map{{"name", "ArraySink<double>"}};
         gr::property_map block2;
         block2["name"]       = "ArraySource<double>";
         block2["id"]         = "gr::testing::ArraySource<double>";
-        block2["parameters"] = gr::property_map{{"name", gr::pmt::Value("ArraySource<double>")}};
+        block2["parameters"] = gr::property_map{{"name", "ArraySource<double>"}};
         expected["blocks"]   = Tensor<pmt::Value>{block1, block2};
         const auto zero      = pmt::Value{static_cast<int64_t>(0)};
         const auto one       = pmt::Value{static_cast<int64_t>(1)};

@@ -34,57 +34,57 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
         // all times are in nanoseconds
         constexpr std::uint64_t ms       = 1'000'000; // ms -> ns conversion factor (wish we had a proper C++ units-lib integration)
         auto&                   clockSrc = graph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({
-            {"sample_rate", gr::pmt::Value(sample_rate)},
-            {"n_samples_max", gr::pmt::Value(kN_SAMPLES_MAX)},
-            {"name", gr::pmt::Value("ClockSource")},                                                                                                             //
+            {"sample_rate", sample_rate},
+            {"n_samples_max", kN_SAMPLES_MAX},
+            {"name", "ClockSource"},                                                                                                                             //
             {"tag_times", Tensor<std::uint64_t>(data_from, {10 * ms, 90 * ms, 100 * ms, 300 * ms, 350 * ms, 400 * ms, 550 * ms, 650 * ms, 800 * ms, 850 * ms})}, //
-            {"tag_values", Tensor<pmt::Value>{pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1"),                                                              //
-                                                 pmt::Value("CMD_DIAG_TRIGGER1"),                                                                                                  //
-                                                 pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2"),                                                                             //
-                                                 pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3"),                                                                             //
-                                                 pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"),                                                                             //
-                                                 pmt::Value("CMD_DIAG_TRIGGER2"),                                                                                                  //
-                                                 pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5"),                                                                             //
-                                                 pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6"),                                                                             //
-                                                 pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7"),                                                                             //
-                                                 pmt::Value("CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8")}},
-            {"repeat_period", gr::pmt::Value(1000 * ms)},
-            {"do_zero_order_hold", gr::pmt::Value(true)},
+            {"tag_values", Tensor<pmt::Value>{"CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1",                                                                          //
+                                                 "CMD_DIAG_TRIGGER1",                                                                                                              //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4",                                                                                         //
+                                                 "CMD_DIAG_TRIGGER2",                                                                                                              //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8"}},
+            {"repeat_period", 1000 * ms},
+            {"do_zero_order_hold", true},
         });
 
-        auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", gr::pmt::Value(sample_rate)}, {"signal_trigger", gr::pmt::Value("CMD_BP_START")}, {"name", gr::pmt::Value("FunctionGenerator")}});
+        auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"signal_trigger", "CMD_BP_START"}, {"name", "FunctionGenerator"}});
 
         using gr::tag::TRIGGER_NAME;
         using gr::tag::CONTEXT;
 
         const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=1")}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=2")}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=3")}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=4")}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=5")}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=6")}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=7")}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, gr::pmt::Value("FAIR.SELECTOR.C=1:S=1:P=8")}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
+        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
+        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
+        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
+        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
 
         expect(eq(funcGen.settings().getNStoredParameters(), 9UZ));
 
-        auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("SampleGeneratorSink")}});
-        auto& uiSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", gr::pmt::Value("ImChartSinkFull")}});
+        auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
+        auto& uiSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "ImChartSinkFull"}});
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"clk_in">(funcGen))) << "connect clockSrc->funcGen";
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(sink))) << "connect funcGen->sink";
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(uiSink))) << "connect funcGen->uiSink";
 
-        const property_map blockSettings = {{"name", gr::pmt::Value("StreamToDataSet")}, {"filter", gr::pmt::Value(filter)}, {"n_pre", gr::pmt::Value(preSamples)}, {"n_post", gr::pmt::Value(postSamples)}, {"n_max", gr::pmt::Value(maxSamples)}};
+        const property_map blockSettings = {{"name", "StreamToDataSet"}, {"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};
         //
         auto& streamFilter  = graph.emplaceBlock<StreamFilter<float>>(blockSettings);
         auto& dataSetFilter = graph.emplaceBlock<StreamToDataSet<float>>(blockSettings);
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).template to<"in">(streamFilter))) << "connect funcGen->streamFilter";
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).template to<"in">(dataSetFilter))) << "connect funcGen->dataSetFilter";
 
-        auto& uiFilteredStreamSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", gr::pmt::Value("ImChartFilteredStream")}});
+        auto& uiFilteredStreamSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "ImChartFilteredStream"}});
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(streamFilter).to<"in">(uiFilteredStreamSink))) << "connect funcGen->uiFilteredStreamSink";
-        auto& uiDataSetSink = graph.emplaceBlock<testing::ImChartMonitor<DataSet<float>>>({{"name", gr::pmt::Value("ImChartDataSet")}});
+        auto& uiDataSetSink = graph.emplaceBlock<testing::ImChartMonitor<DataSet<float>>>({{"name", "ImChartDataSet"}});
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(dataSetFilter).to<"in">(uiDataSetSink))) << "connect funcGen->uiDataSetSink";
 
         std::thread uiLoop([&uiSink, &uiFilteredStreamSink, &uiDataSetSink]() {
@@ -92,7 +92,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
             while (drawUI) { // mocks UI update loop
                 using enum gr::work::Status;
                 drawUI = false;
-                drawUI |= uiSink.draw({{"reset_view", gr::pmt::Value(true)}}) != DONE;
+                drawUI |= uiSink.draw({{"reset_view", true}}) != DONE;
                 drawUI |= uiFilteredStreamSink.draw() != DONE;
                 drawUI |= uiDataSetSink.draw() != DONE;
 
@@ -126,8 +126,8 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 };
 
 gr::Tag genTrigger(std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
-    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), gr::pmt::Value(triggerName)}, {gr::tag::TRIGGER_TIME.shortKey(), gr::pmt::Value(std::uint64_t(0))}, {gr::tag::TRIGGER_OFFSET.shortKey(), gr::pmt::Value(0.f)}, //
-                       {gr::tag::CONTEXT.shortKey(), gr::pmt::Value(triggerCtx)},                                                                                                                                     //
+    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+                       {gr::tag::CONTEXT.shortKey(), triggerCtx},                                                                                                     //
                        {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
 };
 
@@ -141,8 +141,8 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
         constexpr float sample_rate = 1'000.f;
         Graph           graph;
 
-        auto& tagSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", gr::pmt::Value(sample_rate)}, //
-            {"n_samples_max", gr::pmt::Value(nSamples)}, {"name", gr::pmt::Value("TagSource")}, {"verbose_console", gr::pmt::Value(false)}, {"repeat_tags", gr::pmt::Value(false)}, {"mark_tag", gr::pmt::Value(false)}});
+        auto& tagSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", sample_rate}, //
+            {"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", false}, {"mark_tag", false}});
         tagSrc._tags = {
             genTrigger(5, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1"),  // start
             genTrigger(8, "CMD_DIAG_TRIGGER1", ""),                      // it is also used to split samples processing into 2 iterations
@@ -153,9 +153,9 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
             genTrigger(22, "CMD_DIAG_TRIGGER1", "")                      // it is also used as end trigger for "including" mode
         };
 
-        const property_map blockSettings        = {{"filter", gr::pmt::Value(filter)}, {"n_pre", gr::pmt::Value(preSamples)}, {"n_post", gr::pmt::Value(postSamples)}};
+        const property_map blockSettings        = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}};
         auto&              filterStreamToStream = graph.emplaceBlock<StreamFilter<float>>(blockSettings);
-        auto&              streamSink           = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", gr::pmt::Value("streamSink")}, {"log_tags", gr::pmt::Value(true)}, {"log_samples", gr::pmt::Value(true)}, {"verbose_console", gr::pmt::Value(false)}});
+        auto&              streamSink           = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "streamSink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(tagSrc).template to<"in">(filterStreamToStream)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filterStreamToStream).template to<"in">(streamSink)));
 
@@ -212,8 +212,8 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
         constexpr float sample_rate = 1'000.f;
         Graph           graph;
 
-        auto& tagSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", gr::pmt::Value(sample_rate)}, //
-            {"n_samples_max", gr::pmt::Value(nSamples)}, {"name", gr::pmt::Value("TagSource")}, {"verbose_console", gr::pmt::Value(false)}, {"repeat_tags", gr::pmt::Value(false)}, {"mark_tag", gr::pmt::Value(false)}});
+        auto& tagSrc = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", sample_rate}, //
+            {"n_samples_max", nSamples}, {"name", "TagSource"}, {"verbose_console", false}, {"repeat_tags", false}, {"mark_tag", false}});
         tagSrc._tags = {
             genTrigger(5, "CMD_BP_START", "FAIR.SELECTOR.C=1:S=1:P=1"),  // start
             genTrigger(8, "CMD_DIAG_TRIGGER1", ""),                      // it is also used to split samples processing into 2 iterations
@@ -227,9 +227,9 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
             genTrigger(32, "CMD_DIAG_TRIGGER1", "")                      // it is also used as end trigger for "including" mode
         };
 
-        const property_map blockSettings         = {{"filter", gr::pmt::Value(filter)}, {"n_pre", gr::pmt::Value(preSamples)}, {"n_post", gr::pmt::Value(postSamples)}, {"n_max", gr::pmt::Value(maxSamples)}};
+        const property_map blockSettings         = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};
         auto&              filterStreamToDataSet = graph.emplaceBlock<StreamToDataSet<float>>(blockSettings);
-        auto&              dataSetSink           = graph.emplaceBlock<TagSink<DataSet<float>, ProcessFunction::USE_PROCESS_BULK>>({{"name", gr::pmt::Value("dataSetSink")}, {"log_tags", gr::pmt::Value(true)}, {"log_samples", gr::pmt::Value(true)}, {"verbose_console", gr::pmt::Value(false)}});
+        auto&              dataSetSink           = graph.emplaceBlock<TagSink<DataSet<float>, ProcessFunction::USE_PROCESS_BULK>>({{"name", "dataSetSink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(tagSrc).template to<"in">(filterStreamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filterStreamToDataSet).template to<"in">(dataSetSink)));
 

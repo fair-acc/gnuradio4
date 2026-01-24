@@ -151,10 +151,10 @@ const boost::ut::suite ManagedSubGraph = [] {
         std::expected<void, Error> schedulerRet;
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.wrapper->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName", gr::pmt::Value(std::string(demo.pass2->unique_name))}, {"portDirection", gr::pmt::Value("output")}, {"portName", gr::pmt::Value("out")}, {"exportedName", gr::pmt::Value("outExp")}, {"exportFlag", gr::pmt::Value(true)}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
+            property_map{{"uniqueBlockName", std::string(demo.pass2->unique_name)}, {"portDirection", "output"}, {"portName", "out"}, {"exportedName", "outExp"}, {"exportFlag", true}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.wrapper->uniqueName(), graph::property::kSubgraphExportPort, //
-            property_map{{"uniqueBlockName", gr::pmt::Value(std::string(demo.pass1->unique_name))}, {"portDirection", gr::pmt::Value("input")}, {"portName", gr::pmt::Value("in")}, {"exportedName", gr::pmt::Value("inExp")}, {"exportFlag", gr::pmt::Value(true)}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
+            property_map{{"uniqueBlockName", std::string(demo.pass1->unique_name)}, {"portDirection", "input"}, {"portName", "in"}, {"exportedName", "inExp"}, {"exportFlag", true}}, [](const Message& reply) { return reply.endpoint == graph::property::kSubgraphExportedPort; });
 
         expect(eq(demo.wrapper->dynamicInputPortsSize(), 1UZ));
         expect(eq(demo.wrapper->dynamicOutputPortsSize(), 1UZ));
@@ -267,11 +267,11 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
-        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                                                                                                               //
-            property_map{{"uniqueBlockName", gr::pmt::Value(demo.pass2->unique_name.value())}, {"portDirection", gr::pmt::Value("output")}, {"portName", gr::pmt::Value("out")}, {"exportedName", gr::pmt::Value("outExp")}, {"exportFlag", gr::pmt::Value(true)}}, //
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                               //
+            property_map{{"uniqueBlockName", demo.pass2->unique_name.value()}, {"portDirection", "output"}, {"portName", "out"}, {"exportedName", "outExp"}, {"exportFlag", true}}, //
             ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
-        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                                                                                                            //
-            property_map{{"uniqueBlockName", gr::pmt::Value(demo.pass1->unique_name.value())}, {"portDirection", gr::pmt::Value("input")}, {"portName", gr::pmt::Value("in")}, {"exportedName", gr::pmt::Value("inExp")}, {"exportFlag", gr::pmt::Value(true)}}, //
+        testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.schedulerUniqueName, graph::property::kSubgraphExportPort,                                            //
+            property_map{{"uniqueBlockName", demo.pass1->unique_name.value()}, {"portDirection", "input"}, {"portName", "in"}, {"exportedName", "inExp"}, {"exportFlag", true}}, //
             ReplyChecker{.expectedEndpoint = graph::property::kSubgraphExportedPort});
 
         for (const auto& block : graph.blocks()) {
