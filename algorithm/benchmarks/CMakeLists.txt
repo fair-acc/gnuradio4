@@ -27,3 +27,4 @@ endfunction()
 
 add_gr_benchmark(bm_fft)
 add_gr_benchmark(bm_pffft)
+add_gr_benchmark(bm_svd)
