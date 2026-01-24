@@ -23,6 +23,7 @@ lib/
 imgui.ini
 bin/
 build/
+build*/
 build_*/
 out/
 cmake-build-*/
