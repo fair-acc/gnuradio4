@@ -13,7 +13,6 @@
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "message_utils.hpp"
-#include "value_utils.hpp"
 
 namespace gr::subgraph_test {
 
@@ -169,21 +168,21 @@ const boost::ut::suite ManagedSubGraph = [] {
             auto msg = testing::sendAndWaitForReply<Get>(toScheduler, fromScheduler, scheduler.graph().unique_name /* serviceName */, graph::property::kGraphInspect /* endpoint */, property_map{} /* data */, [](const Message& reply) { return reply.endpoint == graph::property::kGraphInspected; });
             expect(msg.has_value()) << "msg should have a value";
             const auto& data     = msg.value().data.value();
-            const auto& children = get_value_or_fail<property_map>(data.at("children"));
+            const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
             expect(eq(children.size(), 3UZ));
 
-            const auto& edges = get_value_or_fail<property_map>(data.at("edges"));
+            const auto& edges = gr::test::get_value_or_fail<property_map>(data.at("edges"));
             expect(eq(edges.size(), 2UZ));
 
             std::size_t subGraphInConnections  = 0UZ;
             std::size_t subGraphOutConnections = 0UZ;
 
             for (const auto& [index, edge_] : edges) {
-                const auto& edge = get_value_or_fail<property_map>(edge_);
-                if (get_value_or_fail<std::string>(edge.at("destination_block")) == demo.wrapper->uniqueName()) {
+                const auto& edge = gr::test::get_value_or_fail<property_map>(edge_);
+                if (gr::test::get_value_or_fail<std::string>(edge.at("destination_block")) == demo.wrapper->uniqueName()) {
                     subGraphInConnections++;
                 }
-                if (get_value_or_fail<std::string>(edge.at("source_block")) == demo.wrapper->uniqueName()) {
+                if (gr::test::get_value_or_fail<std::string>(edge.at("source_block")) == demo.wrapper->uniqueName()) {
                     subGraphOutConnections++;
                 }
             }
@@ -193,9 +192,9 @@ const boost::ut::suite ManagedSubGraph = [] {
             expect(eq(subGraphOutConnections, 1UZ));
 
             // Check subgraph topology
-            const auto& subGraphData     = get_value_or_fail<property_map>(children.at(std::pmr::string(demo.wrapper->uniqueName())));
-            const auto& subGraphChildren = get_value_or_fail<property_map>(subGraphData.at("children"));
-            const auto& subGraphEdges    = get_value_or_fail<property_map>(subGraphData.at("edges"));
+            const auto& subGraphData     = gr::test::get_value_or_fail<property_map>(children.at(std::pmr::string(demo.wrapper->uniqueName())));
+            const auto& subGraphChildren = gr::test::get_value_or_fail<property_map>(subGraphData.at("children"));
+            const auto& subGraphEdges    = gr::test::get_value_or_fail<property_map>(subGraphData.at("edges"));
             expect(eq(subGraphChildren.size(), 2UZ));
             expect(eq(subGraphEdges.size(), 1UZ));
         }
@@ -294,10 +293,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     }
 
                     const auto& data     = reply.data.value();
-                    const auto& children = get_value_or_fail<property_map>(data.at("children"));
+                    const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
                     expect(eq(children.size(), 3UZ));
 
-                    const auto& edges = get_value_or_fail<property_map>(data.at("edges"));
+                    const auto& edges = gr::test::get_value_or_fail<property_map>(data.at("edges"));
                     expect(eq(edges.size(), 2UZ));
 
                     std::size_t subGraphInConnections  = 0UZ;
@@ -306,11 +305,11 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     // Check that the subgraph is connected properly
 
                     for (const auto& [index, edge_] : edges) {
-                        const auto& edge = get_value_or_fail<property_map>(edge_);
-                        if (get_value_or_fail<std::string>(edge.at("destination_block")) == demo.schedulerUniqueName) {
+                        const auto& edge = gr::test::get_value_or_fail<property_map>(edge_);
+                        if (gr::test::get_value_or_fail<std::string>(edge.at("destination_block")) == demo.schedulerUniqueName) {
                             subGraphInConnections++;
                         }
-                        if (get_value_or_fail<std::string>(edge.at("source_block")) == demo.schedulerUniqueName) {
+                        if (gr::test::get_value_or_fail<std::string>(edge.at("source_block")) == demo.schedulerUniqueName) {
                             subGraphOutConnections++;
                         }
                     }
@@ -318,9 +317,9 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     expect(eq(subGraphOutConnections, 1UZ));
 
                     // Check subgraph topology
-                    const auto& subGraphData     = get_value_or_fail<property_map>(children.at(std::pmr::string(demo.schedulerUniqueName)));
-                    const auto& subGraphChildren = get_value_or_fail<property_map>(subGraphData.at("children"));
-                    const auto& subGraphEdges    = get_value_or_fail<property_map>(subGraphData.at("edges"));
+                    const auto& subGraphData     = gr::test::get_value_or_fail<property_map>(children.at(std::pmr::string(demo.schedulerUniqueName)));
+                    const auto& subGraphChildren = gr::test::get_value_or_fail<property_map>(subGraphData.at("children"));
+                    const auto& subGraphEdges    = gr::test::get_value_or_fail<property_map>(subGraphData.at("edges"));
                     expect(eq(subGraphChildren.size(), 2UZ));
                     expect(eq(subGraphEdges.size(), 1UZ));
                     return true;

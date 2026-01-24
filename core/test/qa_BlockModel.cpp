@@ -169,13 +169,13 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
 
         expect(!dynBlock.metaInformation().contains("answer"));
         dynBlock.metaInformation()["answer"] = 42;
-        expect(eq(get_value_or_fail<int>(dynBlock.metaInformation().at("answer")), 42));
+        expect(eq(gr::test::get_value_or_fail<int>(dynBlock.metaInformation().at("answer")), 42));
 
         expect(dynBlock.uiConstraints().empty());
         dynBlock.uiConstraints()["x-position"] = 3.0f;
         dynBlock.uiConstraints()["y-position"] = 4.0f;
-        expect(eq(get_value_or_fail<float>(dynBlock.uiConstraints().at("x-position")), 3.0f));
-        expect(eq(get_value_or_fail<float>(dynBlock.uiConstraints().at("y-position")), 4.0f));
+        expect(eq(gr::test::get_value_or_fail<float>(dynBlock.uiConstraints().at("x-position")), 3.0f));
+        expect(eq(gr::test::get_value_or_fail<float>(dynBlock.uiConstraints().at("y-position")), 4.0f));
 
         const property_map setReturn = dynBlock.settings().set({{"output_chunk_size", Size_t(5)}, {"input_chunk_size", Size_t(3)}});
         expect(setReturn.empty()) << std::format("set return not empty: {}", setReturn);

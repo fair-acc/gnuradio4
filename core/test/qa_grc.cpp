@@ -24,8 +24,6 @@
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
-#include "value_utils.hpp"
-
 namespace ut = boost::ut;
 
 auto makeTestContext() {
@@ -70,17 +68,17 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
     std::vector<BlockMinData> secondBlocks;
     std::set<BlockMinData>    seenBlocks;
 
-    for (const auto& block : testing::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("blocks"))) {
-        const auto&  blockMap = testing::get_value_or_fail<gr::property_map>(block);
-        BlockMinData data{testing::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+    for (const auto& block : test::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("blocks"))) {
+        const auto&  blockMap = test::get_value_or_fail<gr::property_map>(block);
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         firstBlocks.push_back(data);
         seenBlocks.insert(data);
     }
 
-    for (const auto& block : testing::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("blocks"))) {
-        const auto& blockMap = testing::get_value_or_fail<gr::property_map>(block);
+    for (const auto& block : test::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("blocks"))) {
+        const auto& blockMap = test::get_value_or_fail<gr::property_map>(block);
         std::println("Current block {}", blockMap);
-        BlockMinData data{testing::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         secondBlocks.push_back(data);
         seenBlocks.erase(data);
     }
@@ -89,7 +87,7 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
         std::print("Missing id={} name={}\n", block.first, block.second);
     }
 
-    if (seenBlocks.empty() && (testing::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("connections")).size() == testing::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("connections")).size())) {
+    if (seenBlocks.empty() && (test::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("connections")).size() == test::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("connections")).size())) {
         return true;
     }
 
@@ -161,7 +159,7 @@ connections:
             for (const auto& block : graph->blocks()) {
                 if (block->name() == "ArraySource<float64>") {
                     expect(block->settings().applyStagedParameters().forwardParameters.empty());
-                    expect(testing::get_value_or_fail<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
+                    expect(test::get_value_or_fail<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
                 }
             }
 
@@ -598,13 +596,13 @@ const boost::ut::suite SettingsTests = [] {
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
             gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
                 const auto settings = node->settings().get();
-                expect(eq(testing::get_value_or_fail<bool>(settings.at("bool_setting")), expectedBool));
-                expect(eq(testing::get_value_or_fail<std::string>(settings.at("string_setting")), expectedString));
-                expect(eq(testing::get_value_or_fail<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
-                expect(eq(testing::get_value_or_fail<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
-                expect(eq(testing::get_value_or_fail<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
-                expect(eq(testing::get_value_or_fail<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
-                expect(eq(testing::get_value_or_fail<std::vector<std::complex<double>>>(settings.at("complex_vector")), expectedComplexVector));
+                expect(eq(test::get_value_or_fail<bool>(settings.at("bool_setting")), expectedBool));
+                expect(eq(test::get_value_or_fail<std::string>(settings.at("string_setting")), expectedString));
+                expect(eq(test::get_value_or_fail<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
+                expect(eq(test::get_value_or_fail<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
+                expect(eq(test::get_value_or_fail<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
+                expect(eq(test::get_value_or_fail<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
+                expect(eq(test::get_value_or_fail<std::vector<std::complex<double>>>(settings.at("complex_vector")), expectedComplexVector));
             });
 
             expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
@@ -655,7 +653,7 @@ const boost::ut::suite SettingsTests = [] {
                             expectedName = "ArraySink3";
                         }
 
-                        expect(eq(testing::get_value_or_fail<std::string>(settingsMap.at("name")), expectedName));
+                        expect(eq(test::get_value_or_fail<std::string>(settingsMap.at("name")), expectedName));
                     }
                 }
             });

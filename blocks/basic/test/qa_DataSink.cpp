@@ -16,8 +16,6 @@
 #include <gnuradio-4.0/testing/Delay.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-#include <value_utils.hpp>
-
 using namespace std::chrono_literals;
 
 template<>
@@ -195,15 +193,15 @@ Metadata metadataFromTag(const Tag& tag) {
     Metadata m;
     for (const auto& [key, value] : tag.map) {
         if (key == gr::tag::SIGNAL_NAME.shortKey()) {
-            m.signal_name = testing::get_value_or_fail<std::string>(value);
+            m.signal_name = test::get_value_or_fail<std::string>(value);
         } else if (key == gr::tag::SIGNAL_UNIT.shortKey()) {
-            m.signal_unit = testing::get_value_or_fail<std::string>(value);
+            m.signal_unit = test::get_value_or_fail<std::string>(value);
         } else if (key == gr::tag::SIGNAL_MIN.shortKey()) {
-            m.signal_min = testing::get_value_or_fail<float>(value);
+            m.signal_min = test::get_value_or_fail<float>(value);
         } else if (key == gr::tag::SIGNAL_MAX.shortKey()) {
-            m.signal_max = testing::get_value_or_fail<float>(value);
+            m.signal_max = test::get_value_or_fail<float>(value);
         } else if (key == gr::tag::SAMPLE_RATE.shortKey()) {
-            m.sample_rate = testing::get_value_or_fail<float>(value);
+            m.sample_rate = test::get_value_or_fail<float>(value);
         }
     }
     return m;
@@ -486,7 +484,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto polling = std::async([] {
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
                 const auto v = tag.get(TRIGGER_NAME.shortKey());
-                return v && testing::get_value_or_fail<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+                return v && test::get_value_or_fail<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
 
             std::shared_ptr<DataSetPoller<int32_t>> poller;
@@ -557,7 +555,7 @@ const boost::ut::suite DataSinkTests = [] {
 
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
                 const auto type = tag.get(TRIGGER_NAME.shortKey());
-                return (type && testing::get_value_or_fail<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+                return (type && test::get_value_or_fail<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
             std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
@@ -622,7 +620,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
             const auto v = tag.get(TRIGGER_NAME.shortKey());
-            return (v && testing::get_value_or_fail<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+            return (v && test::get_value_or_fail<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
         };
 
         auto registerThread = std::thread([&] {

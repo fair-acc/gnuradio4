@@ -324,7 +324,7 @@ const boost::ut::suite TopologyGraphTests = [] {
             expect(!atLeastOneReplyFromScheduler) << "should not receive a reply";
             property_map stagedSettings = scheduler.scheduler().settings().stagedParameters();
             expect(stagedSettings.contains("timeout_ms"));
-            expect(eq(42UZ, gr::testing::get_value_or_fail<gr::Size_t>(stagedSettings.at("timeout_ms"))));
+            expect(eq(42UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.at("timeout_ms"))));
 
             // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
@@ -332,7 +332,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
             stagedSettings = scheduler.scheduler().settings().stagedParameters();
             expect(stagedSettings.contains("timeout_ms"));
-            expect(eq(43UZ, gr::testing::get_value_or_fail<gr::Size_t>(stagedSettings.at("timeout_ms"))));
+            expect(eq(43UZ, gr::test::get_value_or_fail<gr::Size_t>(stagedSettings.at("timeout_ms"))));
 
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, "", block::property::kSetting, {{"timeout_ms", 43}}, //
                 ReplyChecker{.expectedEndpoint = block::property::kSetting, .expectedHasData = false});
@@ -365,7 +365,7 @@ const boost::ut::suite TopologyGraphTests = [] {
                 if (reply.endpoint == scheduler::property::kGraphGRC && reply.data.has_value()) {
                     const auto& data = reply.data.value();
                     expect(data.contains("value")) << "Reply should contain 'value' field";
-                    const auto& yaml = gr::testing::get_value_or_fail<std::string>(data.at("value"));
+                    const auto& yaml = gr::test::get_value_or_fail<std::string>(data.at("value"));
                     expect(!yaml.empty()) << "YAML string should not be empty";
                     std::println("YAML content:\n{}", yaml);
 
@@ -417,8 +417,8 @@ const boost::ut::suite TopologyGraphTests = [] {
                    !uiConstraintsFor(copy1).empty();
         });
 
-        expect(eq(42.f, gr::testing::get_value_or_fail<float>(uiConstraintsFor(copy1)["x"])));
-        expect(eq(43.f, gr::testing::get_value_or_fail<float>(uiConstraintsFor(copy2)["x"])));
+        expect(eq(42.f, gr::test::get_value_or_fail<float>(uiConstraintsFor(copy1)["x"])));
+        expect(eq(43.f, gr::test::get_value_or_fail<float>(uiConstraintsFor(copy2)["x"])));
 
         // Check if block introspection includes ui_constraints
 
@@ -440,9 +440,9 @@ const boost::ut::suite TopologyGraphTests = [] {
                 std::set<float> seenUiConstraintsY;
 
                 for (const auto& child : children) {
-                    const auto& uiConstraints = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(gr::testing::get_value_or_fail<gr::property_map>(child.second), "parameters"s, "ui_constraints"s));
-                    seenUiConstraintsX.insert(gr::testing::get_value_or_fail<float>(uiConstraints.at("x")));
-                    seenUiConstraintsY.insert(gr::testing::get_value_or_fail<float>(uiConstraints.at("y")));
+                    const auto& uiConstraints = gr::detail::getOrThrow(gr::detail::getProperty<gr::property_map>(gr::test::get_value_or_fail<gr::property_map>(child.second), "parameters"s, "ui_constraints"s));
+                    seenUiConstraintsX.insert(gr::test::get_value_or_fail<float>(uiConstraints.at("x")));
+                    seenUiConstraintsY.insert(gr::test::get_value_or_fail<float>(uiConstraints.at("y")));
                 }
 
                 expect(seenUiConstraintsX == std::set<float>{42, 43});
@@ -454,8 +454,8 @@ const boost::ut::suite TopologyGraphTests = [] {
             auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
             auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
 
-            expect(eq(42.f, gr::testing::get_value_or_fail<float>(copy1direct->ui_constraints["x"])));
-            expect(eq(43.f, gr::testing::get_value_or_fail<float>(copy2direct->ui_constraints["x"])));
+            expect(eq(42.f, gr::test::get_value_or_fail<float>(copy1direct->ui_constraints["x"])));
+            expect(eq(43.f, gr::test::get_value_or_fail<float>(copy2direct->ui_constraints["x"])));
         }
 
         scheduler.scheduler().requestStop();
@@ -463,8 +463,8 @@ const boost::ut::suite TopologyGraphTests = [] {
         auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
         auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
 
-        expect(eq(42.f, gr::testing::get_value_or_fail<float>(copy1direct->ui_constraints["x"])));
-        expect(eq(43.f, gr::testing::get_value_or_fail<float>(copy2direct->ui_constraints["x"])));
+        expect(eq(42.f, gr::test::get_value_or_fail<float>(copy1direct->ui_constraints["x"])));
+        expect(eq(43.f, gr::test::get_value_or_fail<float>(copy2direct->ui_constraints["x"])));
     };
 };
 
@@ -515,12 +515,12 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
 
             const auto& data = reply.data.value();
 
-            graphUniqueName = gr::testing::get_value_or_fail<std::string>(data.at(std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)));
+            graphUniqueName = gr::test::get_value_or_fail<std::string>(data.at(std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)));
 
-            const auto& children = gr::testing::get_value_or_fail<property_map>(data.at("children"));
+            const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
             expect(eq(children.size(), 4UZ));
 
-            const auto& edges = gr::testing::get_value_or_fail<property_map>(data.at("edges"));
+            const auto& edges = gr::test::get_value_or_fail<property_map>(data.at("edges"));
             expect(eq(edges.size(), 4UZ));
             return true;
         });
@@ -533,7 +533,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
             }
 
             const auto& data     = reply.data.value();
-            const auto& children = gr::testing::get_value_or_fail<property_map>(data.at("children"));
+            const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
             expect(eq(children.size(), 1UZ));
 
             for (const auto& [childUniqueName, child] : children) {

@@ -1,12 +1,10 @@
-#include "gnuradio-4.0/meta/UnitTestHelper.hpp"
+#include <format>
+#include <numbers>
 
 #include <benchmark.hpp>
 
-#include <numbers>
-
-#include <format>
-
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 template<typename T>
 std::vector<T, gr::allocator::Aligned<T>> generateSinSample(std::size_t N, double sampleRate, double frequency, double amplitude) {

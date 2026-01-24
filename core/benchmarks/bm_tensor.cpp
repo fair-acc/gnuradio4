@@ -1,12 +1,3 @@
-#include "gnuradio-4.0/meta/UnitTestHelper.hpp"
-
-#include <benchmark.hpp>
-
-#include <gnuradio-4.0/Tensor.hpp>
-#include <gnuradio-4.0/TensorMath.hpp>
-
-#include <boost/ut.hpp>
-
 #include <algorithm>
 #include <execution>
 #include <format>
@@ -18,6 +9,15 @@
 #include <tuple>
 #include <type_traits>
 #include <typeindex>
+
+#include <benchmark.hpp>
+
+#include <gnuradio-4.0/Tensor.hpp>
+#include <gnuradio-4.0/TensorMath.hpp>
+
+#include <boost/ut.hpp>
+
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 using namespace std::string_view_literals;
 

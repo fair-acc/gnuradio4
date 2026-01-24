@@ -13,7 +13,7 @@
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>
 
-#include <value_utils.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 
@@ -92,7 +92,7 @@ const boost::ut::suite HttpBlocktests = [] {
         source.trigger();
         httpBlock.processScheduledMessages();
         expect(sched.runAndWait().has_value());
-        expect(eq(gr::testing::get_value_or_fail<std::string>(sink.value.at("raw-data")), std::string("Hello world!")));
+        expect(eq(gr::test::get_value_or_fail<std::string>(sink.value.at("raw-data")), std::string("Hello world!")));
 
 #ifndef __EMSCRIPTEN__
         server.stop();
@@ -124,7 +124,7 @@ const boost::ut::suite HttpBlocktests = [] {
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         expect(sched.runAndWait().has_value());
-        expect(eq(gr::testing::get_value_or_fail<int>(sink.value.at("status")), 404));
+        expect(eq(gr::test::get_value_or_fail<int>(sink.value.at("status")), 404));
 
 #ifndef __EMSCRIPTEN__
         server.stop();
@@ -156,7 +156,7 @@ const boost::ut::suite HttpBlocktests = [] {
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         expect(sched.runAndWait().has_value());
-        expect(eq(gr::testing::get_value_or_fail<std::string>(sink.value.at("raw-data")), "OK"sv));
+        expect(eq(gr::test::get_value_or_fail<std::string>(sink.value.at("raw-data")), "OK"sv));
 
 #ifndef __EMSCRIPTEN__
         server.stop();
@@ -200,7 +200,7 @@ const boost::ut::suite HttpBlocktests = [] {
         }
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         expect(sched.runAndWait().has_value());
-        expect(eq(gr::testing::get_value_or_fail<std::string>(sink.value.at("raw-data")), "event"sv));
+        expect(eq(gr::test::get_value_or_fail<std::string>(sink.value.at("raw-data")), "event"sv));
 
 #ifndef __EMSCRIPTEN__
         shutdown = true;

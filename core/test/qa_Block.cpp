@@ -923,11 +923,11 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         };
         auto testBlock = gr::BlockWrapper<LocalTestBlock>();
         expect(testBlock.metaInformation().contains("Drawable")) << "drawable";
-        const auto& drawableConfigMap = gr::testing::get_value_or_fail<gr::property_map>(testBlock.metaInformation().at("Drawable"));
+        const auto& drawableConfigMap = gr::test::get_value_or_fail<gr::property_map>(testBlock.metaInformation().at("Drawable"));
         expect(drawableConfigMap.contains("Category"));
-        expect(eq(gr::testing::get_value_or_fail<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
-        expect(eq(gr::testing::get_value_or_fail<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
     };
 
     "ui_constraints"_test = [] {
@@ -943,8 +943,8 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         expect(eq(testBlock.uiConstraints().size(), 2UZ));
         expect(testBlock.uiConstraints().contains("x-position"));
         expect(testBlock.uiConstraints().contains("y-position"));
-        expect(eq(gr::testing::get_value_or_fail<float>(testBlock.uiConstraints().at("x-position")), 3.f));
-        expect(eq(gr::testing::get_value_or_fail<float>(testBlock.uiConstraints().at("y-position")), 4.f));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("x-position")), 3.f));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("y-position")), 4.f));
     };
 };
 

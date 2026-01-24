@@ -124,10 +124,10 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     }
 
                     const auto& data     = reply.data.value();
-                    const auto& children = get_value_or_fail<property_map>(data.at("children"));
+                    const auto& children = gr::test::get_value_or_fail<property_map>(data.at("children"));
                     expect(eq(children.size(), 3UZ));
 
-                    const auto& edges = get_value_or_fail<property_map>(data.at("edges"));
+                    const auto& edges = gr::test::get_value_or_fail<property_map>(data.at("edges"));
                     expect(eq(edges.size(), 2UZ));
 
                     std::size_t subGraphInConnections  = 0UZ;
@@ -136,11 +136,11 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     // Check that the subgraph is connected properly
 
                     for (const auto& [index, edge_] : edges) {
-                        const auto& edge = get_value_or_fail<property_map>(edge_);
-                        if (get_value_or_fail<std::string>(edge.at("destination_block")) == demo.graphUniqueName) {
+                        const auto& edge = gr::test::get_value_or_fail<property_map>(edge_);
+                        if (gr::test::get_value_or_fail<std::string>(edge.at("destination_block")) == demo.graphUniqueName) {
                             subGraphInConnections++;
                         }
-                        if (get_value_or_fail<std::string>(edge.at("source_block")) == demo.graphUniqueName) {
+                        if (gr::test::get_value_or_fail<std::string>(edge.at("source_block")) == demo.graphUniqueName) {
                             subGraphOutConnections++;
                         }
                     }
@@ -148,9 +148,9 @@ const boost::ut::suite ExportPortsTests_ = [] {
                     expect(eq(subGraphOutConnections, 1UZ));
 
                     // Check subgraph topology
-                    const auto& subGraphData     = get_value_or_fail<property_map>(children.at(convert_string_domain(demo.graphUniqueName)));
-                    const auto& subGraphChildren = get_value_or_fail<property_map>(subGraphData.at("children"));
-                    const auto& subGraphEdges    = get_value_or_fail<property_map>(subGraphData.at("edges"));
+                    const auto& subGraphData     = gr::test::get_value_or_fail<property_map>(children.at(convert_string_domain(demo.graphUniqueName)));
+                    const auto& subGraphChildren = gr::test::get_value_or_fail<property_map>(subGraphData.at("children"));
+                    const auto& subGraphEdges    = gr::test::get_value_or_fail<property_map>(subGraphData.at("edges"));
                     expect(eq(subGraphChildren.size(), 2UZ));
                     expect(eq(subGraphEdges.size(), 1UZ));
                     return true;

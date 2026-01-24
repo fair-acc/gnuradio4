@@ -12,7 +12,7 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
-#include "value_utils.hpp"
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 namespace gr::testing {
 
@@ -112,7 +112,7 @@ inline std::string sendAndWaitMessageEmplaceBlock(gr::MsgPortOut& toGraph, gr::M
         {{"type", std::move(type)}, {"properties", std::move(properties)}},                                                                       //
         ReplyChecker{.expectedEndpoint = gr::scheduler::property::kBlockEmplaced});
 
-    return get_value_or_fail<std::string>(reply.value().data.value().at("unique_name"), sourceLocation);
+    return gr::test::get_value_or_fail<std::string>(reply.value().data.value().at("unique_name"), sourceLocation);
 };
 
 inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn& fromGraph, std::string sourceBlock, std::string sourcePort, std::string destinationBlock, std::string destinationPort, std::string serviceName = "", std::source_location sourceLocation = std::source_location::current()) {

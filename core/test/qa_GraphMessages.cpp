@@ -98,7 +98,7 @@ const boost::ut::suite GraphMessageTests = [] {
                     PluginLoader& loader             = context->loader;
                     auto          expectedBlockTypes = loader.availableBlocks();
                     std::ranges::sort(expectedBlockTypes);
-                    auto blockTypes = gr::testing::get_value_or_fail<std::vector<std::string>>(foundTypes->second);
+                    auto blockTypes = gr::test::get_value_or_fail<std::vector<std::string>>(foundTypes->second);
                     std::ranges::sort(blockTypes);
                     expect(eq(expectedBlockTypes, blockTypes));
                 } else {
