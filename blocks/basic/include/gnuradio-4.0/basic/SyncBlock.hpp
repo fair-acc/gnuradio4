@@ -234,7 +234,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
     constexpr void publishDroppedSamplesTagIfNotZero(OutputSpanLike auto& out, std::size_t nDroppedSamples) {
         if (nDroppedSamples > 0UZ) {
-            out.publishTag(property_map{{gr::tag::N_DROPPED_SAMPLES.shortKey(), nDroppedSamples}}, 0UZ);
+            out.publishTag(property_map{{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nDroppedSamples)}}, 0UZ);
         }
     }
 

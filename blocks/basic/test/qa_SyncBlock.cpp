@@ -93,11 +93,11 @@ gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string tri
 };
 
 gr::Tag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}}};
+    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}}};
 };
 
 gr::Tag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
 };
 
 const boost::ut::suite SyncBlockTests = [] {

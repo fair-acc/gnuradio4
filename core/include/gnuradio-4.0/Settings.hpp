@@ -101,14 +101,24 @@ struct ApplyStagedParametersResult {
 
 namespace detail {
 
+template<typename TValue>
+auto castToGrSizeIfStdSize(const TValue& value) {
+    if constexpr (std::is_same_v<TValue, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+        return static_cast<gr::Size_t>(value);
+    } else {
+        return value;
+    }
+};
+
 template<typename T>
 pmt::Value unwrap_decorated_value(const T& value) {
+
     if constexpr (AnnotatedType<T>) {
-        return pmt::Value(value.value);
+        return pmt::Value(castToGrSizeIfStdSize(value.value));
     } else if constexpr (meta::ImmutableType<T>) {
-        return pmt::Value(value.value());
+        return pmt::Value(castToGrSizeIfStdSize(value.value()));
     } else {
-        return pmt::Value(value);
+        return pmt::Value(castToGrSizeIfStdSize(value));
     }
 };
 
@@ -591,7 +601,7 @@ public:
                             if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
                                 newParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
                             } else {
-                                newParameters.insert_or_assign(key, convertedValue.value());
+                                newParameters.insert_or_assign(key, detail::castToGrSizeIfStdSize(convertedValue.value()));
                             }
                             isSet = true;
                         } else {
@@ -765,6 +775,11 @@ public:
                                 _stagedParameters.insert_or_assign(key, value);
                                 wasChanged = true;
                             }
+                        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<gr::Size_t>()) {
+                                _stagedParameters.insert_or_assign(key, value);
+                                wasChanged = true;
+                            }
                         } else {
                             if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<Type>()) {
                                 _stagedParameters.insert_or_assign(key, value);
@@ -926,6 +941,14 @@ public:
                                 if (auto conversionResult = pmt::assignTo(*maybe_value, *tensor); !conversionResult) {
                                     maybe_value = std::unexpected(conversionResult.error().message);
                                 }
+                            } else {
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
+
+                        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+                            auto ptr = checked_access_ptr{stagedValue.get_if<gr::Size_t>()};
+                            if (ptr != nullptr) {
+                                maybe_value = static_cast<std::size_t>(*ptr);
                             } else {
                                 maybe_value = std::unexpected("Unexpected type in stagedValue");
                             }
@@ -1164,7 +1187,7 @@ private:
                             if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
                                 _stagedParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
                             } else {
-                                _stagedParameters.insert_or_assign(key, convertedValue.value());
+                                _stagedParameters.insert_or_assign(key, detail::castToGrSizeIfStdSize(convertedValue.value()));
                             }
                             isSet = true;
                         } else {

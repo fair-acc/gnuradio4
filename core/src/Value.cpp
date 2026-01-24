@@ -34,11 +34,7 @@ bool Value::holds() const noexcept {
 }
 
 template<typename T>
-requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>
-#ifdef __EMSCRIPTEN__
-         && !std::is_same_v<T, std::size_t>
-#endif
-    )
+requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>)
 T* Value::get_if() noexcept {
     if (!holds<T>()) [[unlikely]] {
         return nullptr;
@@ -283,10 +279,6 @@ Value::Value(uint64_t v, std::pmr::memory_resource* resource) : _resource(ensure
     _storage.u64 = v;
 }
 
-#ifdef __EMSCRIPTEN__
-Value::Value(std::size_t v, std::pmr::memory_resource* resource) : Value(static_cast<uint64_t>(v), resource) {}
-#endif
-
 Value::Value(float v, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
     set_types(ValueType::Float32, ContainerType::Scalar);
     _storage.f32 = v;
@@ -429,15 +421,6 @@ Value& Value::operator=(uint64_t v) {
     _storage.u64 = v;
     return *this;
 }
-
-#ifdef __EMSCRIPTEN__
-Value& Value::operator=(std::size_t v) {
-    destroy();
-    set_types(ValueType::UInt64, ContainerType::Scalar);
-    _storage.u64 = static_cast<uint64_t>(v);
-    return *this;
-}
-#endif
 
 Value& Value::operator=(float v) {
     destroy();
@@ -655,10 +638,6 @@ template bool              Value::holds<std::string>() const noexcept;
 template bool              Value::holds<std::string_view>() const noexcept;
 template Value::Map*       Value::get_if<Value::Map>() noexcept;
 template const Value::Map* Value::get_if<Value::Map>() const noexcept;
-
-#ifdef __EMSCRIPTEN__
-template bool Value::holds<std::size_t>() const noexcept;
-#endif
 
 } // namespace gr::pmt
 

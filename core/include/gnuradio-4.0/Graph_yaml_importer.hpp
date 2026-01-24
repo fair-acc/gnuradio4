@@ -364,7 +364,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
             writePortDefinition(edge.destinationPortDefinition());
 
             if (edge.minBufferSize() != std::numeric_limits<std::size_t>::max()) {
-                seq.push_back(edge.minBufferSize());
+                seq.push_back(static_cast<gr::Size_t>(edge.minBufferSize()));
             }
 
             serializedConnections.emplace_back(std::move(seq));

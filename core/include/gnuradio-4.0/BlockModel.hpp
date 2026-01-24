@@ -558,8 +558,8 @@ property_map serializeEdge(const auto& edge) {
     auto         serializePortDefinition = [&](std::string_view key, const PortDefinition& portDefinition) {
         if (const auto* _definition = std::get_if<PortDefinition::IndexBased>(&portDefinition.definition)) {
             const auto& definition = *_definition;
-            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_TOP_LEVEL), definition.topLevel);
-            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_SUB_INDEX), definition.subIndex);
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_TOP_LEVEL), static_cast<gr::Size_t>(definition.topLevel));
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_SUB_INDEX), static_cast<gr::Size_t>(definition.subIndex));
 
         } else {
             const auto& definition = std::get<PortDefinition::StringBased>(portDefinition.definition);
@@ -573,13 +573,13 @@ property_map serializeEdge(const auto& edge) {
     serializePortDefinition(serialization_fields::EDGE_DESTINATION_PORT, edge.destinationPortDefinition());
 
     result.emplace(serialization_fields::EDGE_WEIGHT, edge.weight());
-    result.emplace(serialization_fields::EDGE_MIN_BUFFER_SIZE, edge.minBufferSize());
+    result.emplace(serialization_fields::EDGE_MIN_BUFFER_SIZE, static_cast<gr::Size_t>(edge.minBufferSize()));
     result.emplace(serialization_fields::EDGE_NAME, std::string(edge.name()));
 
-    result.emplace(serialization_fields::EDGE_BUFFER_SIZE, edge.bufferSize());
+    result.emplace(serialization_fields::EDGE_BUFFER_SIZE, static_cast<gr::Size_t>(edge.bufferSize()));
     result.emplace(serialization_fields::EDGE_EDGE_STATE, std::string(magic_enum::enum_name(edge.state())));
-    result.emplace(serialization_fields::EDGE_N_READERS, edge.nReaders());
-    result.emplace(serialization_fields::EDGE_N_WRITERS, edge.nWriters());
+    result.emplace(serialization_fields::EDGE_N_READERS, static_cast<gr::Size_t>(edge.nReaders()));
+    result.emplace(serialization_fields::EDGE_N_WRITERS, static_cast<gr::Size_t>(edge.nWriters()));
     result.emplace(serialization_fields::EDGE_TYPE, std::string(magic_enum::enum_name(edge.edgeType())));
 
     return result;
@@ -681,7 +681,7 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
                                       return property_map{
                                           //
                                           {"name", std::string(namedCollection.name)},                                                               //
-                                          {"size", namedCollection.ports.size()},                                                                    //
+                                          {"size", static_cast<gr::Size_t>(namedCollection.ports.size())},                                           //
                                           {"type", namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName())} //
                                       };
                                   }},
