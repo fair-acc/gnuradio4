@@ -271,181 +271,181 @@ std::expected<DstTensor, ConversionError> tensorToTensor(TensorOf<SrcT> auto con
 
 template<typename DstT, ConversionPolicy CP>
 std::expected<DstT, ConversionError> tryConvertElement(const Value& elem, std::size_t idx) {
-    if (auto* ptr = elem.get_if<DstT>()) {
-        return *ptr; // exact match
-    }
-
     // Handle string types: std::pmr::string in Value, may want std::string or std::pmr::string
     if constexpr (std::same_as<DstT, std::string> || std::same_as<DstT, std::pmr::string>) {
-        if (auto* p = elem.get_if<std::pmr::string>()) {
-            return DstT{*p};
+        if (auto p = elem.value_or(std::string_view{}); p.data()) {
+            return DstT(p);
+        }
+    } else {
+
+        if (auto* ptr = elem.get_if<DstT>()) {
+            return *ptr; // exact match
+        }
+
+        if constexpr (CP >= ConversionPolicy::Widening) {
+            if constexpr (std::same_as<DstT, double>) {
+                if (auto* p = elem.get_if<float>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int64_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, float>) {
+                if (auto* p = elem.get_if<std::int32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::int64_t>) {
+                if (auto* p = elem.get_if<std::int32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::int32_t>) {
+                if (auto* p = elem.get_if<std::int16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::int16_t>) {
+                if (auto* p = elem.get_if<std::int8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::uint64_t>) {
+                if (auto* p = elem.get_if<std::uint32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::uint32_t>) {
+                if (auto* p = elem.get_if<std::uint16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::uint16_t>) {
+                if (auto* p = elem.get_if<std::uint8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::complex<double>>) {
+                if (auto* p = elem.get_if<std::complex<float>>()) {
+                    return static_cast<DstT>(*p);
+                }
+            }
+        }
+
+        if constexpr (CP >= ConversionPolicy::Narrowing) {
+            if constexpr (std::same_as<DstT, float>) {
+                if (auto* p = elem.get_if<double>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::int32_t>) {
+                if (auto* p = elem.get_if<std::int64_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<double>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<float>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::int16_t>) {
+                if (auto* p = elem.get_if<std::int32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int64_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::int8_t>) {
+                if (auto* p = elem.get_if<std::int16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::uint32_t>) {
+                if (auto* p = elem.get_if<std::uint64_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::uint16_t>) {
+                if (auto* p = elem.get_if<std::uint32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::uint8_t>) {
+                if (auto* p = elem.get_if<std::uint16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+            } else if constexpr (std::same_as<DstT, std::complex<float>>) {
+                if (auto* p = elem.get_if<std::complex<double>>()) {
+                    return static_cast<DstT>(*p);
+                }
+            }
+        }
+
+        if constexpr (CP == ConversionPolicy::Unchecked) {
+            if constexpr (std::is_arithmetic_v<DstT>) {
+                if (auto* p = elem.get_if<bool>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::int64_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint8_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint16_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint32_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::uint64_t>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<float>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<double>()) {
+                    return static_cast<DstT>(*p);
+                }
+            }
+            if constexpr (std::same_as<DstT, std::complex<float>> || std::same_as<DstT, std::complex<double>>) {
+                if (auto* p = elem.get_if<std::complex<float>>()) {
+                    return static_cast<DstT>(*p);
+                }
+                if (auto* p = elem.get_if<std::complex<double>>()) {
+                    return static_cast<DstT>(*p);
+                }
+            }
         }
     }
-
-    if constexpr (CP >= ConversionPolicy::Widening) {
-        if constexpr (std::same_as<DstT, double>) {
-            if (auto* p = elem.get_if<float>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int64_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, float>) {
-            if (auto* p = elem.get_if<std::int32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::int64_t>) {
-            if (auto* p = elem.get_if<std::int32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::int32_t>) {
-            if (auto* p = elem.get_if<std::int16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::int16_t>) {
-            if (auto* p = elem.get_if<std::int8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::uint64_t>) {
-            if (auto* p = elem.get_if<std::uint32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::uint32_t>) {
-            if (auto* p = elem.get_if<std::uint16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::uint16_t>) {
-            if (auto* p = elem.get_if<std::uint8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::complex<double>>) {
-            if (auto* p = elem.get_if<std::complex<float>>()) {
-                return static_cast<DstT>(*p);
-            }
-        }
-    }
-
-    if constexpr (CP >= ConversionPolicy::Narrowing) {
-        if constexpr (std::same_as<DstT, float>) {
-            if (auto* p = elem.get_if<double>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::int32_t>) {
-            if (auto* p = elem.get_if<std::int64_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<double>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<float>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::int16_t>) {
-            if (auto* p = elem.get_if<std::int32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int64_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::int8_t>) {
-            if (auto* p = elem.get_if<std::int16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::uint32_t>) {
-            if (auto* p = elem.get_if<std::uint64_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::uint16_t>) {
-            if (auto* p = elem.get_if<std::uint32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::uint8_t>) {
-            if (auto* p = elem.get_if<std::uint16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-        } else if constexpr (std::same_as<DstT, std::complex<float>>) {
-            if (auto* p = elem.get_if<std::complex<double>>()) {
-                return static_cast<DstT>(*p);
-            }
-        }
-    }
-
-    if constexpr (CP == ConversionPolicy::Unchecked) {
-        if constexpr (std::is_arithmetic_v<DstT>) {
-            if (auto* p = elem.get_if<bool>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::int64_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint8_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint16_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint32_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::uint64_t>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<float>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<double>()) {
-                return static_cast<DstT>(*p);
-            }
-        }
-        if constexpr (std::same_as<DstT, std::complex<float>> || std::same_as<DstT, std::complex<double>>) {
-            if (auto* p = elem.get_if<std::complex<float>>()) {
-                return static_cast<DstT>(*p);
-            }
-            if (auto* p = elem.get_if<std::complex<double>>()) {
-                return static_cast<DstT>(*p);
-            }
-        }
-    }
-
     return std::unexpected(ConversionError{.kind = ConversionError::Kind::ElementTypeMismatch, .index = idx});
 }
 

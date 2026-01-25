@@ -36,7 +36,7 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         if (it == map2.end()) {
             std::print("    key '{}' is present in {} but not in {}\n", std::string_view(key), name1, name2);
         } else if (it->second != value) {
-            std::print("    key '{}' has different values ('{}' vs '{}')\n", std::string_view(key), value, it->second);
+            std::print("    key '{}' has different values ('{}' {} {} vs '{}' {} {})\n", std::string_view(key), value, value.value_type(), value.container_type(), it->second, it->second.value_type(), it->second.container_type());
         }
     }
 

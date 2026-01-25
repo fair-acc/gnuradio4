@@ -101,24 +101,41 @@ struct ApplyStagedParametersResult {
 
 namespace detail {
 
+#ifdef __EMSCRIPTEN__
 template<typename TValue>
-auto castToGrSizeIfStdSize(const TValue& value) {
-    if constexpr (std::is_same_v<TValue, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+auto castToGrSizeIfNeeded(const TValue& value) {
+    if constexpr (std::is_same_v<TValue, std::size_t>) {
         return static_cast<gr::Size_t>(value);
     } else {
         return value;
     }
 };
+#else
+template<typename TValue>
+auto castToGrSizeIfNeeded(const TValue& value) {
+    return value;
+};
+#endif
 
 template<typename T>
-pmt::Value unwrap_decorated_value(const T& value) {
-
+auto unwrap_decorated_value(const T& value) {
     if constexpr (AnnotatedType<T>) {
-        return pmt::Value(castToGrSizeIfStdSize(value.value));
+        return castToGrSizeIfNeeded(value.value);
     } else if constexpr (meta::ImmutableType<T>) {
-        return pmt::Value(castToGrSizeIfStdSize(value.value()));
+        return castToGrSizeIfNeeded(value.value());
     } else {
-        return pmt::Value(castToGrSizeIfStdSize(value));
+        return castToGrSizeIfNeeded(value);
+    }
+}
+
+template<typename T>
+const auto& unwrap_decorated_reference(const T& value) {
+    if constexpr (AnnotatedType<T>) {
+        return value.value;
+    } else if constexpr (meta::ImmutableType<T>) {
+        return value.value();
+    } else {
+        return value;
     }
 };
 
@@ -173,6 +190,15 @@ inline auto computeValueHash = meta::overloaded([](const std::string_view& sv) {
 inline std::size_t computeHash(const pmt::Value& value) {
     std::size_t result = 0UZ;
     pmt::ValueVisitor([&](const auto& v) { result = computeValueHash(v); }).visit(value);
+    return result;
+}
+
+template<typename TCollection>
+auto collectionToTensor(const TCollection& collection) {
+    using TValue       = typename TCollection::value_type;
+    using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
+    Tensor<TTensorValue> result(extents_from, {collection.size()});
+    std::ranges::copy(collection, result.begin());
     return result;
 }
 
@@ -264,14 +290,37 @@ template<typename T>
             if (sv.data()) {
                 return std::string(sv);
             } else {
-                return std::unexpected(std::format("value {} for key '{}' has wrong type, needs {}", value, key, std::string(meta::type_name<T>())));
+                return std::unexpected(std::format("value {} for key '{}' has wrong type {} {}, needs {}", value, key, value.value_type(), value.container_type(), std::string(meta::type_name<T>())));
+            }
+
+        } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+            const auto* tensorValue = value.get_if<Tensor<pmt::Value>>();
+            if (!tensorValue) {
+                return std::unexpected(std::format("Value {} is not a tensor of Value", value));
+
+            } else {
+                std::vector<std::string> converted(tensorValue->size());
+                std::ranges::transform(*tensorValue, converted.begin(), [](const pmt::Value& in) { return in.value_or(std::string()); });
+                return converted;
+            }
+
+        } else if constexpr (meta::is_instantiation_of<T, std::vector>) {
+            using TValue            = typename T::value_type;
+            const auto* tensorValue = value.get_if<Tensor<TValue>>();
+            if (!tensorValue) {
+                return std::unexpected(std::format("Value {} is not a tensor of {}", value, meta::type_name<TValue>()));
+
+            } else {
+                std::vector<TValue> converted(tensorValue->size());
+                std::ranges::copy(*tensorValue, converted.begin());
+                return converted;
             }
 
         } else {
             constexpr bool strictChecks = false;
             auto           converted    = pmt::convert_safely<T, strictChecks>(value);
             if (!converted) {
-                return std::unexpected(std::format("value {} for key '{}' has wrong type, needs {}", value, key, std::string(meta::type_name<T>())));
+                return std::unexpected(std::format("value {} for key '{}' has wrong type {} {}, needs {}", value, key, value.value_type(), value.container_type(), std::string(meta::type_name<T>())));
             }
             return *converted;
         }
@@ -600,8 +649,11 @@ public:
                             }
                             if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
                                 newParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
+                            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                                newParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(*convertedValue)));
+
                             } else {
-                                newParameters.insert_or_assign(key, detail::castToGrSizeIfStdSize(convertedValue.value()));
+                                newParameters.insert_or_assign(key, detail::castToGrSizeIfNeeded(convertedValue.value()));
                             }
                             isSet = true;
                         } else {
@@ -775,9 +827,18 @@ public:
                                 _stagedParameters.insert_or_assign(key, value);
                                 wasChanged = true;
                             }
+#ifdef __EMSCRIPTEN__
                         } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
                             if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<gr::Size_t>()) {
                                 _stagedParameters.insert_or_assign(key, value);
+                                wasChanged = true;
+                            }
+#endif
+                        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                            using TValue = typename Type::value_type;
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<Tensor<TValue>>()) {
+                                auto vectorValue = pmt::convertTo<Tensor<TValue>>(value);
+                                _stagedParameters.insert_or_assign(key, std::move(vectorValue.value()));
                                 wasChanged = true;
                             }
                         } else {
@@ -934,8 +995,9 @@ public:
                             }
 
                         } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-                            using Value = typename Type::value_type;
-                            auto tensor = checked_access_ptr{stagedValue.get_if<Tensor<Value>>()};
+                            using TValue       = typename Type::value_type;
+                            using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
+                            auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
                             if (tensor != nullptr) {
                                 maybe_value = typename decltype(maybe_value)::value_type{};
                                 if (auto conversionResult = pmt::assignTo(*maybe_value, *tensor); !conversionResult) {
@@ -945,6 +1007,7 @@ public:
                                 maybe_value = std::unexpected("Unexpected type in stagedValue");
                             }
 
+#ifdef __EMSCRIPTEN__
                         } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
                             auto ptr = checked_access_ptr{stagedValue.get_if<gr::Size_t>()};
                             if (ptr != nullptr) {
@@ -952,6 +1015,7 @@ public:
                             } else {
                                 maybe_value = std::unexpected("Unexpected type in stagedValue");
                             }
+#endif
 
                         } else {
                             auto ptr = checked_access_ptr{stagedValue.get_if<Type>()};
@@ -1076,6 +1140,10 @@ private:
             if constexpr (settings::isReadableMember<Type>()) {
                 if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
                     _activeParameters.insert_or_assign(convert_string_domain(key), detail::enumToString(member));
+                } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                    const auto& from = detail::unwrap_decorated_reference(member);
+                    _activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::collectionToTensor(from)));
+
                 } else {
                     _activeParameters.insert_or_assign(convert_string_domain(key), detail::unwrap_decorated_value(member));
                 }
@@ -1186,8 +1254,10 @@ private:
                         if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
                             if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
                                 _stagedParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
+                            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                                _stagedParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(*convertedValue)));
                             } else {
-                                _stagedParameters.insert_or_assign(key, detail::castToGrSizeIfStdSize(convertedValue.value()));
+                                _stagedParameters.insert_or_assign(key, detail::castToGrSizeIfNeeded(convertedValue.value()));
                             }
                             isSet = true;
                         } else {
@@ -1269,8 +1339,8 @@ private:
     [[nodiscard]] NO_INLINE std::optional<std::uint64_t> triggeredTimeInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
             const pmt::Value& pmtTimeUtcNs = tag.map.at(gr::tag::TRIGGER_TIME.shortKey());
-            auto              result       = checked_access_ptr{pmtTimeUtcNs.get_if<std::uint64_t>()};
-            if (result != nullptr) {
+            auto              result       = pmt::convert_safely<std::uint64_t>(pmtTimeUtcNs);
+            if (result) {
                 return *result;
             }
         }
@@ -1305,10 +1375,15 @@ private:
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                 if constexpr (settings::isReadableMember<Type>()) {
+                    const auto& key    = std::pmr::string(refl::data_member_name<TBlock, kIdx>.view());
+                    const auto& member = refl::data_member<kIdx>(*_block);
                     if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), detail::enumToString(refl::data_member<kIdx>(*_block)));
+                        parameters.insert_or_assign(key, detail::enumToString(member));
+                    } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                        const auto& from = detail::unwrap_decorated_value(member);
+                        parameters.insert_or_assign(key, detail::collectionToTensor(from));
                     } else {
-                        parameters.insert_or_assign(std::pmr::string(refl::data_member_name<TBlock, kIdx>.view()), detail::unwrap_decorated_value(refl::data_member<kIdx>(*_block)));
+                        parameters.insert_or_assign(key, detail::unwrap_decorated_value(member));
                     }
                 }
             });
