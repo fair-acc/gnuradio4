@@ -19,7 +19,7 @@ GR_REGISTER_BLOCK("ConsoleDebugSink", gr::testing::ImChartMonitor, ([T], false),
 
 template<typename T, bool drawAsynchronously = true>
 requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
-struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::conditional_t<drawAsynchronously, BlockingIO<false>, void>, std::conditional_t<drawAsynchronously, Drawable<UICategory::ChartPane, "console">, void>> {
+struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::conditional_t<drawAsynchronously, BlockingIO<false>, void>, std::conditional_t<drawAsynchronously, Drawable<UICategory::Content, "console">, void>> {
     using ClockSourceType               = std::chrono::system_clock;
     using TimePoint                     = ClockSourceType::time_point;
     constexpr static bool isDataSetLike = gr::DataSetLike<T>;
