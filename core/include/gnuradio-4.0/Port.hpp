@@ -8,6 +8,7 @@
 #include <span>
 #include <variant>
 
+#include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include "CircularBuffer.hpp"
@@ -214,7 +215,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     constexpr PortMetaInfo() noexcept = default;
     explicit PortMetaInfo(std::string_view dataTypeName) noexcept : data_type(dataTypeName) {};
-    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initMetaInfo) noexcept(false) //
+    explicit PortMetaInfo(std::initializer_list<std::pair<const std::string, pmt::Value>> initMetaInfo) noexcept(false) //
         : PortMetaInfo(property_map{initMetaInfo.begin(), initMetaInfo.end()}) {}
     explicit PortMetaInfo(const property_map& metaInfo) noexcept(false) {
         if (auto res = update(metaInfo); !res.has_value()) {
@@ -225,37 +226,49 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     void reset() { auto_update = {gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end()}; }
 
     [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
+        std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
-            if (!auto_update.contains(key)) {
+            if (!auto_update.contains(convert_string_domain(key))) {
                 continue;
             }
-            std::expected<void, Error> maybeError = {};
             refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) {
                 using MemberType = refl::data_member_type<PortMetaInfo, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
 
                 const auto fieldName = refl::data_member_name<PortMetaInfo, kIdx>.view();
                 if (fieldName == key) {
-                    if (std::holds_alternative<Type>(value)) {
-                        auto& member = refl::data_member<kIdx>(*this);
-                        std::ignore  = member.validate_and_set(std::get<Type>(value));
+                    auto& member = refl::data_member<kIdx>(*this);
+                    if constexpr (std::is_same_v<Type, std::string>) {
+                        const auto str = value.value_or(std::string_view{});
+                        if (str.data()) {
+                            std::ignore = member.validate_and_set(std::string(str));
+                        } else {
+                            maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key")});
+                        }
                     } else {
-                        maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key {} (expected:{}, got:{}, value:{})", key, gr::meta::type_name<Type>(), gr::meta::type_name<std::decay_t<decltype(value)>>(), value), location});
+                        const auto converted = pmt::convert_safely<Type, true>(value);
+                        if (converted) {
+                            std::ignore = member.validate_and_set(*converted);
+                        } else {
+                            maybeError = std::unexpected(Error{std::format("PortMetaInfo invalid-argument: incorrect type for key {} (expected:{}, got:{} {}, value:{})", //
+                                                                   std::string_view(key), gr::meta::type_name<Type>(), value.value_type(), value.container_type(), value),
+                                location});
+                        }
                     }
                 }
             });
-            if (!maybeError.has_value()) {
-                return maybeError;
-            }
         }
 
+        if (!maybeError.has_value()) {
+            return maybeError;
+        }
         return {};
     }
 
     [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
         refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { //
-            metaInfo.insert_or_assign(std::string(refl::data_member_name<PortMetaInfo, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*this)));
+            metaInfo.insert_or_assign(std::pmr::string(refl::data_member_name<PortMetaInfo, kIdx>.view()), refl::data_member<kIdx>(*this).value);
         });
 
         return metaInfo;
@@ -575,7 +588,7 @@ struct Port {
     std::conditional_t<Required::kIsConst, const std::size_t, std::size_t> max_samples = Required::kMaxSamples;
 
     // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
-    PortMetaInfo metaInfo{gr::meta::type_name<T>()};
+    PortMetaInfo metaInfo{std::string_view(gr::meta::type_name<T>())};
 
     GR_MAKE_REFLECTABLE(Port, kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo);
 
@@ -1290,8 +1303,9 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, std
     if (tag.index < readPosition) {
         return false;
     }
-    auto eosTagIter = tag.map.find(gr::tag::END_OF_STREAM);
-    return eosTagIter != tag.map.end() && eosTagIter->second == true;
+    auto& map        = tag.map;
+    auto  eosTagIter = map.find(static_cast<std::pmr::string>(gr::tag::END_OF_STREAM));
+    return eosTagIter != map.end() && eosTagIter->second == true;
 };
 } // namespace detail
 

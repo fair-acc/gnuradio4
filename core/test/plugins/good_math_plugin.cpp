@@ -13,10 +13,10 @@ namespace good {
 template<typename T>
 auto factor(const gr::property_map& params) {
     T factor = 1;
-    if (auto it = params.find("factor"s); it != params.end()) {
+    if (auto it = params.find("factor"); it != params.end()) {
         auto& variant = it->second;
-        auto* ptr     = std::get_if<T>(&variant);
-        if (ptr) {
+        auto  ptr     = gr::checked_access_ptr{variant.get_if<T>()};
+        if (ptr != nullptr) {
             factor = *ptr;
         }
     }

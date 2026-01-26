@@ -28,7 +28,7 @@ bool equalTags(auto tags, auto expected) {
     return true;
 }
 
-static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, pmtv::pmt>> init) { return gr::property_map{init.begin(), init.end()}; }
+static inline gr::property_map propMap(std::initializer_list<std::pair<const std::string, gr::pmt::Value>> init) { return gr::property_map{init.begin(), init.end()}; }
 
 const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
@@ -85,7 +85,10 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
         { // partial consume
             auto data = in.get<SpanReleasePolicy::ProcessAll>(6UZ);
             expect(std::ranges::equal(data.rawTags, std::vector<Tag>{{0UZ, {{"id", "tag@100"}, {"id0", true}}}, {1, {{"id", "tag@101"}, {"id1", true}}}, {3, {{"id", "tag@103"}, {"id3", true}}}, {4, {{"id", "tag@104"}, {"id4", true}}}, {5, {{"id", "tag@105"}, {"id5", true}}}}));
-            expect(equalTags(data.tags(), std::vector{std::make_pair(0L, property_map{{"id", "tag@100"}, {"id0", true}}), std::make_pair(1L, property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(3L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(4L, property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(5L, property_map{{"id", "tag@105"}, {"id5", true}})}));
+            expect(equalTags(data.tags(), std::vector{std::make_pair(0L,
+                                                          property_map{//
+                                                              {"id", "tag@100"}, {"id0", true}}),
+                                              std::make_pair(1L, property_map{{"id", "tag@101"}, {"id1", true}}), std::make_pair(3L, property_map{{"id", "tag@103"}, {"id3", true}}), std::make_pair(4L, property_map{{"id", "tag@104"}, {"id4", true}}), std::make_pair(5L, property_map{{"id", "tag@105"}, {"id5", true}})}));
             expect(std::ranges::equal(data, std::views::iota(100) | std::views::take(6UZ)));
             expect(equalTags(data.tags(1), std::vector{std::make_pair(0L, property_map{{"id", "tag@100"}, {"id0", true}})}));
             expect(data.consume(3));
@@ -200,9 +203,9 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
             auto tags = tagReader.get();
             expect(eq(tags.size(), 2UZ));
             expect(eq(tags[0].map.size(), 1UZ));
-            expect(eq(std::get<int>(tags[0].map.at("k1")), 1));
+            expect(eq(tags[0].map.at("k1").value_or(-1), 1));
             expect(eq(tags[1].map.size(), 1UZ));
-            expect(eq(std::get<int>(tags[1].map.at("k2")), 2));
+            expect(eq(tags[1].map.at("k2").value_or(-1), 2));
             expect(std::ranges::equal(data, std::vector<int>{11, 22}));
         }
     };
@@ -436,14 +439,14 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(eq(metaInfo.signal_max.value, +1.f));
 
         const property_map out = metaInfo.get();
-        expect(eq(std::get<std::string>(out.at("data_type")), "f32"s));
-        expect(eq(std::get<std::string>(out.at("name")), "TestPortName"s));
-        expect(eq(std::get<float>(out.at(tag::SAMPLE_RATE.shortKey())), 48000.f));
-        expect(eq(std::get<std::string>(out.at(tag::SIGNAL_NAME.shortKey())), "IF"s));
-        expect(eq(std::get<std::string>(out.at(tag::SIGNAL_QUANTITY.shortKey())), "voltage"s));
-        expect(eq(std::get<std::string>(out.at(tag::SIGNAL_UNIT.shortKey())), "[V]"s));
-        expect(eq(std::get<float>(out.at(tag::SIGNAL_MIN.shortKey())), -1.f));
-        expect(eq(std::get<float>(out.at(tag::SIGNAL_MAX.shortKey())), 1.f));
+        expect(eq(out.at("data_type").value_or(std::string()), "f32"s));
+        expect(eq(out.at("name").value_or(std::string()), "TestPortName"s));
+        expect(eq(out.at(tag::SAMPLE_RATE.shortKey()).value_or(0.0f), 48000.f));
+        expect(eq(out.at(tag::SIGNAL_NAME.shortKey()).value_or(std::string()), "IF"s));
+        expect(eq(out.at(tag::SIGNAL_QUANTITY.shortKey()).value_or(std::string()), "voltage"s));
+        expect(eq(out.at(tag::SIGNAL_UNIT.shortKey()).value_or(std::string()), "[V]"s));
+        expect(eq(out.at(tag::SIGNAL_MIN.shortKey()).value_or(0.0f), -1.f));
+        expect(eq(out.at(tag::SIGNAL_MAX.shortKey()).value_or(0.0f), 1.f));
     };
 
     "update wrong type"_test = [] {
@@ -462,6 +465,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         p[gr::tag::SAMPLE_RATE.shortKey()] = 42.f;                             // ok
         p[gr::tag::SIGNAL_MIN.shortKey()]  = std::string("wrong_type_string"); // wrong type
         p[gr::tag::SIGNAL_MAX.shortKey()]  = 42.;                              // o, but after throw
+        for (const auto& [key, value] : p) {
+            std::println("k={} val={}:{}/{}", std::string_view(key), value, value.value_type(), value.container_type());
+        }
         expect(!metaInfo.update(p).has_value());
         expect(eq(metaInfo.sample_rate.value, 42.f));                                // sample_rate was updated
         expect(eq(metaInfo.signal_min.value, std::numeric_limits<float>::lowest())); // default value
@@ -514,9 +520,9 @@ const boost::ut::suite<"PortMetaInfo"> _pmi = [] { // NOSONAR (N.B. lambda size)
         expect(m.update(p).has_value());
 
         auto out = m.get();
-        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MIN.shortKey())), -0.5f));
-        expect(eq(std::get<float>(out.at(gr::tag::SIGNAL_MAX.shortKey())), +0.5f));
-        expect(eq(std::get<std::string>(out.at(gr::tag::SIGNAL_NAME.shortKey())), "<unnamed>"s)) << "untouched defaults still there";
+        expect(eq(out.at(gr::tag::SIGNAL_MIN.shortKey()).value_or(0.0f), -0.5f));
+        expect(eq(out.at(gr::tag::SIGNAL_MAX.shortKey()).value_or(0.0f), +0.5f));
+        expect(eq(out.at(gr::tag::SIGNAL_NAME.shortKey()).value_or(std::string()), "<unnamed>"s)) << "untouched defaults still there";
     };
 };
 

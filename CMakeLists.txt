@@ -368,7 +368,7 @@ FetchContent_Declare(
 
 set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
-if(NOT EMSCRIPTEN)
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   set(GR_HTTP_ENABLED FALSE)
 
   if(NOT
@@ -410,7 +410,7 @@ set(GR_FETCH_MAKE_AVAILABLE_DEPS
     vir-simd
     cpp-httplib)
 
-if(NOT EMSCRIPTEN)
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS cpr)
 endif()
 
@@ -420,10 +420,6 @@ FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
   find_package(SoapySDR CONFIG)
 endif()
-
-add_library(pmtv INTERFACE)
-target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
-target_link_libraries(pmtv INTERFACE)
 
 install(DIRECTORY ${pmt_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
@@ -501,7 +497,8 @@ if(ENABLE_TESTING
     qa_DataSink
     qa_DynamicPort
     qa_DynamicBlock
-    qa_HierBlock
+    qa_UnmanagedSubGraph
+    qa_ManagedSubGraph
     qa_filter
     qa_Settings
     qa_Tags
@@ -523,7 +520,8 @@ if(ENABLE_TESTING
     qa_DataSink
     qa_DynamicPort
     qa_DynamicBlock
-    qa_HierBlock
+    qa_UnmanagedSubGraph
+    qa_ManagedSubGraph
     qa_filter
     qa_Settings
     qa_Tags

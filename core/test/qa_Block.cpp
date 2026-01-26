@@ -8,9 +8,12 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include "message_utils.hpp"
 
 #if !DISABLE_SIMD
 namespace gr::test {
@@ -771,14 +774,14 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         gr::Graph testGraph;
         auto&     source = testGraph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(20)}});
         source._tags     = {
-            {0, {{"key0", "value@0"}}},    //
-            {2, {{"key2", "value@2"}}},    //
-            {4, {{"key4", "value@4"}}},    //
-            {6, {{"key6", "value@6"}}},    //
-            {8, {{"ke8", "value@8"}}},     //
-            {10, {{"key10", "value@10"}}}, //
-            {12, {{"key12", "value@12"}}}, //
-            {14, {{"key14", "value@14"}}}  //
+            {0, property_map({{"key0", "value@0"}})},    //
+            {2, property_map({{"key2", "value@2"}})},    //
+            {4, property_map({{"key4", "value@4"}})},    //
+            {6, property_map({{"key6", "value@6"}})},    //
+            {8, property_map({{"ke8", "value@8"}})},     //
+            {10, property_map({{"key10", "value@10"}})}, //
+            {12, property_map({{"key12", "value@12"}})}, //
+            {14, property_map({{"key14", "value@14"}})}  //
         };
 
         auto& intDecBlock = testGraph.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
@@ -818,10 +821,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         auto& testNode = graph.emplaceBlock<TestNode>();
 
-        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
-        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
-        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
-        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{3.}}}));
 
         sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
@@ -866,10 +869,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         auto& testNode = graph.emplaceBlock<TestNode>();
 
-        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
-        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
-        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
-        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{3.}}}));
 
         sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
@@ -920,11 +923,11 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         };
         auto testBlock = gr::BlockWrapper<LocalTestBlock>();
         expect(testBlock.metaInformation().contains("Drawable")) << "drawable";
-        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock.metaInformation().at("Drawable"s));
+        const auto& drawableConfigMap = gr::test::get_value_or_fail<gr::property_map>(testBlock.metaInformation().at("Drawable"));
         expect(drawableConfigMap.contains("Category"));
-        expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
-        expect(eq(std::get<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
     };
 
     "ui_constraints"_test = [] {
@@ -940,8 +943,8 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         expect(eq(testBlock.uiConstraints().size(), 2UZ));
         expect(testBlock.uiConstraints().contains("x-position"));
         expect(testBlock.uiConstraints().contains("y-position"));
-        expect(eq(std::get<float>(testBlock.uiConstraints().at("x-position"s)), 3.f));
-        expect(eq(std::get<float>(testBlock.uiConstraints().at("y-position"s)), 4.f));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("x-position")), 3.f));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("y-position")), 4.f));
     };
 };
 
@@ -1133,9 +1136,10 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
 
         gr::Graph flow;
         // ClockSource has a BlockingIO attribute
-        auto& source  = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 10.f}, {"n_samples_max", gr::Size_t(0)}});
-        auto& monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
-        auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        auto&                                               source = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 10.f}, {"n_samples_max", gr::Size_t(0)}});
+        TagMonitor<float, ProcessFunction::USE_PROCESS_ONE> d(gr::property_map{});
+        auto&                                               monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        auto&                                               sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 

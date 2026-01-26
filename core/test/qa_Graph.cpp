@@ -11,8 +11,8 @@ requires(std::is_arithmetic_v<T>)
 struct MultiPortTestSource : public gr::Block<MultiPortTestSource<T, nPorts>> {
     std::vector<gr::PortOut<T>> out{nPorts};
 
-    gr::Size_t              n_samples_max{1024}; // if 0 -> infinite samples
-    std::vector<gr::Size_t> active_indices = {0};
+    gr::Size_t             n_samples_max{1024}; // if 0 -> infinite samples
+    gr::Tensor<gr::Size_t> active_indices = {gr::data_from, {0}};
 
     gr::Size_t _processBulkCount{0UZ};
     gr::Size_t _nSamplesProduced{0UZ};
@@ -94,12 +94,12 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
     "Graph connection buffer size test - Multi output ports"_test = [] {
         Graph graph;
 
-        const std::size_t       customBufferSize = 8192UZ;
-        const std::size_t       nIterations      = 10;
-        gr::Size_t              nMaxSamples      = static_cast<gr::Size_t>(nIterations * customBufferSize);
-        std::vector<gr::Size_t> activeIndices    = {0};
-        auto&                   src              = graph.emplaceBlock<MultiPortTestSource<float, 3>>({{"n_samples_max", nMaxSamples}, {"active_indices", activeIndices}});
-        auto&                   sink1            = graph.emplaceBlock<NullSink<float>>();
+        const std::size_t  customBufferSize = 8192UZ;
+        const std::size_t  nIterations      = 10;
+        gr::Size_t         nMaxSamples      = static_cast<gr::Size_t>(nIterations * customBufferSize);
+        Tensor<gr::Size_t> activeIndices    = {gr::data_from, {0}};
+        auto&              src              = graph.emplaceBlock<MultiPortTestSource<float, 3>>({{"n_samples_max", nMaxSamples}, {"active_indices", activeIndices}});
+        auto&              sink1            = graph.emplaceBlock<NullSink<float>>();
 
         // only the first port is connected
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", 0>(src, customBufferSize).to<"in">(sink1)));

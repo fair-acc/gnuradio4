@@ -13,9 +13,9 @@ struct TestParams {
     std::string   filter         = "";                                        // if "" -> take default
     std::uint64_t tolerance      = std::numeric_limits<std::uint64_t>::max(); // if max() -> take default
 
-    std::vector<std::vector<int>>     inValues;
+    std::vector<gr::Tensor<int>>      inValues;
     std::vector<std::vector<gr::Tag>> inTags;
-    std::vector<std::vector<int>>     expectedValues;
+    std::vector<gr::Tensor<int>>      expectedValues;
     std::vector<std::vector<gr::Tag>> expectedTags;
     std::size_t                       expectedNSamples = 0UZ;
 };
@@ -93,11 +93,11 @@ gr::Tag genSyncTag(std::size_t index, std::uint64_t triggerTime, std::string tri
 };
 
 gr::Tag genDropTag(std::size_t index, std::size_t nSamplesDropped) { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}}};
+    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}}};
 };
 
 gr::Tag genDropSyncTag(std::size_t index, std::size_t nSamplesDropped, std::uint64_t triggerTime, std::string triggerName = "TriggerName") { //
-    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), nSamplesDropped}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
+    return {index, {{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nSamplesDropped)}, {gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), triggerTime}}};
 };
 
 const boost::ut::suite SyncBlockTests = [] {
@@ -111,9 +111,9 @@ const boost::ut::suite SyncBlockTests = [] {
             .tolerance = 2ULL,                                                                                //
             .inValues  =                                                                                      //
             {                                                                                                 //
-                {1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1},                                                         //
-                {1, 2, 0, 1, 2, 3, 4, 0, 1, 2, 3, 0, 1, 2},                                                   //
-                {1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 0, 1, 2, 3}},                                            //
+                gr::Tensor<int>(data_from, {1, 0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1}),                             //
+                gr::Tensor<int>(data_from, {1, 2, 0, 1, 2, 3, 4, 0, 1, 2, 3, 0, 1, 2}),                       //
+                gr::Tensor<int>(data_from, {1, 2, 3, 0, 1, 2, 3, 4, 5, 0, 1, 2, 0, 1, 2, 3})},                //
             .inTags =                                                                                         //
             {                                                                                                 //
                 {genSyncTag(1, 99), genSyncTag(5, 201), genSyncTag(10, 301)},                                 //
@@ -121,9 +121,9 @@ const boost::ut::suite SyncBlockTests = [] {
                 {genSyncTag(3, 101), genSyncTag(9, 200), genSyncTag(12, 300)}},                               //
             .expectedValues =                                                                                 //
             {                                                                                                 //
-                {1, 0, 1, 2, 3, 0, 1, 2, 0, 1},                                                               //
-                {2, 0, 1, 2, 3, 0, 1, 2, 0, 1},                                                               //
-                {3, 0, 1, 2, 3, 0, 1, 2, 0, 1}},                                                              //
+                gr::Tensor<int>(data_from, {1, 0, 1, 2, 3, 0, 1, 2, 0, 1}),                                   //
+                gr::Tensor<int>(data_from, {2, 0, 1, 2, 3, 0, 1, 2, 0, 1}),                                   //
+                gr::Tensor<int>(data_from, {3, 0, 1, 2, 3, 0, 1, 2, 0, 1})},                                  //
             .expectedTags =                                                                                   //
             {                                                                                                 //
                 {genSyncTag(1, 99), genSyncTag(5, 201), genDropSyncTag(8, 2, 301)},                           //
@@ -132,27 +132,27 @@ const boost::ut::suite SyncBlockTests = [] {
     };
 
     "SyncBlock missing tag test"_test = [] {
-        runTest({                                                              //
-            .tolerance = 2ULL,                                                 //
-            .inValues  =                                                       //
-            {                                                                  //
-                {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},                        //
-                {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},                        //
-                {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}},                       //
-            .inTags =                                                          //
-            {                                                                  //
-                {genSyncTag(1, 100), genSyncTag(5, 200), genSyncTag(10, 300)}, //
-                {genSyncTag(2, 100), genSyncTag(10, 300)},                     //
-                {genSyncTag(4, 200), genSyncTag(10, 300)}},                    //
-            .expectedValues =                                                  //
-            {                                                                  //
-                {5, 6, 7, 8, 9, 10, 11},                                       //
-                {5, 6, 7, 8, 9, 10, 11},                                       //
-                {5, 6, 7, 8, 9, 10, 11}},                                      //
-            .expectedTags =                                                    //
-            {                                                                  //
-                {genDropSyncTag(0, 5, 200), genSyncTag(5, 300)},               // Sample 5 was copied to the output, including the sync tag, even though the tag was not used
-                {genDropTag(0, 5), genSyncTag(5, 300)},                        //
+        runTest({                                                                    //
+            .tolerance = 2ULL,                                                       //
+            .inValues  =                                                             //
+            {                                                                        //
+                gr::Tensor<int>(data_from, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}),  //
+                gr::Tensor<int>(data_from, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}),  //
+                gr::Tensor<int>(data_from, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11})}, //
+            .inTags =                                                                //
+            {                                                                        //
+                {genSyncTag(1, 100), genSyncTag(5, 200), genSyncTag(10, 300)},       //
+                {genSyncTag(2, 100), genSyncTag(10, 300)},                           //
+                {genSyncTag(4, 200), genSyncTag(10, 300)}},                          //
+            .expectedValues =                                                        //
+            {                                                                        //
+                gr::Tensor<int>(data_from, {5, 6, 7, 8, 9, 10, 11}),                 //
+                gr::Tensor<int>(data_from, {5, 6, 7, 8, 9, 10, 11}),                 //
+                gr::Tensor<int>(data_from, {5, 6, 7, 8, 9, 10, 11})},                //
+            .expectedTags =                                                          //
+            {                                                                        //
+                {genDropSyncTag(0, 5, 200), genSyncTag(5, 300)},                     // Sample 5 was copied to the output, including the sync tag, even though the tag was not used
+                {genDropTag(0, 5), genSyncTag(5, 300)},                              //
                 {genDropTag(0, 5), genSyncTag(5, 300)}}});
     };
 

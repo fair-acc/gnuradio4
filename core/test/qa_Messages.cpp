@@ -319,7 +319,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(!reply.data.value().empty());
                 expect(reply.data.value().contains("factor"));
-                expect(eq(1, std::get<int>(reply.data.value().at("factor"))));
+                expect(eq(1, gr::test::get_value_or_fail<int>(reply.data.value().at("factor"))));
             };
 
             "get - StagedSettings"_test = [&] {
@@ -342,7 +342,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 property_map stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("factor"));
-                expect(eq(42, std::get<int>(stagedSettings.at("factor"))));
+                expect(eq(42, gr::test::get_value_or_fail<int>(stagedSettings.at("factor"))));
 
                 // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, {{"factor", 43}} /* data  */);
@@ -351,7 +351,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("factor"));
-                expect(eq(43, std::get<int>(stagedSettings.at("factor"))));
+                expect(eq(43, gr::test::get_value_or_fail<int>(stagedSettings.at("factor"))));
             };
 
             "set - StagedSettings, property_map field"_test = [&] {
@@ -362,7 +362,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 property_map stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("ui_constraints"));
-                expect(eq(42.f, std::get<float>(std::get<gr::property_map>(stagedSettings.at("ui_constraints"))["x"])));
+                expect(eq(42.f, gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(stagedSettings.at("ui_constraints"))["x"])));
 
                 // setting staged setting via staged setting (N.B. non-real-time <-> real-time setting decoupling
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kStagedSetting /* endpoint */, {{"ui_constraints", makeUiConstraints(43, 7)}} /* data  */);
@@ -371,10 +371,10 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(fromBlock.streamReader().available(), 0UZ)) << "should not receive a reply";
                 stagedSettings = unitTestBlock.settings().stagedParameters();
                 expect(stagedSettings.contains("ui_constraints"));
-                expect(eq(43.f, std::get<float>(std::get<gr::property_map>(stagedSettings.at("ui_constraints"))["x"])));
+                expect(eq(43.f, gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(stagedSettings.at("ui_constraints"))["x"])));
 
                 expect(unitTestBlock.settings().applyStagedParameters().forwardParameters.empty());
-                expect(eq(43.f, std::get<float>(unitTestBlock.ui_constraints["x"])));
+                expect(eq(43.f, gr::test::get_value_or_fail<float>(unitTestBlock.ui_constraints["x"])));
             };
         };
 
@@ -392,9 +392,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const std::map<pmt::Value, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 1UZ));
-                expect(allStored.contains(""s));
+                expect(allStored.contains(""));
 
                 const Message reply = consumeFirstReply(fromBlock);
                 expect(reply.cmd == Final) << std::format("mismatch between reply.cmd = {} and expected {} command", reply.cmd, Final);
@@ -403,9 +403,9 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kSettingsContexts)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("contexts"));
-                auto contexts = std::get<std::vector<std::string>>(reply.data.value().at("contexts"));
+                auto contexts = reply.data.value().at("contexts").value_or(Tensor<pmt::Value>{});
                 expect(eq(contexts.size(), 1UZ));
-                expect(eq(contexts, std::vector<std::string>{""}));
+                expect(eq(contexts[0], ""s));
             };
 
             "get active context - w/o explicit serviceName"_test = [&] {
@@ -420,11 +420,11 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(eq(""s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
 
             "create active test_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "test_context"}, {gr::tag::CONTEXT_TIME.shortKey(), 1UZ}} /* data  */);
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "test_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(1UZ)}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -438,12 +438,12 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kSettingsCtx)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("failed_to_set"));
-                auto failed_to_set = std::get<pmtv::map_t>(reply.data.value().at("failed_to_set"));
+                auto failed_to_set = gr::test::get_value_or_fail<gr::property_map>(reply.data.value().at("failed_to_set"));
                 expect(failed_to_set.empty());
             };
 
             "create active new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), 2UZ}} /* data  */);
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kSettingsCtx /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
@@ -457,16 +457,16 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kSettingsCtx)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("failed_to_set"));
-                auto failed_to_set = std::get<pmtv::map_t>(reply.data.value().at("failed_to_set"));
+                auto failed_to_set = gr::test::get_value_or_fail<gr::property_map>(reply.data.value().at("failed_to_set"));
                 expect(failed_to_set.empty());
             };
 
             "activate new_context - w/o explicit serviceName"_test = [&] {
-                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), 2UZ}} /* data  */);
+                sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kActiveContext /* endpoint */, {{gr::tag::CONTEXT.shortKey(), "new_context"}, {gr::tag::CONTEXT_TIME.shortKey(), static_cast<gr::Size_t>(2UZ)}} /* data  */);
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                std::string activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
+                std::string activeContext = gr::test::get_value_or_fail<std::string>(unitTestBlock.settings().activeContext().context);
                 expect(eq("new_context"s, activeContext));
 
                 const Message reply = consumeFirstReply(fromBlock);
@@ -477,7 +477,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
                 expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
-                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
 
             "get active new_context - w/o explicit serviceName"_test = [&] {
@@ -493,7 +493,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
                 expect(reply.data.value().contains(gr::tag::CONTEXT_TIME.shortKey()));
-                expect(eq("new_context"s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq("new_context"s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
 
             "get all contexts - w/o explicit serviceName"_test = [&] {
@@ -501,7 +501,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(nothrow([&] { unitTestBlock.processScheduledMessages(); })) << "manually execute processing of messages";
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
-                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const std::map<pmt::Value, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 3UZ));
                 expect(allStored.contains(""s));
                 expect(allStored.contains("new_context"s));
@@ -515,11 +515,11 @@ const boost::ut::suite MessagesTests = [] {
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains("contexts"));
                 expect(reply.data.value().contains("times"));
-                auto contexts = std::get<std::vector<std::string>>(reply.data.value().at("contexts"));
-                auto times    = std::get<std::vector<std::uint64_t>>(reply.data.value().at("times"));
+                auto contexts = reply.data.value().at("contexts").value_or(Tensor<pmt::Value>());
+                auto times    = reply.data.value().at("times").value_or(Tensor<std::uint64_t>());
                 expect(eq(contexts.size(), 3UZ));
                 expect(eq(times.size(), 3UZ));
-                expect(eq(contexts, std::vector<std::string>{"", "new_context", "test_context"}));
+                expect(eq(contexts, std::vector<pmt::Value>{"", "new_context", "test_context"}));
                 // We do not check the default context as it's time is now()
                 expect(eq(times[1], allStored.at("new_context")[0].context.time)); // We need internal time since wasm change our time
                 expect(eq(times[2], allStored.at("test_context")[0].context.time));
@@ -527,7 +527,7 @@ const boost::ut::suite MessagesTests = [] {
 
             "remove new_context - w/o explicit serviceName"_test = [&] {
                 //  We need internal time since wasm change our time
-                const std::map<pmtv::pmt, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
+                const std::map<pmt::Value, std::vector<gr::SettingsBase::CtxSettingsPair>, settings::PMTCompare> allStored = unitTestBlock.settings().getStoredAll();
                 expect(eq(allStored.size(), 3UZ));
                 const std::uint64_t internalTimeForWasm = allStored.at("new_context")[0].context.time;
 
@@ -536,7 +536,7 @@ const boost::ut::suite MessagesTests = [] {
 
                 expect(eq(fromBlock.streamReader().available(), 1UZ)) << "didn't receive reply message";
                 const Message reply         = consumeFirstReply(fromBlock);
-                std::string   activeContext = std::get<std::string>(unitTestBlock.settings().activeContext().context);
+                std::string   activeContext = gr::test::get_value_or_fail<std::string>(unitTestBlock.settings().activeContext().context);
                 expect(eq(""s, activeContext));
             };
 
@@ -552,7 +552,7 @@ const boost::ut::suite MessagesTests = [] {
                 expect(eq(reply.endpoint, std::string(block::property::kActiveContext)));
                 expect(reply.data.has_value());
                 expect(reply.data.value().contains(gr::tag::CONTEXT.shortKey()));
-                expect(eq(""s, std::get<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
+                expect(eq(""s, gr::test::get_value_or_fail<std::string>(reply.data.value().at(gr::tag::CONTEXT.shortKey()))));
             };
         };
     };
@@ -707,7 +707,7 @@ const boost::ut::suite MessagesTests = [] {
                 { .cmd = [&] { std::print("executing passing test"); /* simulate work */ }, .check = [&] { return true; /* simulate success */ }, .delay = 500ms },
                 { .cmd = [&] { std::print("executing test timeout"); /* simulate work */ }, .check = [&] { return std::nullopt; /* simulate time-out */ }, .timeout=100ms, .mayFail = true },
                 { .cmd = [&] { sendCommand("get settings      ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(fromScheduler, "get settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 1.0f } }); }, .delay = 100ms, .retryFor = 9s },
-                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f } }); }, .check = [&] { return checkReply(fromScheduler, "set settings", 0UZ, "", "", property_map{ }); }, .delay = 800ms , .retryFor = 9s},
+                { .cmd = [&] { sendCommand("set settings      ", Set, "UnitTestBlock", property::kSetting, { { "factor", 42.0f} }); }, .check = [&] { return checkReply(fromScheduler, "set settings", 0UZ, "", "", property_map{ }); }, .delay = 800ms , .retryFor = 9s},
                 { .cmd = [&] { sendCommand("verify settings   ", Get, "UnitTestBlock", property::kSetting, { }); }, .check = [&] { return checkReply(fromScheduler, "verify settings", 1UZ, process.unique_name, property::kSetting, property_map{ { "factor", 42.0f } }); }, .delay = 100ms, .retryFor = 9s },
                 { .cmd = [&] { sendCommand("shutdown scheduler", Set, "", property::kLifeCycleState, { { "state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP)) } }); }}
         };
@@ -824,7 +824,7 @@ const boost::ut::suite MessagesTests = [] {
             expect(msg.endpoint == block::property::kLifeCycleState);
             expect(msg.data.has_value());
             expect(msg.data.value().contains("state"));
-            const auto state = std::get<std::string>(msg.data.value().at("state"));
+            const auto state = gr::test::get_value_or_fail<std::string>(msg.data.value().at("state"));
             receivedStates.push_back(state);
             lastSeen = std::chrono::steady_clock::now();
             if (state == magic_enum::enum_name(lifecycle::State::STOPPED)) {
@@ -846,7 +846,7 @@ const boost::ut::suite MessagesTests = [] {
         gr::Graph flow;
 
         auto& source    = flow.emplaceBlock<ClockSource<float>>({{"n_samples_max", gr::Size_t(0)}});
-        auto& testBlock = flow.emplaceBlock<TestBlock<float>>({{"factor", 42.f}, {"ui_constraints", gr::property_map{{"x"s, 42.f}, {"y"s, 6.f}}}});
+        auto& testBlock = flow.emplaceBlock<TestBlock<float>>({{"factor", 42.f}, {"ui_constraints", gr::property_map{{"x", 42.f}, {"y", 6.f}}}});
         auto& sink      = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
 
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(testBlock)));
@@ -867,7 +867,7 @@ const boost::ut::suite MessagesTests = [] {
             sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting,
                 {{"factor", 43.0f},           //
                     {"name", "My New Name"s}, //
-                    {"ui_constraints", gr::property_map{{"x"s, 43.f}, {"y"s, 7.f}}}});
+                    {"ui_constraints", gr::property_map{{"x", 43.f}, {"y", 7.f}}}});
             bool       seenUpdate = false;
             const auto startTime  = std::chrono::steady_clock::now();
             auto       isExpired  = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
@@ -883,22 +883,22 @@ const boost::ut::suite MessagesTests = [] {
                     if (msg.serviceName == blockName && msg.endpoint == block::property::kStagedSetting) {
                         expect(msg.data.has_value());
                         expect(msg.data.value().contains("factor"));
-                        const auto factor = std::get<float>(msg.data.value().at("factor"));
+                        const auto factor = gr::test::get_value_or_fail<float>(msg.data.value().at("factor"));
                         expect(eq(factor, 43.0f));
 
                         expect(msg.data.value().contains("name"));
-                        const auto name = std::get<std::string>(msg.data.value().at("name"));
+                        const auto name = gr::test::get_value_or_fail<std::string>(msg.data.value().at("name"));
                         expect(eq(name, "My New Name"s));
 
                         expect(msg.data.value().contains("ui_constraints"));
-                        const auto uiConstraints = std::get<gr::property_map>(msg.data.value().at("ui_constraints"));
-                        expect(uiConstraints == gr::property_map{{"x"s, 43.f}, {"y"s, 7.f}});
+                        const auto uiConstraints = gr::test::get_value_or_fail<gr::property_map>(msg.data.value().at("ui_constraints"));
+                        expect(uiConstraints == gr::property_map{{"x", 43.f}, {"y", 7.f}});
 
                         expect(testBlock.settings().applyStagedParameters().forwardParameters.empty());
-                        expect(eq(std::get<float>(testBlock.settings().get("factor").value()), 43.0f));
-                        expect(eq(std::get<std::string>(testBlock.settings().get("name"s).value()), "My New Name"s));
-                        expect(eq(std::get<float>(std::get<gr::property_map>(testBlock.settings().get("ui_constraints").value())["x"]), 43.f));
-                        expect(eq(std::get<float>(std::get<gr::property_map>(testBlock.settings().get("ui_constraints").value())["y"]), 7.f));
+                        expect(eq(gr::test::get_value_or_fail<float>(testBlock.settings().get("factor").value()), 43.0f));
+                        expect(eq(gr::test::get_value_or_fail<std::string>(testBlock.settings().get("name"s).value()), "My New Name"s));
+                        expect(eq(gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(testBlock.settings().get("ui_constraints").value())["x"]), 43.f));
+                        expect(eq(gr::test::get_value_or_fail<float>(gr::test::get_value_or_fail<gr::property_map>(testBlock.settings().get("ui_constraints").value())["y"]), 7.f));
 
                         seenUpdate = true;
                     }

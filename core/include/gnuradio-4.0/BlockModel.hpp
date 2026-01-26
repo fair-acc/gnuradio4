@@ -187,7 +187,7 @@ protected:
 
     BlockModel() = default;
 
-    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, const std::string& name, std::source_location location = std::source_location::current()) {
+    [[nodiscard]] gr::DynamicPort& dynamicPortFromName(DynamicPorts& what, std::string_view name, std::source_location location = std::source_location::current()) {
         initDynamicPorts();
 
         if (auto separatorIt = std::ranges::find(name, '#'); separatorIt == name.end()) {
@@ -297,22 +297,22 @@ public:
         return _dynamicOutputPorts;
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicInputPorts, name, location); }
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(const std::string& name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicOutputPorts, name, location); }
+    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::string_view name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicInputPorts, name, location); }
+    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::string_view name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicOutputPorts, name, location); }
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::INPUT>(_dynamicInputPorts, index, subIndex, std::move(loc)); }
     [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::OUTPUT>(_dynamicOutputPorts, index, subIndex, std::move(loc)); }
 
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
         return std::visit(meta::overloaded(                                                                                                                                                        //
                               [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex, location); }, //
-                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.name, location); }),                         //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(std::string_view(_definition.name), location); }),       //
             definition.definition);
     }
 
     [[nodiscard]] gr::DynamicPort& dynamicOutputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
         return std::visit(meta::overloaded(                                                                                                                                                         //
                               [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex, location); }, //
-                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.name, location); }),                         //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(std::string_view(_definition.name), location); }),       //
             definition.definition);
     }
 
@@ -511,7 +511,7 @@ public:
     [[nodiscard]] virtual gr::property_map exportedInputPorts()  = 0;
     [[nodiscard]] virtual gr::property_map exportedOutputPorts() = 0;
 
-    virtual void exportPort(bool exportFlag, const std::string& uniqueBlockName, PortDirection portDirection, const std::string& portName, const std::string& exportedName, std::source_location location = std::source_location::current()) = 0;
+    virtual void exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) = 0;
 };
 
 namespace serialization_fields {
@@ -558,8 +558,8 @@ property_map serializeEdge(const auto& edge) {
     auto         serializePortDefinition = [&](std::string_view key, const PortDefinition& portDefinition) {
         if (const auto* _definition = std::get_if<PortDefinition::IndexBased>(&portDefinition.definition)) {
             const auto& definition = *_definition;
-            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_TOP_LEVEL), definition.topLevel);
-            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_SUB_INDEX), definition.subIndex);
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_TOP_LEVEL), static_cast<gr::Size_t>(definition.topLevel));
+            result.emplace(std::string(key) + std::string(serialization_fields::EDGE_PORT_SUB_INDEX), static_cast<gr::Size_t>(definition.subIndex));
 
         } else {
             const auto& definition = std::get<PortDefinition::StringBased>(portDefinition.definition);
@@ -573,13 +573,13 @@ property_map serializeEdge(const auto& edge) {
     serializePortDefinition(serialization_fields::EDGE_DESTINATION_PORT, edge.destinationPortDefinition());
 
     result.emplace(serialization_fields::EDGE_WEIGHT, edge.weight());
-    result.emplace(serialization_fields::EDGE_MIN_BUFFER_SIZE, edge.minBufferSize());
+    result.emplace(serialization_fields::EDGE_MIN_BUFFER_SIZE, static_cast<gr::Size_t>(edge.minBufferSize()));
     result.emplace(serialization_fields::EDGE_NAME, std::string(edge.name()));
 
-    result.emplace(serialization_fields::EDGE_BUFFER_SIZE, edge.bufferSize());
+    result.emplace(serialization_fields::EDGE_BUFFER_SIZE, static_cast<gr::Size_t>(edge.bufferSize()));
     result.emplace(serialization_fields::EDGE_EDGE_STATE, std::string(magic_enum::enum_name(edge.state())));
-    result.emplace(serialization_fields::EDGE_N_READERS, edge.nReaders());
-    result.emplace(serialization_fields::EDGE_N_WRITERS, edge.nWriters());
+    result.emplace(serialization_fields::EDGE_N_READERS, static_cast<gr::Size_t>(edge.nReaders()));
+    result.emplace(serialization_fields::EDGE_N_WRITERS, static_cast<gr::Size_t>(edge.nWriters()));
     result.emplace(serialization_fields::EDGE_TYPE, std::string(magic_enum::enum_name(edge.edgeType())));
 
     return result;
@@ -613,10 +613,10 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
     if (flags & BlockSerializationFlags::Settings) {
         // Helper function to write parameters
         auto writeParameters = [&](const property_map& settingsMap) {
-            pmtv::map_t parameters;
-            auto        writeMap = [&](const auto& localMap) {
+            pmt::Value::Map parameters;
+            auto            writeMap = [&](const auto& localMap) {
                 for (const auto& [settingsKey, settingsValue] : localMap) {
-                    std::visit([&]<typename T>(const T& value) { parameters[settingsKey] = value; }, settingsValue);
+                    parameters[settingsKey] = settingsValue;
                 }
             };
             writeMap(settingsMap);
@@ -630,28 +630,32 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
         result.emplace(serialization_fields::BLOCK_PARAMETERS, writeParameters(block->settings().get()));
 
         using namespace std::string_literals;
-        std::vector<pmtv::pmt> ctxParamsSeq;
+        Tensor<pmt::Value> ctxParamsSeq;
         ctxParamsSeq.reserve(stored.size());
         for (const auto& [ctx, ctxParameters] : stored) {
-            if (std::holds_alternative<std::string>(ctx) && std::get<std::string>(ctx) == ""s) {
-                continue;
+            if (ctx.holds<std::string>()) {
+                if (auto str = ctx.value_or(std::string_view{}); str.empty()) {
+                    continue;
+                }
             }
 
             for (const auto& [ctxTime, settingsMap] : ctxParameters) {
-                pmtv::map_t ctxParam;
+                pmt::Value::Map ctxParam;
 
                 // Convert ctxTime.context to a string, regardless of its actual type
-                std::string contextStr = std::visit(
-                    [](const auto& arg) -> std::string {
-                        using T = std::decay_t<decltype(arg)>;
-                        if constexpr (std::is_same_v<T, std::string>) {
-                            return arg;
-                        } else if constexpr (std::is_arithmetic_v<T>) {
-                            return std::to_string(arg);
-                        }
-                        return ""s;
-                    },
-                    ctxTime.context);
+                std::string contextStr;
+                pmt::ValueVisitor([&contextStr](const auto& arg) {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        contextStr = arg;
+                    } else if constexpr (std::is_same_v<std::string_view, T> || std::is_same_v<std::pmr::string, T>) {
+                        contextStr = std::string(arg);
+                    } else if constexpr (std::is_arithmetic_v<T>) {
+                        contextStr = std::to_string(arg);
+                    } else {
+                        contextStr.clear();
+                    }
+                }).visit(ctxTime.context);
 
                 ctxParam.emplace(gr::tag::CONTEXT.shortKey(), contextStr);
                 ctxParam.emplace(gr::tag::CONTEXT_TIME.shortKey(), ctxTime.time);
@@ -664,35 +668,35 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
 
     if (flags & BlockSerializationFlags::Ports) {
         auto serializePortOrCollection = [](const auto& portOrCollection) {
-            // clang-format off
             // TODO: Type names can be mangled. We need proper type names...
-            return std::visit(meta::overloaded{
-                    [](const gr::DynamicPort& port) {
-                        return property_map{
-                            {"name"s, std::string(port.name)},
-                            {"type"s, port.typeName()}
-                        };
-                    },
-                    [](const BlockModel::NamedPortCollection& namedCollection) {
-                        return property_map{
-                            {"name"s, std::string(namedCollection.name)},
-                            {"size"s, namedCollection.ports.size()},
-                            {"type"s, namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName()) }
-                        };
-                    }},
+            return std::visit(meta::overloaded{//
+                                  [](const gr::DynamicPort& port) {
+                                      return property_map{
+                                          //
+                                          {"name", std::string(port.name)}, //
+                                          {"type", port.typeName()}         //
+                                      };
+                                  },
+                                  [](const BlockModel::NamedPortCollection& namedCollection) {
+                                      return property_map{
+                                          //
+                                          {"name", std::string(namedCollection.name)},                                                               //
+                                          {"size", static_cast<gr::Size_t>(namedCollection.ports.size())},                                           //
+                                          {"type", namedCollection.ports.empty() ? std::string() : std::string(namedCollection.ports[0].typeName())} //
+                                      };
+                                  }},
                 portOrCollection);
-            // clang-format on
         };
 
         property_map inputPorts;
         for (auto& portOrCollection : block->dynamicInputPorts()) {
-            inputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+            inputPorts[convert_string_domain(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
         }
         result.emplace(serialization_fields::BLOCK_INPUT_PORTS, std::move(inputPorts));
 
         property_map outputPorts;
         for (auto& portOrCollection : block->dynamicOutputPorts()) {
-            outputPorts[BlockModel::portName(portOrCollection)] = serializePortOrCollection(portOrCollection);
+            outputPorts[convert_string_domain(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
         }
         result.emplace(serialization_fields::BLOCK_OUTPUT_PORTS, std::move(outputPorts));
     }
@@ -701,18 +705,18 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
         if (block->blockCategory() != block::Category::NormalBlock) {
             property_map serializedChildren;
             for (const auto& child : block->blocks()) {
-                serializedChildren[std::string(child->uniqueName())] = serializeBlock(pluginLoader, child, flags);
+                serializedChildren[std::pmr::string(child->uniqueName())] = serializeBlock(pluginLoader, child, flags);
             }
             result.emplace(serialization_fields::BLOCK_CHILDREN, std::move(serializedChildren));
-        }
 
-        property_map serializedEdges;
-        std::size_t  index = 0UZ;
-        for (const auto& edge : block->edges()) {
-            serializedEdges[std::to_string(index)] = serializeEdge(edge);
-            index++;
+            property_map serializedEdges;
+            std::size_t  index = 0UZ;
+            for (const auto& edge : block->edges()) {
+                serializedEdges[convert_string_domain(std::to_string(index))] = serializeEdge(edge);
+                index++;
+            }
+            result.emplace(serialization_fields::BLOCK_EDGES, std::move(serializedEdges));
         }
-        result.emplace(serialization_fields::BLOCK_EDGES, std::move(serializedEdges));
     }
 
     return result;
@@ -904,7 +908,7 @@ public:
     [[nodiscard]] gr::Graph*       graph() override { return nullptr; }
     [[nodiscard]] gr::property_map exportedInputPorts() override { return {}; }
     [[nodiscard]] gr::property_map exportedOutputPorts() override { return {}; }
-    void                           exportPort(bool, const std::string&, PortDirection, const std::string&, const std::string&, std::source_location = std::source_location::current()) override {}
+    void                           exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override {}
 };
 
 namespace detail {
@@ -996,8 +1000,8 @@ template<gr::PortDirection direction>
         return idx->topLevel == 0UZ ? 0UZ : (countPortsPrior(block, idx->topLevel));
     }
 
-    if (const auto idx = std::get_if<gr::PortDefinition::StringBased>(&portDefinition.definition); idx) {                                 // portDefinition is StringBased, e.g. "in#1";
-        const auto& port                  = isInput ? block->dynamicInputPort(idx->name, loc) : block->dynamicOutputPort(idx->name, loc); // N.B. can throw if name not present
+    if (const auto idx = std::get_if<gr::PortDefinition::StringBased>(&portDefinition.definition); idx) {                                                                     // portDefinition is StringBased, e.g. "in#1";
+        const auto& port                  = isInput ? block->dynamicInputPort(std::string_view(idx->name), loc) : block->dynamicOutputPort(std::string_view(idx->name), loc); // N.B. can throw if name not present
         const auto [baseName, portOffset] = detail::portBaseNameAndOffset(port.portName(), portDefinition);
         const std::size_t baseIdx         = isInput ? block->dynamicInputPortIndex(std::string(baseName), loc) : block->dynamicOutputPortIndex(std::string(baseName), loc);
         if (baseIdx == gr::meta::invalid_index) {

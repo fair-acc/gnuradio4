@@ -372,7 +372,15 @@ struct Metadata {
     float       signalMin;
     float       signalMax;
 
-    property_map toTagMap() const { return {{std::string(tag::SIGNAL_RATE.shortKey()), sampleRate}, {std::string(tag::SIGNAL_NAME.shortKey()), signalName}, {std::string(tag::SIGNAL_QUANTITY.shortKey()), signalQuantity}, {std::string(tag::SIGNAL_UNIT.shortKey()), signalUnit}, {std::string(tag::SIGNAL_MIN.shortKey()), signalMin}, {std::string(tag::SIGNAL_MAX.shortKey()), signalMax}}; }
+    property_map toTagMap() const {
+        return property_map{                                                     //
+            {std::pmr::string(tag::SIGNAL_RATE.shortKey()), sampleRate},         //
+            {std::pmr::string(tag::SIGNAL_NAME.shortKey()), signalName},         //
+            {std::pmr::string(tag::SIGNAL_QUANTITY.shortKey()), signalQuantity}, //
+            {std::pmr::string(tag::SIGNAL_UNIT.shortKey()), signalUnit},         //
+            {std::pmr::string(tag::SIGNAL_MIN.shortKey()), signalMin},           //
+            {std::pmr::string(tag::SIGNAL_MAX.shortKey()), signalMax}};
+    }
 };
 
 inline std::optional<property_map> tagAndMetadata(const std::optional<property_map>& tagData, const std::optional<Metadata>& metadata) {
@@ -519,7 +527,7 @@ public:
 
     void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
         if (oldSettings.contains("signal_name")) {
-            const std::string oldSignalName = std::get<std::string>(oldSettings.at("signal_name"));
+            const std::string oldSignalName = oldSettings.at("signal_name").value_or(std::string{});
             if (oldSignalName.empty()) {
                 globalDataSinkRegistry().registerSink(this);
             } else if (oldSignalName != signal_name && _registered) {
@@ -1053,7 +1061,7 @@ public:
 
     void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
         if (oldSettings.contains("signal_name")) {
-            const std::string oldSignalName = std::get<std::string>(oldSettings.at("signal_name"));
+            const std::string oldSignalName = oldSettings.at("signal_name").value_or(std::string());
             if (oldSignalName.empty()) {
                 globalDataSinkRegistry().registerSink(this);
             } else if (oldSignalName != signal_name && _registered) {

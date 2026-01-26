@@ -234,7 +234,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
     constexpr void publishDroppedSamplesTagIfNotZero(OutputSpanLike auto& out, std::size_t nDroppedSamples) {
         if (nDroppedSamples > 0UZ) {
-            out.publishTag(property_map{{gr::tag::N_DROPPED_SAMPLES.shortKey(), nDroppedSamples}}, 0UZ);
+            out.publishTag(property_map{{gr::tag::N_DROPPED_SAMPLES.shortKey(), static_cast<gr::Size_t>(nDroppedSamples)}}, 0UZ);
         }
     }
 
@@ -338,19 +338,31 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         const std::string keyTriggerName = gr::tag::TRIGGER_NAME.shortKey();
         const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
 
-        if (tag.map.contains(keyTriggerName) && std::holds_alternative<std::string>(tag.map.at(keyTriggerName)) && (filter == "" || tag.map.at(keyTriggerName) == filter) //
-            && tag.map.contains(keyTriggerTime) && std::holds_alternative<uint64_t>(tag.map.at(keyTriggerTime))) {
-            return true;
+        const auto itName = tag.map.find(keyTriggerName);
+        if (itName == tag.map.end() || //
+            (!filter->empty() && itName->second.value_or(std::string_view{}) != filter)) {
+            return false;
         }
-        return false;
+        const auto itTime = tag.map.find(keyTriggerTime);
+        if (itTime == tag.map.end() || !itTime->second.holds<std::uint64_t>()) {
+            return false;
+        }
+        return true;
     }
 
     [[nodiscard]] constexpr std::uint64_t getTime(const gr::Tag& tag) const {
         const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
-        if (tag.map.contains(keyTriggerTime) && std::holds_alternative<uint64_t>(tag.map.at(keyTriggerTime))) {
-            return std::get<std::uint64_t>(tag.map.at(keyTriggerTime));
+
+        auto it = tag.map.find(keyTriggerTime);
+        if (it == tag.map.end()) {
+            return 0ULL;
         }
-        return 0ULL;
+
+        auto ptr = it->second.get_if<std::uint64_t>();
+        if (ptr == nullptr) {
+            return 0ULL;
+        }
+        return *ptr;
     }
 
     [[nodiscard]] constexpr std::size_t getRelativeTagIndex(const InputSpanLike auto& in, const Tag& tag) const { //

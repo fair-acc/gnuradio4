@@ -17,6 +17,8 @@
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
+#include "message_utils.hpp"
+
 using namespace std::string_literals;
 
 namespace gr::setting_test {
@@ -161,9 +163,9 @@ const boost::ut::suite SettingsTests = [] {
         expect(block1.settings().get(gr::tag::CONTEXT.shortKey()).has_value());
         expect(block1.settings().get({gr::tag::CONTEXT.shortKey()}).has_value());
         expect(not block1.settings().get({"test"}).has_value());
-        expect(not eq(std::get<std::string>(block1.settings().get(gr::tag::CONTEXT.shortKey()).value()), "Test Context"s));
+        expect(not eq(block1.settings().get(gr::tag::CONTEXT.shortKey()).value().value_or(std::string{}), "Test Context"s));
         block1.settings().updateActiveParameters();
-        expect(eq(std::get<std::string>(block1.settings().get(gr::tag::CONTEXT.shortKey()).value()), "Test Context"s));
+        expect(eq(block1.settings().get(gr::tag::CONTEXT.shortKey()).value().value_or(std::string{}), "Test Context"s));
 
         std::vector<std::string>   keys1{"key1", "key2", "key3"};
         std::span<std::string>     keys2{keys1};
@@ -177,7 +179,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
         auto ret1 = block1.settings().set({{"unknown", "random value"}});
         expect(eq(ret1.size(), 1U)) << "setting one unknown parameter";
-        expect(eq(std::get<std::string>(static_cast<property_map>(block1.meta_information).at("unknown")), "random value"sv)) << "setting one unknown parameter";
+        expect(eq(static_cast<property_map>(block1.meta_information).at("unknown").value_or(std::string{}), "random value"sv)) << "setting one unknown parameter";
         expect(eq(block1.settings().getNStoredParameters(), 1UZ));
 
         expect(not block1.settings().changed());
@@ -270,7 +272,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(block.settings().activateContext() != std::nullopt);
             expect(eq(block.settings().stagedParameters().size(), 0UZ)); // same activeCtx, no changes
             expect(eq(block.settings().get().size(), 16UL));             // all active settings
-            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
+            expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 1.f));
         };
 
         "with init parameter"_test = [] {
@@ -290,7 +292,7 @@ const boost::ut::suite SettingsTests = [] {
             block.settings().updateActiveParameters();
             expect(eq(block.settings().get().size(), 16UL));
             expect(eq(block.scaling_factor, 2.f));
-            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
+            expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 2.f));
         };
 
         "empty via graph"_test = [] {
@@ -303,7 +305,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
             expect(eq(block.settings().get().size(), 16UL));
             expect(eq(block.scaling_factor, 1.f));
-            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 1.f));
+            expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 1.f));
         };
 
         "with init parameter via graph"_test = [] {
@@ -316,7 +318,7 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().autoForwardParameters().size(), gr::tag::kDefaultTags.size()));
             expect(eq(block.settings().get().size(), 16UL));
             expect(eq(block.scaling_factor, 2.f));
-            expect(eq(std::get<float>(*block.settings().get("scaling_factor")), 2.f));
+            expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 2.f));
         };
     };
 
@@ -328,7 +330,7 @@ const boost::ut::suite SettingsTests = [] {
         block.settings().updateActiveParameters();
         expect(eq(block.settings().get().size(), 16UL));
         block._debug   = true;
-        const auto val = block.settings().set({{"vector_setting", std::vector{42.f, 2.f, 3.f}}, {"string_vector_setting", std::vector<std::string>{"A", "B", "C"}}});
+        const auto val = block.settings().set({{"vector_setting", Tensor{42.f, 2.f, 3.f}}, {"string_vector_setting", Tensor<gr::pmt::Value>{"A", "B", "C"}}});
         expect(val.empty()) << "unable to stage settings";
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         expect(eq(block.settings().stagedParameters().size(), 0UZ));
@@ -338,10 +340,9 @@ const boost::ut::suite SettingsTests = [] {
 
         expect(eq(block.settings().stagedParameters().size(), 0UZ)); // clear _staged after applyStagedParameters() call
         expect(eq(block.vector_setting, std::vector{42.f, 2.f, 3.f}));
-        expect(eq(block.string_vector_setting.value, std::vector<std::string>{"A", "B", "C"}));
         expect(eq(block._updateCount, 1)) << std::format("actual update count: {}\n", block._updateCount);
-        expect(eq(std::get<std::vector<float>>(*block.settings().get("vector_setting")), std::vector{42.f, 2.f, 3.f}));
-        expect(eq(std::get<std::vector<std::string>>(*block.settings().get("string_vector_setting")), std::vector<std::string>{"A", "B", "C"}));
+        expect(eq(gr::test::get_value_or_fail<std::vector<float>>(*block.settings().get("vector_setting")), std::vector{42.f, 2.f, 3.f}));
+        expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(*block.settings().get("string_vector_setting")), std::vector<std::string>{"A", "B", "C"}));
     };
 
     "unique ID"_test = [] {
@@ -369,7 +370,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(wrapped1.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped1.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         (wrapped1.metaInformation())["key"] = "value";
-        expect(eq(std::get<std::string>(wrapped1.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
+        expect(eq(wrapped1.metaInformation().at("key").value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
 
         // via constructor
         auto wrapped2 = BlockWrapper<SettingsChangeRecorder<float>>({{"name", "test_name"}});
@@ -382,7 +383,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(wrapped2.settings().set({{gr::tag::CONTEXT.shortKey(), "a string"}}).empty()) << "successful set returns empty map";
         expect(eq(wrapped2.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         (wrapped2.metaInformation())["key"] = "value";
-        expect(eq(std::get<std::string>(wrapped2.metaInformation().at("key")), "value"sv)) << "BlockModel meta-information";
+        expect(eq(wrapped2.metaInformation().at("key").value_or(std::string_view()), "value"sv)) << "BlockModel meta-information";
     };
 
     "basic ui constraints test"_test = []() {
@@ -393,7 +394,7 @@ const boost::ut::suite SettingsTests = [] {
         expect(sink.settings().setStaged(property_map{{"ui_constraints", property_map{{"x", 6.f}, {"y", 42.f}}}}).empty());
         expect(eq(sink.settings().applyStagedParameters().forwardParameters.size(), 0UZ)); // no autoForwardParameters
 
-        expect(eq(std::get<float>(src.ui_constraints["x"s]), 6.f));
+        expect(eq(gr::test::get_value_or_fail<float>(src.ui_constraints["x"]), 6.f));
         expect(eq(src.ui_constraints, sink.ui_constraints));
     };
 
@@ -462,13 +463,13 @@ const boost::ut::suite SettingsTests = [] {
         // test storeDefaults()
         const auto defaultParOld = block.settings().defaultParameters();
         expect(eq(defaultParOld.size(), 16UZ));
-        expect(eq(std::get<std::string>(defaultParOld.at("name")), "TestName"s));
-        expect(eq(std::get<float>(defaultParOld.at("scaling_factor")), 2.f));
+        expect(eq(defaultParOld.at("name").value_or(std::string()), "TestName"s));
+        expect(eq(gr::test::get_value_or_fail<float>(defaultParOld.at("scaling_factor")), 2.f));
         block.settings().storeDefaults();
         const auto defaultParNew = block.settings().defaultParameters();
         expect(eq(defaultParNew.size(), 16UZ));
-        expect(eq(std::get<std::string>(defaultParNew.at("name")), "TestNameAlt"s));
-        expect(eq(std::get<float>(defaultParNew.at("scaling_factor")), 42.f));
+        expect(eq(defaultParNew.at("name").value_or(std::string()), "TestNameAlt"s));
+        expect(eq(gr::test::get_value_or_fail<float>(defaultParNew.at("scaling_factor")), 42.f));
         expect(block.settings().set({{"name", "TestNameAlt2"}, {"scaling_factor", 43.f}}).empty()) << "successful set returns empty map\n";
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
         expect(block.settings().activateContext() != std::nullopt);
@@ -494,11 +495,11 @@ const boost::ut::suite AnnotationTests = [] {
         Graph                          testGraph;
         SettingsChangeRecorder<float>& block = testGraph.emplaceBlock<SettingsChangeRecorder<float>>();
         expect(gr::blockDescription<SettingsChangeRecorder<float>>().find(std::string_view(SettingsChangeRecorder<float>::Description::value)) != std::string_view::npos);
-        expect(eq(std::get<std::string>(block.meta_information.value.at("description")), std::string(SettingsChangeRecorder<float>::Description::value))) << "type-erased block description";
-        expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::description")), "scaling factor"sv));
-        expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::documentation")), "y = a * x"sv));
-        expect(eq(std::get<std::string>(block.meta_information.value.at("scaling_factor::unit")), "As"sv));
-        expect(std::get<bool>(block.meta_information.value.at("scaling_factor::visible"))) << "visible being true";
+        expect(eq(block.meta_information.value.at("description").value_or(std::string()), std::string(SettingsChangeRecorder<float>::Description::value))) << "type-erased block description";
+        expect(eq(block.meta_information.value.at("scaling_factor::description").value_or(std::string()), "scaling factor"sv));
+        expect(eq(block.meta_information.value.at("scaling_factor::documentation").value_or(std::string()), "y = a * x"sv));
+        expect(eq(block.meta_information.value.at("scaling_factor::unit").value_or(std::string()), "As"sv));
+        expect(gr::test::get_value_or_fail<bool>(block.meta_information.value.at("scaling_factor::visible"))) << "visible being true";
         expect(block.scaling_factor.visible());
         expect(eq(block.scaling_factor.description(), "scaling factor"sv));
         expect(eq(block.scaling_factor.unit(), "As"sv));
@@ -528,7 +529,7 @@ const boost::ut::suite AnnotationTests = [] {
         expect(not needPowerOfTwoAlt.validate_and_set(5));
         expect(block.settings().set({{gr::tag::SAMPLE_RATE.shortKey(), -1.0f}}).empty()) << "successful set returns empty map";
         expect(eq(block.settings().getNStoredParameters(), 1UZ)); // new parameters added, but old parameters removed
-        expect(eq(std::get<float>(block.settings().getStored(gr::tag::SAMPLE_RATE.shortKey()).value()), -1.f));
+        expect(eq(gr::test::get_value_or_fail<float>(block.settings().getStored(gr::tag::SAMPLE_RATE.shortKey()).value()), -1.f));
         expect(block.settings().activateContext() != std::nullopt);
         expect(eq(block.settings().stagedParameters().size(), 1UZ));                        // sample_rate
         expect(eq(block.settings().applyStagedParameters().forwardParameters.size(), 1UZ)); // sample_rate
@@ -621,53 +622,53 @@ const boost::ut::suite CtxSettingsTests = [] {
         auto ctx5    = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(5)));
         auto ctxNull = SettingsCtx();
         // one key
-        expect(eq(std::get<float>(settings.getStored("scaling_factor").value()), 10.f));          // return as ctx.time = std::chrono::system_clock::now()
-        expect(settings.getStored("scaling_factor", ctxM1) == std::nullopt);                      // return std::nullopt, all settings ctx times are in the future
-        expect(eq(std::get<float>(settings.getStored("scaling_factor", ctx0).value()), 10.f));    // return exact
-        expect(eq(std::get<float>(settings.getStored("scaling_factor", ctx1).value()), 10.f));    // return previous
-        expect(eq(std::get<float>(settings.getStored("scaling_factor", ctx2).value()), 12.f));    // return exact
-        expect(eq(std::get<float>(settings.getStored("scaling_factor", ctx3).value()), 12.f));    // return previous
-        expect(eq(std::get<float>(settings.getStored("scaling_factor", ctx4).value()), 14.f));    // return exact
-        expect(eq(std::get<float>(settings.getStored("scaling_factor", ctx5).value()), 14.f));    // return latest
-        expect(eq(std::get<float>(settings.getStored("scaling_factor", ctxNull).value()), 10.f)); // return as ctx.time = std::chrono::system_clock::now()
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), 10.f));          // return as ctx.time = std::chrono::system_clock::now()
+        expect(settings.getStored("scaling_factor", ctxM1) == std::nullopt);                                         // return std::nullopt, all settings ctx times are in the future
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor", ctx0).value()), 10.f));    // return exact
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor", ctx1).value()), 10.f));    // return previous
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor", ctx2).value()), 12.f));    // return exact
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor", ctx3).value()), 12.f));    // return previous
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor", ctx4).value()), 14.f));    // return exact
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor", ctx5).value()), 14.f));    // return latest
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor", ctxNull).value()), 10.f)); // return as ctx.time = std::chrono::system_clock::now()
         // several keys
         std::vector<std::string> parameterKeys = {"scaling_factor", "name"};
 
         const property_map params = settings.getStored(parameterKeys).value(); // return as ctx.time = std::chrono::system_clock::now()
-        expect(eq(std::get<float>(params.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(params.at("name")), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params.at("scaling_factor")), 10.f));
+        expect(eq(params.at("name").value_or(std::string()), "TestName10"s));
         const property_map paramsAll = settings.getStored().value(); // test API without parameters, should return all keys
         expect(eq(paramsAll.size(), 2UZ));
 
         expect(settings.getStored(parameterKeys, ctxM1) == std::nullopt); // return std::nullopt, all settings ctx times are in the future
 
         const property_map params0 = settings.getStored(parameterKeys, ctx0).value(); // return exact
-        expect(eq(std::get<float>(params0.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(params0.at("name")), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params0.at("scaling_factor")), 10.f));
+        expect(eq(params0.at("name").value_or(std::string()), "TestName10"s));
 
         const property_map params1 = settings.getStored(parameterKeys, ctx1).value(); // return previous
-        expect(eq(std::get<float>(params1.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(params1.at("name")), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params1.at("scaling_factor")), 10.f));
+        expect(eq(params1.at("name").value_or(std::string()), "TestName10"s));
 
         const property_map params2 = settings.getStored(parameterKeys, ctx2).value(); // return exact
-        expect(eq(std::get<float>(params2.at("scaling_factor")), 12.f));
-        expect(eq(std::get<std::string>(params2.at("name")), "TestName12"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params2.at("scaling_factor")), 12.f));
+        expect(eq(params2.at("name").value_or(std::string()), "TestName12"s));
 
         const property_map params3 = settings.getStored(parameterKeys, ctx3).value(); // return previous
-        expect(eq(std::get<float>(params3.at("scaling_factor")), 12.f));
-        expect(eq(std::get<std::string>(params3.at("name")), "TestName12"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params3.at("scaling_factor")), 12.f));
+        expect(eq(params3.at("name").value_or(std::string()), "TestName12"s));
 
         const property_map params4 = settings.getStored(parameterKeys, ctx4).value(); // return exact
-        expect(eq(std::get<float>(params4.at("scaling_factor")), 14.f));
-        expect(eq(std::get<std::string>(params4.at("name")), "TestName14"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params4.at("scaling_factor")), 14.f));
+        expect(eq(params4.at("name").value_or(std::string()), "TestName14"s));
 
         const property_map params5 = settings.getStored(parameterKeys, ctx5).value(); // return latest
-        expect(eq(std::get<float>(params5.at("scaling_factor")), 14.f));
-        expect(eq(std::get<std::string>(params5.at("name")), "TestName14"s));
+        expect(eq(gr::test::get_value_or_fail<float>(params5.at("scaling_factor")), 14.f));
+        expect(eq(params5.at("name").value_or(std::string()), "TestName14"s));
 
         const property_map paramsNull = settings.getStored(parameterKeys, ctxNull).value(); // return as ctx.time = std::chrono::system_clock::now()
-        expect(eq(std::get<float>(paramsNull.at("scaling_factor")), 10.f));
-        expect(eq(std::get<std::string>(paramsNull.at("name")), "TestName10"s));
+        expect(eq(gr::test::get_value_or_fail<float>(paramsNull.at("scaling_factor")), 10.f));
+        expect(eq(paramsNull.at("name").value_or(std::string()), "TestName10"s));
     };
 #ifdef __EMSCRIPTEN__
     "CtxSettings Resolve Duplicate Timestamp"_test = [] {
@@ -690,7 +691,7 @@ const boost::ut::suite CtxSettingsTests = [] {
         expect(eq(vec.size(), 1UZ));
         expect(eq(vec[0].first.time, timeNowNs + 2));
 
-        expect(eq(std::get<float>(settings.getStored("scaling_factor").value()), 12.f));
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), 12.f));
     };
 #endif
     "CtxSettings Expired Parameters"_test = [] {
@@ -707,25 +708,25 @@ const boost::ut::suite CtxSettingsTests = [] {
         auto ctxM20 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow - std::chrono::seconds(20)));
         expect(settings.set({{"scaling_factor", -20.f}}, ctxM20).empty());
         expect(eq(settings.getNStoredParameters(), 1UZ));
-        expect(eq(std::get<float>(settings.getStored("scaling_factor").value()), -20.f));
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), -20.f));
 
         // now - 10
         auto ctxM10 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow - std::chrono::seconds(10)));
         expect(settings.set({{"scaling_factor", -10.f}}, ctxM10).empty());
         expect(eq(settings.getNStoredParameters(), 1UZ)); // ctxM20 should be outdated and removed
-        expect(eq(std::get<float>(settings.getStored("scaling_factor").value()), -10.f));
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), -10.f));
 
         // now + 10
         auto ctx10 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10)));
         expect(settings.set({{"scaling_factor", 10.f}}, ctx10).empty());
         expect(eq(settings.getNStoredParameters(), 2UZ)); // ctxM10 and ctx10
-        expect(eq(std::get<float>(settings.getStored("scaling_factor").value()), -10.f));
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), -10.f));
 
         // now - 5
         auto ctxM5 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow - std::chrono::seconds(5)));
         expect(settings.set({{"scaling_factor", -5.f}}, ctxM5).empty());
         expect(eq(settings.getNStoredParameters(), 2UZ)); // ctxM10 should be outdated and removed
-        expect(eq(std::get<float>(settings.getStored("scaling_factor").value()), -5.f));
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), -5.f));
 
         settings.expiry_time = 2'000'000'000; // expiry_time is in ns
 
@@ -745,13 +746,13 @@ const boost::ut::suite CtxSettingsTests = [] {
         auto ctxM1 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow - std::chrono::seconds(1)));
         expect(settings.set({{"scaling_factor", -1.f}}, ctxM1).empty());
         expect(eq(settings.getNStoredParameters(), 3UZ)); // ctxM1 is not expired and should be stored
-        expect(eq(std::get<float>(settings.getStored("scaling_factor").value()), -1.f));
+        expect(eq(gr::test::get_value_or_fail<float>(settings.getStored("scaling_factor").value()), -1.f));
     };
 
     auto matchPred = [](const auto& table, const auto& search, const auto attempt) -> std::optional<bool> {
-        if (std::holds_alternative<std::string>(table) && std::holds_alternative<std::string>(search)) {
-            const auto tableString  = std::get<std::string>(table);
-            const auto searchString = std::get<std::string>(search);
+        if (table.template holds<std::string>() && search.template holds<std::string>()) {
+            const auto tableString  = table.value_or(std::string());
+            const auto searchString = search.value_or(std::string());
 
             if (!searchString.starts_with("FAIR.SELECTOR.")) {
                 return std::nullopt;
@@ -781,15 +782,15 @@ const boost::ut::suite CtxSettingsTests = [] {
         expect(settings.set({{"scaling_factor", 103}}, ctx2).empty()) << "successful set returns empty map";
 
         // exact matches
-        expect(eq(std::get<int>(settings.getStored("scaling_factor", ctx0).value()), 101));
-        expect(eq(std::get<int>(settings.getStored("scaling_factor", ctx1).value()), 102));
-        expect(eq(std::get<int>(settings.getStored("scaling_factor", ctx2).value()), 103));
+        expect(eq(gr::test::get_value_or_fail<int>(settings.getStored("scaling_factor", ctx0).value()), 101));
+        expect(eq(gr::test::get_value_or_fail<int>(settings.getStored("scaling_factor", ctx1).value()), 102));
+        expect(eq(gr::test::get_value_or_fail<int>(settings.getStored("scaling_factor", ctx2).value()), 103));
 
         // matching by using the custom predicate (no exact matching possible anymore)
         const auto ctx3 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow), "FAIR.SELECTOR.C=1:S=1:P=2");
-        expect(eq(std::get<int>(settings.getStored("scaling_factor", ctx3).value()), 102)); // no setting for 'P=2' -> fall back to "FAIR.SELECTOR.C=1:S=1"
+        expect(eq(gr::test::get_value_or_fail<int>(settings.getStored("scaling_factor", ctx3).value()), 102)); // no setting for 'P=2' -> fall back to "FAIR.SELECTOR.C=1:S=1"
         const auto ctx4 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow), "FAIR.SELECTOR.C=1:S=2:P=2");
-        expect(eq(std::get<int>(settings.getStored("scaling_factor", ctx4).value()), 103)); // no setting for 'S=2' and 'P=2' -> fall back to "FAIR.SELECTOR.C=1"
+        expect(eq(gr::test::get_value_or_fail<int>(settings.getStored("scaling_factor", ctx4).value()), 103)); // no setting for 'S=2' and 'P=2' -> fall back to "FAIR.SELECTOR.C=1"
 
         // doesn't exist
         auto ctx5 = SettingsCtx(settings::convertTimePointToUint64Ns(timeNow), "FAIR.SELECTOR.C=2:S=2:P=2");
@@ -804,7 +805,7 @@ const boost::ut::suite CtxSettingsTests = [] {
         block.setSettings(s);
         auto ctx0 = SettingsCtx(settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()));
         expect(block.settings().set({{"name", "TestNameAlt"}, {"scaling_factor", 42.f}}, ctx0).empty()) << "successful set returns empty map";
-        expect(eq(std::get<float>(block.settings().getStored("scaling_factor").value()), 42.f)); // TODO:
+        expect(eq(gr::test::get_value_or_fail<float>(block.settings().getStored("scaling_factor").value()), 42.f)); // TODO:
     };
 
     "CtxSettings autoUpdateParameters"_test = [&] {
@@ -821,10 +822,10 @@ const boost::ut::suite CtxSettingsTests = [] {
             src._tags.push_back(gr::Tag(i, {{gr::tag::SAMPLE_RATE.shortKey(), static_cast<float>(i)}}));
         }
         // this sample_rates should not be applied
-        src._tags.push_back({15, {{gr::tag::SAMPLE_RATE.shortKey(), 15.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //
-                                     {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name20"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
-        src._tags.push_back({18, {{gr::tag::SAMPLE_RATE.shortKey(), 18.f}, {std::string(gr::tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
-                                     {std::string(gr::tag::TRIGGER_NAME.shortKey()), "name10"}, {std::string(gr::tag::TRIGGER_OFFSET.shortKey()), 0.f}}});
+        src._tags.push_back({15, property_map{{gr::tag::SAMPLE_RATE.shortKey(), 15.f}, {gr::tag::TRIGGER_TIME.shortKey(), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(20))}, //
+                                     {gr::tag::TRIGGER_NAME.shortKey(), "name20"}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}});
+        src._tags.push_back({18, {{gr::tag::SAMPLE_RATE.shortKey(), 18.f}, {gr::tag::TRIGGER_TIME.shortKey(), settings::convertTimePointToUint64Ns(timeNow + std::chrono::seconds(10))}, //
+                                     {gr::tag::TRIGGER_NAME.shortKey(), "name10"}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}}});
 
         auto& monitorBulk = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
         auto& monitorOne  = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", verboseConsole}});
@@ -871,12 +872,13 @@ const boost::ut::suite CtxSettingsTests = [] {
 
         auto testStored = [&](BlockLike auto& block) {
             const auto& stored = block.settings().getStoredAll();
-            expect(stored.contains("")) << block.name.value; // empty string is default context
-            const auto& vec = stored.at("");
+            auto        it     = stored.find("");
+            expect(it != stored.end()) << block.name.value; // empty string is default context
+            const auto& vec = it->second;
             expect(eq(vec.size(), 1UZ)) << block.name.value;              // no stored parameters were added via Tag
             expect(eq(vec[0].settings.size(), 14UZ)) << block.name.value; // always store all parameters
 
-            expect(eq(std::get<float>(vec[0].settings.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
+            expect(eq(gr::test::get_value_or_fail<float>(vec[0].settings.at(gr::tag::SAMPLE_RATE.shortKey())), 1000.f)); // Parameters changed via Tag are not changed in the storedParameters
 
             const auto& autoUpdate = block.settings().autoUpdateParameters();
             expect(eq(autoUpdate.size(), 7UZ)) << block.name.value;
@@ -947,7 +949,9 @@ connections:
                 throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
             }
             expect(sched.runAndWait().has_value());
-            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(sched.graph(), [](std::shared_ptr<BlockModel> block) { expect(eq(std::get<float>(*block->settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << std::format("sample_rate forwarded to {}", block->name()); });
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(sched.graph(), [](std::shared_ptr<BlockModel> block) { //
+                expect(eq(gr::test::get_value_or_fail<float>(*block->settings().get(gr::tag::SAMPLE_RATE.shortKey())), 123456.f)) << std::format("sample_rate forwarded to {}", block->name());
+            });
         } catch (const std::string& e) {
             expect(false) << std::format("GRC loading failed: {}\n", e);
         }

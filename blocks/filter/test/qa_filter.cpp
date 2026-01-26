@@ -48,9 +48,9 @@ const boost::ut::suite SequenceTests = [] {
     using namespace gr::filter;
 
     "FIR and IIR general tests"_test = [] {
-        std::vector<double> fir_coeffs(10, 0.1); // box car filter
-        std::vector<double> iir_coeffs_b{0.55, 0};
-        std::vector<double> iir_coeffs_a{1, -0.45};
+        Tensor<double> fir_coeffs(10, 0.1); // box car filter
+        Tensor<double> iir_coeffs_b(data_from, {0.55, 0.0});
+        Tensor<double> iir_coeffs_a(data_from, {1.0, -0.45});
 
         // Create FIR and IIR filter instances
         fir_filter<double> fir_filter;
@@ -90,8 +90,8 @@ const boost::ut::suite SequenceTests = [] {
     };
 
     "IIR equality tests"_test = [] {
-        std::vector<double> iir_coeffs_b{0.020083365564211, 0.040166731128423, 0.020083365564211};
-        std::vector<double> iir_coeffs_a{1.0, -1.561018075800718, 0.641351538057563};
+        Tensor<double> iir_coeffs_b(data_from, {0.020083365564211, 0.040166731128423, 0.020083365564211});
+        Tensor<double> iir_coeffs_a(data_from, {1.0, -1.561018075800718, 0.641351538057563});
 
         iir_filter<double, IIRForm::DF_I> iir_filter_I;
         iir_filter_I.b = iir_coeffs_b;

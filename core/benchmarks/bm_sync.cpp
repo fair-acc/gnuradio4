@@ -34,8 +34,8 @@ void runTest() {
     if constexpr (std::is_same_v<TBlock, gr::basic::SyncBlock<int>>) {
         perfBlockProperties = {{"n_ports", nPorts}};
     } else if constexpr (std::is_same_v<TBlock, gr::basic::Selector<int>>) {
-        auto                    iotaView = std::views::iota(gr::Size_t(0), nPorts);
-        std::vector<gr::Size_t> indMap(iotaView.begin(), iotaView.end());
+        auto               iotaView = std::views::iota(gr::Size_t(0), nPorts);
+        Tensor<gr::Size_t> indMap(iotaView.begin(), iotaView.end());
         perfBlockProperties = {{"n_inputs", nPorts}, {"n_outputs", nPorts}, {"map_in", indMap}, {"map_out", indMap}};
     } else {
         throw std::invalid_argument("incorrect TBlock type");

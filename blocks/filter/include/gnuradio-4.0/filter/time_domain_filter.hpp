@@ -4,7 +4,6 @@
 #include <execution>
 #include <functional>
 #include <numeric>
-#include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -28,9 +27,9 @@ struct fir_filter : Block<fir_filter<T>> {
 The transfer function of an FIR filter is given by:
 H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
 )"">;
-    PortIn<T>      in;
-    PortOut<T>     out;
-    std::vector<T> b{T{1}}; // feedforward coefficients
+    PortIn<T>  in;
+    PortOut<T> out;
+    Tensor<T>  b{T{1}}; // feedforward coefficients
 
     GR_MAKE_REFLECTABLE(fir_filter, in, out, b);
 
@@ -69,10 +68,10 @@ struct iir_filter : Block<iir_filter<T, form>> {
 b are the feed-forward coefficients (N.B. b[0] denoting the newest and b[-1] the previous sample)
 a are the feedback coefficients
 )"">;
-    PortIn<T>      in;
-    PortOut<T>     out;
-    std::vector<T> b{1}; // feed-forward coefficients
-    std::vector<T> a{1}; // feedback coefficients
+    PortIn<T>  in;
+    PortOut<T> out;
+    Tensor<T>  b{1}; // feed-forward coefficients
+    Tensor<T>  a{1}; // feedback coefficients
 
     GR_MAKE_REFLECTABLE(iir_filter, in, out, b, a);
 

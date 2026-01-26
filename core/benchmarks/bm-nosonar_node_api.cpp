@@ -392,7 +392,10 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char* test_name) {
-        auto gen_mult_block                                              = [&factor] { return merge<"out", "in">(MultiplyConst<T>({{{"value", factor}}}), merge<"out", "in">(DivideConst<T>({{{"factor", factor}}}), add<T, -1>())); };
+        auto gen_mult_block = [&factor] {
+            return merge<"out", "in">(MultiplyConst<T>({{{"value", factor}}}), //
+                merge<"out", "in">(DivideConst<T>({{{"factor", factor}}}), add<T, -1>()));
+        };
         auto mergedBlock                                                 = merge<"out", "in">(merge<"out", "in">(bm::test::source<T>({{"n_samples_max", N_SAMPLES}}), gen_mult_block()), bm::test::sink<T>());
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     };

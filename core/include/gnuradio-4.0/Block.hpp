@@ -5,8 +5,6 @@
 #include <map>
 #include <source_location>
 
-#include <pmtv/pmt.hpp>
-
 #include <format>
 
 #include <gnuradio-4.0/meta/RangesHelper.hpp>
@@ -757,10 +755,10 @@ public:
         property_map ret;
         if constexpr (!std::is_same_v<NotDrawable, DrawableControl>) {
             property_map info;
-            info.insert_or_assign("Category"s, std::string(magic_enum::enum_name(DrawableControl::kCategory)));
-            info.insert_or_assign("Toolkit"s, std::string(DrawableControl::kToolkit));
+            info.insert_or_assign("Category", std::string(magic_enum::enum_name(DrawableControl::kCategory)));
+            info.insert_or_assign("Toolkit", std::string(DrawableControl::kToolkit));
 
-            ret.insert_or_assign("Drawable"s, info);
+            ret.insert_or_assign("Drawable", info);
         }
         return ret;
     }
@@ -827,7 +825,7 @@ protected:
 
 public:
     Block() : Block(gr::property_map()) {}
-    Block(std::initializer_list<std::pair<const std::string, pmtv::pmt>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
+    Block(std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
     Block(property_map initParameters) noexcept(false)                                                     // N.B. throws in case of on contract violations
         : lifecycle::StateMachine<Derived>(),                                                              //
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
@@ -1075,7 +1073,7 @@ public:
             if (inputTagsPresent()) {
                 const auto&  autoForwardKeys = settings().autoForwardParameters();
                 property_map onlyAutoForwardMap;
-                std::ranges::copy_if(_mergedInputTag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(kv.first); });
+                std::ranges::copy_if(_mergedInputTag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(convert_string_domain(kv.first)); });
                 for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
             }
         }
@@ -1161,16 +1159,18 @@ public:
             auto applyResult = settings().applyStagedParameters();
             checkBlockParameterConsistency();
 
-            if (!applyResult.forwardParameters.empty()) {
-                for (auto& [key, value] : applyResult.forwardParameters) {
-                    _mergedInputTag.insert_or_assign(key, value);
+            auto& forwardParametersMap = applyResult.forwardParameters;
+            if (!forwardParametersMap.empty()) {
+                for (auto& [key, value] : forwardParametersMap) {
+                    _mergedInputTag.insert_or_assign(convert_string_domain(key), value);
                 }
             }
 
             settings().setChanged(false);
 
-            if (!applyResult.appliedParameters.empty()) {
-                notifyListeners(block::property::kStagedSetting, applyResult.appliedParameters);
+            auto& appliedParametersMap = applyResult.appliedParameters;
+            if (!appliedParametersMap.empty()) {
+                notifyListeners(block::property::kStagedSetting, appliedParametersMap);
             }
             notifyListeners(block::property::kSetting, settings().get());
         });
@@ -1232,8 +1232,9 @@ public:
             }
 #endif
             if (lastTag.index == tagOffset) { // -> merge tags with the same index
+                auto& lastTagMap = lastTag.map;
                 for (auto&& [key, value] : tagData) {
-                    lastTag.map.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
+                    lastTagMap.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
                 }
             } else {
                 _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
@@ -1242,7 +1243,7 @@ public:
     }
 
     inline constexpr void publishEoS() noexcept {
-        const property_map& tag_data{{gr::tag::END_OF_STREAM, true}};
+        const property_map tag_data{{static_cast<std::pmr::string>(gr::tag::END_OF_STREAM), true}};
         for_each_port([&tag_data](PortLike auto& outPort) { outPort.publishTag(tag_data, static_cast<std::size_t>(outPort.streamWriter().nRequestedSamplesToPublish())); }, outputPorts<PortType::STREAM>(&self()));
     }
 
@@ -1256,7 +1257,7 @@ public:
     constexpr void processScheduledMessages() {
         using namespace std::chrono;
         const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
-        notifyListeners(block::property::kHeartbeat, {{"heartbeat", nanoseconds_count}});
+        notifyListeners(block::property::kHeartbeat, pmt::Value::Map{{"heartbeat", nanoseconds_count}});
 
         auto processPort = [this]<PortLike TPort>(TPort& inPort) {
             const auto available = inPort.streamReader().available();
@@ -1291,7 +1292,7 @@ protected:
 
         if (message.cmd == Set || message.cmd == Get) {
             std::uint64_t nanoseconds_count = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-            message.data                    = {{"heartbeat", nanoseconds_count}};
+            message.data                    = pmt::Value::Map{{"heartbeat", nanoseconds_count}};
             return message;
         } else if (message.cmd == Subscribe) {
             if (!message.clientRequestID.empty()) {
@@ -1332,14 +1333,14 @@ protected:
                 throw gr::exception(std::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
             }
 
-            const std::string* stateStr = std::get_if<std::string>(&it->second); // Used std::get_if instead of std::get and try-catch block
-            if (!stateStr) {
+            const auto stateStr = it->second.value_or(std::string_view{});
+            if (!stateStr.data()) {
                 throw gr::exception(std::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
             }
 
-            auto state = magic_enum::enum_cast<lifecycle::State>(*stateStr); // Changed to dereference stateStr
+            auto state = magic_enum::enum_cast<lifecycle::State>(stateStr); // Changed to dereference stateStr
             if (!state.has_value()) {
-                throw gr::exception(std::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", *stateStr, message));
+                throw gr::exception(std::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", stateStr, message));
             }
 
             if (auto e = this->changeStateTo(state.value()); !e) {
@@ -1350,7 +1351,7 @@ protected:
         }
 
         if (message.cmd == Get) { // Merged 'else if' with 'if'
-            message.data = {{"state", std::string(magic_enum::enum_name(this->state()))}};
+            message.data = pmt::Value::Map{{"state", std::string(magic_enum::enum_name(this->state()))}};
             return message;
         }
 
@@ -1482,8 +1483,8 @@ protected:
 
             std::string contextStr;
             if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-                if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
-                    contextStr = *stringPtr;
+                if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
+                    contextStr = str;
                 } else {
                     throw gr::exception(std::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
                 }
@@ -1493,7 +1494,7 @@ protected:
 
             std::uint64_t time = 0;
             if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-                if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
+                if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
                     time = *timePtr;
                 }
             }
@@ -1510,7 +1511,10 @@ protected:
 
         if (message.cmd == Get || message.cmd == Set) {
             const auto& ctx = settings().activeContext();
-            message.data    = {{gr::tag::CONTEXT.shortKey(), ctx.context}, {gr::tag::CONTEXT_TIME.shortKey(), ctx.time}};
+            message.data    = property_map{
+                   {gr::tag::CONTEXT.shortKey(), ctx.context},  //
+                   {gr::tag::CONTEXT_TIME.shortKey(), ctx.time} //
+            };
             return message;
         }
 
@@ -1529,8 +1533,8 @@ protected:
 
         std::string contextStr;
         if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-            if (const auto stringPtr = std::get_if<std::string>(&it->second); stringPtr) {
-                contextStr = *stringPtr;
+            if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
+                contextStr = str;
             } else {
                 throw gr::exception(std::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
             }
@@ -1540,7 +1544,7 @@ protected:
 
         std::uint64_t time = 0;
         if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-            if (const std::uint64_t* timePtr = std::get_if<std::uint64_t>(&it->second); timePtr) {
+            if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
                 time = *timePtr;
             }
         }
@@ -1550,39 +1554,44 @@ protected:
             .context = contextStr,
         };
 
-        pmtv::map_t parameters;
+        pmt::Value::Map parameters;
         if (message.cmd == Get) {
-            std::vector<std::string> paramKeys;
-            auto                     itParam = dataMap.find("parameters");
+            Tensor<pmt::Value> paramKeys;
+            auto               itParam = dataMap.find("parameters");
             if (itParam != dataMap.end()) {
-                auto keys = std::get_if<std::vector<std::string>>(&itParam->second);
+                auto keys = itParam->second.get_if<Tensor<pmt::Value>>();
                 if (keys) {
                     paramKeys = *keys;
+                } else {
+                    std::println("Warning: keys are not Tensor<Value>");
                 }
             }
 
-            if (auto params = settings().getStored(paramKeys, ctx); params.has_value()) {
+            auto paramKeyStrings =                                                                                                                         //
+                paramKeys | std::views::transform([](const auto& keyValue) { return keyValue.value_or(std::string()); }) | std::ranges::to<std::vector>(); //
+            if (auto params = settings().getStored(paramKeyStrings, ctx); params.has_value()) {
                 parameters = params.value();
             }
-            message.data = {{"parameters", parameters}};
+            message.data = pmt::Value::Map{{"parameters", parameters}};
             return message;
         }
 
         if (message.cmd == Set) {
             if (auto it = dataMap.find("parameters"); it != dataMap.end()) {
-                auto params = std::get_if<pmtv::map_t>(&it->second);
+                auto params = it->second.get_if<pmt::Value::Map>();
                 if (params) {
                     parameters = *params;
                 }
             }
 
-            message.data = {{"failed_to_set", settings().set(parameters, ctx)}};
+            message.data = property_map{{"failed_to_set", settings().set(parameters, ctx)}};
             return message;
         }
 
         // Removed a Context
         if (message.cmd == Disconnect) {
-            if (ctx.context == "") {
+            auto str = ctx.context.value_or(std::string_view{});
+            if (str.empty()) {
                 throw gr::exception(std::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
             }
 
@@ -1600,22 +1609,24 @@ protected:
         assert(propertyName == block::property::kSettingsContexts);
 
         if (message.cmd == Get) {
-            const std::map<pmtv::pmt, std::vector<SettingsBase::CtxSettingsPair>, settings::PMTCompare>& stored = settings().getStoredAll();
+            const std::map<pmt::Value, std::vector<SettingsBase::CtxSettingsPair>, settings::PMTCompare>& stored = settings().getStoredAll();
 
-            std::vector<std::string>   contexts;
-            std::vector<std::uint64_t> times;
+            Tensor<pmt::Value>    contexts;
+            Tensor<std::uint64_t> times;
             for (const auto& [ctxName, ctxParameters] : stored) {
                 for (const auto& [ctx, properties] : ctxParameters) {
-                    if (const auto stringPtr = std::get_if<std::string>(&ctx.context); stringPtr) {
-                        contexts.push_back(*stringPtr);
-                        times.push_back(ctx.time);
+                    if (!ctx.context.holds<std::string>()) {
+                        continue;
                     }
+                    const auto str = ctx.context.value_or(std::string_view{});
+                    contexts.push_back(str);
+                    times.push_back(ctx.time);
                 }
             }
 
-            message.data = {
-                {"contexts", contexts},
-                {"times", times},
+            message.data = pmt::Value::Map{
+                {"contexts", std::move(contexts)},
+                {"times", std::move(times)},
             };
             return message;
         }

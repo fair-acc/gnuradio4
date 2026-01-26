@@ -81,7 +81,7 @@ myBlock.processBulk(ins, outs);
     // optional shortening
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A                = Annotated<U, description, Arguments...>;
-    using poc_property_map = std::map<std::string, std::string, std::less<>>; // TODO: needs to be replaced with 'property_map` aka. 'pmtv::map_t'
+    using poc_property_map = std::map<std::string, std::string, std::less<>>; // TODO: needs to be replaced with 'property_map` aka. 'pmt::Value::Map'
     using tag_type         = std::string;
 
     std::vector<PortIn<T>>                                                        inputs{};
@@ -131,7 +131,7 @@ this_block = PythonBlockWrapper(capsule))p",
     void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
         if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
 
-            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : "same", old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs") : "same");
+            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : pmt::Value("same"), old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs").value_or("same"s) : "same"s);
             if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
                 throw gr::exception("Number of input ports cannot be changed after Graph initialization.");
             }

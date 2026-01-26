@@ -15,7 +15,6 @@
 #endif
 #include <magic_enum.hpp>
 
-#include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
 #pragma GCC diagnostic pop
@@ -231,74 +230,6 @@ constexpr std::string join(const Container& container, std::string_view separato
 }
 
 } // namespace gr
-
-template<>
-struct std::formatter<pmtv::map_t::value_type> {
-    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const noexcept {
-        return std::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
-    }
-};
-
-template<pmtv::IsPmt T>
-struct std::formatter<T> { // alternate pmtv formatter optimised for compile-time not runtime
-    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const T& value, FormatContext& ctx) const noexcept {
-        // if the std::visit dispatch is too expensive then maybe manually loop-unroll this
-        return std::visit([&ctx](const auto& format_arg) { return format_value(format_arg, ctx); }, value);
-    }
-
-private:
-    template<typename FormatContext, typename U>
-    static auto format_value(const U& arg, FormatContext& ctx) -> decltype(std::format_to(ctx.out(), "")) {
-        if constexpr (pmtv::Scalar<U> || pmtv::Complex<U>) {
-            return std::format_to(ctx.out(), "{}", arg);
-        } else if constexpr (std::same_as<U, std::string>) {
-            return std::format_to(ctx.out(), "{}", arg);
-        } else if constexpr (pmtv::UniformVector<U> || pmtv::UniformStringVector<U>) { // format vector
-            std::format_to(ctx.out(), "[");
-            gr::format_join(ctx.out(), arg, ", ");
-            return std::format_to(ctx.out(), "]");
-        } else if constexpr (std::same_as<U, std::vector<pmtv::pmt>>) { // format vector of pmts
-            std::format_to(ctx.out(), "[");
-            gr::format_join(ctx.out(), arg, ", ");
-            return std::format_to(ctx.out(), "]");
-        } else if constexpr (pmtv::PmtMap<U>) { // format map
-            std::format_to(ctx.out(), "{{ ");
-            for (auto it = arg.begin(); it != arg.end(); ++it) {
-                format_value(it->first, ctx); // Format key
-                std::format_to(ctx.out(), ": ");
-                format_value(it->second, ctx); // Format value
-                if (std::next(it) != arg.end()) {
-                    std::format_to(ctx.out(), ", ");
-                }
-            }
-            return std::format_to(ctx.out(), " }}");
-        } else if constexpr (requires { std::visit([](const auto&) {}, arg); }) {
-            return std::visit([&](const auto& value) { return format_value(value, ctx); }, arg);
-        } else if constexpr (std::same_as<std::monostate, U>) {
-            return std::format_to(ctx.out(), "null");
-        } else {
-            return std::format_to(ctx.out(), "unknown type {}", gr::meta::type_name<U>());
-        }
-    }
-};
-
-template<>
-struct std::formatter<pmtv::map_t> {
-    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    constexpr auto format(const pmtv::map_t& value, FormatContext& ctx) const noexcept {
-        std::format_to(ctx.out(), "{{ ");
-        gr::format_join(ctx.out(), value, ", ");
-        return std::format_to(ctx.out(), " }}");
-    }
-};
 
 #ifndef STD_FORMATTER_VECTOR_BOOL
 #define STD_FORMATTER_VECTOR_BOOL

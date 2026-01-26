@@ -105,14 +105,14 @@ struct LayoutPreference {
 inline LayoutPref getLayoutPref(const std::shared_ptr<gr::BlockModel>& block) {
     auto& ui = block.get()->uiConstraints();
     if (auto it = ui.find("layout_pref"); it != ui.end()) {
-        if (auto* str = std::get_if<std::string>(&it->second)) {
-            if (*str == "horizontal") {
+        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
+            if (str == "horizontal") {
                 return LayoutPref::HORIZONTAL;
             }
-            if (*str == "vertical") {
+            if (str == "vertical") {
                 return LayoutPref::VERTICAL;
             }
-            if (*str == "auto") {
+            if (str == "auto") {
                 return LayoutPref::AUTO;
             }
         }
@@ -136,12 +136,12 @@ Point<T> getPosition(const std::shared_ptr<gr::BlockModel>& block) {
     T     y  = Point<T>::invalid_position;
 
     if (auto it = ui.find("pos_x"); it != ui.end()) {
-        if (auto* val = std::get_if<double>(&it->second)) {
+        if (auto* val = it->second.get_if<double>()) {
             x = static_cast<T>(*val);
         }
     }
     if (auto it = ui.find("pos_y"); it != ui.end()) {
-        if (auto* val = std::get_if<double>(&it->second)) {
+        if (auto* val = it->second.get_if<double>()) {
             y = static_cast<T>(*val);
         }
     }
@@ -177,14 +177,14 @@ public:
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
         // ensure vector exists and has correct size
-        auto& vec = [&]() -> std::vector<pmtv::pmt>& {
-            auto [it, _] = ui.try_emplace(mapKey, std::vector<pmtv::pmt>(portCount));
-            if (!std::holds_alternative<std::vector<pmtv::pmt>>(it->second)) {
-                it->second = std::vector<pmtv::pmt>(portCount);
+        auto& vec = [&]() -> Tensor<pmt::Value>& {
+            auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
+            if (!it->second.holds<Tensor<pmt::Value>>()) {
+                it->second = Tensor<pmt::Value>(gr::extents_from, {portCount});
             }
-            auto& v = std::get<std::vector<pmtv::pmt>>(it->second);
+            auto& v = *it->second.get_if<Tensor<pmt::Value>>();
             if (v.size() != portCount) {
-                v.resize(portCount);
+                v.resize({portCount}, gr::pmt::Value{});
             }
             return v;
         }();
@@ -195,15 +195,15 @@ public:
 
         // Ensure property_map exists at this index
         auto& m = [&]() -> gr::property_map& {
-            if (!std::holds_alternative<gr::property_map>(vec[_idx])) {
+            if (!vec[_idx].holds<gr::property_map>()) {
                 vec[_idx] = gr::property_map{};
             }
-            return std::get<gr::property_map>(vec[_idx]);
+            return *vec[_idx].get_if<gr::property_map>();
         }();
 
         // --- Side (legacy int; keep key name "side") ---
         if (auto it = m.find("side"); it != m.end()) {
-            if (auto* v = std::get_if<int>(&it->second)) {
+            if (auto* v = it->second.get_if<int>()) {
                 _preferredSide = static_cast<Side>(*v);
             }
         } else {
@@ -228,13 +228,13 @@ public:
         if (!posSet) {
             bool hasX = false, hasY = false;
             if (auto it = m.find("pos_x"); it != m.end()) {
-                if (auto* v = std::get_if<double>(&it->second)) {
+                if (auto* v = it->second.get_if<double>()) {
                     _position.x = *v;
                     hasX        = true;
                 }
             }
             if (auto it = m.find("pos_y"); it != m.end()) {
-                if (auto* v = std::get_if<double>(&it->second)) {
+                if (auto* v = it->second.get_if<double>()) {
                     _position.y = *v;
                     hasY        = true;
                 }
@@ -259,7 +259,7 @@ public:
             tmp["direction"] = it->second;
             _exitDir         = gr::utf8::fromPropertyMap(Direction{}, tmp);
         } else if (auto it2 = m.find("exit_dir"); it2 != m.end()) {
-            if (auto* v = std::get_if<int>(&it2->second)) {
+            if (auto* v = it2->second.get_if<int>()) {
                 _exitDir = static_cast<Direction>(*v);
             }
             // Write back new key
@@ -280,9 +280,9 @@ public:
         _style = gr::utf8::fromPropertyMap(Style{}, m);
         if (!_style.isSet()) {
             if (auto it = m.find("colour"); it != m.end()) {
-                if (auto* pstr = std::get_if<std::string>(&it->second)) {
+                if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
                     // interpret as fg hex
-                    if (auto c = gr::utf8::color::parseHexRGB(*pstr)) {
+                    if (auto c = gr::utf8::color::parseHexRGB(str)) {
                         _style.fg    = Colour{c->r, c->g, c->b};
                         _style.fgSet = 1U;
                     }
@@ -383,14 +383,14 @@ private:
         const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
-        auto& vec = [&]() -> std::vector<pmtv::pmt>& {
-            auto [it, _] = ui.try_emplace(mapKey, std::vector<pmtv::pmt>(portCount));
-            if (!std::holds_alternative<std::vector<pmtv::pmt>>(it->second)) {
-                it->second = std::vector<pmtv::pmt>(portCount);
+        auto& vec = [&]() -> Tensor<pmt::Value>& {
+            auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
+            if (!it->second.holds<Tensor<pmt::Value>>()) {
+                it->second = Tensor<pmt::Value>(extents_from, {portCount});
             }
-            auto& v = std::get<std::vector<pmtv::pmt>>(it->second);
+            auto& v = *it->second.get_if<Tensor<pmt::Value>>();
             if (v.size() != portCount) {
-                v.resize(portCount);
+                v.resize({portCount}, pmt::Value());
             }
             return v;
         }();
@@ -399,15 +399,15 @@ private:
             return;
         }
 
-        if (!std::holds_alternative<gr::property_map>(vec[_idx])) {
+        if (!vec[_idx].holds<gr::property_map>()) {
             vec[_idx] = gr::property_map{};
         }
 
-        auto& m = std::get<gr::property_map>(vec[_idx]);
+        auto& m = *vec[_idx].get_if<gr::property_map>();
         mergeInto(m, patch);
     }
 
-    void updateUIConstraints(const std::string& key, pmtv::pmt value) {
+    void updateUIConstraints(const std::string& key, pmt::Value value) {
         if (!_block) {
             return;
         }
@@ -417,14 +417,14 @@ private:
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
         // Ensure vector exists and has correct size
-        auto& vec = [&]() -> std::vector<pmtv::pmt>& {
-            auto [it, _] = ui.try_emplace(mapKey, std::vector<pmtv::pmt>(portCount));
-            if (!std::holds_alternative<std::vector<pmtv::pmt>>(it->second)) {
-                it->second = std::vector<pmtv::pmt>(portCount);
+        auto& vec = [&]() -> Tensor<pmt::Value>& {
+            auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
+            if (!it->second.holds<Tensor<pmt::Value>>()) {
+                it->second = Tensor<pmt::Value>(extents_from, {portCount});
             }
-            auto& v = std::get<std::vector<pmtv::pmt>>(it->second);
+            auto& v = *it->second.get_if<Tensor<pmt::Value>>();
             if (v.size() != portCount) {
-                v.resize(portCount);
+                v.resize({portCount}, pmt::Value());
             }
             return v;
         }();
@@ -434,12 +434,12 @@ private:
             return; // Safety check
         }
 
-        if (!std::holds_alternative<gr::property_map>(vec[_idx])) {
+        if (!vec[_idx].holds<gr::property_map>()) {
             vec[_idx] = gr::property_map{};
         }
 
-        auto& m = std::get<gr::property_map>(vec[_idx]);
-        m[key]  = std::move(value);
+        auto& m                       = *vec[_idx].get_if<gr::property_map>();
+        m[convert_string_domain(key)] = std::move(value);
     }
 };
 
@@ -643,11 +643,11 @@ void updateBlock(std::shared_ptr<gr::BlockModel>& block, Point<T> newPosition) {
 [[nodiscard]] inline EdgeType getEdgeType(const gr::Edge& edge) {
     auto& ui = const_cast<gr::Edge&>(edge).uiConstraints();
     if (auto it = ui.find("edge_type"); it != ui.end()) {
-        if (auto* str = std::get_if<std::string>(&it->second)) {
-            if (*str == "feedback") {
+        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
+            if (str == "feedback") {
                 return EdgeType::Feedback;
             }
-            if (*str == "lateral") {
+            if (str == "lateral") {
                 return EdgeType::Lateral;
             }
         }

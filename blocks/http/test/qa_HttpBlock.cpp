@@ -13,6 +13,8 @@
 
 #include <gnuradio-4.0/http/HttpBlock.hpp>
 
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+
 static_assert(gr::BlockLike<http::HttpBlock<uint8_t>>);
 
 template<typename T>
@@ -74,9 +76,9 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/echo"}});
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url", gr::pmt::Value("http://localhost:8080")}, {"endpoint", gr::pmt::Value("/echo")}});
 
-        auto& sink = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto& sink = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -90,7 +92,7 @@ const boost::ut::suite HttpBlocktests = [] {
         source.trigger();
         httpBlock.processScheduledMessages();
         expect(sched.runAndWait().has_value());
-        expect(eq(std::get<std::string>(sink.value.at("raw-data")), "Hello world!"sv));
+        expect(eq(gr::test::get_value_or_fail<std::string>(sink.value.at("raw-data")), std::string("Hello world!")));
 
 #ifndef __EMSCRIPTEN__
         server.stop();
@@ -109,8 +111,8 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/does-not-exist"}});
-        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>(property_map{{"url", gr::pmt::Value("http://localhost:8080")}, {"endpoint", gr::pmt::Value("/does-not-exist")}});
+        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -122,7 +124,7 @@ const boost::ut::suite HttpBlocktests = [] {
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         expect(sched.runAndWait().has_value());
-        expect(eq(std::get<int>(sink.value.at("status")), 404));
+        expect(eq(gr::test::get_value_or_fail<int>(sink.value.at("status")), 404));
 
 #ifndef __EMSCRIPTEN__
         server.stop();
@@ -141,8 +143,8 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/number"}, {"type"s, "POST"}, {"parameters"s, "param=42"}});
-        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url", gr::pmt::Value("http://localhost:8080")}, {"endpoint", gr::pmt::Value("/number")}, {"type", gr::pmt::Value("POST")}, {"parameters", gr::pmt::Value("param=42")}});
+        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -154,7 +156,7 @@ const boost::ut::suite HttpBlocktests = [] {
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         httpBlock.trigger();
         expect(sched.runAndWait().has_value());
-        expect(eq(std::get<std::string>(sink.value.at("raw-data")), "OK"sv));
+        expect(eq(gr::test::get_value_or_fail<std::string>(sink.value.at("raw-data")), "OK"sv));
 
 #ifndef __EMSCRIPTEN__
         server.stop();
@@ -186,8 +188,8 @@ const boost::ut::suite HttpBlocktests = [] {
 
         gr::Graph graph;
         auto&     source    = graph.emplaceBlock<FixedSource<uint8_t>>();
-        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url"s, "http://localhost:8080"}, {"endpoint"s, "/notify"}, {"type"s, "SUBSCRIBE"}});
-        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmtv::map_t>>();
+        auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url", gr::pmt::Value("http://localhost:8080")}, {"endpoint", gr::pmt::Value("/notify")}, {"type", gr::pmt::Value("SUBSCRIBE")}});
+        auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(httpBlock).template to<"in">(sink)));
@@ -198,7 +200,7 @@ const boost::ut::suite HttpBlocktests = [] {
         }
         sink.stopFunc = [&]() { expect(sched.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value()); };
         expect(sched.runAndWait().has_value());
-        expect(eq(std::get<std::string>(sink.value.at("raw-data")), "event"sv));
+        expect(eq(gr::test::get_value_or_fail<std::string>(sink.value.at("raw-data")), "event"sv));
 
 #ifndef __EMSCRIPTEN__
         shutdown = true;

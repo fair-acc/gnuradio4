@@ -115,7 +115,7 @@ const suite<"utf8::color"> colorSuite = [] {
         expect(m.contains("colour")) << "flat key present";
         auto out = fromPropertyMap(color::Colour{}, m);
         expect(in.r == out.r && in.g == out.g && in.b == out.b) << "bit-for-bit RGB";
-        expect(eq(std::get<std::string>(m["colour"]), std::string("#FFD200")));
+        expect(eq(m["colour"].value_or(std::string()), std::string("#FFD200")));
     };
 
     "Colour_from_missing_defaults"_test = [] {
@@ -367,7 +367,7 @@ const suite<"Point<T>"> pointSuite = [] {
     "visual sanity for local runs"_test = [] {
         color::Colour c{0xFF, 0xD2, 0x00};
         auto          m = toPropertyMap(c);
-        std::println("Colour hex: {}", std::get<std::string>(m["colour"]));
+        std::println("Colour hex: {}", m["colour"].value_or(std::string()));
     };
 };
 

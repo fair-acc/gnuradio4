@@ -205,7 +205,7 @@ public:
         return result;
     }
 
-    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
+    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = property_map{}) {
         // Try to create a node from the global registry
         if (auto result = _registry->create(name, params)) {
             return result;
@@ -234,7 +234,7 @@ public:
         return result;
     }
 
-    std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
+    std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = property_map{}) {
         if (auto result = _schedulerRegistry->create(name, params)) {
             return std::shared_ptr<gr::SchedulerModel>(result.release());
         }

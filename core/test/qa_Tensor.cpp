@@ -31,6 +31,7 @@ const boost::ut::suite<"Tensor<T> Basic Functionality"> _tensorBasic = [] {
     using namespace boost::ut;
     using namespace boost::ut::literals;
     using namespace std::string_view_literals;
+    using namespace std::string_literals;
     using gr::TensorBase;
     using gr::Tensor;
     using gr::TensorView;
@@ -527,7 +528,7 @@ const boost::ut::suite<"Tensor<T> STL Compatibility"> _tensorSTL = [] {
             static_assert(std::contiguous_iterator<decltype(staticTensor.begin())>);
 
             auto it = staticTensor.begin();
-            expect(eq(it + 5, staticTensor.begin() + 5));
+            expect(it + 5 == staticTensor.begin() + 5);
             expect(eq(std::to_address(it + 5), staticTensor.data() + 5));
         };
 
