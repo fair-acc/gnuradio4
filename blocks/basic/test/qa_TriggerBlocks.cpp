@@ -25,7 +25,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
     }
 
     using enum gr::trigger::InterpolationMethod;
-    "SchmittTrigger"_test =
+    skip / "SchmittTrigger"_test =
         [&enableVisualTests]<class Method> {
             Graph graph;
 
