@@ -186,7 +186,18 @@ using is_incompleteFinalUpdatePolicy = std::bool_constant<IsIncompleteFinalUpdat
 
 static_assert(is_incompleteFinalUpdatePolicy<IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>::value);
 
-enum class UICategory { None, Toolbar, ChartPane, StatusBar, Menu };
+enum class UICategory {
+    None,        /// No UI contribution (default).
+    MenuBar,     /// Global app menu bar items (File/Edit/View…).
+    Toolbar,     /// Compact, frequently used actions/toggles.
+    StatusBar,   /// Always-visible, low-interaction status readouts.
+    Content,     /// Primary viewport output (plots/canvases/dashboards).
+    Panel,       /// Secondary panels (inspectors, settings, lists, logs).
+    Overlay,     /// Layered HUD over Content (cursors/markers/annotations).
+    ContextMenu, /// Right-click / long-press contextual popup menus.
+    Dialog,      /// Modal/semi-modal short workflows (export/config/confirm).
+    Notification /// Transient non-modal feedback (toast/banner).
+};
 
 /**
  * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
@@ -211,7 +222,7 @@ using is_drawable = std::bool_constant<IsDrawable<T>>;
 
 using NotDrawable = Drawable<UICategory::None, "">; // nomen-est-omen
 static_assert(is_drawable<NotDrawable>::value);
-static_assert(is_drawable<Drawable<UICategory::ChartPane, "console">>::value);
+static_assert(is_drawable<Drawable<UICategory::Content, "console">>::value);
 static_assert(!is_drawable<int>::value);
 
 /**
