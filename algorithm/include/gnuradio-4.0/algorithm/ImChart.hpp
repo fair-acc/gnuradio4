@@ -115,8 +115,10 @@ inline std::vector<std::size_t> optimalTickScreenPositions(std::size_t axisWidth
     // determine the segment size.
     std::size_t segmentSize = validDivisorIt != preferredDivisors.end() ? (reducedAxisWidth < 10 ? *validDivisorIt : (reducedAxisWidth / *validDivisorIt)) : reducedAxisWidth; // default -> [0, reducedAxisWidth]
 
-    auto tickRange = std::views::iota(0UZ, axisWidth) | std::views::filter([=](auto i) { return i % segmentSize == 0; });
-    return {tickRange.begin(), tickRange.end()};
+    auto                     tickRange = std::views::iota(std::size_t{0}, axisWidth) | std::views::filter([=](std::size_t i) { return i % segmentSize == 0; });
+    std::vector<std::size_t> ticks;
+    std::ranges::copy(tickRange, std::back_inserter(ticks));
+    return ticks;
 }
 
 } // namespace detail

@@ -96,7 +96,7 @@ constexpr void gemm(C& C_out, const A& A_in, const B& B_in) {
             const T* b_row = &B_in[p, 0UZ]; // row p of B, contiguous
 
             // crow[j] += a_ip * brow[j]  for j in [0, n)
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
             std::transform(std::execution::unseq, b_row, b_row + n, crow, crow, [a_ip](const T& b, const T& c) noexcept { return c + a_ip * b; });
 #else
             std::transform(b_row, b_row + n, crow, crow, [a_ip](const T& b, const T& c) noexcept { return c + a_ip * b; });
@@ -167,7 +167,7 @@ void gemv(Y& y, const A& a, const X& x) {
         const T* rowEnd   = &a[i, k];
 
         // dot product of A[i,*] and x[*]
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         y[i] = std::transform_reduce(std::execution::unseq, rowBegin, rowEnd, x.cbegin(), T{}, std::plus<>{}, std::multiplies<>{});
 #else
         y[i] = std::transform_reduce(rowBegin, rowEnd, x.cbegin(), T{}, std::plus<>{}, std::multiplies<>{});

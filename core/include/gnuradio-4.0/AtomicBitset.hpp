@@ -1,8 +1,8 @@
 #ifndef GNURADIO_ATOMICBITSET_HPP
 #define GNURADIO_ATOMICBITSET_HPP
 
-#include <vector>
 #include <atomic>
+#include <vector>
 
 #ifndef forceinline
 // use this for hot-spots only <-> may bloat code size, not fit into cache and consequently slow down execution
