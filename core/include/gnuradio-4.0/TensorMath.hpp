@@ -142,7 +142,7 @@ struct TensorOps {
         if (!same_shape(self.extents(), other.extents())) {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), other.begin(), self.begin(), std::plus<>{});
 #else
         std::transform(self.begin(), self.end(), other.begin(), self.begin(), std::plus<>{});
@@ -160,7 +160,7 @@ struct TensorOps {
         if (!same_shape(self.extents(), other.extents())) {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), other.begin(), self.begin(), std::minus<>{});
 #else
         std::transform(self.begin(), self.end(), other.begin(), self.begin(), std::minus<>{});
@@ -174,7 +174,7 @@ struct TensorOps {
     }
 
     [[maybe_unused]] static constexpr TensorType& multiply_scalar_inplace(TensorType& self, const T& scalar) {
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x * scalar; });
 #else
         std::transform(self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x * scalar; });
@@ -191,7 +191,7 @@ struct TensorOps {
         if (scalar == T{0}) {
             throw std::runtime_error("Division by zero");
         }
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x / scalar; });
 #else
         std::ranges::transform(self.begin(), self.end(), self.begin(), [scalar](const T& x) { return x / scalar; });
@@ -211,7 +211,7 @@ struct TensorOps {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
 
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::ranges::transform(std::execution::unseq, self, other.begin(), self.begin(), std::multiplies<>{});
 #else
         std::ranges::transform(self, other.begin(), self.begin(), std::multiplies<>{});
@@ -229,7 +229,7 @@ struct TensorOps {
         if (!same_shape(self.extents(), other.extents())) {
             throw std::runtime_error("Tensor dimensions must match for element-wise operations");
         }
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::ranges::transform(std::execution::unseq, self, other.begin(), self.begin(), std::divides<>{});
 #else
         std::ranges::transform(self, other.begin(), self.begin(), std::divides<>{});
@@ -364,7 +364,7 @@ struct TensorOps {
     [[maybe_unused]] static constexpr TensorType& replace_nan(TensorType& self, const T& value)
     requires std::floating_point<T>
     {
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), self.begin(), [value](const T& x) { return std::isnan(x) ? value : x; });
 #else
         std::transform(self.begin(), self.end(), self.begin(), [value](const T& x) { return std::isnan(x) ? value : x; });
@@ -373,7 +373,7 @@ struct TensorOps {
     }
 
     [[maybe_unused]] static constexpr TensorType& clip_inplace(TensorType& self, const T& min_val, const T& max_val) {
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::ranges::transform(std::execution::unseq, self, self.begin(), [min_val, max_val](const T& x) { return std::clamp(x, min_val, max_val); });
 #else
         std::ranges::transform(self, self.begin(), [min_val, max_val](const T& x) { return std::clamp(x, min_val, max_val); });
@@ -395,7 +395,7 @@ struct TensorOps {
                 return std::abs(x);
             }
         };
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::ranges::transform(std::execution::unseq, self, result.begin(), abs);
 #else
         std::ranges::transform(self, result.begin(), abs);
@@ -413,7 +413,7 @@ struct TensorOps {
             }
             return T{0};
         };
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::ranges::transform(std::execution::unseq, self, result.begin(), sign);
 #else
         std::ranges::transform(self, result.begin(), sign);
@@ -585,7 +585,7 @@ struct TensorOps {
     [[nodiscard]] static constexpr auto real(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, Tensor<typename U::value_type, Ex...>> {
         using RealType = U::value_type;
         Tensor<RealType, Ex...> result(extents_from, self.extents());
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { return x.real(); });
 #else
         std::ranges::transform(self, result.begin(), [](const U& x) { return x.real(); });
@@ -597,7 +597,7 @@ struct TensorOps {
     [[nodiscard]] static constexpr auto imag(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, Tensor<typename U::value_type, Ex...>> {
         using RealType = U::value_type;
         Tensor<RealType, Ex...> result(extents_from, self.extents());
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { return x.imag(); });
 #else
         std::ranges::transform(self, result.begin(), [](const U& x) { return x.imag(); });
@@ -608,7 +608,7 @@ struct TensorOps {
     template<typename U = T>
     [[nodiscard]] static constexpr auto conj(const TensorType& self) -> std::enable_if_t<std::is_same_v<U, std::complex<typename U::value_type>>, TensorType> {
         TensorType result(extents_from, self.extents());
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
         std::transform(std::execution::unseq, self.begin(), self.end(), result.begin(), [](const U& x) { return std::conj(x); });
 #else
         std::ranges::transform(self, result.begin(), [](const U& x) { return std::conj(x); });

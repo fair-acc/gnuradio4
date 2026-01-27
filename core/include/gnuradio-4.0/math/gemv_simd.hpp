@@ -261,7 +261,7 @@ struct SimpleGemv {
         for (std::size_t i = 0; i < M; ++i) {
             const T* a_row = &A[i, 0];
 
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
             T dot = std::transform_reduce(std::execution::unseq, a_row, a_row + N, &x[0], T{0}, std::plus<>{}, std::multiplies<>{});
 #else
             T dot = std::transform_reduce(a_row, a_row + N, &x[0], T{0}, std::plus<>{}, std::multiplies<>{});

@@ -75,7 +75,7 @@ struct CacheOptimizedGemm {
         } else if (beta != T{1}) {
             for (std::size_t i = 0; i < M; ++i) {
                 T* c_row = &C[i, 0];
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
                 std::transform(std::execution::unseq, c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
 #else
                 std::transform(c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
@@ -151,7 +151,7 @@ struct CacheOptimizedGemm {
                                 c_row[j] = helper::gemm::fma(a_ik, b_row[j], c_row[j]);
                             }
                         } else { // small N -> auto-vectorise
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
                             std::transform(std::execution::unseq, b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });
 #else
                             std::transform(b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });
@@ -180,7 +180,7 @@ struct SmallGemm {
         } else if (beta != T{1}) {
             for (std::size_t i = 0; i < M; ++i) {
                 T* c_row = &C[i, 0];
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
                 std::transform(std::execution::unseq, c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
 #else
                 std::transform(c_row, c_row + N, c_row, [beta](T x) { return beta * x; });
@@ -199,7 +199,7 @@ struct SmallGemm {
             for (std::size_t k = 0UZ; k < K; ++k) {
                 const T  a_ik  = alpha * A[i, k];
                 const T* b_row = &B[k, 0UZ];
-#if defined(__GLIBCXX__)
+#if defined(__GLIBCXX__) && !defined(__ACPP__)
                 std::transform(std::execution::unseq, b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });
 #else
                 std::transform(b_row, b_row + N, c_row, c_row, [a_ik](T b, T c) { return helper::gemm::fma(a_ik, b, c); });

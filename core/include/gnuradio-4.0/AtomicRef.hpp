@@ -23,48 +23,53 @@ struct AtomicRef {
     value_type& _x;
     explicit AtomicRef(T& x) noexcept : _x(x) {}
 
-    forceinline T load_acquire() const noexcept {
-#ifdef GR_HAS_SYCL
-        return sycl::atomic_ref<value_type, sycl::memory_order::acquire, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).load();
+    forceinline value_type load_acquire() const noexcept {
+#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+        __acpp_if_target_device(return sycl::atomic_ref<value_type, sycl::memory_order::acquire, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).load(););
+        __acpp_if_target_host(return std::atomic_ref<value_type>(_x).load(std::memory_order_acquire););
 #else
         return std::atomic_ref<value_type>(_x).load(std::memory_order_acquire);
 #endif
     }
 
     forceinline constexpr void store_release(T v) noexcept {
-#ifdef GR_HAS_SYCL
-        sycl::atomic_ref<T, sycl::memory_order::release, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).store(v);
+#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+        __acpp_if_target_device(sycl::atomic_ref<T, sycl::memory_order::release, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).store(v););
+        __acpp_if_target_host(std::atomic_ref<T>(_x).store(v, std::memory_order_release););
 #else
         std::atomic_ref<T>(_x).store(v, std::memory_order_release);
 #endif
     }
 
     forceinline constexpr bool compare_exchange(T& expected, T desired) noexcept {
-#ifdef GR_HAS_SYCL
-        return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).compare_exchange_strong(expected, desired);
+#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+        __acpp_if_target_device(return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).compare_exchange_strong(expected, desired););
+        __acpp_if_target_host(return std::atomic_ref<T>(_x).compare_exchange_strong(expected, desired, std::memory_order_acq_rel, std::memory_order_acquire););
 #else
         return std::atomic_ref<T>(_x).compare_exchange_strong(expected, desired, std::memory_order_acq_rel, std::memory_order_acquire);
 #endif
     }
 
     forceinline constexpr T fetch_add(T inc) noexcept {
-#ifdef GR_HAS_SYCL
-        return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_add(inc);
+#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+        __acpp_if_target_device(return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_add(inc););
+        __acpp_if_target_host(return std::atomic_ref<T>(_x).fetch_add(inc, std::memory_order_acq_rel););
 #else
         return std::atomic_ref<T>(_x).fetch_add(inc, std::memory_order_acq_rel);
 #endif
     }
 
     forceinline constexpr T fetch_sub(T dec) noexcept {
-#ifdef GR_HAS_SYCL
-        return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_sub(dec);
+#if defined(GR_HAS_SYCL) && defined(__ACPP__)
+        __acpp_if_target_device(return sycl::atomic_ref<T, sycl::memory_order::acq_rel, sycl::memory_scope::system, sycl::access::address_space::global_space>(_x).fetch_sub(dec););
+        __acpp_if_target_host(return std::atomic_ref<T>(_x).fetch_sub(dec, std::memory_order_acq_rel););
 #else
         return std::atomic_ref<T>(_x).fetch_sub(dec, std::memory_order_acq_rel);
 #endif
     }
 
     forceinline constexpr void wait(T oldValue) const noexcept {
-#ifdef GR_HAS_SYCL
+#if defined(GR_HAS_SYCL) && defined(__ACPP__)
         // SYCL has no wait/notify; poll shared memory.
         // Keep it polite to avoid hammering PCIe.
         for (;;) {
