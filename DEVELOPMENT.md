@@ -46,7 +46,7 @@ To be able to natively compile some prerequisites have to be installed:
 - ninja (or GNU make)
 - optional for python block support: python3
 - optional for soapy (limesdr,rtlsdr) blocks: soapysdr
-- optional for compiling to webassembly: emscripten >= 3.1.50
+- optional for compiling to webassembly: emscripten >= 5.0.0
 
 To apply the project's formatting rules, you'll also need the correct formatters, `clang-format-18` and `cmake-format`. With these installed you can use the scripts in the repository to reformat your changes. For smaller changes, the CI will provide you with a patch which will fix the formatting (click on the "Details" link on the failed Restyled.io check), but for bigger changes it's useful to have local formatting.
 
