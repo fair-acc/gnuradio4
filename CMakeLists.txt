@@ -362,11 +362,6 @@ set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-
 # include exprtk header-only - END
 
 include(FetchContent)
-FetchContent_Declare(
-  pmt
-  GIT_REPOSITORY https://github.com/gnuradio/pmt.git
-  GIT_TAG 5960738cd35827acceb5a4de9e1c4005d2d02305 # latest as of 2025-08-13
-)
 
 set(BOOST_UT_DISABLE_MODULE
     ON
@@ -425,11 +420,7 @@ if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   endif()
 endif()
 
-set(GR_FETCH_MAKE_AVAILABLE_DEPS
-    pmt
-    ut
-    vir-simd
-    cpp-httplib)
+set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
 
 if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
   list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS cpr)
@@ -441,8 +432,6 @@ FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
   find_package(SoapySDR CONFIG)
 endif()
-
-install(DIRECTORY ${pmt_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
