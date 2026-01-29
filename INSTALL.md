@@ -46,10 +46,8 @@ cd gnuradio4
 GNU Radio 4 uses an out-of-source CMake build.
 
 ```bash
-mkdir build
-cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build .
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build ./build
 ```
 
 
