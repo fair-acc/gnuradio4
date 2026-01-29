@@ -106,7 +106,7 @@ https://apt.kitware.com/ubuntu/ noble main" \
 | sudo tee /etc/apt/sources.list.d/kitware.list
 
 sudo apt update
-sudo apt install -y cmake g++ git python3
+sudo apt install -y cmake g++ git python3-dev
 ```
 
 Verify:
