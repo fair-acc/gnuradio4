@@ -142,9 +142,8 @@ brew install cmake llvm git python3
 Build:
 
 ```bash
-mkdir build && cd build
-cmake ..
-cmake --build .
+cmake -S . -B build
+cmake --build ./build
 ```
 
 
