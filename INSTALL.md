@@ -57,6 +57,7 @@ cmake --build ./build
 After a successful build, tests can be executed using:
 
 ```bash
+cd build
 ctest --output-on-failure
 ```
 
