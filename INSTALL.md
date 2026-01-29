@@ -6,20 +6,18 @@ GNU Radio 4 (GR4) is a modern C++ signal processing framework developed under th
 
 Building the project is required to run tests, examples, and to develop or use block libraries.
 
-
-
 ## Requirements
 
-The following tools are required to build and use GNU Radio 4:
+The following tools are required to build GNU Radio 4:
 
 * **CMake ≥ 3.28**
-* **C++20 compatible compiler**
+* **C++23 compatible compiler**
 
-  * GCC 11 or newer (Linux)
-  * Clang 14 or newer (Linux, macOS)
-  * MSVC 2022 (Windows)
+  * **GCC ≥ 14.2** (Linux)
+  * **Clang**: see `README.md` for currently supported versions
+  * **MSVC 2022** (Windows)
 * Git
-* Python 3 (required for tests and tooling)
+* Python 3 (optional; required only for Python blocks and bindings)
 
 Verify tool versions:
 
@@ -27,7 +25,6 @@ Verify tool versions:
 cmake --version
 g++ --version
 ```
-
 
 
 ## Obtaining the Source Code
@@ -40,7 +37,6 @@ cd gnuradio4
 ```
 
 
-
 ## Building GNU Radio 4
 
 GNU Radio 4 uses an out-of-source CMake build.
@@ -51,7 +47,6 @@ cmake --build ./build
 ```
 
 
-
 ## Running Tests
 
 After a successful build, tests can be executed using:
@@ -60,7 +55,6 @@ After a successful build, tests can be executed using:
 cd build
 ctest --output-on-failure
 ```
-
 
 
 ## Using GNU Radio 4 via CMake FetchContent
@@ -89,39 +83,32 @@ Pinning a specific commit or tag is recommended for reproducible builds.
 
 ### Ubuntu 24.04
 
-The default Ubuntu CMake package is insufficient. GNU Radio 4 requires **CMake ≥ 3.28**.
+Ubuntu 24.04 provides a sufficiently recent CMake version via the standard package repositories.
 
-Install CMake from Kitware:
+Install dependencies:
 
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates gpg wget
-
-wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc \
-  | gpg --dearmor - \
-  | sudo tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-
-echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] \
-https://apt.kitware.com/ubuntu/ noble main" \
-| sudo tee /etc/apt/sources.list.d/kitware.list
-
-sudo apt update
-sudo apt install -y cmake g++ git python3-dev
+sudo apt install -y cmake g++ git python3 python3-dev
 ```
 
-Verify:
+Build:
 
 ```bash
-cmake --version
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build ./build
 ```
+
+
+
 ### Windows 10 / 11
 
 Requirements:
 
 * Visual Studio 2022 with C++ workload
-* CMake ≥ 3.28 (added to PATH)
+* CMake ≥ 3.28 (added to `PATH`)
 * Git for Windows
-* Python 3
+* Python 3 (optional)
 
 Configure and build:
 
@@ -130,23 +117,20 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
+
 ### macOS
 
-Using Homebrew:
+> **Note:** macOS support has not been recently verified. Installing dependencies
+> via Homebrew alone may be insufficient. Please refer to CI results and
+> `README.md` for the current macOS support status.
+
+If attempting a local build:
 
 ```bash
-brew update
 brew install cmake llvm git python3
-```
-
-Build:
-
-```bash
 cmake -S . -B build
 cmake --build ./build
 ```
-
-
 
 ## Troubleshooting
 
@@ -154,7 +138,7 @@ cmake --build ./build
 
 Ensure `cmake --version` reports **3.28 or newer**.
 
-### Compiler does not support C++20
+### Compiler does not support C++23
 
 Upgrade the compiler to a supported version listed in the requirements.
 
