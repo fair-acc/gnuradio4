@@ -5,7 +5,6 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
-#include <pmtv/pmt.hpp>
 
 #include <queue>
 #include <semaphore>
@@ -57,24 +56,23 @@ The result is provided on a single output port as a map with the following keys:
 
     using Block<HttpBlock<T>, BlockingIO<false>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
-    PortOut<pmtv::map_t> out;
+    PortOut<pmt::Value::Map> out;
 
-    std::string url;
-    std::string endpoint = "/";
-    std::string type     = std::string(magic_enum::enum_name(gr::http::RequestType::GET));
-    std::string parameters; // x-www-form-urlencoded encoded POST parameters
+    std::string           url;
+    std::string           endpoint = "/";
+    gr::http::RequestType type     = gr::http::RequestType::GET;
+    std::string           parameters; // x-www-form-urlencoded encoded POST parameters
 
     GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
 
     // used for queuing GET responses for the consumer
-    std::queue<pmtv::map_t> _backlog;
-    std::mutex              _backlog_mutex;
+    std::queue<pmt::Value::Map> _backlog;
+    std::mutex                  _backlog_mutex;
 
     std::shared_ptr<std::thread> _thread;
     std::atomic_size_t           _pendingRequests = 0;
     std::atomic_bool             _shutdownThread  = false;
     std::binary_semaphore        _ready{0};
-    gr::http::RequestType        _type = gr::http::RequestType::GET;
 
 #ifndef __EMSCRIPTEN__
     std::unique_ptr<httplib::Client> _client;
@@ -82,7 +80,7 @@ The result is provided on a single output port as a map with the following keys:
 
 #ifdef __EMSCRIPTEN__
     void queueWorkEmscripten(emscripten_fetch_t* fetch) {
-        pmtv::map_t result;
+        pmt::Value::Map result;
         result["mime-type"] = "text/plain";
         result["status"]    = static_cast<int>(fetch->status);
         result["raw-data"]  = std::string(fetch->data, static_cast<std::size_t>(fetch->numBytes));
@@ -104,7 +102,7 @@ The result is provided on a single output port as a map with the following keys:
     void doRequestEmscripten() {
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
-        if (_type == RequestType::POST) {
+        if (type == RequestType::POST) {
             strcpy(attr.requestMethod, "POST");
             if (!parameters.empty()) {
                 attr.requestData     = parameters.c_str();
@@ -131,7 +129,7 @@ The result is provided on a single output port as a map with the following keys:
     }
 
     void runThreadEmscripten() {
-        if (_type == RequestType::SUBSCRIBE) {
+        if (type == RequestType::SUBSCRIBE) {
             while (!_shutdownThread) {
                 // long polling, just keep doing requests
                 std::thread thread{&HttpBlock::doRequestEmscripten, this};
@@ -152,11 +150,11 @@ The result is provided on a single output port as a map with the following keys:
     void runThreadNative() {
         _client = std::make_unique<httplib::Client>(url);
         _client->set_follow_location(true);
-        if (_type == RequestType::SUBSCRIBE) {
+        if (type == RequestType::SUBSCRIBE) {
             // it's long polling, be generous with timeouts
             _client->set_read_timeout(1h);
             _client->Get(endpoint, [&](const char* data, size_t len) {
-                pmtv::map_t result;
+                pmt::Value::Map result;
                 result["mime-type"] = "text/plain";
                 result["status"]    = 200;
                 result["raw-data"]  = std::string(data, len);
@@ -170,12 +168,12 @@ The result is provided on a single output port as a map with the following keys:
                 while (_pendingRequests > 0) {
                     _pendingRequests--;
                     httplib::Result resp;
-                    if (_type == RequestType::POST) {
+                    if (type == RequestType::POST) {
                         resp = parameters.empty() ? _client->Post(endpoint) : _client->Post(endpoint, parameters, "application/x-www-form-urlencoded");
                     } else {
                         resp = _client->Get(endpoint);
                     }
-                    pmtv::map_t result;
+                    pmt::Value::Map result;
                     if (resp) {
                         result["mime-type"] = "text/plain";
                         result["status"]    = resp->status;
@@ -190,7 +188,7 @@ The result is provided on a single output port as a map with the following keys:
     }
 #endif
 
-    void queueWork(const pmtv::map_t& item) {
+    void queueWork(const pmt::Value::Map& item) {
         {
             std::lock_guard lg{_backlog_mutex};
             _backlog.push(item);
@@ -207,6 +205,7 @@ The result is provided on a single output port as a map with the following keys:
             _thread.reset();
         }
         _thread = std::shared_ptr<std::thread>(new std::thread([this]() {
+            gr::thread_pool::thread::setThreadName(std::format("uT:{}", gr::meta::shorten_type_name(this->unique_name)));
 #ifdef __EMSCRIPTEN__
             runThreadEmscripten();
 #else
@@ -241,9 +240,6 @@ The result is provided on a single output port as a map with the following keys:
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings) {
         if (newSettings.contains("url") || newSettings.contains("type")) {
-            if (newSettings.contains("type")) {
-                _type = magic_enum::enum_cast<gr::http::RequestType>(type, magic_enum::case_insensitive).value_or(_type);
-            }
             // other setting changes are hot-swappable without restarting the Client
             if (_thread) {
                 stopThread();
@@ -257,7 +253,7 @@ The result is provided on a single output port as a map with the following keys:
     void stop() { stopThread(); }
 
     [[nodiscard]] constexpr auto processOne() noexcept {
-        pmtv::map_t     result;
+        pmt::Value::Map result;
         std::lock_guard lg{_backlog_mutex};
         if (!_backlog.empty()) {
             result = _backlog.front();
@@ -275,10 +271,10 @@ The result is provided on a single output port as a map with the following keys:
         gr::Block<HttpBlock<T>, BlockingIO<false>>::processMessages(port, message);
 
         std::ranges::for_each(message, [this](auto& m) {
-            if (_type == RequestType::SUBSCRIBE) {
+            if (type == RequestType::SUBSCRIBE) {
                 if (m.data.has_value() && m.data.value().contains("active")) {
                     // for long polling, the subscription should stay active, if and only if the messages' "active" member is true
-                    if (std::get<bool>(m.data.value().at("active"))) {
+                    if (m.data.value().at("active").value_or(false)) {
                         if (!_thread) {
                             startThread();
                         }

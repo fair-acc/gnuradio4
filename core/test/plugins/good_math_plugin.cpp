@@ -1,19 +1,22 @@
 #include <charconv>
+#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/Plugin.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/SchedulerModel.hpp>
 
-GR_PLUGIN("Good Math Plugin", "Unknown", "LGPL3", "v1")
+GR_PLUGIN("Good Math Plugin", "Unknown", "MIT", "v1")
 
 namespace good {
 
 template<typename T>
 auto factor(const gr::property_map& params) {
     T factor = 1;
-    if (auto it = params.find("factor"s); it != params.end()) {
+    if (auto it = params.find("factor"); it != params.end()) {
         auto& variant = it->second;
-        auto* ptr     = std::get_if<T>(&variant);
-        if (ptr) {
+        auto  ptr     = gr::checked_access_ptr{variant.get_if<T>()};
+        if (ptr != nullptr) {
             factor = *ptr;
         }
     }
@@ -80,3 +83,17 @@ static_assert(bts::stream_output_ports<good::multiply<float>>::size == 1);
 static_assert(std::is_same_v<bts::stream_output_port_types<good::multiply<float>>, gr::meta::typelist<float>>);
 
 auto registerDivide = gr::registerBlock<good::divide, float, double>(static_cast<gr::BlockRegistry&>(grPluginInstance()));
+
+namespace good {
+
+class GoodMathScheduler : public gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> {
+public:
+    explicit GoodMathScheduler(const gr::property_map& = {}) : gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>({}) {}
+};
+
+} // namespace good
+
+auto registerGoodMathScheduler = [](auto& registry) {
+    registry.template insert<good::GoodMathScheduler>();
+    return true;
+}(static_cast<gr::SchedulerRegistry&>(grPluginInstance()));

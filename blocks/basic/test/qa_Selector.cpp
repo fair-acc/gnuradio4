@@ -17,8 +17,8 @@ using namespace std::string_literals;
 struct TestParams {
     gr::Size_t                                     nSamples;
     std::vector<std::pair<gr::Size_t, gr::Size_t>> mapping;
-    std::vector<std::vector<double>>               inValues;
-    std::vector<std::vector<double>>               outValues;
+    std::vector<gr::Tensor<double>>                inValues;
+    std::vector<gr::Tensor<double>>                outValues;
     std::vector<std::vector<gr::Tag>>              inTags;
     std::vector<std::vector<gr::Tag>>              outTags;
     gr::Size_t                                     monitorSource;
@@ -29,7 +29,15 @@ struct TestParams {
     bool                                           ignoreOrder{false};
 };
 
-void execute_selector_test(TestParams params) {
+std::vector<gr::Tensor<double>> values(std::initializer_list<std::initializer_list<double>> data) {
+    std::vector<gr::Tensor<double>> result;
+    for (const auto tensorData : data) {
+        result.emplace_back(gr::data_from, tensorData);
+    }
+    return result;
+}
+
+void execute_selector_test(TestParams params, std::source_location location = std::source_location::current()) {
     using namespace boost::ut;
     using namespace gr::testing;
 
@@ -41,8 +49,8 @@ void execute_selector_test(TestParams params) {
     std::vector<TagSink<double, ProcessFunction::USE_PROCESS_ONE>*> sinks;
     gr::basic::Selector<double>*                                    selector;
 
-    std::vector<gr::Size_t> mapIn(params.mapping.size());
-    std::vector<gr::Size_t> mapOut(params.mapping.size());
+    gr::Tensor<gr::Size_t> mapIn(gr::extents_from, {params.mapping.size()});
+    gr::Tensor<gr::Size_t> mapOut(gr::extents_from, {params.mapping.size()});
     std::ranges::transform(params.mapping, mapIn.begin(), [](auto& p) { return p.first; });
     std::ranges::transform(params.mapping, mapOut.begin(), [](auto& p) { return p.second; });
 
@@ -65,7 +73,10 @@ void execute_selector_test(TestParams params) {
     expect(monitorSink->settings().applyStagedParameters().forwardParameters.empty());
     expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
 
-    gr::scheduler::Simple sched{std::move(graph)};
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(graph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     expect(sched.runAndWait().has_value());
 
     for (std::size_t i = 0; i < selector->inputs.size(); i++) {
@@ -77,7 +88,8 @@ void execute_selector_test(TestParams params) {
             std::ranges::sort(sinks[i]->_samples);
             std::ranges::sort(params.outValues[i]);
         }
-        expect(std::ranges::equal(sinks[i]->_samples, params.outValues[i])) << std::format("sinks[{}]->_samples does not match to expected values:\nSink:{}\nExpected:{}\n", i, sinks[i]->_samples, params.outValues[i]);
+        expect(std::ranges::equal(sinks[i]->_samples, params.outValues[i])) //
+            << std::format("called from {}:{} -- test failed:\nparams.outValues[i] i={} samples={} outValues={}", location.file_name(), location.line(), i, sinks[i]->_samples, params.outValues[i]);
     }
 
     for (std::size_t i = 0; i < sinks.size(); i++) {
@@ -91,7 +103,7 @@ const boost::ut::suite SelectorTest = [] {
 
     "Selector<T> constructor"_test = [] {
         Selector<double> block_nop({{"name", "block_nop"}});
-        block_nop.init(block_nop.progress, block_nop.ioThreadPool);
+        block_nop.init(block_nop.progress);
         expect(eq(block_nop.n_inputs, 0U));
         expect(eq(block_nop.n_outputs, 0U));
         expect(eq(block_nop.inputs.size(), 0U));
@@ -99,7 +111,7 @@ const boost::ut::suite SelectorTest = [] {
         expect(eq(block_nop._internalMappingInOut.size(), 0U));
 
         Selector<double> block({{"name", "block"}, {"n_inputs", 4U}, {"n_outputs", 3U}});
-        block.init(block.progress, block.ioThreadPool);
+        block.init(block.progress);
         expect(eq(block.n_inputs, 4U));
         expect(eq(block.n_outputs, 3U));
         expect(eq(block.inputs.size(), 4U));
@@ -109,9 +121,9 @@ const boost::ut::suite SelectorTest = [] {
 
     "basic Selector<T>"_test = [] {
         using T = double;
-        const std::vector<uint32_t> outputMap{1U, 0U};
-        Selector<T>                 block({{"n_inputs", 3U}, {"n_outputs", 2U}, {"map_in", std::vector<gr::Size_t>{0U, 1U}}, {"map_out", outputMap}}); // N.B. 3rd input is unconnected
-        block.init(block.progress, block.ioThreadPool);
+        const Tensor<uint32_t> outputMap{data_from, {1U, 0U}};
+        Selector<T>            block({{"n_inputs", 3U}, {"n_outputs", 2U}, {"map_in", Tensor<gr::Size_t>(data_from, {0U, 1U})}, {"map_out", outputMap}}); // N.B. 3rd input is unconnected
+        block.init(block.progress);
         expect(eq(block._internalMappingInOut.size(), 2U));
 
         using internal_mapping_t = decltype(block._internalMappingInOut);
@@ -125,11 +137,11 @@ const boost::ut::suite SelectorTest = [] {
     // Tests without the back pressure
 
     "Selector<T> 1 to 1 mapping"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                                                   //
-            .mapping                     = {{0, 0}, {1, 1}, {2, 2}},                            //
-            .inValues                    = {{1}, {2}, {3}},                                     //
-            .outValues                   = {{1, 1, 1, 1, 1}, {2, 2, 2, 2, 2}, {3, 3, 3, 3, 3}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                            //
+        execute_selector_test({.nSamples = 5,                                                           //
+            .mapping                     = {{0, 0}, {1, 1}, {2, 2}},                                    //
+            .inValues                    = values({{1}, {2}, {3}}),                                     //
+            .outValues                   = values({{1, 1, 1, 1, 1}, {2, 2, 2, 2, 2}, {3, 3, 3, 3, 3}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                    //
             .outTags                     = {{tag1}, {tag2}, {tag3}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -139,11 +151,11 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> only one input used"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                         //
-            .mapping                     = {{1, 1}},                  //
-            .inValues                    = {{1}, {2}, {3}},           //
-            .outValues                   = {{}, {2, 2, 2, 2, 2}, {}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},  //
+        execute_selector_test({.nSamples = 5,                                 //
+            .mapping                     = {{1, 1}},                          //
+            .inValues                    = values({{1}, {2}, {3}}),           //
+            .outValues                   = values({{}, {2, 2, 2, 2, 2}, {}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},          //
             .outTags                     = {{}, {tag2}, {}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -156,11 +168,11 @@ const boost::ut::suite SelectorTest = [] {
         const Tag newTag1{6, tag1.map};
         const Tag newTag2{10, tag2.map};
         const Tag newTag3{13, tag3.map};
-        execute_selector_test({.nSamples = 5,                                                       //
-            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                //
-            .inValues                    = {{1}, {2}, {3}},                                         //
-            .outValues                   = {{}, {1, 2, 2, 3, 3, 3, 1, 1, 1, 1, 2, 2, 2, 3, 3}, {}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                                //
+        execute_selector_test({.nSamples = 5,                                                               //
+            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
+            .inValues                    = values({{1}, {2}, {3}}),                                         //
+            .outValues                   = values({{}, {1, 2, 2, 3, 3, 3, 1, 1, 1, 1, 2, 2, 2, 3, 3}, {}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                        //
             .outTags                     = {{}, {newTag1, newTag2, newTag3}, {}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -174,11 +186,11 @@ const boost::ut::suite SelectorTest = [] {
         const Tag newTag1{3, tag1.map};
         const Tag newTag2{7, tag2.map};
         const Tag newTag3{11, tag3.map};
-        execute_selector_test({.nSamples = 5,                                                       //
-            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                //
-            .inValues                    = {{1}, {2}, {3}},                                         //
-            .outValues                   = {{}, {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3}, {}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                                //
+        execute_selector_test({.nSamples = 5,                                                               //
+            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
+            .inValues                    = values({{1}, {2}, {3}}),                                         //
+            .outValues                   = values({{}, {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3}, {}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                        //
             .outTags                     = {{}, {newTag1, newTag2, newTag3}, {}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -189,11 +201,11 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> one for all"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                                                   //
-            .mapping                     = {{1, 0}, {1, 1}, {1, 2}},                            //
-            .inValues                    = {{1}, {2}, {3}},                                     //
-            .outValues                   = {{2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                            //
+        execute_selector_test({.nSamples = 5,                                                           //
+            .mapping                     = {{1, 0}, {1, 1}, {1, 2}},                                    //
+            .inValues                    = values({{1}, {2}, {3}}),                                     //
+            .outValues                   = values({{2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                    //
             .outTags                     = {{tag2}, {tag2}, {tag2}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -205,11 +217,11 @@ const boost::ut::suite SelectorTest = [] {
     // tests with the back pressure
 
     "Selector<T> 1 to 1 mapping, with back pressure"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                                                   //
-            .mapping                     = {{0, 0}, {1, 1}, {2, 2}},                            //
-            .inValues                    = {{1}, {2}, {3}},                                     //
-            .outValues                   = {{1, 1, 1, 1, 1}, {2, 2, 2, 2, 2}, {3, 3, 3, 3, 3}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                            //
+        execute_selector_test({.nSamples = 5,                                                           //
+            .mapping                     = {{0, 0}, {1, 1}, {2, 2}},                                    //
+            .inValues                    = values({{1}, {2}, {3}}),                                     //
+            .outValues                   = values({{1, 1, 1, 1, 1}, {2, 2, 2, 2, 2}, {3, 3, 3, 3, 3}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                    //
             .outTags                     = {{tag1}, {tag2}, {tag3}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -219,11 +231,11 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> only one input used, with back pressure"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                         //
-            .mapping                     = {{1, 1}},                  //
-            .inValues                    = {{1}, {2}, {3}},           //
-            .outValues                   = {{}, {2, 2, 2, 2, 2}, {}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},  //
+        execute_selector_test({.nSamples = 5,                                 //
+            .mapping                     = {{1, 1}},                          //
+            .inValues                    = values({{1}, {2}, {3}}),           //
+            .outValues                   = values({{}, {2, 2, 2, 2, 2}, {}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},          //
             .outTags                     = {{}, {tag2}, {}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -236,11 +248,11 @@ const boost::ut::suite SelectorTest = [] {
         const Tag newTag1{3, tag1.map};
         const Tag newTag2{7, tag2.map};
         const Tag newTag3{11, tag3.map};
-        execute_selector_test({.nSamples = 5,                                                       //
-            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                //
-            .inValues                    = {{1}, {2}, {3}},                                         //
-            .outValues                   = {{}, {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3}, {}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                                //
+        execute_selector_test({.nSamples = 5,                                                               //
+            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
+            .inValues                    = values({{1}, {2}, {3}}),                                         //
+            .outValues                   = values({{}, {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3}, {}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                        //
             .outTags                     = {{}, {newTag1, newTag2, newTag3}, {}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -250,11 +262,11 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> one for all, with back pressure"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                                                   //
-            .mapping                     = {{1, 0}, {1, 1}, {1, 2}},                            //
-            .inValues                    = {{1}, {2}, {3}},                                     //
-            .outValues                   = {{2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                            //
+        execute_selector_test({.nSamples = 5,                                                           //
+            .mapping                     = {{1, 0}, {1, 1}, {1, 2}},                                    //
+            .inValues                    = values({{1}, {2}, {3}}),                                     //
+            .outValues                   = values({{2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                    //
             .outTags                     = {{tag2}, {tag2}, {tag2}},
             .monitorSource               = -1U, //
             .monitorValues               = {},  //
@@ -266,11 +278,11 @@ const boost::ut::suite SelectorTest = [] {
     // Tests with a monitor
 
     "Selector<T> 1 to 1 mapping, with monitor, monitor source already mapped"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                                                   //
-            .mapping                     = {{0, 0}, {1, 1}, {2, 2}},                            //
-            .inValues                    = {{1}, {2}, {3}},                                     //
-            .outValues                   = {{1, 1, 1, 1, 1}, {2, 2, 2, 2, 2}, {3, 3, 3, 3, 3}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                            //
+        execute_selector_test({.nSamples = 5,                                                           //
+            .mapping                     = {{0, 0}, {1, 1}, {2, 2}},                                    //
+            .inValues                    = values({{1}, {2}, {3}}),                                     //
+            .outValues                   = values({{1, 1, 1, 1, 1}, {2, 2, 2, 2, 2}, {3, 3, 3, 3, 3}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                    //
             .outTags                     = {{tag1}, {tag2}, {tag3}},
             .monitorSource               = 0U,              // set monitor index
             .monitorValues               = {1, 1, 1, 1, 1}, //
@@ -280,11 +292,11 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> only one input used, with monitor, monitor source not mapped"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                         //
-            .mapping                     = {{1, 1}},                  //
-            .inValues                    = {{1}, {2}, {3}},           //
-            .outValues                   = {{}, {2, 2, 2, 2, 2}, {}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},  //
+        execute_selector_test({.nSamples = 5,                                 //
+            .mapping                     = {{1, 1}},                          //
+            .inValues                    = values({{1}, {2}, {3}}),           //
+            .outValues                   = values({{}, {2, 2, 2, 2, 2}, {}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},          //
             .outTags                     = {{}, {tag2}, {}},
             .monitorSource               = 0U,              // set monitor index
             .monitorValues               = {1, 1, 1, 1, 1}, // monitor has values even if port is not mapped
@@ -297,11 +309,11 @@ const boost::ut::suite SelectorTest = [] {
         const Tag newTag1{3, tag1.map};
         const Tag newTag2{7, tag2.map};
         const Tag newTag3{11, tag3.map};
-        execute_selector_test({.nSamples = 5,                                                       //
-            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                //
-            .inValues                    = {{1}, {2}, {3}},                                         //
-            .outValues                   = {{}, {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3}, {}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                                //
+        execute_selector_test({.nSamples = 5,                                                               //
+            .mapping                     = {{0, 1}, {1, 1}, {2, 1}},                                        //
+            .inValues                    = values({{1}, {2}, {3}}),                                         //
+            .outValues                   = values({{}, {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3}, {}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                        //
             .outTags                     = {{}, {newTag1, newTag2, newTag3}, {}},
             .monitorSource               = 1U,              // set monitor index
             .monitorValues               = {2, 2, 2, 2, 2}, //
@@ -311,11 +323,11 @@ const boost::ut::suite SelectorTest = [] {
     };
 
     "Selector<T> one for all, with monitor, monitor source already mapped"_test = [tag1, tag2, tag3] {
-        execute_selector_test({.nSamples = 5,                                                   //
-            .mapping                     = {{1, 0}, {1, 1}, {1, 2}},                            //
-            .inValues                    = {{1}, {2}, {3}},                                     //
-            .outValues                   = {{2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}}, //
-            .inTags                      = {{tag1}, {tag2}, {tag3}},                            //
+        execute_selector_test({.nSamples = 5,                                                           //
+            .mapping                     = {{1, 0}, {1, 1}, {1, 2}},                                    //
+            .inValues                    = values({{1}, {2}, {3}}),                                     //
+            .outValues                   = values({{2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}}), //
+            .inTags                      = {{tag1}, {tag2}, {tag3}},                                    //
             .outTags                     = {{tag2}, {tag2}, {tag2}},
             .monitorSource               = 1U,              //
             .monitorValues               = {2, 2, 2, 2, 2}, //

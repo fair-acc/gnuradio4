@@ -17,7 +17,7 @@ if(NOT EMSCRIPTEN AND TARGET GrBasicBlocksShared)
 
   add_executable(qa_apptest_LoadingPlainBlocklibs qa_apptest_LoadingPlainBlocklibs.cpp)
   setup_test(qa_apptest_LoadingPlainBlocklibs)
-  target_link_libraries(qa_apptest_KnownStaticLibBlocks PRIVATE gnuradio-core gnuradio-blocklib-core)
+  target_link_libraries(qa_apptest_LoadingPlainBlocklibs PRIVATE gnuradio-core gnuradio-blocklib-core)
   set_property(
     TEST qa_apptest_LoadingPlainBlocklibs
     PROPERTY ENVIRONMENT_MODIFICATION

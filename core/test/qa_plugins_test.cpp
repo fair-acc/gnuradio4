@@ -41,7 +41,11 @@ const boost::ut::suite PluginLoaderTests = [] {
     "BadPlugins"_test = [&] {
         expect(!context->loader.failedPlugins().empty());
         for (const auto& plugin : context->loader.failedPlugins()) {
+#if defined(_WIN32)
+            expect(plugin.first.ends_with("bad_plugin.dll"));
+#else
             expect(plugin.first.ends_with("bad_plugin.so"));
+#endif
         }
     };
 
@@ -153,12 +157,12 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         expect(connection_5 == gr::ConnectionResult::SUCCESS);
 
         for (std::size_t i = 0; i < repeats; ++i) {
-            std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_source->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_multiply_double.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_convert_to_float.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_multiply_float.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_convert_to_double.work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_sink.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_convert_to_float->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_multiply_float->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_convert_to_double->work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_sink->work(std::numeric_limits<std::size_t>::max());
         }
     };
 };

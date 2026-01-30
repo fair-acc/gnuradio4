@@ -66,8 +66,8 @@ const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
         }
 
         if (devices.empty()) {
-            std::println(stderr, "no devices found");
-            return;
+            std::println(stderr, "no devices found - aborting tests");
+            exit(0);
         }
     };
     std::println("Detected available devices: [{}]", gr::join(availableDeviceDriver, ", "));
@@ -284,8 +284,7 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
     };
 
-    auto threadPool                                             = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 10UZ);
-    tag("rtlsdr") / "basic RTL soapy data generation test"_test = [&threadPool, &createWatchdog] {
+    tag("rtlsdr") / "basic RTL soapy data generation test"_test = [&createWatchdog] {
         using namespace gr;
         using namespace gr::blocks::soapy;
         using namespace gr::testing;
@@ -297,17 +296,20 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
 
         auto& source  = flow.emplaceBlock<SoapyBlock<ValueType, 1UZ>>({
             //
-            {"device", "rtlsdr"},                                //
-            {"sample_rate", float(1e6)},                         //
-            {"rx_center_frequency", std::vector<double>{107e6}}, //
-            {"rx_gains", std::vector<double>{20.}},
+            {"device", "rtlsdr"},                           //
+            {"sample_rate", float(1e6)},                    //
+            {"rx_center_frequency", Tensor<double>{107e6}}, //
+            {"rx_gains", Tensor<double>{20.}},
         });
         auto& monitor = flow.emplaceBlock<Copy<ValueType>>();
         auto& sink    = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto sched                                        = scheduler{std::move(flow), threadPool};
+        scheduler sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
         auto retVal = sched.runAndWait();
@@ -323,7 +325,7 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         std::println("N.B. 'basic RTL soapy data generation test' test finished");
     };
 
-    tag("lime") / "basic Lime soapy data generation test"_test = [&threadPool, &createWatchdog] {
+    tag("lime") / "basic Lime soapy data generation test"_test = [&createWatchdog] {
         using namespace gr;
         using namespace gr::blocks::soapy;
         using namespace gr::testing;
@@ -335,21 +337,23 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
 
         auto& source = flow.emplaceBlock<SoapyBlock<ValueType, 2UZ>>({
             //
-            {"device", "lime"},                                         //
-            {"rx_channels", std::vector<gr::Size_t>{0U, 1U}},           //
-            {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}},  //
-            {"sample_rate", float(1e6)},                                //
-            {"rx_center_frequency", std::vector<double>{107e6, 107e6}}, //
-            {"rx_bandwdith", std::vector<double>{0.5e6, 0.5e6}},        //
-            {"rx_gains", std::vector<double>{10., 10.}},
+            {"device", "lime"},                                           //
+            {"rx_channels", Tensor<gr::Size_t>(gr::data_from, {0U, 1U})}, //
+            {"rx_antennae", Tensor<pmt::Value>{"LNAW", "LNAW"}},          //
+            {"sample_rate", float(1e6)},                                  //
+            {"rx_center_frequency", Tensor<double>{107e6, 107e6}},        //
+            {"rx_bandwdith", Tensor<double>{0.5e6, 0.5e6}},               //
+            {"rx_gains", Tensor<double>{10., 10.}},
         });
         auto& sink1  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
         auto& sink2  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 0>(source).to<"in">(sink1)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", 1>(source).to<"in">(sink2)));
 
-        auto sched = scheduler{std::move(flow), threadPool};
-
+        scheduler sched;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
         auto retVal = sched.runAndWait();

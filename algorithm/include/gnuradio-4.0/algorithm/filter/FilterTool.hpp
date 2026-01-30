@@ -33,7 +33,7 @@
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 // this mocks the execution policy until Emscripten's libc++ does support this (Clang already does)
-#if defined(__EMSCRIPTEN__) || defined(__clang__)
+#if not defined(__GLIBCXX__) && (defined(__EMSCRIPTEN__) || defined(__clang__))
 
 namespace std {
 

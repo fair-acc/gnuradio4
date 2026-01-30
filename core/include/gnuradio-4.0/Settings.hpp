@@ -4,21 +4,19 @@
 #include <atomic>
 #include <chrono>
 #include <concepts>
+#include <format>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <variant>
 
-#include <pmtv/base64/base64.h>
-#include <pmtv/pmt.hpp>
-
-#include <format>
-
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/ValueHelper.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/meta/immutable.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 #if defined(__clang__)
@@ -34,10 +32,10 @@ namespace gr {
 namespace settings {
 
 template<typename T>
-constexpr bool isSupportedVectorType() {
-    if constexpr (gr::meta::vector_type<T>) {
+constexpr bool isSupportedVectorOrTensorType() {
+    if constexpr (gr::meta::vector_type<T> || is_tensor<T>) {
         using ValueType = typename T::value_type;
-        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>>;
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, pmt::Value>;
     } else {
         return false;
     }
@@ -45,13 +43,23 @@ constexpr bool isSupportedVectorType() {
 
 template<typename T>
 constexpr bool isReadableMember() {
-    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorType<T>() || std::is_same_v<T, property_map> //
-           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>>;
+    auto isReadableImmutable = [] {
+        if constexpr (gr::meta::is_immutable<T>{}) {
+            return isReadableMember<typename T::value_type>();
+        } else if constexpr (is_annotated<T>{}) {
+            return isReadableMember<typename T::value_type>();
+
+        } else {
+            return false;
+        }
+    };
+    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
+           || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, pmt::Value> || isReadableImmutable();
 }
 
 template<typename T, typename TMember>
 constexpr bool isWritableMember() {
-    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember>;
+    return isReadableMember<T>() && !std::is_const_v<T> && !std::is_const_v<TMember> && !gr::meta::is_immutable<TMember>{};
 }
 
 inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_point<std::chrono::system_clock>& tp) {
@@ -61,25 +69,27 @@ inline constexpr uint64_t convertTimePointToUint64Ns(const std::chrono::time_poi
 
 static auto nullMatchPred = [](auto, auto, auto) { return std::nullopt; };
 
-inline std::strong_ordering comparePmt(const pmtv::pmt& lhs, const pmtv::pmt& rhs) {
+inline std::strong_ordering comparePmt(const pmt::Value& lhs, const pmt::Value& rhs) {
     // If the types are different, cast rhs to the type of lhs and compare
-    if (lhs.index() != rhs.index()) {
+    if (lhs.container_type() != rhs.container_type()) {
         // TODO: throw if types are not the same?
-        return lhs.index() <=> rhs.index();
+        return lhs.container_type() <=> rhs.container_type();
+    } else if (lhs.value_type() != rhs.value_type()) {
+        return lhs.value_type() <=> rhs.value_type();
     } else {
-        if (std::holds_alternative<std::string>(lhs)) {
-            return std::get<std::string>(lhs) <=> std::get<std::string>(rhs);
-        } else if (std::holds_alternative<int>(lhs)) {
-            return std::get<int>(lhs) <=> std::get<int>(rhs);
+        if (lhs.holds<std::string_view>()) {
+            return lhs.value_or(std::string_view{}) <=> rhs.value_or(std::string_view{});
+        } else if (lhs.holds<int>()) {
+            return lhs.value_or(0) <=> rhs.value_or(0);
         } else {
             throw gr::exception("Invalid CtxSettings context type " + std::string(typeid(lhs).name()));
         }
     }
 }
 
-// pmtv::pmt comparison is needed to use it as a key of std::map
+// pmt::Value comparison is needed to use it as a key of std::map
 struct PMTCompare {
-    bool operator()(const pmtv::pmt& lhs, const pmtv::pmt& rhs) const { return comparePmt(lhs, rhs) == std::strong_ordering::less; }
+    bool operator()(const pmt::Value& lhs, const pmt::Value& rhs) const { return comparePmt(lhs, rhs) == std::strong_ordering::less; }
 };
 
 } // namespace settings
@@ -90,6 +100,47 @@ struct ApplyStagedParametersResult {
 };
 
 namespace detail {
+
+#ifdef __EMSCRIPTEN__
+template<typename TValue>
+auto castToGrSizeIfNeeded(const TValue& value) {
+    if constexpr (std::is_same_v<TValue, std::size_t>) {
+        return static_cast<gr::Size_t>(value);
+    } else {
+        return value;
+    }
+};
+#else
+template<typename TValue>
+auto castToGrSizeIfNeeded(const TValue& value) {
+    return value;
+};
+#endif
+
+template<typename T>
+auto unwrap_decorated_value(const T& value) {
+    if constexpr (AnnotatedType<T>) {
+        return castToGrSizeIfNeeded(value.value);
+    } else if constexpr (meta::ImmutableType<T>) {
+        return castToGrSizeIfNeeded(value.value());
+    } else {
+        return castToGrSizeIfNeeded(value);
+    }
+}
+
+template<typename T>
+const auto& unwrap_decorated_reference(const T& value) {
+    if constexpr (AnnotatedType<T>) {
+        return value.value;
+    } else if constexpr (meta::ImmutableType<T>) {
+        return value.value();
+    } else {
+        return value;
+    }
+};
+
+std::size_t computeHash(const pmt::Value& value);
+
 template<class T>
 constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
     std::hash<T> hasher;
@@ -97,63 +148,98 @@ constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
     return seed;
 }
 
-std::size_t computeHash(const pmtv::pmt_var_t& value);
-
-struct PmtHashVisitor {
-    template<typename T>
-    constexpr std::size_t operator()(const T& value) const {
-        if constexpr (std::is_same_v<T, std::monostate>) {
-            return 0x9e3779b9UZ; // arbitrary constant seed
-        } else if constexpr (pmtv::Scalar<T>) {
-            if constexpr (gr::meta::complex_like<T>) {
-                using value_t           = typename T::value_type;
-                std::size_t        seed = std::hash<value_t>()(value.real());
-                std::hash<value_t> hasher;
-                seed ^= hasher(value.imag()) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
-                return seed;
-            } else {
-                return std::hash<T>()(value);
-            }
-        } else if constexpr (pmtv::String<T>) {
-            return std::hash<std::string>()(value);
-        } else if constexpr (gr::meta::vector_type<T>) {
-            using value_t    = typename T::value_type;
-            std::size_t seed = 0UZ;
-            for (const auto& elem : value) {
-                if constexpr (pmtv::IsPmt<value_t>) {
-                    seed = detail::hash_combine(seed, std::visit(*this, elem));
-                } else {
-                    seed = detail::hash_combine(seed, (*this)(static_cast<value_t>(elem)));
-                }
-            }
-            return seed;
-        } else if constexpr (pmtv::PmtMap<T>) {
-            std::size_t seed = 0UZ;
-            for (const auto& [key, val] : value) {
-                // static_assert(pmtv::IsPmt<decltype(val)>, "val must be a std::variant");
-                std::size_t kv_seed = std::hash<std::string>()(key);
-                seed                = detail::hash_combine(kv_seed, computeHash(val));
-                seed                = detail::hash_combine(seed, kv_seed);
-            }
+inline auto computeValueHash = meta::overloaded([](const std::string_view& sv) { return std::hash<std::string_view>()(sv); }, //
+    []<typename T>(const gr::Tensor<T>& tensor) {
+        std::size_t seed = 9UZ;
+        for (const auto& v : tensor) {
+            seed = detail::hash_combine(seed, computeHash(pmt::Value(v)));
+        }
+        return seed;
+    }, //
+    [](const gr::property_map& map) {
+        std::size_t seed = 0UZ;
+        for (const auto& [k, v] : map) {
+            std::size_t kv_seed = std::hash<std::string_view>()(k);
+            seed                = detail::hash_combine(kv_seed, computeHash(v));
+            seed                = detail::hash_combine(seed, kv_seed);
+        }
+        return seed;
+    }, //
+    [](const std::monostate) {
+        // arbitrary constant seed
+        return 0x9e3779b9UZ;
+    }, //
+    []<typename VT>(const std::complex<VT>& v) {
+        std::hash<VT> hasher;
+        std::size_t   seed = hasher(v.real());
+        seed ^= hasher(v.imag()) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
+        return seed;
+    }, //
+    []<typename T>(const T& v) {
+        if constexpr (gr::meta::complex_like<std::remove_cvref_t<T>>) {
+            using value_t           = typename T::value_type;
+            std::size_t        seed = std::hash<value_t>()(v.real());
+            std::hash<value_t> hasher;
+            seed ^= hasher(v.imag()) + 0x9e3779b9UZ + (seed << 6) + (seed >> 2);
             return seed;
         } else {
-            static_assert(gr::meta::always_false<T>, "Unhandled type in PmtHashVisitor.");
-            return 0; // unreachable
+            return std::hash<T>()(v);
         }
-    }
-};
+    });
 
-inline std::size_t computeHash(const pmtv::pmt& value) { return std::visit(PmtHashVisitor{}, value); }
+inline std::size_t computeHash(const pmt::Value& value) {
+    std::size_t result = 0UZ;
+    pmt::ValueVisitor([&](const auto& v) { result = computeValueHash(v); }).visit(value);
+    return result;
+}
+
+template<typename TCollection>
+auto collectionToTensor(const TCollection& collection) {
+    using TValue       = typename TCollection::value_type;
+    using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
+    Tensor<TTensorValue> result(extents_from, {collection.size()});
+    std::ranges::copy(collection, result.begin());
+    return result;
+}
+
+template<typename T, typename U = unwrap_if_wrapped_t<std::remove_cvref_t<T>>>
+constexpr bool isEnumOrAnnotatedEnum = std::is_enum_v<U>;
+
+template<typename T>
+requires isEnumOrAnnotatedEnum<T>
+std::expected<T, std::string> tryExtractEnumValue(const pmt::Value& pmt, std::string_view key) {
+
+    auto str = pmt.value_or(std::string_view{});
+    if (str.data() == nullptr) {
+        return std::unexpected(std::format("Field '{}' expects enum string, got different type", key));
+    }
+
+    if (auto opt = magic_enum::enum_cast<T>(str); opt.has_value()) {
+        return *opt;
+    }
+
+    return std::unexpected(std::format("Invalid enum value '{}' for key '{}'", str, key));
+}
+
+template<typename T, typename U = std::remove_cvref_t<T>>
+requires isEnumOrAnnotatedEnum<U>
+std::string enumToString(T&& enum_value) {
+    if constexpr (is_annotated<U>()) {
+        return std::string(magic_enum::enum_name(enum_value.value));
+    } else {
+        return std::string(magic_enum::enum_name(enum_value));
+    }
+}
 
 } // namespace detail
 
 struct SettingsCtx {
-    std::uint64_t time    = 0ULL; // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
-    pmtv::pmt     context = "";   // user-defined multiplexing context for which the setting is valid
+    std::uint64_t time    = 0ULL;          // UTC-based time-stamp in ns, time from which the setting is valid, 0U is undefined time
+    pmt::Value    context = std::string(); // user-defined multiplexing context for which the setting is valid
 
     bool operator==(const SettingsCtx&) const = default;
 
-    auto operator<=>(const SettingsCtx& other) const {
+    std::partial_ordering operator<=>(const SettingsCtx& other) const {
         // First compare time
         if (auto cmp = time <=> other.time; cmp != std::strong_ordering::equal) {
             return cmp;
@@ -195,10 +281,59 @@ namespace settings {
  * @brief Convert the given `value` to type `T`. If conversion fails or return diagnostic text.
  */
 template<typename T>
-[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmtv::pmt& value); // foward declaration, implementation defined in corresponding .cpp file
+[[nodiscard]] std::expected<T, std::string> convertParameter(std::string_view key, const pmt::Value& value) {
+    if constexpr (std::is_enum_v<T>) {
+        return detail::tryExtractEnumValue<T>(value, key);
+    } else {
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto sv = value.value_or(std::string_view{});
+            if (sv.data()) {
+                return std::string(sv);
+            } else {
+                return std::unexpected(std::format("value {} for key '{}' has wrong type {} {}, needs {}", value, key, value.value_type(), value.container_type(), std::string(meta::type_name<T>())));
+            }
+
+        } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+            const auto* tensorValue = value.get_if<Tensor<pmt::Value>>();
+            if (!tensorValue) {
+                return std::unexpected(std::format("Value {} is not a tensor of Value", value));
+
+            } else {
+                std::vector<std::string> converted(tensorValue->size());
+                std::ranges::transform(*tensorValue, converted.begin(), [](const pmt::Value& in) { return in.value_or(std::string()); });
+                return converted;
+            }
+
+        } else if constexpr (meta::is_instantiation_of<T, std::vector>) {
+            using TValue            = typename T::value_type;
+            const auto* tensorValue = value.get_if<Tensor<TValue>>();
+            if (!tensorValue) {
+                return std::unexpected(std::format("Value {} is not a tensor of {}", value, meta::type_name<TValue>()));
+
+            } else {
+                std::vector<TValue> converted(tensorValue->size());
+                std::ranges::copy(*tensorValue, converted.begin());
+                return converted;
+            }
+
+        } else {
+            constexpr bool strictChecks = false;
+            auto           converted    = pmt::convert_safely<T, strictChecks>(value);
+            if (!converted) {
+                return std::unexpected(std::format("value {} for key '{}' has wrong type {} {}, needs {}", value, key, value.value_type(), value.container_type(), std::string(meta::type_name<T>())));
+            }
+            return *converted;
+        }
+    }
+}
+
 } // namespace settings
 
 struct SettingsBase {
+    struct CtxSettingsPair {
+        SettingsCtx  context;
+        property_map settings;
+    };
     virtual ~SettingsBase() = default;
 
     /**
@@ -264,7 +399,7 @@ struct SettingsBase {
     /**
      * @brief return available active block setting as key-value pair for a single key
      */
-    [[nodiscard]] virtual std::optional<pmtv::pmt> get(const std::string& parameter_key) const noexcept = 0;
+    [[nodiscard]] virtual std::optional<pmt::Value> get(const std::string& parameter_key) const noexcept = 0;
 
     /**
      * @brief return all (or for selected multiple keys) stored block settings for provided context as key-value pairs
@@ -274,7 +409,7 @@ struct SettingsBase {
     /**
      * @brief return available stored block setting for provided context as key-value pair for a single key
      */
-    [[nodiscard]] virtual std::optional<pmtv::pmt> getStored(const std::string& parameter_key, SettingsCtx ctx = {}) const noexcept = 0;
+    [[nodiscard]] virtual std::optional<pmt::Value> getStored(const std::string& parameter_key, SettingsCtx ctx = {}) const noexcept = 0;
 
     /**
      * @brief return number of all sets of stored parameters
@@ -289,7 +424,7 @@ struct SettingsBase {
     /**
      * @brief return _storedParameters
      */
-    [[nodiscard]] virtual std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept = 0;
+    [[nodiscard]] virtual std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept = 0;
 
     /**
      * @brief returns the staged/not-yet-applied new parameters
@@ -337,15 +472,15 @@ class CtxSettings : public SettingsBase {
      * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
      * which indicates that no matches were found and there is no chance of matching anything in a further round.
      */
-    using MatchPredicate = std::function<std::optional<bool>(const pmtv::pmt&, const pmtv::pmt&, std::size_t)>;
+    using MatchPredicate = std::function<std::optional<bool>(const pmt::Value&, const pmt::Value&, std::size_t)>;
 
     TBlock*            _block = nullptr;
     std::atomic_bool   _changed{false};
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
-    mutable std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> _storedParameters{};
-    property_map                                                                                         _defaultParameters{};
+    mutable std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
+    property_map                                                                     _defaultParameters{};
     // Store the initial parameters provided in the Block constructor. These parameters cannot be set directly in the constructor
     // because `_defaultParameters` cannot be initialized using Settings::storeDefaults() within the Block constructor.
     // Instead, we store them now and set them later in the Block::init method.
@@ -395,10 +530,11 @@ public:
                 auto memberName  = std::string(refl::data_member_name<TBlock, kIdx>.view());
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
-                    _block->meta_information.value[memberName + "::description"]   = std::string(RawType::description());
-                    _block->meta_information.value[memberName + "::documentation"] = std::string(RawType::documentation());
-                    _block->meta_information.value[memberName + "::unit"]          = std::string(RawType::unit());
-                    _block->meta_information.value[memberName + "::visible"]       = RawType::visible();
+                    auto& meta_information                                                  = _block->meta_information;
+                    meta_information[convert_string_domain(memberName) + "::description"]   = std::string(RawType::description());
+                    meta_information[convert_string_domain(memberName) + "::documentation"] = std::string(RawType::documentation());
+                    meta_information[convert_string_domain(memberName) + "::unit"]          = std::string(RawType::unit());
+                    meta_information[convert_string_domain(memberName) + "::visible"]       = RawType::visible();
                 }
 
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {
@@ -409,60 +545,51 @@ public:
         _autoForwardParameters.insert(gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end());
     }
 
-    CtxSettings(const CtxSettings& other) {
-        std::scoped_lock lock(_mutex, other._mutex);
-        copyFrom(other);
+    // Not safe as CtxSettings has a pointer back to the block
+    // that owns it
+    CtxSettings(const CtxSettings& other)            = delete;
+    CtxSettings(CtxSettings&& other)                 = delete;
+    CtxSettings& operator=(const CtxSettings& other) = delete;
+    CtxSettings& operator=(CtxSettings&& other)      = delete;
+
+    CtxSettings(TBlock& block, const CtxSettings& other) {
+        _block = std::addressof(block);
+        assignFrom(other);
     }
 
-    CtxSettings(CtxSettings&& other) noexcept {
-        std::scoped_lock lock(_mutex, other._mutex);
-        moveFrom(other);
+    CtxSettings(TBlock& block, CtxSettings&& other) noexcept {
+        _block = std::addressof(block);
+        assignFrom(std::move(other));
     }
 
-    CtxSettings& operator=(const CtxSettings& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-
+    void assignFrom(const CtxSettings& other) {
         std::scoped_lock lock(_mutex, other._mutex);
-        copyFrom(other);
-        return *this;
-    }
-
-    CtxSettings& operator=(CtxSettings&& other) noexcept {
-        if (this == &other) {
-            return *this;
-        }
-        std::scoped_lock lock(_mutex, other._mutex);
-        moveFrom(other);
-        return *this;
-    }
-
-private:
-    void copyFrom(const CtxSettings& other) {
-        _block = other._block;
         std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
-        _activeParameters      = other._activeParameters;
         _storedParameters      = other._storedParameters;
         _defaultParameters     = other._defaultParameters;
+        _initBlockParameters   = other._initBlockParameters;
         _allWritableMembers    = other._allWritableMembers;
         _autoUpdateParameters  = other._autoUpdateParameters;
         _autoForwardParameters = other._autoForwardParameters;
         _matchPred             = other._matchPred;
         _activeCtx             = other._activeCtx;
+        _stagedParameters      = other._stagedParameters;
+        _activeParameters      = other._activeParameters;
     }
 
-    void moveFrom(CtxSettings& other) noexcept {
-        _block = std::exchange(other._block, nullptr);
+    void assignFrom(CtxSettings&& other) noexcept {
+        std::scoped_lock lock(_mutex, other._mutex);
         std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
-        _activeParameters      = std::move(other._activeParameters);
         _storedParameters      = std::move(other._storedParameters);
         _defaultParameters     = std::move(other._defaultParameters);
+        _initBlockParameters   = std::move(other._initBlockParameters);
         _allWritableMembers    = std::move(other._allWritableMembers);
         _autoUpdateParameters  = std::move(other._autoUpdateParameters);
         _autoForwardParameters = std::move(other._autoForwardParameters);
         _matchPred             = std::exchange(other._matchPred, settings::nullMatchPred);
         _activeCtx             = std::exchange(other._activeCtx, {});
+        _stagedParameters      = std::move(other._stagedParameters);
+        _activeParameters      = std::move(other._activeParameters);
     }
 
 public:
@@ -502,6 +629,10 @@ public:
             auto& currentAutoUpdateParameters = _autoUpdateParameters[ctx];
 
             for (const auto& [key, value] : parameters) {
+                if (value.is_monostate()) {
+                    continue;
+                }
+
                 bool isSet = false;
                 refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
@@ -512,10 +643,18 @@ public:
                             return;
                         }
                         if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-                            if (currentAutoUpdateParameters.contains(key)) {
-                                currentAutoUpdateParameters.erase(key);
+                            auto it = currentAutoUpdateParameters.find(std::string(key));
+                            if (it != currentAutoUpdateParameters.end()) {
+                                currentAutoUpdateParameters.erase(it);
                             }
-                            newParameters.insert_or_assign(key, convertedValue.value());
+                            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                                newParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
+                            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                                newParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(*convertedValue)));
+
+                            } else {
+                                newParameters.insert_or_assign(key, detail::castToGrSizeIfNeeded(convertedValue.value()));
+                            }
                             isSet = true;
                         } else {
                             throw gr::exception(convertedValue.error());
@@ -523,7 +662,7 @@ public:
                     }
                 });
                 if (!isSet) {
-                    ret.insert_or_assign(key, pmtv::pmt(value));
+                    ret.insert_or_assign(key, value);
                 }
             }
             addStoredParameters(newParameters, ctx);
@@ -551,7 +690,7 @@ public:
 
     NO_INLINE void resetDefaults() override {
         // add default parameters to stored and apply the parameters
-        auto ctx = SettingsCtx{settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), ""};
+        auto ctx = SettingsCtx{settings::convertTimePointToUint64Ns(std::chrono::system_clock::now()), std::string()};
 #ifdef __EMSCRIPTEN__
         resolveDuplicateTimestamp(ctx);
 #endif
@@ -569,7 +708,8 @@ public:
     [[nodiscard]] NO_INLINE const SettingsCtx& activeContext() const noexcept override { return _activeCtx; }
 
     [[nodiscard]] NO_INLINE bool removeContext(SettingsCtx ctx) override {
-        if (ctx.context == "") {
+        auto str = ctx.context.value_or(std::string_view{});
+        if (str.empty()) {
             return false; // Forbid removing default context
         }
 
@@ -585,8 +725,8 @@ public:
 #endif
         }
 
-        std::vector<std::pair<SettingsCtx, property_map>>& vec     = it->second;
-        auto                                               exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.first.time == ctx.time; });
+        std::vector<CtxSettingsPair>& vec     = it->second;
+        auto                          exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.context.time == ctx.time; });
 
         if (exactIt == vec.end()) {
             return false;
@@ -627,7 +767,7 @@ public:
                 // the following is more compile-time friendly
                 property_map notAutoUpdateParams;
                 for (const auto& pair : parameters.value()) {
-                    if (!currentAutoUpdateParams.contains(pair.first)) {
+                    if (!currentAutoUpdateParams.contains(std::string(pair.first))) {
                         notAutoUpdateParams.insert(pair);
                     }
                 }
@@ -637,9 +777,10 @@ public:
                 setChanged(true);
             }
         } else {
-            std::optional<property_map> parameters = getBestMatchStoredParameters(ctx);
-            if (parameters) {
-                _stagedParameters.insert(parameters.value().begin(), parameters.value().end());
+            std::optional<property_map> _parameters = getBestMatchStoredParameters(ctx);
+            if (_parameters) {
+                auto& parameters = *_parameters;
+                _stagedParameters.insert(parameters.begin(), parameters.end());
                 _activeCtx = bestMatchSettingsCtx.value();
                 setChanged(true);
             } else {
@@ -674,16 +815,37 @@ public:
                 return;
             }
 
-            const property_map& parameters = tag.map;
-            bool                wasChanged = false;
+            const auto& parameters = tag.map;
+            bool        wasChanged = false;
             for (const auto& [key, value] : parameters) {
                 refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(key) && std::holds_alternative<Type>(value)) {
-                            _stagedParameters.insert_or_assign(key, value);
-                            wasChanged = true;
+                        if constexpr (std::is_enum_v<Type>) {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<std::string>()) {
+                                _stagedParameters.insert_or_assign(key, value);
+                                wasChanged = true;
+                            }
+#ifdef __EMSCRIPTEN__
+                        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<gr::Size_t>()) {
+                                _stagedParameters.insert_or_assign(key, value);
+                                wasChanged = true;
+                            }
+#endif
+                        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                            using TValue = typename Type::value_type;
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<Tensor<TValue>>()) {
+                                auto vectorValue = pmt::convertTo<Tensor<TValue>>(value);
+                                _stagedParameters.insert_or_assign(key, std::move(vectorValue.value()));
+                                wasChanged = true;
+                            }
+                        } else {
+                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<Type>()) {
+                                _stagedParameters.insert_or_assign(key, value);
+                                wasChanged = true;
+                            }
                         }
                     }
                 });
@@ -705,17 +867,18 @@ public:
         }
         property_map ret;
         for (const auto& key : parameterKeys) {
-            if (_activeParameters.contains(key)) {
-                ret.insert_or_assign(key, _activeParameters.at(key));
+            if (_activeParameters.contains(convert_string_domain(key))) {
+                ret.insert_or_assign(convert_string_domain(key), _activeParameters.at(convert_string_domain(key)));
             }
         }
         return ret;
     }
 
-    [[nodiscard]] std::optional<pmtv::pmt> get(const std::string& parameterKey) const noexcept override {
+    [[nodiscard]] std::optional<pmt::Value> get(const std::string& parameterKey) const noexcept override {
         auto res = get(std::array<std::string, 1>({parameterKey}));
-        if (res.contains(parameterKey)) {
-            return res.at(parameterKey);
+        auto it  = res.find(convert_string_domain(parameterKey));
+        if (it != res.end()) {
+            return it->second;
         } else {
             return std::nullopt;
         }
@@ -740,18 +903,18 @@ public:
         }
         property_map ret;
         for (const auto& key : parameterKeys) {
-            if (allBestMatchParameters.value().contains(key)) {
-                ret.insert_or_assign(key, allBestMatchParameters.value().at(key));
+            if (allBestMatchParameters->contains(convert_string_domain(key))) {
+                ret.insert_or_assign(convert_string_domain(key), allBestMatchParameters->at(convert_string_domain(key)));
             }
         }
         return ret;
     }
 
-    [[nodiscard]] std::optional<pmtv::pmt> getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override {
+    [[nodiscard]] std::optional<pmt::Value> getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override {
         auto res = getStored(std::array<std::string, 1>({parameterKey}), ctx);
 
-        if (res != std::nullopt && res.value().contains(parameterKey)) {
-            return res.value().at(parameterKey);
+        if (res.has_value() && res->contains(convert_string_domain(parameterKey))) {
+            return res->at(convert_string_domain(parameterKey));
         } else {
             return std::nullopt;
         }
@@ -771,7 +934,7 @@ public:
         return static_cast<gr::Size_t>(_autoUpdateParameters.size());
     }
 
-    [[nodiscard]] std::map<pmtv::pmt, std::vector<std::pair<SettingsCtx, property_map>>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
+    [[nodiscard]] std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
 
     [[nodiscard]] const property_map& stagedParameters() const noexcept override {
         std::lock_guard lg(_mutex);
@@ -801,51 +964,90 @@ public:
             }
 
             // check if reset of settings should be performed
-            if (_stagedParameters.contains(gr::tag::RESET_DEFAULTS)) {
+            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
                 resetDefaults();
             }
 
             // update staged and forward parameters based on member properties
             property_map staged;
             for (const auto& [key, stagedValue] : _stagedParameters) {
-                refl::for_each_data_member_index<TBlock>([&key, &staged, &result, &stagedValue, this](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    using Type       = unwrap_if_wrapped_t<RawType>;
+
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        if (refl::data_member_name<TBlock, kIdx>.view() == key && std::holds_alternative<Type>(stagedValue)) {
-                            auto& member = refl::data_member<kIdx>(*_block);
-                            if constexpr (is_annotated<RawType>()) {
-                                if (member.validate_and_set(std::get<Type>(stagedValue))) {
-                                    if constexpr (HasSettingsChangedCallback<TBlock>) {
-                                        staged.insert_or_assign(key, stagedValue);
-                                    } else {
-                                        std::ignore = staged; // help clang to see why staged is not unused
-                                    }
-                                } else {
-                                    const auto  fieldName     = refl::data_member_name<TBlock, kIdx>.view();
-                                    const char* validatorInfo = RawType::LimitType::ValidatorFunc == nullptr ? "not" : "";
-                                    std::string msg           = std::vformat(" cannot set field {}({})::{} = {} to {} due to limit constraints [{}, {}] validate func is {} defined\n", //
-                                                  std::make_format_args(
-#if !defined(__EMSCRIPTEN__) && !defined(__clang__)
-                                            _block->unique_name, _block->name,
-#else
-                                            "_block->uniqueName", "_block->name",
-#endif
-                                            fieldName, member, std::get<Type>(stagedValue), RawType::LimitType::MinRange, RawType::LimitType::MaxRange, validatorInfo));
-                                    std::fputs(msg.c_str(), stderr);
+                        if (refl::data_member_name<TBlock, kIdx>.view() != key) {
+                            return;
+                        }
+                        auto& member = refl::data_member<kIdx>(*_block);
+
+                        std::expected<Type, std::string> maybe_value;
+                        if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
+                            maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
+
+                        } else if constexpr (std::is_same_v<Type, std::string>) {
+                            auto str = stagedValue.value_or(std::string_view{});
+                            if (str.data() != nullptr) {
+                                maybe_value = std::string(str);
+                            } else {
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
+
+                        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                            using TValue       = typename Type::value_type;
+                            using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
+                            auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
+                            if (tensor != nullptr) {
+                                maybe_value = typename decltype(maybe_value)::value_type{};
+                                if (auto conversionResult = pmt::assignTo(*maybe_value, *tensor); !conversionResult) {
+                                    maybe_value = std::unexpected(conversionResult.error().message);
                                 }
                             } else {
-                                member = std::get<Type>(stagedValue);
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
+
+#ifdef __EMSCRIPTEN__
+                        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+                            auto ptr = checked_access_ptr{stagedValue.get_if<gr::Size_t>()};
+                            if (ptr != nullptr) {
+                                maybe_value = static_cast<std::size_t>(*ptr);
+                            } else {
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
+#endif
+
+                        } else {
+                            auto ptr = checked_access_ptr{stagedValue.get_if<Type>()};
+                            if (ptr != nullptr) {
+                                maybe_value = *ptr;
+                            } else {
+                                maybe_value = std::unexpected("Unexpected type in stagedValue");
+                            }
+                        }
+
+                        if constexpr (is_annotated<RawType>()) {
+                            if (maybe_value && member.validate_and_set(*maybe_value)) {
                                 result.appliedParameters.insert_or_assign(key, stagedValue);
                                 if constexpr (HasSettingsChangedCallback<TBlock>) {
                                     staged.insert_or_assign(key, stagedValue);
-                                } else {
-                                    std::ignore = staged; // help clang to see why staged is not unused
                                 }
+                            } else {
+                                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", std::string_view(key), stagedValue).c_str(), stderr);
+                            }
+                        } else {
+                            if (!maybe_value) {
+                                std::fputs(std::format("Failed to convert key '{}': {}\n", std::string_view(key), maybe_value.error()).c_str(), stderr);
+                                return;
+                            }
+                            member = *maybe_value;
+                            result.appliedParameters.insert_or_assign(key, stagedValue);
+                            if constexpr (HasSettingsChangedCallback<TBlock>) {
+                                staged.insert_or_assign(key, stagedValue);
                             }
                         }
-                        if (_autoForwardParameters.contains(key)) {
+
+                        if (_autoForwardParameters.contains(convert_string_domain(key))) {
                             result.forwardParameters.insert_or_assign(key, stagedValue);
                         }
                     }
@@ -869,17 +1071,17 @@ public:
             if constexpr (TBlock::ResamplingControl::kEnabled) {
                 if (result.forwardParameters.contains(gr::tag::SAMPLE_RATE.shortKey()) && (_block->input_chunk_size != 1ULL || _block->output_chunk_size != 1ULL)) {
                     const float ratio         = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
-                    const float newSampleRate = ratio * std::get<float>(_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()));
+                    const float newSampleRate = ratio * (*_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()).get_if<float>());
                     result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
                 }
             }
 
-            if (_stagedParameters.contains(gr::tag::STORE_DEFAULTS)) {
+            if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::STORE_DEFAULTS))) {
                 storeDefaults();
             }
 
             if constexpr (HasSettingsResetCallback<TBlock>) {
-                if (_stagedParameters.contains(gr::tag::RESET_DEFAULTS)) {
+                if (_stagedParameters.contains(static_cast<std::pmr::string>(gr::tag::RESET_DEFAULTS))) {
                     _block->reset();
                 }
             }
@@ -907,16 +1109,15 @@ public:
                 if constexpr (settings::isWritableMember<Type, MemberType>()) {
                     const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
                     if (!isSet && fieldName == key) {
-                        if constexpr (!std::is_same_v<property_map, Type>) {
-                            newProperties[key] = value;
-                            isSet              = true;
-                        }
+                        newProperties[key] = value;
+                        isSet              = true;
                     }
                 }
             });
 
             if (!isSet) {
-                if (ctx.context == "") { // store meta_information only for default
+                auto str = ctx.context.value_or(std::string_view{});
+                if (str.empty()) { // store meta_information only for default
                     _block->meta_information[key] = value;
                 }
             }
@@ -930,15 +1131,27 @@ public:
 private:
     NO_INLINE void updateActiveParametersImpl() noexcept {
         refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
-            using MemberType = refl::data_member_type<TBlock, kIdx>;
-            using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+            using MemberType   = refl::data_member_type<TBlock, kIdx>;
+            using RawType      = std::remove_cvref_t<MemberType>;
+            using Type         = unwrap_if_wrapped_t<RawType>;
+            const auto& member = refl::data_member<kIdx>(*_block);
+            const auto& key    = std::string(refl::data_member_name<TBlock, kIdx>.view());
+
             if constexpr (settings::isReadableMember<Type>()) {
-                _activeParameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), static_cast<Type>(refl::data_member<kIdx>(*_block)));
+                if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
+                    _activeParameters.insert_or_assign(convert_string_domain(key), detail::enumToString(member));
+                } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                    const auto& from = detail::unwrap_decorated_reference(member);
+                    _activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::collectionToTensor(from)));
+
+                } else {
+                    _activeParameters.insert_or_assign(convert_string_domain(key), detail::unwrap_decorated_value(member));
+                }
             }
         });
     }
 
-    [[nodiscard]] NO_INLINE std::optional<pmtv::pmt> findBestMatchCtx(const pmtv::pmt& contextToSearch) const {
+    [[nodiscard]] NO_INLINE std::optional<pmt::Value> findBestMatchCtx(const pmt::Value& contextToSearch) const {
         if (_storedParameters.empty()) {
             return std::nullopt;
         }
@@ -971,18 +1184,18 @@ private:
         if (vec.empty()) {
             return std::nullopt;
         }
-        if (ctx.time == 0ULL || vec.back().first.time <= ctx.time) {
-            return vec.back().first;
+        if (ctx.time == 0ULL || vec.back().context.time <= ctx.time) {
+            return vec.back().context;
         } else {
-            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.first.time; });
+            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.context.time; });
             if (lower == vec.end()) {
-                return vec.back().first;
+                return vec.back().context;
             } else {
-                if (lower->first.time == ctx.time) {
-                    return lower->first;
+                if (lower->context.time == ctx.time) {
+                    return lower->context;
                 } else if (lower != vec.begin()) {
                     --lower;
-                    return lower->first;
+                    return lower->context;
                 }
             }
         }
@@ -995,9 +1208,9 @@ private:
             return std::nullopt;
         }
         const auto& vec        = _storedParameters[bestMatchSettingsCtx.value().context];
-        const auto  parameters = std::ranges::find_if(vec, [&](const auto& pair) { return pair.first == bestMatchSettingsCtx.value(); });
+        const auto  parameters = std::ranges::find_if(vec, [&](const CtxSettingsPair& contextSettings) { return contextSettings.context == bestMatchSettingsCtx.value(); });
 
-        return parameters != vec.end() ? std::optional(parameters->second) : std::nullopt;
+        return parameters != vec.end() ? std::optional(parameters->settings) : std::nullopt;
     }
 
     [[nodiscard]] inline std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
@@ -1017,10 +1230,10 @@ private:
         const auto&       vec       = vecIt->second;
         const std::size_t tolerance = 1000; // ns
         // find the last context in sorted vector such that `ctx.time <= ctxToFind <= ctx.time + tolerance`
-        const auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& elem) { return elem.first.time; });
-        const auto upper = std::ranges::upper_bound(vec, ctx.time + tolerance, {}, [](const auto& elem) { return elem.first.time; });
+        const auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& elem) { return elem.context.time; });
+        const auto upper = std::ranges::upper_bound(vec, ctx.time + tolerance, {}, [](const auto& elem) { return elem.context.time; });
         if (lower != upper && lower != vec.end()) {
-            ctx.time = (*(upper - 1)).first.time + 1;
+            ctx.time = (*(upper - 1)).context.time + 1;
         }
     }
 
@@ -1039,7 +1252,13 @@ private:
                         }
 
                         if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-                            _stagedParameters.insert_or_assign(key, convertedValue.value());
+                            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                                _stagedParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
+                            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                                _stagedParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(*convertedValue)));
+                            } else {
+                                _stagedParameters.insert_or_assign(key, detail::castToGrSizeIfNeeded(convertedValue.value()));
+                            }
                             isSet = true;
                         } else {
                             throw gr::exception(convertedValue.error());
@@ -1047,7 +1266,7 @@ private:
                     }
                 });
                 if (!isSet) {
-                    ret.insert_or_assign(key, pmtv::pmt(value));
+                    ret.insert_or_assign(key, value);
                 }
             }
         }
@@ -1062,16 +1281,16 @@ private:
             _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(_allWritableMembers);
         }
 
-        std::vector<std::pair<SettingsCtx, property_map>>& sortedVectorForContext = _storedParameters[ctx.context];
+        std::vector<CtxSettingsPair>& sortedVectorForContext = _storedParameters[ctx.context];
         // binary search and merge-sort
-        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.first.time; });
+        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.context.time; });
         sortedVectorForContext.insert(it, {ctx, newParameters});
     }
 
     NO_INLINE void removeExpiredStoredParameters() {
         const auto removeFromAutoUpdateParameters = [this](const auto& begin, const auto& end) {
             for (auto it = begin; it != end; it++) {
-                _autoUpdateParameters.erase(it->first);
+                _autoUpdateParameters.erase(it->context);
             }
         };
         std::uint64_t now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
@@ -1081,7 +1300,7 @@ private:
         for (auto& [ctx, vec] : _storedParameters) {
             // remove all expired parameters
             if (expiry_time != std::numeric_limits<std::uint64_t>::max()) {
-                const auto [first, last] = std::ranges::remove_if(vec, [&](const auto& elem) { return elem.first.time + expiry_time <= now; });
+                const auto [first, last] = std::ranges::remove_if(vec, [&](const auto& elem) { return elem.context.time + expiry_time <= now; });
                 removeFromAutoUpdateParameters(first, last);
                 vec.erase(first, last);
             }
@@ -1090,12 +1309,12 @@ private:
                 continue;
             }
             // always keep at least one past parameter set
-            auto lower = std::ranges::lower_bound(vec, now, {}, [](const auto& elem) { return elem.first.time; });
+            auto lower = std::ranges::lower_bound(vec, now, {}, [](const auto& elem) { return elem.context.time; });
             if (lower == vec.end()) {
                 removeFromAutoUpdateParameters(vec.begin(), vec.end() - 1);
                 vec.erase(vec.begin(), vec.end() - 1);
             } else {
-                if (lower->first.time == now) {
+                if (lower->context.time == now) {
                     removeFromAutoUpdateParameters(vec.begin(), lower);
                     vec.erase(vec.begin(), lower);
                 } else if (lower != vec.begin() && lower - 1 != vec.begin()) {
@@ -1108,9 +1327,10 @@ private:
 
     [[nodiscard]] NO_INLINE std::optional<std::string> contextInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::CONTEXT.shortKey())) {
-            const pmtv::pmt& ctxInfo = tag.map.at(std::string(gr::tag::CONTEXT.shortKey()));
-            if (std::holds_alternative<std::string>(ctxInfo)) {
-                return std::get<std::string>(ctxInfo);
+            const pmt::Value& ctxInfo = tag.map.at(gr::tag::CONTEXT.shortKey());
+            auto              result  = ctxInfo.value_or(std::string_view{});
+            if (result.data() != nullptr) {
+                return {std::string(result)};
             }
         }
         return std::nullopt;
@@ -1118,9 +1338,10 @@ private:
 
     [[nodiscard]] NO_INLINE std::optional<std::uint64_t> triggeredTimeInTag(const Tag& tag) const {
         if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
-            const pmtv::pmt& pmtTimeUtcNs = tag.map.at(std::string(gr::tag::TRIGGER_TIME.shortKey()));
-            if (std::holds_alternative<uint64_t>(pmtTimeUtcNs)) {
-                return std::get<uint64_t>(pmtTimeUtcNs);
+            const pmt::Value& pmtTimeUtcNs = tag.map.at(gr::tag::TRIGGER_TIME.shortKey());
+            auto              result       = pmt::convert_safely<std::uint64_t>(pmtTimeUtcNs);
+            if (result) {
+                return *result;
             }
         }
         return std::nullopt;
@@ -1154,7 +1375,16 @@ private:
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                 if constexpr (settings::isReadableMember<Type>()) {
-                    parameters.insert_or_assign(std::string(refl::data_member_name<TBlock, kIdx>.view()), pmtv::pmt(refl::data_member<kIdx>(*_block)));
+                    const auto& key    = std::pmr::string(refl::data_member_name<TBlock, kIdx>.view());
+                    const auto& member = refl::data_member<kIdx>(*_block);
+                    if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                        parameters.insert_or_assign(key, detail::enumToString(member));
+                    } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                        const auto& from = detail::unwrap_decorated_value(member);
+                        parameters.insert_or_assign(key, detail::collectionToTensor(from));
+                    } else {
+                        parameters.insert_or_assign(key, detail::unwrap_decorated_value(member));
+                    }
                 }
             });
         }
@@ -1170,53 +1400,6 @@ struct hash<gr::SettingsCtx> {
     [[nodiscard]] size_t operator()(const gr::SettingsCtx& ctx) const noexcept { return ctx.hash(); }
 };
 } // namespace std
-
-namespace gr {
-
-namespace detail {
-extern template std::size_t hash_combine<std::size_t>(std::size_t seed, std::size_t const& v) noexcept;
-
-}
-
-namespace settings {
-
-// specialisation for fundamental base-types
-extern template std::expected<bool, std::string>                 convertParameter<bool>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int8_t, std::string>          convertParameter<std::int8_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint8_t, std::string>         convertParameter<std::uint8_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int16_t, std::string>         convertParameter<std::int16_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint16_t, std::string>        convertParameter<std::uint16_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int32_t, std::string>         convertParameter<std::int32_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint32_t, std::string>        convertParameter<std::uint32_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::int64_t, std::string>         convertParameter<std::int64_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::uint64_t, std::string>        convertParameter<std::uint64_t>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<float, std::string>                convertParameter<float>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<double, std::string>               convertParameter<double>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::complex<float>, std::string>  convertParameter<std::complex<float>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::complex<double>, std::string> convertParameter<std::complex<double>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::string, std::string>          convertParameter<std::string>(std::string_view key, const pmtv::pmt& value);
-
-// specialisation declarations for std::string and vectors
-extern template std::expected<std::string, std::string>                       convertParameter<std::string>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<bool>, std::string>                 convertParameter<std::vector<bool>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int8_t>, std::string>          convertParameter<std::vector<std::int8_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint8_t>, std::string>         convertParameter<std::vector<std::uint8_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int16_t>, std::string>         convertParameter<std::vector<std::int16_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint16_t>, std::string>        convertParameter<std::vector<std::uint16_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int32_t>, std::string>         convertParameter<std::vector<std::int32_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint32_t>, std::string>        convertParameter<std::vector<std::uint32_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::int64_t>, std::string>         convertParameter<std::vector<std::int64_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::uint64_t>, std::string>        convertParameter<std::vector<std::uint64_t>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<float>, std::string>                convertParameter<std::vector<float>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<double>, std::string>               convertParameter<std::vector<double>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::complex<float>>, std::string>  convertParameter<std::vector<std::complex<float>>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::complex<double>>, std::string> convertParameter<std::vector<std::complex<double>>>(std::string_view key, const pmtv::pmt& value);
-extern template std::expected<std::vector<std::string>, std::string>          convertParameter<std::vector<std::string>>(std::string_view key, const pmtv::pmt& value);
-
-extern template std::expected<property_map, std::string> convertParameter<property_map>(std::string_view key, const pmtv::pmt& value);
-
-} // namespace settings
-} // namespace gr
 
 #undef NO_INLINE
 

@@ -36,9 +36,18 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
         auto&                   clockSrc = graph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({
             {"sample_rate", sample_rate},
             {"n_samples_max", kN_SAMPLES_MAX},
-            {"name", "ClockSource"},                                                                                                                     //
-            {"tag_times", std::vector<std::uint64_t>{10 * ms, 90 * ms, 100 * ms, 300 * ms, 350 * ms, 400 * ms, 550 * ms, 650 * ms, 800 * ms, 850 * ms}}, //
-            {"tag_values", std::vector<std::string>{"CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1", "CMD_DIAG_TRIGGER1", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4", "CMD_DIAG_TRIGGER2", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7", "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8"}},
+            {"name", "ClockSource"},                                                                                                                             //
+            {"tag_times", Tensor<std::uint64_t>(data_from, {10 * ms, 90 * ms, 100 * ms, 300 * ms, 350 * ms, 400 * ms, 550 * ms, 650 * ms, 800 * ms, 850 * ms})}, //
+            {"tag_values", Tensor<pmt::Value>{"CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1",                                                                          //
+                                                 "CMD_DIAG_TRIGGER1",                                                                                                              //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4",                                                                                         //
+                                                 "CMD_DIAG_TRIGGER2",                                                                                                              //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=5",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7",                                                                                         //
+                                                 "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8"}},
             {"repeat_period", 1000 * ms},
             {"do_zero_order_hold", true},
         });
@@ -62,7 +71,7 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 
         auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
         auto& uiSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "ImChartSinkFull"}});
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"in">(funcGen))) << "connect clockSrc->funcGen";
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"clk_in">(funcGen))) << "connect clockSrc->funcGen";
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(sink))) << "connect funcGen->sink";
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(uiSink))) << "connect funcGen->uiSink";
 
@@ -92,7 +101,10 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
             std::this_thread::sleep_for(std::chrono::seconds(1)); // wait for another second before closing down
         });
 
-        gr::scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter);
 
         expect(eq(clockSrc.sample_rate, sample_rate));
@@ -147,7 +159,10 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(tagSrc).template to<"in">(filterStreamToStream)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filterStreamToStream).template to<"in">(streamSink)));
 
-        gr::scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         std::println("start -> Stream-to-Stream with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
         expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter);
         std::println("done -> Stream-to-Stream with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
@@ -218,7 +233,10 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(tagSrc).template to<"in">(filterStreamToDataSet)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filterStreamToDataSet).template to<"in">(dataSetSink)));
 
-        gr::scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         std::println("start -> Stream-to-DataSet with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
         expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter);
         std::println("done -> Stream-to-DataSet with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);

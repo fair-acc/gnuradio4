@@ -15,6 +15,12 @@
 #include "Sequence.hpp"
 #include "WaitStrategy.hpp"
 
+#ifndef forceinline
+// use this for hot-spots only <-> may bloat code size, not fit into cache and
+// consequently slow down execution
+#define forceinline inline __attribute__((always_inline))
+#endif
+
 namespace gr {
 
 template<typename T>
@@ -91,15 +97,25 @@ static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
  * Suitable for use for sequencing across multiple publisher threads.
  * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
  * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
- *
- * The size argument (compile-time and run-time) must be a power-of-2 value.
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
-requires(SIZE == std::dynamic_extent || std::has_single_bit(SIZE))
 class alignas(hardware_constructive_interference_size) MultiProducerStrategy {
     AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
-    const std::size_t  _size = SIZE;
-    const std::size_t  _mask = SIZE - 1;
+    const std::size_t  _size   = SIZE;
+    const bool         _isPow2 = std::has_single_bit(SIZE);
+    const std::size_t  _mask   = SIZE - 1; // valid only when _isPow2
+
+    forceinline constexpr std::size_t calculateIndex(std::size_t seq) const noexcept {
+        if constexpr (SIZE == std::dynamic_extent) {
+            return _isPow2 ? (seq & _mask) : (seq % _size);
+        } else {
+            if constexpr (std::has_single_bit(SIZE)) {
+                return seq & (SIZE - 1);
+            } else {
+                return seq % SIZE;
+            }
+        }
+    }
 
 public:
     Sequence                                                _reserveCursor; // slots can be reserved starting from _reserveCursor
@@ -108,10 +124,6 @@ public:
     std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
 
     MultiProducerStrategy() = delete;
-
-    explicit MultiProducerStrategy()
-    requires(SIZE != std::dynamic_extent)
-    {}
 
     explicit MultiProducerStrategy(std::size_t bufferSize)
     requires(SIZE == std::dynamic_extent)
@@ -175,7 +187,7 @@ public:
             currentPublishCursor = _publishCursor.value();
             nextPublishCursor    = currentPublishCursor;
 
-            while (_slotStates.test(nextPublishCursor & _mask) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
+            while (_slotStates.test(calculateIndex(nextPublishCursor)) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
                 nextPublishCursor++;
             }
         } while (!_publishCursor.compareAndSet(currentPublishCursor, nextPublishCursor));
@@ -199,8 +211,8 @@ private:
     void setSlotsStates(std::size_t seqBegin, std::size_t seqEnd, bool value) {
         assert(seqBegin <= seqEnd);
         assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
-        const std::size_t beginSet  = seqBegin & _mask;
-        const std::size_t endSet    = seqEnd & _mask;
+        const std::size_t beginSet  = calculateIndex(seqBegin);
+        const std::size_t endSet    = calculateIndex(seqEnd);
         const auto        diffReset = seqEnd - seqBegin;
 
         if (beginSet <= endSet && diffReset < _size) {
@@ -213,7 +225,7 @@ private:
         }
         // Non-bulk AtomicBitset API
         //        for (std::size_t seq = static_cast<std::size_t>(seqBegin); seq < static_cast<std::size_t>(seqEnd); seq++) {
-        //            _slotStates.set(seq & _mask, value);
+        //            _slotStates.set(wrap(seq), value);
         //        }
     }
 };
@@ -252,5 +264,9 @@ using producer_type_v = typename producer_type<size, producerType, TWaitStrategy
 } // namespace detail
 
 } // namespace gr
+
+#ifdef forceinline
+#undef forceinline
+#endif
 
 #endif // GNURADIO_CLAIMSTRATEGY_HPP

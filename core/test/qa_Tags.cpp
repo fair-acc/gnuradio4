@@ -171,7 +171,7 @@ const boost::ut::suite TagTests = [] {
         using namespace std::string_view_literals;
         Tag testTag{};
 
-        testTag.insert_or_assign(tag::SAMPLE_RATE, pmtv::pmt(3.0f));
+        testTag.insert_or_assign(tag::SAMPLE_RATE, 3.0f);
         testTag.insert_or_assign(tag::SAMPLE_RATE(4.0f));
         // testTag.insert_or_assign(tag::SAMPLE_RATE(5.0)); // type-mismatch -> won't compile
         expect(testTag.at(tag::SAMPLE_RATE) == 4.0f);
@@ -238,7 +238,7 @@ const boost::ut::suite TagPropagation = [] {
             {SIGNAL_MAX.shortKey(), 42.f},                                                    //
             {N_DROPPED_SAMPLES.shortKey(), gr::Size_t(42)},                                   //
             {TRIGGER_NAME.shortKey(), "TRIGGER_NAME_42"},                                     //
-            {TRIGGER_TIME.shortKey(), uint64_t(42)},                                          //
+            {TRIGGER_TIME.shortKey(), std::uint64_t(42)},                                     //
             {TRIGGER_OFFSET.shortKey(), 42.f},                                                //
             {TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}, //
             {CONTEXT.shortKey(), "CONTEXT_42"},                                               //
@@ -256,7 +256,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(autoForwardBlock).to<"in">(monitor)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitor).to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, nSamples));
@@ -297,7 +300,7 @@ const boost::ut::suite TagPropagation = [] {
             gr::Tag(6UZ, {{SIGNAL_MAX.shortKey(), 42.f}}),                                                     //
             gr::Tag(7UZ, {{N_DROPPED_SAMPLES.shortKey(), gr::Size_t(42)}}),                                    //
             gr::Tag(8UZ, {{TRIGGER_NAME.shortKey(), "TRIGGER_NAME_42"}}),                                      //
-            gr::Tag(9UZ, {{TRIGGER_TIME.shortKey(), uint64_t(42)}}),                                           //
+            gr::Tag(9UZ, {{TRIGGER_TIME.shortKey(), std::uint64_t(42)}}),                                      //
             gr::Tag(10UZ, {{TRIGGER_OFFSET.shortKey(), 42.f}}),                                                //
             gr::Tag(11UZ, {{TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}}), //
             gr::Tag(12UZ, {{CONTEXT.shortKey(), "CONTEXT_42"}}),                                               //
@@ -327,7 +330,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk2).to<"in">(sinkOne)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk2).to<"in">(sinkBulk)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, nSamples));
@@ -387,14 +393,14 @@ const boost::ut::suite TagPropagation = [] {
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {gr::tag::SIGNAL_NAME.shortKey(), "tagStream"}, {"verbose_console", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>(srcParameter);
         src._tags                       = {
-            {0, {{"key", "value@0"}, {"key0", "value@0"}}},          //
-            {1, {{"key", "value@1"}, {"key1", "value@1"}}},          //
-            {100, {{"key", "value@100"}, {"key2", "value@100"}}},    //
-            {150, {{"key", "value@150"}, {"key3", "value@150"}}},    //
-            {1000, {{"key", "value@1000"}, {"key4", "value@1000"}}}, //
-            {1001, {{"key", "value@1001"}, {"key5", "value@1001"}}}, //
-            {1002, {{"key", "value@1002"}, {"key6", "value@1002"}}}, //
-            {1023, {{"key", "value@1023"}, {"key7", "value@1023"}}}  //
+            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},          //
+            {1, gr::property_map{{"key", "value@1"}, {"key1", "value@1"}}},          //
+            {100, gr::property_map{{"key", "value@100"}, {"key2", "value@100"}}},    //
+            {150, gr::property_map{{"key", "value@150"}, {"key3", "value@150"}}},    //
+            {1000, gr::property_map{{"key", "value@1000"}, {"key4", "value@1000"}}}, //
+            {1001, gr::property_map{{"key", "value@1001"}, {"key5", "value@1001"}}}, //
+            {1002, gr::property_map{{"key", "value@1002"}, {"key6", "value@1002"}}}, //
+            {1023, gr::property_map{{"key", "value@1023"}, {"key7", "value@1023"}}}  //
         };
         expect(eq("tagStream"s, src.signal_name)) << "src signal_name -> needed for setting-via-tag forwarding";
         auto& realign = testGraph.emplaceBlock<RealignTagsToChunks<float>>();
@@ -404,7 +410,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"inPort">(realign)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outPort">(realign).to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
@@ -419,13 +428,13 @@ const boost::ut::suite TagPropagation = [] {
         Graph testGraph;
         auto& src = testGraph.emplaceBlock<TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"verbose_console", true}});
         src._tags = {
-            {0, {{"key", "value@0"}, {"key0", "value@0"}}},     //
-            {4, {{"key", "value@4"}, {"key4", "value@4"}}},     //
-            {5, {{"key", "value@5"}, {"key5", "value@5"}}},     //
-            {15, {{"key", "value@15"}, {"key15", "value@15"}}}, //
-            {20, {{"key", "value@20"}, {"key20", "value@20"}}}, //
-            {25, {{"key", "value@25"}, {"key25", "value@25"}}}, //
-            {35, {{"key", "value@35"}, {"key35", "value@35"}}}  //
+            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},     //
+            {4, gr::property_map{{"key", "value@4"}, {"key4", "value@4"}}},     //
+            {5, gr::property_map{{"key", "value@5"}, {"key5", "value@5"}}},     //
+            {15, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}}, //
+            {20, gr::property_map{{"key", "value@20"}, {"key20", "value@20"}}}, //
+            {25, gr::property_map{{"key", "value@25"}, {"key25", "value@25"}}}, //
+            {35, gr::property_map{{"key", "value@35"}, {"key35", "value@35"}}}  //
         };
 
         auto&                    decimator             = testGraph.emplaceBlock<TDecimator>({{"decim", decim}});
@@ -436,7 +445,10 @@ const boost::ut::suite TagPropagation = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(decimator)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(decimator).template to<"in">(sink)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._nSamplesProduced, nSamples));
@@ -447,20 +459,20 @@ const boost::ut::suite TagPropagation = [] {
     };
 
     "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                             //
-            {0, {{"key", "value@0"}, {"key0", "value@0"}}},                           //
-            {1, {{"key", "value@5"}, {"key4", "value@4"}, {"key5", "value@5"}}},      //
-            {2, {{"key", "value@20"}, {"key15", "value@15"}, {"key20", "value@20"}}}, //
-            {3, {{"key", "value@25"}, {"key25", "value@25"}}}};
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                                             //
+            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},                           //
+            {1, gr::property_map{{"key", "value@5"}, {"key4", "value@4"}, {"key5", "value@5"}}},      //
+            {2, gr::property_map{{"key", "value@20"}, {"key15", "value@15"}, {"key20", "value@20"}}}, //
+            {3, gr::property_map{{"key", "value@25"}, {"key25", "value@25"}}}};
         runPolicyTest.template operator()<DecimatorForward<float>>(expectedTags);
     };
 
     "Tag propagation with decimation - Backward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                                             //
-            {0, {{"key", "value@5"}, {"key0", "value@0"}, {"key4", "value@4"}, {"key5", "value@5"}}}, //
-            {1, {{"key", "value@15"}, {"key15", "value@15"}}},                                        //
-            {2, {{"key", "value@25"}, {"key20", "value@20"}, {"key25", "value@25"}}},                 //
-            {3, {{"key", "value@35"}, {"key35", "value@35"}}}};
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                                                             //
+            {0, gr::property_map{{"key", "value@5"}, {"key0", "value@0"}, {"key4", "value@4"}, {"key5", "value@5"}}}, //
+            {1, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}},                                        //
+            {2, gr::property_map{{"key", "value@25"}, {"key20", "value@20"}, {"key25", "value@25"}}},                 //
+            {3, gr::property_map{{"key", "value@35"}, {"key35", "value@35"}}}};
         runPolicyTest.template operator()<DecimatorBackward<float>>(expectedTags);
     };
 };
@@ -476,7 +488,12 @@ const boost::ut::suite RepeatedTags = [] {
         Graph              testGraph;
         const property_map srcParameter = {{"n_samples_max", n_samples}, {"name", "TagSource"}, {"verbose_console", true && verbose}, {"repeat_tags", true}};
         auto&              src          = testGraph.emplaceBlock<TagSource<float, srcType>>(srcParameter);
-        src._tags                       = {{2, {{SAMPLE_RATE.shortKey(), 2.f}}}, {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, {8, {{SAMPLE_RATE.shortKey(), 8.f}}}};
+        src._tags                       = {
+            {2, {{SAMPLE_RATE.shortKey(), 2.f}}}, //
+            {3, {{SAMPLE_RATE.shortKey(), 3.f}}}, //
+            {5, {{SAMPLE_RATE.shortKey(), 5.f}}}, //
+            {8, {{SAMPLE_RATE.shortKey(), 8.f}}}  //
+        };
 
         auto& monitorOne = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagMonitorOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
         auto& sinkOne    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
@@ -485,7 +502,10 @@ const boost::ut::suite RepeatedTags = [] {
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(monitorOne)));
         expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
 
-        scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(src._tags.size(), 4UZ));

@@ -1,0 +1,17 @@
+diff --git a/cmake/std_fs_support_test.cpp b/cmake/std_fs_support_test.cpp
+index 44bac77..237c8ce 100644
+--- a/cmake/std_fs_support_test.cpp
++++ b/cmake/std_fs_support_test.cpp
+@@ -1,11 +1 @@
+-#if __has_include(<filesystem>)
+-#include <filesystem>
+-namespace fs = std::filesystem;
+-#else
+-#include <experimental/filesystem>
+-namespace fs = std::experimental::filesystem;
+-#endif
+-
+-int main() {
+-    auto cwd = fs::current_path();
+-}
++int main() {}

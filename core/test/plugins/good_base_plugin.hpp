@@ -4,7 +4,6 @@
 #include <print>
 
 #include <gnuradio-4.0/Plugin.hpp>
-#include <pmtv/pmt.hpp>
 
 gr::plugin<>& grPluginInstance();
 

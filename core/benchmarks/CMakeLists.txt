@@ -3,21 +3,33 @@ if(NOT EMSCRIPTEN)
     add_benchmark(${BM_NAME})
     target_link_libraries(
       ${BM_NAME}
-      PRIVATE gnuradio-core
+      PRIVATE gnuradio-options
+              gnuradio-core
+              gnuradio-blocklib-core
+              gnuradio-plugin
               gr-basic
               gr-fileio
               gr-math
-              gr-testing)
-    target_compile_options(${BM_NAME} PRIVATE -O3) # performance related benchmarks should be optimised during
-                                                   # compile-time
+              gr-testing
+              gr-basic
+              gr-filter
+              ut
+              ut-benchmark)
+    if(EMSCRIPTEN) # performance benchmarks should be optimised
+      target_compile_options(${BM_NAME} PRIVATE -O3)
+    else()
+      target_compile_options(${BM_NAME} PRIVATE -O3 -march=native)
+    endif()
+
+    target_include_directories(${BM_NAME} PRIVATE "../test")
   endfunction()
 
   add_gr_benchmark(bm_Buffer)
   add_gr_benchmark(bm_HistoryBuffer)
   add_gr_benchmark(bm_Profiler)
   add_gr_benchmark(bm_Scheduler)
+  add_gr_benchmark(bm_tensor)
   add_gr_benchmark(bm-nosonar_node_api)
-  add_gr_benchmark(bm_fft)
   add_gr_benchmark(bm_sync)
-  target_link_libraries(bm_fft PRIVATE gr-fourier)
+  add_gr_benchmark(bm_portLimits)
 endif()

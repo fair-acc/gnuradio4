@@ -8,10 +8,12 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/basic/ClockSource.hpp>
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include "message_utils.hpp"
 
 #if !DISABLE_SIMD
 namespace gr::test {
@@ -368,11 +370,11 @@ struct StrideTestData {
 };
 
 template<typename T>
-struct IntDecBlock : public gr::Block<IntDecBlock<T>, gr::Resampling<>, gr::Stride<>> {
+struct Resampler : public gr::Block<Resampler<T>, gr::Resampling<>, gr::Stride<>> {
     gr::PortIn<T>  in{};
     gr::PortOut<T> out{};
 
-    GR_MAKE_REFLECTABLE(IntDecBlock, in, out);
+    GR_MAKE_REFLECTABLE(Resampler, in, out);
 
     ProcessStatus status{};
     bool          write_to_vector{false};
@@ -544,14 +546,13 @@ const boost::ut::suite<"Block signatures"> _block_signature = [] {
     };
 };
 
-void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
+void interpolation_decimation_test(const IntDecTestData& data) {
     using namespace boost::ut;
     using namespace gr::testing;
-    using scheduler = gr::scheduler::Simple<>;
 
     gr::Graph flow;
     auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
+    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -562,7 +563,10 @@ void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<g
         int_dec_block.out.min_samples = static_cast<size_t>(data.out_port_min);
     }
 
-    auto sched = scheduler(std::move(flow), std::move(thread_pool));
+    gr::scheduler::Simple<> sched;
+    if (auto ret = sched.exchange(std::move(flow)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     expect(sched.runAndWait().has_value());
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
@@ -570,17 +574,16 @@ void interpolation_decimation_test(const IntDecTestData& data, std::shared_ptr<g
     expect(eq(int_dec_block.status.n_outputs, data.exp_out)) << "last number of output samples, parameters = " << data.to_string();
 }
 
-void stride_test(const StrideTestData& data, std::shared_ptr<gr::thread_pool::BasicThreadPool> thread_pool) {
+void stride_test(const StrideTestData& data) {
     using namespace boost::ut;
     using namespace gr::testing;
     using namespace gr::test;
-    using scheduler = gr::scheduler::Simple<>;
 
     const bool write_to_vector{data.exp_in_vector.size() != 0};
 
     gr::Graph flow;
     auto&     source        = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
-    auto&     int_dec_block = flow.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}, {"stride", data.stride}});
+    auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}, {"stride", data.stride}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
     expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
@@ -592,7 +595,10 @@ void stride_test(const StrideTestData& data, std::shared_ptr<gr::thread_pool::Ba
         int_dec_block.in.min_samples = static_cast<size_t>(data.in_port_min);
     }
 
-    auto sched = scheduler(std::move(flow), std::move(thread_pool));
+    gr::scheduler::Simple<> sched;
+    if (auto ret = sched.exchange(std::move(flow)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     expect(sched.runAndWait().has_value());
 
     expect(eq(int_dec_block.status.process_counter, data.exp_counter)) << "processBulk invokes counter, parameters = " << data.to_string();
@@ -625,7 +631,10 @@ void syncOrAsyncTest() {
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(tagSrc).to<"in">(asyncBlock))) << testInfo;
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(asyncBlock).template to<"in">(sink))) << testInfo;
 
-    scheduler::Simple sched{std::move(testGraph)};
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     expect(sched.runAndWait().has_value()) << testInfo;
     expect(eq(n_samples, sink._nSamplesProduced)) << testInfo;
 }
@@ -634,8 +643,6 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
     using namespace boost::ut;
     using namespace boost::ut::reflection;
     using namespace gr;
-
-    auto thread_pool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
 
     "Resampling"_test = [] {
         static_assert(Resampling<>::kInputChunkSize == 1LU);
@@ -720,44 +727,44 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(testBlock.stride, 2LU));
     };
 
-    "Interpolation/Decimation"_test = [&thread_pool] {
-        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 2, .exp_in = 1024, .exp_out = 512, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 2, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 5, .input_chunk_size = 6, .exp_in = 996, .exp_out = 830, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 549, .output_chunk_size = 1, .input_chunk_size = 50, .exp_in = 500, .exp_out = 10, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 3, .input_chunk_size = 7, .exp_in = 98, .exp_out = 42, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 100, .input_chunk_size = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 10, .input_chunk_size = 1100, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 1, .input_chunk_size = 1001, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 101, .input_chunk_size = 101, .exp_in = 0, .exp_out = 0, .exp_counter = 0}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 5, .input_chunk_size = 11, .out_port_min = 10, .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter = 1}, thread_pool);
-        interpolation_decimation_test({.n_samples = 80, .output_chunk_size = 2, .input_chunk_size = 4, .out_port_min = 20, .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter = 2}, thread_pool);
-        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 7, .input_chunk_size = 3, .out_port_min = 10, .out_port_max = 20, .exp_in = 6, .exp_out = 14, .exp_counter = 16}, thread_pool);
+    "Interpolation/Decimation"_test = [] {
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 1, .input_chunk_size = 2, .exp_in = 1024, .exp_out = 512, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1024, .output_chunk_size = 2, .input_chunk_size = 1, .exp_in = 1024, .exp_out = 2048, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 5, .input_chunk_size = 6, .exp_in = 996, .exp_out = 830, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 549, .output_chunk_size = 1, .input_chunk_size = 50, .exp_in = 500, .exp_out = 10, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 3, .input_chunk_size = 7, .exp_in = 98, .exp_out = 42, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 100, .input_chunk_size = 100, .exp_in = 100, .exp_out = 100, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 10, .input_chunk_size = 1100, .exp_in = 0, .exp_out = 0, .exp_counter = 0});
+        interpolation_decimation_test({.n_samples = 1000, .output_chunk_size = 1, .input_chunk_size = 1001, .exp_in = 0, .exp_out = 0, .exp_counter = 0});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 101, .input_chunk_size = 101, .exp_in = 0, .exp_out = 0, .exp_counter = 0});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 5, .input_chunk_size = 11, .out_port_min = 10, .out_port_max = 41, .exp_in = 88, .exp_out = 40, .exp_counter = 1});
+        interpolation_decimation_test({.n_samples = 80, .output_chunk_size = 2, .input_chunk_size = 4, .out_port_min = 20, .out_port_max = 20, .exp_in = 40, .exp_out = 20, .exp_counter = 2});
+        interpolation_decimation_test({.n_samples = 100, .output_chunk_size = 7, .input_chunk_size = 3, .out_port_min = 10, .out_port_max = 20, .exp_in = 6, .exp_out = 14, .exp_counter = 16});
     };
 
-    "Stride tests"_test = [&thread_pool] {
-        stride_test({.n_samples = 1024, .stride = 0, .in_port_max = 1024, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1, .exp_total_in = 1024, .exp_total_out = 1024}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 100, .exp_in = 50, .exp_out = 50, .exp_counter = 10, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
+    "Stride tests"_test = [] {
+        stride_test({.n_samples = 1024, .stride = 0, .in_port_max = 1024, .exp_in = 1024, .exp_out = 1024, .exp_counter = 1, .exp_total_in = 1024, .exp_total_out = 1024});
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 100, .exp_in = 50, .exp_out = 50, .exp_counter = 10, .exp_total_in = 500, .exp_total_out = 500});
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 50, .stride = 133, .exp_in = 50, .exp_out = 50, .exp_counter = 8, .exp_total_in = 400, .exp_total_out = 400});
         // the original test assumes that the incomplete chunk is also processed, currently we drop that. todo: switch to last sample update type incomplete
-        // stride_test( {.n_samples = 1000, .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 }, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900}, thread_pool);
+        // stride_test( {.n_samples = 1000, .stride =  50 , .in_port_max =  100 , .exp_in = 50 , .exp_out =   50 , .exp_counter = 20 , .exp_total_in = 1950 , .exp_total_out = 1950 });
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 100, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 1900});
         // this one is tricky, it assumes that there are multiple incomplete last chunks :/ not sure what to do here...
-        // stride_test( {.n_samples = 1000, .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 }, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 25, .input_chunk_size = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500}, thread_pool);
-        stride_test({.n_samples = 1000, .output_chunk_size = 24, .input_chunk_size = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480}, thread_pool);
+        // stride_test( {.n_samples = 1000, .stride =  33 , .in_port_max = 100 , .exp_in =   10 , .exp_out =   10 , .exp_counter = 31 , .exp_total_in = 2929 , .exp_total_out = 2929 });
+        stride_test({.n_samples = 1000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 33, .exp_in = 100, .exp_out = 100, .exp_counter = 28, .exp_total_in = 2800, .exp_total_out = 2800});
+        stride_test({.n_samples = 1000, .output_chunk_size = 50, .input_chunk_size = 100, .stride = 50, .exp_in = 100, .exp_out = 50, .exp_counter = 19, .exp_total_in = 1900, .exp_total_out = 950});
+        stride_test({.n_samples = 1000, .output_chunk_size = 25, .input_chunk_size = 50, .stride = 50, .exp_in = 1000, .exp_out = 500, .exp_counter = 1, .exp_total_in = 1000, .exp_total_out = 500});
+        stride_test({.n_samples = 1000, .output_chunk_size = 24, .input_chunk_size = 48, .stride = 50, .exp_in = 48, .exp_out = 24, .exp_counter = 20, .exp_total_in = 960, .exp_total_out = 480});
         // std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13, 12, 13, 14};
-        // stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 }, thread_pool);
+        // stride_test( {.n_samples = 15, .stride = 3, .in_port_max = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 5, .exp_total_in = 23, .exp_total_out = 23, .exp_in_vector = exp_v1 });
         std::vector<int> exp_v1 = {0, 1, 2, 3, 4, 3, 4, 5, 6, 7, 6, 7, 8, 9, 10, 9, 10, 11, 12, 13};
-        stride_test({.n_samples = 15, .output_chunk_size = 5, .input_chunk_size = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1}, thread_pool);
+        stride_test({.n_samples = 15, .output_chunk_size = 5, .input_chunk_size = 5, .stride = 3, .exp_in = 5, .exp_out = 5, .exp_counter = 4, .exp_total_in = 20, .exp_total_out = 20, .exp_in_vector = exp_v1});
         std::vector<int> exp_v2 = {0, 1, 2, 5, 6, 7, 10, 11, 12};
-        stride_test({.n_samples = 15, .output_chunk_size = 3, .input_chunk_size = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2}, thread_pool);
+        stride_test({.n_samples = 15, .output_chunk_size = 3, .input_chunk_size = 3, .stride = 5, .exp_in = 3, .exp_out = 3, .exp_counter = 3, .exp_total_in = 9, .exp_total_out = 9, .exp_in_vector = exp_v2});
         // assuming buffer size is approx 65k
-        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400}, thread_pool);
-        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500}, thread_pool);
+        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 250000, .exp_in = 100, .exp_out = 100, .exp_counter = 4, .exp_total_in = 400, .exp_total_out = 400});
+        stride_test({.n_samples = 1000000, .output_chunk_size = 100, .input_chunk_size = 100, .stride = 249900, .exp_in = 100, .exp_out = 100, .exp_counter = 5, .exp_total_in = 500, .exp_total_out = 500});
     };
 
     "Interpolation/Decimation with many tags, tags forward policy"_test = [] {
@@ -767,22 +774,25 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         gr::Graph testGraph;
         auto&     source = testGraph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(20)}});
         source._tags     = {
-            {0, {{"key0", "value@0"}}},    //
-            {2, {{"key2", "value@2"}}},    //
-            {4, {{"key4", "value@4"}}},    //
-            {6, {{"key6", "value@6"}}},    //
-            {8, {{"ke8", "value@8"}}},     //
-            {10, {{"key10", "value@10"}}}, //
-            {12, {{"key12", "value@12"}}}, //
-            {14, {{"key14", "value@14"}}}  //
+            {0, property_map({{"key0", "value@0"}})},    //
+            {2, property_map({{"key2", "value@2"}})},    //
+            {4, property_map({{"key4", "value@4"}})},    //
+            {6, property_map({{"key6", "value@6"}})},    //
+            {8, property_map({{"ke8", "value@8"}})},     //
+            {10, property_map({{"key10", "value@10"}})}, //
+            {12, property_map({{"key12", "value@12"}})}, //
+            {14, property_map({{"key14", "value@14"}})}  //
         };
 
-        auto& intDecBlock = testGraph.emplaceBlock<IntDecBlock<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
+        auto& intDecBlock = testGraph.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
         auto& sink        = testGraph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(intDecBlock)));
         expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(intDecBlock).to<"in">(sink)));
 
-        gr::scheduler::Simple sched{std::move(testGraph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(intDecBlock.status.process_counter, 2UZ));
@@ -811,10 +821,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         auto& testNode = graph.emplaceBlock<TestNode>();
 
-        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
-        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
-        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
-        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{3.}}}));
 
         sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
@@ -832,7 +842,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#2"s, *sinks[2], "in"s)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#3"s, *sinks[3], "in"s)));
 
-        gr::scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
@@ -856,10 +869,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         auto& testNode = graph.emplaceBlock<TestNode>();
 
-        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{0.}}}));
-        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{1.}}}));
-        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{2.}}}));
-        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", std::vector{3.}}}));
+        sources[0] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{0.}}}));
+        sources[1] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{1.}}}));
+        sources[2] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{2.}}}));
+        sources[3] = std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"values", Tensor{3.}}}));
 
         sinks[0] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[1] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
@@ -877,7 +890,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#2"s, *sinks[2], "in"s)));
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#3"s, *sinks[3], "in"s)));
 
-        gr::scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         std::vector<std::vector<double>> expected_values{{0., 0., 0., 0., 0.}, {1., 1., 1., 1., 1.}, {2., 2., 2., 2., 2.}, {3., 3., 3., 3., 3.}};
@@ -888,76 +904,164 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
     };
 };
 
-const boost::ut::suite<"Drawable Annotations"> _drawableAnnotations = [] {
+const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
 
-    "drawable"_test = [] {
-        struct TestBlock0 : gr::Block<TestBlock0> {
-        } testBlock0;
-        expect(!testBlock0.meta_information.value.contains("Drawable")) << "not drawable";
+    "non-drawable"_test = [] {
+        struct LocalTestBlock : gr::Block<LocalTestBlock> {
+            void processOne() {}
+        };
+        auto testBlock = gr::BlockWrapper<LocalTestBlock>();
+        expect(!testBlock.metaInformation().contains("Drawable")) << "not drawable";
+    };
 
-        struct TestBlock1 : gr::Block<TestBlock1, gr::Drawable<gr::UICategory::Toolbar, "console">> {
+    "drawable"_test = [] {
+        struct LocalTestBlock : gr::Block<LocalTestBlock, gr::Drawable<gr::UICategory::Toolbar, "console">> {
             gr::work::Status draw() { return gr::work::Status::OK; }
-        } testBlock1;
-        expect(testBlock1.meta_information.value.contains("Drawable")) << "drawable";
-        const auto& drawableConfigMap = std::get<gr::property_map>(testBlock1.meta_information.value.at("Drawable"s));
+            void             processOne() {}
+        };
+        auto testBlock = gr::BlockWrapper<LocalTestBlock>();
+        expect(testBlock.metaInformation().contains("Drawable")) << "drawable";
+        const auto& drawableConfigMap = gr::test::get_value_or_fail<gr::property_map>(testBlock.metaInformation().at("Drawable"));
         expect(drawableConfigMap.contains("Category"));
-        expect(eq(std::get<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Category")), "Toolbar"s));
         expect(drawableConfigMap.contains("Toolkit"));
-        expect(eq(std::get<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+        expect(eq(gr::test::get_value_or_fail<std::string>(drawableConfigMap.at("Toolkit")), "console"s));
+    };
+
+    "ui_constraints"_test = [] {
+        struct LocalTestBlock : gr::Block<LocalTestBlock, gr::Drawable<gr::UICategory::Toolbar, "console">> {
+            gr::work::Status draw() { return gr::work::Status::OK; }
+            void             processOne() {}
+        };
+        auto testBlock = gr::BlockWrapper<LocalTestBlock>();
+        expect(testBlock.uiConstraints().empty());
+        testBlock.uiConstraints()["x-position"] = 3.f;
+        testBlock.uiConstraints()["y-position"] = 4.f;
+        expect(!testBlock.uiConstraints().empty());
+        expect(eq(testBlock.uiConstraints().size(), 2UZ));
+        expect(testBlock.uiConstraints().contains("x-position"));
+        expect(testBlock.uiConstraints().contains("y-position"));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("x-position")), 3.f));
+        expect(eq(gr::test::get_value_or_fail<float>(testBlock.uiConstraints().at("y-position")), 4.f));
     };
 };
 
-const boost::ut::suite<"Port MetaInfo Tests"> _portMetaInfoTests = [] {
+template<typename T>
+struct PortMetaInfoTestBlockWithManyPorts : gr::Block<PortMetaInfoTestBlockWithManyPorts<T>> {
+    static constexpr std::size_t nPorts = 2UZ;
+
+    gr::PortIn<T>              in1;
+    std::vector<gr::PortIn<T>> in2{nPorts};
+    gr::PortOut<T>             out;
+
+    GR_MAKE_REFLECTABLE(PortMetaInfoTestBlockWithManyPorts, in1, in2, out);
+
+    template<gr::InputSpanLike TInput2>
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan1, const std::span<TInput2>& inSpan2, gr::OutputSpanLike auto& outSpan) {
+        const std::size_t n = std::min(inSpan1.size(), outSpan.size());
+        std::copy_n(inSpan1.begin(), n, outSpan.begin());
+        std::ignore = inSpan1.consume(n);
+        for (auto& locInSpan2 : inSpan2) {
+            std::ignore = locInSpan2.consume(n);
+        }
+        outSpan.publish(n);
+
+        return gr::work::Status::OK;
+    }
+};
+
+const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
     using namespace boost::ut;
     using namespace std::string_literals;
     using namespace gr;
 
-    "constructor test"_test = [] {
-        // Test the initializer list constructor
-        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, //
-            {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}, {gr::tag::SIGNAL_QUANTITY.shortKey(), "voltage"}, {gr::tag::SIGNAL_UNIT.shortKey(), "V"}, {gr::tag::SIGNAL_MIN.shortKey(), -1.f}, {gr::tag::SIGNAL_MAX.shortKey(), 1.f}});
+    "auto update PortMetaInfo from Tag"_test = [&] {
+        using namespace gr::testing;
+        using namespace gr::tag;
 
-        expect(eq(48000.f, portMetaInfo.sample_rate.value));
-        expect(eq("TestSignal"s, portMetaInfo.signal_name.value));
-        expect(eq("voltage"s, portMetaInfo.signal_quantity.value));
-        expect(eq("V"s, portMetaInfo.signal_unit.value));
-        expect(eq(-1.f, portMetaInfo.signal_min.value));
-        expect(eq(+1.f, portMetaInfo.signal_max.value));
-    };
+        const gr::Size_t nSamples = 100;
+        Graph            testGraph;
 
-    "reset test"_test = [] {
-        PortMetaInfo portMetaInfo;
-        portMetaInfo.auto_update.clear();
-        expect(portMetaInfo.auto_update.empty());
+        auto createSrcTags = [](std::size_t srcNum) -> std::vector<Tag> {
+            const property_map srcParams1 = {                         //
+                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum)}, //
+                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum)}};
 
-        portMetaInfo.reset();
+            const property_map srcParams2 = {                                            //
+                {SIGNAL_QUANTITY.shortKey(), std::format("SIGNAL_QUANTITY_{}", srcNum)}, //
+                {SIGNAL_UNIT.shortKey(), std::format("SIGNAL_UNIT_{}", srcNum)},         //
+                {SIGNAL_MIN.shortKey(), static_cast<float>(srcNum)},                     //
+                {SIGNAL_MAX.shortKey(), static_cast<float>(srcNum)}};
 
-        expect(portMetaInfo.auto_update.contains(gr::tag::SAMPLE_RATE.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_NAME.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_QUANTITY.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_UNIT.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MIN.shortKey()));
-        expect(portMetaInfo.auto_update.contains(gr::tag::SIGNAL_MAX.shortKey()));
-        expect(eq(portMetaInfo.auto_update.size(), 16UZ));
-    };
+            const property_map srcParams3 = {                                //
+                {SAMPLE_RATE.shortKey(), static_cast<float>(srcNum) + 10.f}, //
+                {SIGNAL_NAME.shortKey(), std::format("SIGNAL_NAME_{}", srcNum + 10)}};
 
-    "update test"_test = [] {
-        PortMetaInfo portMetaInfo;
-        property_map updateProps{{gr::tag::SAMPLE_RATE.shortKey(), 96000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "UpdatedSignal"}};
-        portMetaInfo.update(updateProps);
+            return std::vector<Tag>{Tag{10 + 5 * srcNum, srcParams1}, Tag{12 + 5 * srcNum, srcParams2}, Tag{50 + 5 * srcNum, srcParams3}};
+        };
 
-        expect(eq(96000.f, portMetaInfo.sample_rate));
-        expect(eq("UpdatedSignal"s, portMetaInfo.signal_name));
-    };
+        auto& src1 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource1"}, {"n_samples_max", nSamples}});
+        src1._tags = createSrcTags(1);
+        auto& src2 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource2"}, {"n_samples_max", nSamples}});
+        src2._tags = createSrcTags(2);
+        auto& src3 = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSource3"}, {"n_samples_max", nSamples}});
+        src3._tags = createSrcTags(3);
 
-    "get test"_test = [] {
-        PortMetaInfo portMetaInfo({{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}, {gr::tag::SIGNAL_NAME.shortKey(), "TestSignal"}});
-        const auto   props = portMetaInfo.get();
+        auto& manyPortsBlock = testGraph.emplaceBlock<PortMetaInfoTestBlockWithManyPorts<float>>({{"name", "PortMetaInfoTestBlockWithManyPorts"}});
 
-        expect(eq(48000.f, std::get<float>(props.at(gr::tag::SAMPLE_RATE.shortKey()))));
-        expect(eq("TestSignal"s, std::get<std::string>(props.at(gr::tag::SIGNAL_NAME.shortKey()))));
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
+
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src1).to<"in1">(manyPortsBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src2).to<"in2", 0>(manyPortsBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src3).to<"in2", 1>(manyPortsBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(manyPortsBlock).to<"in">(sink)));
+
+        gr::scheduler::Simple<> sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(src1._nSamplesProduced, nSamples));
+        expect(eq(src2._nSamplesProduced, nSamples));
+        expect(eq(src3._nSamplesProduced, nSamples));
+        expect(eq(sink._nSamplesProduced, nSamples));
+
+        expect(eq(src1.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(src2.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(src3.sample_rate, 1000.0f)); // default value (set in the class)
+        expect(eq(sink.sample_rate, 13.0f));   // updated from the last tag across all sources
+
+        expect(eq(manyPortsBlock.in1.metaInfo.sample_rate.value, 11.f));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_name.value, "SIGNAL_NAME_11"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_1"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_unit.value, "SIGNAL_UNIT_1"s));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_min.value, 1.f));
+        expect(eq(manyPortsBlock.in1.metaInfo.signal_max.value, 1.f));
+
+        expect(eq(manyPortsBlock.in2[0].metaInfo.sample_rate.value, 12.f));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_name.value, "SIGNAL_NAME_12"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_2"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_unit.value, "SIGNAL_UNIT_2"s));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_min.value, 2.f));
+        expect(eq(manyPortsBlock.in2[0].metaInfo.signal_max.value, 2.f));
+
+        expect(eq(manyPortsBlock.in2[1].metaInfo.sample_rate.value, 13.f));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_min.value, 3.f));
+        expect(eq(manyPortsBlock.in2[1].metaInfo.signal_max.value, 3.f));
+
+        // updated from the last tag across all sources
+        expect(eq(sink.in.metaInfo.sample_rate.value, 13.f));
+        expect(eq(sink.in.metaInfo.signal_name.value, "SIGNAL_NAME_13"s));
+        expect(eq(sink.in.metaInfo.signal_quantity.value, "SIGNAL_QUANTITY_3"s));
+        expect(eq(sink.in.metaInfo.signal_unit.value, "SIGNAL_UNIT_3"s));
+        expect(eq(sink.in.metaInfo.signal_min.value, 3.f));
+        expect(eq(sink.in.metaInfo.signal_max.value, 3.f));
     };
 };
 
@@ -971,7 +1075,7 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
 
         gr::Graph graph;
         auto&     src       = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"disconnect_on_done", false}});
-        auto&     testBlock = graph.emplaceBlock<IntDecBlock<float>>({{"disconnect_on_done", false}});
+        auto&     testBlock = graph.emplaceBlock<Resampler<float>>({{"disconnect_on_done", false}});
         auto&     sink      = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", false}});
 
         expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(testBlock)));
@@ -1032,15 +1136,18 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
 
         gr::Graph flow;
         // ClockSource has a BlockingIO attribute
-        auto& source  = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 10.f}, {"n_samples_max", gr::Size_t(0)}});
-        auto& monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
-        auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        auto&                                               source = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 10.f}, {"n_samples_max", gr::Size_t(0)}});
+        TagMonitor<float, ProcessFunction::USE_PROCESS_ONE> d(gr::property_map{});
+        auto&                                               monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
+        auto&                                               sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
         expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
 
-        auto scheduler = scheduler::Simple(std::move(flow));
-
-        auto client = std::thread([&scheduler] {
+        gr::scheduler::Simple scheduler;
+        if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        auto client = gr::test::thread_pool::execute("qa_Block::Client", [&scheduler] {
             const auto startTime = std::chrono::steady_clock::now();
             auto       isExpired = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
             bool       expired   = false;
@@ -1051,14 +1158,14 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
             scheduler.requestStop();
         });
 
-        auto schedulerThread = std::thread([&scheduler] { scheduler.runAndWait(); });
-        client.join();
+        auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_Block::Sched", scheduler);
+        client.wait();
 
         // Additional check to be sure that ClockSource is in STOPPED state.
         while (source.state() != lifecycle::State::STOPPED) {
             std::this_thread::sleep_for(10ms);
         }
-        schedulerThread.join();
+        schedulerThread.wait();
     };
 };
 

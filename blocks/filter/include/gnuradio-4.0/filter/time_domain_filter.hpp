@@ -4,7 +4,6 @@
 #include <execution>
 #include <functional>
 #include <numeric>
-#include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -28,9 +27,9 @@ struct fir_filter : Block<fir_filter<T>> {
 The transfer function of an FIR filter is given by:
 H(z) = b[0] + b[1]*z^-1 + b[2]*z^-2 + ... + b[N]*z^-N
 )"">;
-    PortIn<T>      in;
-    PortOut<T>     out;
-    std::vector<T> b{T{1}}; // feedforward coefficients
+    PortIn<T>  in;
+    PortOut<T> out;
+    Tensor<T>  b{T{1}}; // feedforward coefficients
 
     GR_MAKE_REFLECTABLE(fir_filter, in, out, b);
 
@@ -69,10 +68,10 @@ struct iir_filter : Block<iir_filter<T, form>> {
 b are the feed-forward coefficients (N.B. b[0] denoting the newest and b[-1] the previous sample)
 a are the feedback coefficients
 )"">;
-    PortIn<T>      in;
-    PortOut<T>     out;
-    std::vector<T> b{1}; // feed-forward coefficients
-    std::vector<T> a{1}; // feedback coefficients
+    PortIn<T>  in;
+    PortOut<T> out;
+    Tensor<T>  b{1}; // feed-forward coefficients
+    Tensor<T>  a{1}; // feedback coefficients
 
     GR_MAKE_REFLECTABLE(iir_filter, in, out, b, a);
 
@@ -125,6 +124,8 @@ a are the feedback coefficients
 GR_REGISTER_BLOCK(gr::filter::BasicFilter, ([T]), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 GR_REGISTER_BLOCK(gr::filter::BasicFilterProto, ([T], gr::Resampling<1UZ, 1UZ, false>), [ double, float, gr::UncertainValue<float>, gr::UncertainValue<double> ])
 
+enum class FilterType { FIR, IIR };
+
 template<typename T, typename... Args>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
 struct BasicFilterProto : Block<BasicFilterProto<T, Args...>, Args...> {
@@ -139,29 +140,21 @@ with selectable filter type (low-pass, high-pass, band-pass, band-stop), and sup
     PortIn<T>  in;
     PortOut<T> out;
 
-    // private internal state variables
-    enum class FilterType { FIR, IIR };
-
-    FilterType              _filter_type{FilterType::IIR};
-    filter::Type            _filter_response{filter::Type::LOWPASS};
-    filter::iir::Design     _iir_design_method{filter::iir::Design::BUTTERWORTH};
-    algorithm::window::Type _fir_design_method{algorithm::window::Type::Kaiser};
-
     using FilterImpl = std::conditional_t<UncertainValueLike<T>, filter::ErrorPropagatingFilter<T>, filter::Filter<T>>;
 
     FilterImpl _filter;
 
     // Public settings
-    Annotated<std::string, "filter_type", Doc<"Filter type ('FIR' or 'IIR')">, Visible>                                                filter_type     = std::string(magic_enum::enum_name(_filter_type));
-    Annotated<std::string, "filter_response", Doc<"Filter response ('LOWPASS', 'HIGHPASS', 'BANDPASS', 'BANDSTOP')">, Visible>         filter_response = std::string(magic_enum::enum_name(_filter_response));
-    Annotated<gr::Size_t, "filter_order", Doc<"Filter order">>                                                                         filter_order{3};
-    Annotated<double, "f_low", Doc<"Low cutoff frequency in Hz">, Visible>                                                             f_low{0.1};
-    Annotated<double, "f_high", Doc<"High cutoff frequency in Hz (only for BANDPASS/BANDSTOP)">, Visible>                              f_high{0.2};
-    Annotated<double, "sample rate", Doc<"Sample rate in Hz">, Visible>                                                                sample_rate{1.0};
-    Annotated<gr::Size_t, "decimation factor", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimate">>                decimate{1U};
-    Annotated<std::string, "iir_design_method", Doc<"IIR Filter design method ('BUTTERWORTH', 'BESSEL', 'CHEBYSHEV1', 'CHEBYSHEV2')">> iir_design_method = std::string(magic_enum::enum_name(_iir_design_method));
-    Annotated<std::string, "fir_design_method", Doc<"FIR Filter design method ('None', 'Rectangular', 'Hamming', 'Hann', 'HannExp', 'Blackman', 'Nuttall', 'BlackmanHarris', 'BlackmanNuttall', 'FlatTop', 'Exponential', 'Kaiser')">> //
-        fir_design_method = std::string(magic_enum::enum_name(_fir_design_method));
+    Annotated<FilterType, "filter_type", Doc<"Filter type ('FIR' or 'IIR')">, Visible>                                                         filter_type     = FilterType::IIR;
+    Annotated<filter::Type, "filter_response", Doc<"Filter response ('LOWPASS', 'HIGHPASS', 'BANDPASS', 'BANDSTOP')">, Visible>                filter_response = filter::Type::LOWPASS;
+    Annotated<gr::Size_t, "filter_order", Doc<"Filter order">>                                                                                 filter_order{3};
+    Annotated<float, "f_low", Doc<"Low cutoff frequency in Hz">, Visible>                                                                      f_low{0.1f};
+    Annotated<float, "f_high", Doc<"High cutoff frequency in Hz (only for BANDPASS/BANDSTOP)">, Visible>                                       f_high{0.2f};
+    Annotated<float, "sample rate", Doc<"Sample rate in Hz">, Visible>                                                                         sample_rate{1.0f};
+    Annotated<gr::Size_t, "decimation factor", Doc<"1: none, i.e. preserving the relationship: N_out = N_in/decimate">>                        decimate{1U};
+    Annotated<filter::iir::Design, "iir_design_method", Doc<"IIR Filter design method ('BUTTERWORTH', 'BESSEL', 'CHEBYSHEV1', 'CHEBYSHEV2')">> iir_design_method = filter::iir::Design::BUTTERWORTH;
+    Annotated<algorithm::window::Type, "fir_design_method", Doc<"FIR Filter design method ('None', 'Rectangular', 'Hamming', 'Hann', 'HannExp', 'Blackman', 'Nuttall', 'BlackmanHarris', 'BlackmanNuttall', 'FlatTop', 'Exponential', 'Kaiser')">> //
+        fir_design_method = algorithm::window::Type::Kaiser;
 
     GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimate, iir_design_method, fir_design_method);
 
@@ -174,30 +167,17 @@ with selectable filter type (low-pass, high-pass, band-pass, band-stop), and sup
             this->input_chunk_size = decimate;
         }
 
-        auto cast_enum = []<typename V>(const V&, const std::string& str) {
-            auto result = magic_enum::enum_cast<V>(str);
-            if (!result.has_value()) {
-                throw gr::exception(std::format("invalid value for {}: {}", magic_enum::enum_type_name<V>(), str));
-            }
-            return result.value();
-        };
-
-        _filter_type       = cast_enum(_filter_type, filter_type);
-        _filter_response   = cast_enum(_filter_response, filter_response);
-        _iir_design_method = cast_enum(_iir_design_method, iir_design_method);
-        _fir_design_method = cast_enum(_fir_design_method, fir_design_method);
-
         // Set up filter parameters
         FilterParameters params;
         params.order = filter_order;
-        params.fLow  = f_low;
-        params.fHigh = f_high;
-        params.fs    = sample_rate;
+        params.fLow  = static_cast<double>(f_low);
+        params.fHigh = static_cast<double>(f_high);
+        params.fs    = static_cast<double>(sample_rate);
 
-        if (_filter_type == FilterType::FIR) { // design FIR filter
-            _filter = FilterImpl(fir::designFilter<ValueType>(_filter_response, params, _fir_design_method));
-        } else if (_filter_type == FilterType::IIR) { // design IIR filter
-            _filter = FilterImpl(iir::designFilter<ValueType>(_filter_response, params, _iir_design_method));
+        if (filter_type == FilterType::FIR) { // design FIR filter
+            _filter = FilterImpl(fir::designFilter<ValueType>(filter_response, params, fir_design_method));
+        } else if (filter_type == FilterType::IIR) { // design IIR filter
+            _filter = FilterImpl(iir::designFilter<ValueType>(filter_response, params, iir_design_method));
         }
     }
 

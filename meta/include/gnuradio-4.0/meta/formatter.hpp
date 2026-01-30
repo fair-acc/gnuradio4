@@ -5,21 +5,40 @@
 #include <complex>
 #include <concepts>
 #include <expected>
+#include <format>
 #include <source_location>
 #include <vector>
 
-#include <gnuradio-4.0/Tag.hpp>
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuseless-cast"
+#endif
+#include <magic_enum.hpp>
+
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace gr {
 namespace time {
-[[nodiscard]] inline std::string getIsoTime(std::chrono::system_clock::time_point timePoint = std::chrono::system_clock::now()) noexcept {
+template<typename Clock, typename Duration>
+[[nodiscard]] inline std::string getIsoTime(std::chrono::time_point<Clock, Duration> timePoint) noexcept {
     const auto secs = std::chrono::time_point_cast<std::chrono::seconds>(timePoint);
     const auto ms   = std::chrono::duration_cast<std::chrono::milliseconds>(timePoint - secs).count();
-    return std::format("{:%Y-%m-%dT%H:%M:%S}.{:06}", secs, ms); // ms-precision ISO time-format
+#if defined(_WIN32)
+    // In windows the colon (:) characer is reserved.  Using _ instead.
+    return std::format("{:%Y-%m-%dT%H_%M_%S}.{:03}", secs, ms); // ms-precision ISO time-format
+#else
+    return std::format("{:%Y-%m-%dT%H:%M:%S}.{:03}", secs, ms); // ms-precision ISO time-format
+#endif
 }
+
+[[nodiscard]] inline std::string getIsoTime() noexcept { return getIsoTime(std::chrono::system_clock::now()); }
 } // namespace time
 
+#ifndef STD_FORMATTER_RANGES
+#define STD_FORMATTER_RANGES
 template<std::ranges::input_range R>
 requires std::formattable<std::ranges::range_value_t<R>, char>
 std::string join(const R& range, std::string_view sep = ", ") {
@@ -34,6 +53,7 @@ std::string join(const R& range, std::string_view sep = ", ") {
     }
     return out;
 }
+#endif
 
 template<typename T>
 constexpr auto ptr(const T* p) {
@@ -41,6 +61,8 @@ constexpr auto ptr(const T* p) {
 }
 } // namespace gr
 
+#ifndef STD_FORMATTER_SOURCE_LOCATION
+#define STD_FORMATTER_SOURCE_LOCATION
 template<>
 struct std::formatter<std::source_location, char> {
     char presentation = 's';
@@ -66,7 +88,10 @@ struct std::formatter<std::source_location, char> {
         }
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_COMPLEX
+#define STD_FORMATTER_COMPLEX
 template<typename T>
 struct std::formatter<std::complex<T>, char> {
     char presentation = 'g'; // default format
@@ -121,6 +146,7 @@ struct std::formatter<std::complex<T>, char> {
         }
     }
 };
+#endif
 
 // simplified formatter for UncertainValue
 template<gr::arithmetic_or_complex_like T>
@@ -177,7 +203,7 @@ std::ostream& operator<<(std::ostream& os, const gr::Range<T>& v) {
 namespace gr {
 
 template<typename R>
-concept FormattableRange = std::ranges::range<R> && !std::same_as<std::remove_cvref_t<R>, std::string> && !std::is_array_v<std::remove_cvref_t<R>> && std::formattable<std::ranges::range_value_t<R>, char>;
+concept FormattableRange = std::ranges::range<R> && !std::same_as<std::remove_cvref_t<R>, std::string> && !std::same_as<std::remove_cvref_t<R>, std::string_view> && !std::is_array_v<std::remove_cvref_t<R>> && std::formattable<std::ranges::range_value_t<R>, char>;
 
 template<typename OutputIt, typename Container>
 constexpr auto format_join(OutputIt out, const Container& container, std::string_view separator = ", ") {
@@ -205,74 +231,8 @@ constexpr std::string join(const Container& container, std::string_view separato
 
 } // namespace gr
 
-template<>
-struct std::formatter<pmtv::map_t::value_type> {
-    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const pmtv::map_t::value_type& kv, FormatContext& ctx) const noexcept {
-        return std::format_to(ctx.out(), "{}: {}", kv.first, kv.second);
-    }
-};
-
-template<pmtv::IsPmt T>
-struct std::formatter<T> { // alternate pmtv formatter optimised for compile-time not runtime
-    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    auto format(const T& value, FormatContext& ctx) const noexcept {
-        // if the std::visit dispatch is too expensive then maybe manually loop-unroll this
-        return std::visit([&ctx](const auto& format_arg) { return format_value(format_arg, ctx); }, value);
-    }
-
-private:
-    template<typename FormatContext, typename U>
-    static auto format_value(const U& arg, FormatContext& ctx) -> decltype(std::format_to(ctx.out(), "")) {
-        if constexpr (pmtv::Scalar<U> || pmtv::Complex<U>) {
-            return std::format_to(ctx.out(), "{}", arg);
-        } else if constexpr (std::same_as<U, std::string>) {
-            return std::format_to(ctx.out(), "{}", arg);
-        } else if constexpr (pmtv::UniformVector<U> || pmtv::UniformStringVector<U>) { // format vector
-            std::format_to(ctx.out(), "[");
-            gr::format_join(ctx.out(), arg, ", ");
-            return std::format_to(ctx.out(), "]");
-        } else if constexpr (std::same_as<U, std::vector<pmtv::pmt>>) { // format vector of pmts
-            std::format_to(ctx.out(), "[");
-            gr::format_join(ctx.out(), arg, ", ");
-            return std::format_to(ctx.out(), "]");
-        } else if constexpr (pmtv::PmtMap<U>) { // format map
-            std::format_to(ctx.out(), "{{ ");
-            for (auto it = arg.begin(); it != arg.end(); ++it) {
-                format_value(it->first, ctx); // Format key
-                std::format_to(ctx.out(), ": ");
-                format_value(it->second, ctx); // Format value
-                if (std::next(it) != arg.end()) {
-                    std::format_to(ctx.out(), ", ");
-                }
-            }
-            return std::format_to(ctx.out(), " }}");
-        } else if constexpr (requires { std::visit([](const auto&) {}, arg); }) {
-            return std::visit([&](const auto& value) { return format_value(value, ctx); }, arg);
-        } else if constexpr (std::same_as<std::monostate, U>) {
-            return std::format_to(ctx.out(), "null");
-        } else {
-            return std::format_to(ctx.out(), "unknown type {}", gr::meta::type_name<U>());
-        }
-    }
-};
-
-template<>
-struct std::formatter<pmtv::map_t> {
-    constexpr auto parse(std::format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
-
-    template<typename FormatContext>
-    constexpr auto format(const pmtv::map_t& value, FormatContext& ctx) const noexcept {
-        std::format_to(ctx.out(), "{{ ");
-        gr::format_join(ctx.out(), value, ", ");
-        return std::format_to(ctx.out(), " }}");
-    }
-};
-
+#ifndef STD_FORMATTER_VECTOR_BOOL
+#define STD_FORMATTER_VECTOR_BOOL
 template<>
 struct std::formatter<std::vector<bool>> {
     char presentation = 'c';
@@ -303,7 +263,10 @@ struct std::formatter<std::vector<bool>> {
         return ctx.out();
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_PAIR
+#define STD_FORMATTER_PAIR
 template<typename T1, typename T2>
 struct std::formatter<std::pair<T1, T2>, char> {
     constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
@@ -313,7 +276,10 @@ struct std::formatter<std::pair<T1, T2>, char> {
         return std::format_to(ctx.out(), "({}, {})", p.first, p.second);
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_RANGE
+#define STD_FORMATTER_RANGE
 template<gr::FormattableRange R>
 struct std::formatter<R, char> {
     char separator = ',';
@@ -383,8 +349,12 @@ struct std::formatter<T[N], char> {
         return std::format_to(out, "]");
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_EXPECTED
+#define STD_FORMATTER_EXPECTED
 template<typename Value, typename Error>
+
 struct std::formatter<std::expected<Value, Error>> {
     constexpr auto parse(format_parse_context& ctx) const noexcept -> decltype(ctx.begin()) { return ctx.begin(); }
 
@@ -397,7 +367,10 @@ struct std::formatter<std::expected<Value, Error>> {
         }
     }
 };
+#endif
 
+#ifndef STD_FORMATTER_EXCEPTION
+#define STD_FORMATTER_EXCEPTION
 template<typename T>
 requires std::derived_from<T, std::exception>
 struct std::formatter<T, char> {
@@ -408,5 +381,26 @@ struct std::formatter<T, char> {
         return std::format_to(ctx.out(), "{}", e.what());
     }
 };
+#endif
+
+#ifndef STD_FORMATTER_ENUM
+#define STD_FORMATTER_ENUM
+template<typename E>
+requires std::is_enum_v<E>
+struct std::formatter<E, char> {
+    std::formatter<std::string_view, char> _strFormatter;
+
+    constexpr auto parse(std::format_parse_context& ctx) { return _strFormatter.parse(ctx); }
+
+    template<typename FormatContext>
+    auto format(E e, FormatContext& ctx) const {
+        if (auto name = magic_enum::enum_name(e); !name.empty()) {
+            return _strFormatter.format(name, ctx); // delegate string formatting
+        } else {
+            return std::format_to(ctx.out(), "{}", std::to_underlying(e)); // fallback to underlying type
+        }
+    }
+};
+#endif
 
 #endif // GNURADIO_FORMATTER_HPP

@@ -73,7 +73,7 @@ def process_bulk(ins, outs):
 )";
 
         PythonBlock<std::int32_t> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
-        myBlock.init(myBlock.progress, myBlock.ioThreadPool); // needed for unit-test only when executed outside a Scheduler/Graph
+        myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         int                                        count = 0;
         std::vector<std::int32_t>                  data1 = {1, 2, 3};
@@ -156,7 +156,7 @@ def process_bulk(ins, outs):
 )";
 
         PythonBlock<float> myBlock({{"n_inputs", 3U}, {"n_outputs", 3U}, {"pythonScript", pythonScript}});
-        myBlock.init(myBlock.progress, myBlock.ioThreadPool); // needed for unit-test only when executed outside a Scheduler/Graph
+        myBlock.init(myBlock.progress); // needed for unit-test only when executed outside a Scheduler/Graph
 
         std::vector<float>                  data1 = {1, 2, 3};
         std::vector<float>                  data2 = {4, 5, 6};
@@ -192,8 +192,12 @@ def process_bulk(ins, outs):
         expect(gr::ConnectionResult::SUCCESS == graph.connect(src, "out"s, block, "inputs#0"s));
         expect(gr::ConnectionResult::SUCCESS == graph.connect(block, "outputs#0"s, sink, "in"s));
 
-        scheduler::Simple sched{std::move(graph)};
-        bool              throws = false;
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+
+        bool throws = false;
         try {
             expect(sched.runAndWait().has_value());
         } catch (const std::exception& ex) {
@@ -253,7 +257,11 @@ def process_bulk(ins, outs):
         expect(gr::ConnectionResult::SUCCESS == graph.connect(src, "out"s, block, "inputs#0"s));
         expect(gr::ConnectionResult::SUCCESS == graph.connect(block, "outputs#0"s, sink, "in"s));
 
-        scheduler::Simple sched{std::move(graph)};
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(graph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+
         block.pause();  // simplified calling
         block.resume(); // simplified calling
         block.reset();  // simplified calling

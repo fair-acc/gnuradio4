@@ -37,29 +37,30 @@ auto makeTestContext() {
 namespace {
 auto collectBlocks(const gr::Graph& graph) {
     std::set<std::string> result;
-    graph.forEachBlock([&](const auto& node) { result.insert(std::format("{}-{}", node.name(), node.typeName())); });
+    gr::graph::forEachBlock<gr::block::Category::NormalBlock>(graph, [&](const auto node) { result.insert(std::format("{}-{}", node->name(), node->typeName())); });
     return result;
 }
 
 auto collectEdges(const gr::Graph& graph) {
     std::set<std::string> result;
-    graph.forEachEdge([&](const auto& edge) {
+    gr::graph::forEachEdge<gr::block::Category::NormalBlock>(graph, [&](const auto& edge) {
         auto portDefinitionToString = [](const gr::PortDefinition& definition) {
             return std::visit(gr::meta::overloaded(                                                                                                                   //
                                   [](const gr::PortDefinition::IndexBased& _definition) { return std::format("{}#{}", _definition.topLevel, _definition.subIndex); }, //
                                   [](const gr::PortDefinition::StringBased& _definition) { return _definition.name; }),                                               //
                 definition.definition);
         };
-        result.insert(std::format("{}#{} - {}#{}",                                          //
-            edge.sourceBlock().name(), portDefinitionToString(edge.sourcePortDefinition()), //
-            edge.destinationBlock().name(), portDefinitionToString(edge.destinationPortDefinition())));
+        result.insert(std::format("{}#{} - {}#{}",                                           //
+            edge.sourceBlock()->name(), portDefinitionToString(edge.sourcePortDefinition()), //
+            edge.destinationBlock()->name(), portDefinitionToString(edge.destinationPortDefinition())));
     });
     return result;
 }
 
 bool checkAndPrintMissingBlocks(const std::string& first, const std::string& second) {
-    gr::property_map firstYaml  = *pmtv::yaml::deserialize(first);
-    gr::property_map secondYaml = *pmtv::yaml::deserialize(second);
+    using namespace gr;
+    gr::property_map firstYaml  = *pmt::yaml::deserialize(first);
+    gr::property_map secondYaml = *pmt::yaml::deserialize(second);
 
     // Basic check for blocks
     using BlockMinData = std::pair<std::string, std::string>;
@@ -67,16 +68,17 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
     std::vector<BlockMinData> secondBlocks;
     std::set<BlockMinData>    seenBlocks;
 
-    for (const auto& block : std::get<std::vector<pmtv::pmt>>(firstYaml.at("blocks"))) {
-        const auto&  blockMap = std::get<gr::property_map>(block);
-        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), std::get<std::string>(blockMap.at("name"s))};
+    for (const auto& block : test::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("blocks"))) {
+        const auto&  blockMap = test::get_value_or_fail<gr::property_map>(block);
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         firstBlocks.push_back(data);
         seenBlocks.insert(data);
     }
 
-    for (const auto& block : std::get<std::vector<pmtv::pmt>>(secondYaml.at("blocks"))) {
-        const auto&  blockMap = std::get<gr::property_map>(block);
-        BlockMinData data{std::get<std::string>(blockMap.at("id"s)), std::get<std::string>(blockMap.at("name"s))};
+    for (const auto& block : test::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("blocks"))) {
+        const auto& blockMap = test::get_value_or_fail<gr::property_map>(block);
+        std::println("Current block {}", blockMap);
+        BlockMinData data{test::get_value_or_fail<std::string>(blockMap.at("id")), gr::detail::getProperty<std::string>(blockMap, "properties"sv, "name"sv).value_or(""s)};
         secondBlocks.push_back(data);
         seenBlocks.erase(data);
     }
@@ -85,7 +87,7 @@ bool checkAndPrintMissingBlocks(const std::string& first, const std::string& sec
         std::print("Missing id={} name={}\n", block.first, block.second);
     }
 
-    if (seenBlocks.empty() && (std::get<std::vector<pmtv::pmt>>(firstYaml.at("connections")).size() == std::get<std::vector<pmtv::pmt>>(secondYaml.at("connections")).size())) {
+    if (seenBlocks.empty() && (test::get_value_or_fail<Tensor<pmt::Value>>(firstYaml.at("connections")).size() == test::get_value_or_fail<Tensor<pmt::Value>>(secondYaml.at("connections")).size())) {
         return true;
     }
 
@@ -107,14 +109,14 @@ using namespace boost::ut;
 
 namespace gr::qa_grc_test {
 
-template<pmtv::yaml::TypeTagMode tagMode = pmtv::yaml::TypeTagMode::Auto>
+template<pmt::yaml::TypeTagMode tagMode = pmt::yaml::TypeTagMode::Auto>
 std::string ymlDecodeEncode(std::string_view yml, std::source_location location = std::source_location::current()) {
-    const auto yaml = pmtv::yaml::deserialize(yml);
+    const auto yaml = pmt::yaml::deserialize(yml);
     if (!yaml) {
-        throw gr::exception(std::format("Could not parse yaml: \n{}", pmtv::yaml::formatAsLines(yml, yaml.error())), location);
+        throw gr::exception(std::format("Could not parse yaml: \n{}", pmt::yaml::formatAsLines(yml, yaml.error())), location);
     }
 
-    return pmtv::yaml::serialize<tagMode>(yaml.value());
+    return pmt::yaml::serialize<tagMode>(yaml.value());
 }
 
 const boost::ut::suite BasicGrcTests = [] {
@@ -124,18 +126,19 @@ const boost::ut::suite BasicGrcTests = [] {
 
     constexpr std::string_view testGrc = R"(
 blocks:
-  - name: ArraySinkImpl<float64, true, 42>
-    id: gr::testing::ArraySink<float64>
+  - id: gr::testing::ArraySink<float64>
     parameters:
       name: ArraySinkImpl<float64, true, 42>
-  - name: ArraySourceOne<float64>
-    id: gr::testing::ArraySource<float64>
+  - id: gr::testing::ArraySource<float64>
     parameters:
       name: ArraySourceOne<float64>
-  - name: ArraySource<float64>
-    id: gr::testing::ArraySource<float64>
+  - id: gr::testing::ArraySource<float64>
     parameters:
       name: ArraySource<float64>
+      ui_constraints:
+        x: !!float32 43
+        y: !!float32 7070
+
 connections:
   - [ArraySourceOne<float64>, [0, 0], 'ArraySinkImpl<float64, true, 42>', [1, 1]]
   - [ArraySourceOne<float64>, [0, 1], 'ArraySinkImpl<float64, true, 42>', [1, 0]]
@@ -150,9 +153,17 @@ connections:
                 std::print("Block {} is known\n", block);
             }
 
-            const auto graphSrc      = ymlDecodeEncode(testGrc);
-            auto       graph         = gr::loadGrc(context->loader, graphSrc);
-            auto       graphSavedSrc = gr::saveGrc(context->loader, graph);
+            const auto graphSrc = ymlDecodeEncode(testGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            for (const auto& block : graph->blocks()) {
+                if (block->name() == "ArraySource<float64>") {
+                    expect(block->settings().applyStagedParameters().forwardParameters.empty());
+                    expect(test::get_value_or_fail<property_map>(block->settings().get("ui_constraints").value()) == gr::property_map{{"x", 43.f}, {"y", 7070.f}});
+                }
+            }
+
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
             expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
             std::println(std::cerr, "Unexpected exception: {}", e);
@@ -167,10 +178,10 @@ connections:
 
         try {
             auto graph1        = gr::loadGrc(context->loader, testGrc);
-            auto graphSavedSrc = gr::saveGrc(context->loader, graph1);
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph1);
             auto graph2        = gr::loadGrc(context->loader, graphSavedSrc);
-            expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
-            expect(eq(collectEdges(graph1), collectEdges(graph2)));
+            expect(eq(collectBlocks(*graph1), collectBlocks(*graph2)));
+            expect(eq(collectEdges(*graph1), collectEdges(*graph2)));
         } catch (const std::string& e) {
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
@@ -188,18 +199,20 @@ const boost::ut::suite PluginsGrcTests = [] {
 
             constexpr std::string_view pluginsTestGrc = R"(
 blocks:
-  - name: main_source
-    id: good::fixed_source<float64>
+  - id: good::fixed_source<float64>
     parameters:
+      name: main_source
       event_count: 100
       unknown_property: 42
-  - name: multiplier
-    id: good::multiply<float64>
-  - name: counter
-    id: builtin_counter<float64>
-  - name: sink
-    id: good::cout_sink<float64>
+  - id: good::multiply<float64>
     parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
       total_count: 100
       unknown_property: 42
 
@@ -209,21 +222,24 @@ connections:
   - [counter, 0, sink, 0]
 )";
 
-            const auto graphSrc1 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::Auto>(pluginsTestGrc);
-            const auto graphSrc2 = ymlDecodeEncode<pmtv::yaml::TypeTagMode::None>(pluginsTestGrc);
+            const auto graphSrc1 = ymlDecodeEncode<pmt::yaml::TypeTagMode::Auto>(pluginsTestGrc);
+            const auto graphSrc2 = ymlDecodeEncode<pmt::yaml::TypeTagMode::None>(pluginsTestGrc);
             std::println("yml-before:\n {}\nwith type-tags:\n{}\nwithout type tags:\n{}", pluginsTestGrc, graphSrc1, graphSrc2);
 
             auto graph  = gr::loadGrc(context->loader, graphSrc1);
             auto graph2 = gr::loadGrc(context->loader, pluginsTestGrc);
 
-            expect(eq(graph.blocks().size(), 4UZ));
+            expect(eq(graph->blocks().size(), 4UZ));
 
-            auto graphSavedSrc = gr::saveGrc(context->loader, graph);
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
 
             expect(checkAndPrintMissingBlocks(graphSrc2, graphSavedSrc));
 
-            gr::scheduler::Simple scheduler(std::move(graph));
-            expect(scheduler.runAndWait().has_value());
+            gr::scheduler::Simple sched;
+            if (auto ret = sched.exchange(std::move(graph)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
+            expect(sched.runAndWait().has_value());
         } catch (const std::string& e) {
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
@@ -236,33 +252,38 @@ connections:
 
             constexpr std::string_view pluginsTestGrc = R"(
 blocks:
-  - name: main_source
-    id: good::fixed_source<float64>
+  - id: good::fixed_source<float64>
     parameters:
+      name: main_source
       event_count: 100
       unknown_property: 42
-  - name: multiplier
-    id: good::multiply<float64>
-  - name: counter
-    id: builtin_counter<float64>
-  - name: sink
-    id: good::cout_sink<float64>
+  - id: good::multiply<float64>
     parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
       total_count: 100
       unknown_property: 42
-  - name: chained_multiplier
-    id: SUBGRAPH
+  - id: SUBGRAPH
+    parameters:
+      name: chained_multiplier
     graph:
       blocks:
-        - name: multiplier1
-          id: good::multiply<float64>
-        - name: multiplier2
-          id: good::multiply<float64>
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier1
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier2
       connections:
         - [multiplier1, 0, multiplier2, 0]
       exported_ports:
-        - [multiplier1, INPUT, in]
-        - [multiplier2, OUTPUT, out]
+        - [multiplier1, INPUT, in, in]
+        - [multiplier2, OUTPUT, out, out]
 
 connections:
   - [main_source, 0, multiplier, 0]
@@ -274,9 +295,133 @@ connections:
             const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
             auto       graph    = gr::loadGrc(context->loader, graphSrc);
 
-            expect(eq(graph.blocks().size(), 5UZ));
+            expect(eq(graph->blocks().size(), 5UZ));
 
-            auto graphSavedSrc = gr::saveGrc(context->loader, graph);
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
+
+            expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
+        } catch (const std::string& e) {
+            std::println(std::cerr, "Unexpected exception: {}", e);
+            expect(false);
+        }
+    };
+
+    "Basic graph and subgraph loading and storing using plugins"_test = [&] {
+        try {
+            using namespace gr;
+
+            constexpr std::string_view pluginsTestGrc = R"(
+blocks:
+  - id: good::fixed_source<float64>
+    parameters:
+      name: main_source
+      event_count: 100
+      unknown_property: 42
+  - id: good::multiply<float64>
+    parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
+      total_count: 100
+      unknown_property: 42
+  - id: SUBGRAPH
+    parameters:
+      name: chained_multiplier
+    graph:
+      blocks:
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier1
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier2
+      connections:
+        - [multiplier1, 0, multiplier2, 0]
+      exported_ports:
+        - [multiplier1, INPUT, in, in]
+        - [multiplier2, OUTPUT, out, out]
+
+connections:
+  - [main_source, 0, multiplier, 0]
+  - [multiplier, 0, chained_multiplier, 0]
+  - [chained_multiplier, 0, counter, 0]
+  - [counter, 0, sink, 0]
+)";
+
+            const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            expect(eq(graph->blocks().size(), 5UZ));
+
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
+
+            expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
+        } catch (const std::string& e) {
+            std::println(std::cerr, "Unexpected exception: {}", e);
+            expect(false);
+        }
+    };
+
+    "Basic graph and managed subgraph loading and storing using plugins"_test = [&] {
+        try {
+            using namespace gr;
+
+            constexpr std::string_view pluginsTestGrc = R"(
+    blocks:
+      - id: good::fixed_source<float64>
+        parameters:
+          name: main_source
+          event_count: 100
+          unknown_property: 42
+      - id: good::multiply<float64>
+        parameters:
+          name: multiplier
+      - id: builtin_counter<float64>
+        parameters:
+          name: counter
+      - id: good::cout_sink<float64>
+        parameters:
+          name: sink
+          total_count: 100
+          unknown_property: 42
+      - id: SUBGRAPH
+        parameters:
+          name: chained_multiplier
+        scheduler:
+          id: good::GoodMathScheduler
+          parameters:
+            defaultPoolName: default_cpu
+        graph:
+          blocks:
+            - id: good::multiply<float64>
+              parameters:
+                name: multiplier1
+            - id: good::multiply<float64>
+              parameters:
+                name: multiplier2
+          connections:
+            - [multiplier1, 0, multiplier2, 0]
+          exported_ports:
+            - [multiplier1, INPUT, in, in]
+            - [multiplier2, OUTPUT, out, out]
+
+    connections:
+      - [main_source, 0, multiplier, 0]
+      - [multiplier, 0, chained_multiplier, 0]
+      - [chained_multiplier, 0, counter, 0]
+      - [counter, 0, sink, 0]
+    )";
+
+            const auto graphSrc = ymlDecodeEncode(pluginsTestGrc);
+            auto       graph    = gr::loadGrc(context->loader, graphSrc);
+
+            expect(eq(graph->blocks().size(), 5UZ));
+
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
 
             expect(checkAndPrintMissingBlocks(graphSrc, graphSavedSrc));
         } catch (const std::string& e) {
@@ -298,18 +443,20 @@ const boost::ut::suite PortTests = [] {
     "Port buffer sizes"_test = [&] {
         constexpr std::string_view testGrc = R"(
 blocks:
-  - name: main_source
-    id: good::fixed_source<float64>
+  - id: good::fixed_source<float64>
     parameters:
+      name: main_source
       event_count: 100
       unknown_property: 42
-  - name: multiplier
-    id: good::multiply<float64>
-  - name: counter
-    id: builtin_counter<float64>
-  - name: sink
-    id: good::cout_sink<float64>
+  - id: good::multiply<float64>
     parameters:
+      name: multiplier
+  - id: builtin_counter<float64>
+    parameters:
+      name: counter
+  - id: good::cout_sink<float64>
+    parameters:
+      name: sink
       total_count: 100
       unknown_property: 42
 
@@ -327,7 +474,7 @@ connections:
 
             {
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
-                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(*graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
                     if (it != expectedSizes.end()) {
                         expectedSizes.erase(it);
@@ -337,20 +484,20 @@ connections:
                 });
                 expect(expectedSizes.empty());
 
-                expect(graph.connectPendingEdges());
+                expect(graph->connectPendingEdges());
 
                 std::size_t thresholdSize = 2 * 8192UZ;
-                graph.forEachEdge([&thresholdSize](const auto& edge) { //
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(*graph, [&thresholdSize](const auto& edge) { //
                     expect(thresholdSize >= edge.bufferSize());
                 });
             }
 
-            auto graphSavedSrc = gr::saveGrc(context->loader, graph);
+            auto graphSavedSrc = gr::saveGrc(context->loader, *graph);
 
             {
                 auto               graphDuplicate = gr::loadGrc(context->loader, graphSrc);
                 std::unordered_set expectedSizes{1024UZ, 2048UZ, 8192UZ};
-                graph.forEachEdge([&expectedSizes](const auto& edge) {
+                gr::graph::forEachEdge<gr::block::Category::NormalBlock>(*graph, [&expectedSizes](const auto& edge) {
                     auto it = expectedSizes.find(edge.minBufferSize());
                     if (it != expectedSizes.end()) {
                         expectedSizes.erase(it);
@@ -389,8 +536,8 @@ connections:
         const auto graph1Saved = gr::saveGrc(context->loader, graph1);
         const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
-        expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
-        expect(eq(collectEdges(graph1), collectEdges(graph2)));
+        expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
+        expect(eq(collectEdges(graph1), collectEdges(*graph2)));
     };
 
     "Vector of Ports"_test = [&] {
@@ -416,8 +563,8 @@ connections:
         const auto graph1Saved = gr::saveGrc(context->loader, graph1);
         const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
-        expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
-        expect(eq(collectEdges(graph1), collectEdges(graph2)));
+        expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
+        expect(eq(collectEdges(graph1), collectEdges(*graph2)));
     };
 };
 #endif
@@ -431,34 +578,35 @@ const boost::ut::suite SettingsTests = [] {
             using namespace gr;
 
             gr::Graph  graph1;
-            const auto expectedString        = std::string("abc");
-            const bool expectedBool          = true;
-            const auto expectedComplex       = std::complex<double>(1., 1.);
-            const auto expectedStringVector  = std::vector<std::string>{"a", "b", "c"};
-            const auto expectedBoolVector    = std::vector<bool>{true, false, true};
-            const auto expectedDoubleVector  = std::vector<double>{1., 2., 3.};
-            const auto expectedInt16Vector   = std::vector<int16_t>{1, 2, 3};
-            const auto expectedComplexVector = std::vector<std::complex<double>>{{1., 1.}, {2., 2.}, {3., 3.}};
+            const auto expectedString       = std::string("abc");
+            const bool expectedBool         = true;
+            const auto expectedComplex      = std::complex<double>(1., 1.);
+            const auto expectedStringVector = Tensor<pmt::Value>{"a", "b", "c"};
+            const auto expectedBoolVector   = Tensor<bool>(gr::data_from, {true, false, true});
+            const auto expectedDoubleVector = Tensor<double>{1., 2., 3.};
+            const auto expectedInt16Vector  = Tensor<std::int16_t>(gr::data_from, {1, 2, 3});
+
+            using cd                         = std::complex<double>;
+            const auto expectedComplexVector = Tensor<std::complex<double>>{cd{1., 1.}, cd{2., 2.}, cd{3., 3.}};
 
             std::ignore = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"bool_setting", bool(expectedBool)}, {"string_setting", expectedString}, {"complex_setting", expectedComplex}, //
                 {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
             const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
-            graph2.forEachBlock([&](const auto& node) {
-                const auto settings = node.settings().get();
-                expect(eq(std::get<bool>(settings.at("bool_setting")), expectedBool));
-                expect(eq(std::get<std::string>(settings.at("string_setting")), expectedString));
-                expect(eq(std::get<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
-                expect(eq(std::get<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
-                expect(eq(std::get<std::vector<std::string>>(settings.at("string_vector")), expectedStringVector));
-                expect(eq(std::get<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
-                expect(eq(std::get<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
-                expect(eq(std::get<std::vector<std::complex<double>>>(settings.at("complex_vector")), expectedComplexVector));
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
+                const auto settings = node->settings().get();
+                expect(eq(test::get_value_or_fail<bool>(settings.at("bool_setting")), expectedBool));
+                expect(eq(test::get_value_or_fail<std::string>(settings.at("string_setting")), expectedString));
+                expect(eq(test::get_value_or_fail<std::complex<double>>(settings.at("complex_setting")), expectedComplex));
+                expect(eq(test::get_value_or_fail<std::vector<bool>>(settings.at("bool_vector")), expectedBoolVector));
+                expect(eq(test::get_value_or_fail<std::vector<double>>(settings.at("double_vector")), expectedDoubleVector));
+                expect(eq(test::get_value_or_fail<std::vector<int16_t>>(settings.at("int16_vector")), expectedInt16Vector));
+                expect(eq(test::get_value_or_fail<std::vector<std::complex<double>>>(settings.at("complex_vector")), expectedComplexVector));
             });
 
-            expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
-            expect(eq(collectEdges(graph1), collectEdges(graph2)));
+            expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
+            expect(eq(collectEdges(graph1), collectEdges(*graph2)));
         } catch (const std::string& e) {
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
@@ -473,17 +621,23 @@ const boost::ut::suite SettingsTests = [] {
             auto&      block = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"name", "ArraySink0"}});
             const auto now   = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
             expect(block.settings().set({{"name", "ArraySink1"}}, SettingsCtx{now, "1"}).empty());
+            expect(block.settings().getStoredAll().size() == 2);
             expect(block.settings().set({{"name", "ArraySink1+10"}}, SettingsCtx{now + 10'000'000'000ULL, "1"}).empty());
+            expect(block.settings().getStoredAll().size() == 2);
             expect(block.settings().set({{"name", "ArraySink1+20"}}, SettingsCtx{now + 20'000'000'000ULL, "1"}).empty());
+            expect(block.settings().getStoredAll().size() == 2);
             expect(block.settings().set({{"name", "ArraySink2"}}, SettingsCtx{now, "2"}).empty());
+            expect(block.settings().getStoredAll().size() == 3);
             expect(block.settings().set({{"name", "ArraySink3"}}, SettingsCtx{now, 3}).empty()); // int as context name
+            expect(block.settings().getStoredAll().size() == 4);
 
             const auto graph1Saved = gr::saveGrc(context->loader, graph1);
-            const auto graph2      = gr::loadGrc(context->loader, graph1Saved);
 
-            graph2.forEachBlock([&](const auto& node) {
-                const auto& stored = node.settings().getStoredAll();
-                expect(eq(node.settings().getNStoredParameters(), 6UZ));
+            const auto graph2 = gr::loadGrc(context->loader, graph1Saved);
+
+            gr::graph::forEachBlock<gr::block::Category::NormalBlock>(*graph2, [&](const auto node) {
+                const auto& stored = node->settings().getStoredAll();
+                expect(eq(node->settings().getNStoredParameters(), 6UZ));
                 for (const auto& [ctx, ctxParameters] : stored) {
                     for (const auto& [ctxTime, settingsMap] : ctxParameters) {
                         std::string expectedName = "ArraySink0";
@@ -499,13 +653,13 @@ const boost::ut::suite SettingsTests = [] {
                             expectedName = "ArraySink3";
                         }
 
-                        expect(eq(std::get<std::string>(settingsMap.at("name")), expectedName));
+                        expect(eq(test::get_value_or_fail<std::string>(settingsMap.at("name")), expectedName));
                     }
                 }
             });
 
-            expect(eq(collectBlocks(graph1), collectBlocks(graph2)));
-            expect(eq(collectEdges(graph1), collectEdges(graph2)));
+            expect(eq(collectBlocks(graph1), collectBlocks(*graph2)));
+            expect(eq(collectEdges(graph1), collectEdges(*graph2)));
         } catch (const std::string& e) {
             std::println(std::cerr, "Unexpected exception: {}", e);
             expect(false);
@@ -515,4 +669,4 @@ const boost::ut::suite SettingsTests = [] {
 
 } // namespace gr::qa_grc_test
 
-int main() { /* tests are statically executed */ }
+int main() { return boost::ut::cfg<boost::ut::override>.run(); }

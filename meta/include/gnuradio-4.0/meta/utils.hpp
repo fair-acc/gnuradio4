@@ -1,11 +1,14 @@
 #ifndef GNURADIO_GRAPH_UTILS_HPP
 #define GNURADIO_GRAPH_UTILS_HPP
 
+#include <cassert>
 #include <complex>
 #include <cstdint>
 #include <cxxabi.h>
+#include <format>
 #include <map>
 #include <new>
+#include <numeric>
 #include <print>
 #include <ranges>
 #include <string>
@@ -13,6 +16,22 @@
 #include <tuple>
 #include <typeinfo>
 #include <unordered_map>
+
+#if __has_include(<stdfloat>) && !defined(__ADAPTIVECPP__)
+#include <stdfloat>
+#else
+#include <cstdint>
+#include <limits>
+
+// Inject into std only if truly unavailable (nonstandard, but pragmatic for compatibility)
+namespace std {
+using float32_t = float;
+using float64_t = double;
+
+static_assert(std::numeric_limits<float32_t>::is_iec559 && sizeof(float32_t) * 8 == 32, "float32_t must be a 32-bit IEEE 754 float");
+static_assert(std::numeric_limits<float64_t>::is_iec559 && sizeof(float64_t) * 8 == 64, "float64_t must be a 64-bit IEEE 754 double");
+} // namespace std
+#endif
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshadow"
@@ -428,12 +447,14 @@ inline std::string makePortableTypeName(std::string_view name) {
 
     using namespace std::string_literals;
     using gr::meta::detail::local_type_name;
-    static const auto typeMapping = std::array<std::pair<std::string, std::string>, 13>{{
+    static const auto typeMapping = std::array<std::pair<std::string, std::string>, 17>{{
         {local_type_name<std::int8_t>(), "int8"s}, {local_type_name<std::int16_t>(), "int16"s}, {local_type_name<std::int32_t>(), "int32"s}, {local_type_name<std::int64_t>(), "int64"s},         //
         {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
         {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
+        {local_type_name<std::float32_t>(), "float32"s}, {local_type_name<std::float64_t>(), "float64"},                                                                                          //
         {local_type_name<std::string>(), "string"s},                                                                                                                                              //
         {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s},                                                            //
+        {local_type_name<std::complex<std::float32_t>>(), "complex<float32>"s}, {local_type_name<std::complex<std::float64_t>>(), "complex<float64>"s},                                           //
     }};
 
     const auto it = std::ranges::find_if(typeMapping, [&](const auto& pair) { return pair.first == name; });
@@ -549,6 +570,48 @@ static_assert((fixed_string("out") + fixed_string_from_number<123>) == fixed_str
 template<typename T>
 [[nodiscard]] std::string type_name() noexcept {
     return detail::makePortableTypeName(detail::local_type_name<T>());
+}
+
+inline std::string shorten_type_name(std::string_view name) {
+    using namespace std::string_view_literals;
+
+    const bool hasLeading   = name.starts_with("::"sv);
+    const bool hasTrailing  = name.ends_with("::"sv);
+    const auto toStringView = [](auto&& r) { return std::string_view(&*r.begin(), static_cast<std::size_t>(std::ranges::distance(r))); };
+
+    std::vector<std::string_view> parts;
+    for (auto&& token : name | std::views::split("::"sv)) {
+        if (auto sv = toStringView(token); !sv.empty()) {
+            parts.push_back(sv);
+        }
+    }
+
+    if (parts.empty()) {
+        return hasLeading || hasTrailing ? "::" : "";
+    }
+
+    std::string result;
+    if (hasLeading) {
+        result += "::"sv;
+    }
+
+    if (parts.size() == 1UZ) {
+        result += hasTrailing ? std::string(1, parts.front().front()) : std::string(parts.front());
+    } else {
+        for (auto&& part : parts | std::views::take(parts.size() - 1UZ)) {
+            result += part.front();
+        }
+        if (!hasTrailing) {
+            result += "::";
+        }
+        result += parts.back();
+    }
+
+    if (hasTrailing) {
+        result += "::";
+    }
+
+    return result;
 }
 
 template<fixed_string val>
@@ -793,12 +856,160 @@ concept IsNoexceptMemberFunction = std::is_member_function_pointer_v<T> && detai
 
 } // namespace meta
 
-#if HAVE_SOURCE_LOCATION
-inline auto this_source_location(std::source_location l = std::source_location::current()) { return std::format("{}:{},{}", l.file_name(), l.line(), l.column()); }
-#else
-inline auto this_source_location() { return "not yet implemented"; }
-#endif // HAVE_SOURCE_LOCATION
+template<typename Fn>
+struct on_scope_exit {
+    Fn function;
+    on_scope_exit(Fn fn) : function(std::move(fn)) {}
+    ~on_scope_exit() { function(); }
+};
+
+struct normalise_t {};
+inline constexpr normalise_t normalise{};
+
+struct Ratio {
+    // data first
+    std::int32_t numerator{1};
+    std::int32_t denominator{1};
+
+    static constexpr Ratio invalid() noexcept { return Ratio{0, 0}; }
+
+    constexpr Ratio(std::int32_t n = 1, std::int32_t d = 1) noexcept : numerator(n), denominator(d) {}
+    constexpr Ratio(std::int32_t n, std::int32_t d, normalise_t) noexcept : Ratio(n, d) { normalise(); }
+
+    explicit constexpr Ratio(std::string_view sv) noexcept : Ratio(parse(sv).value_or(invalid())) {}
+    explicit constexpr Ratio(std::string_view sv, normalise_t) noexcept : Ratio(sv) { normalise(); }
+
+    template<class R> // std::ratio<N,D>
+    constexpr static Ratio from() {
+        return Ratio(R::num, R::den);
+    }
+
+    constexpr std::int32_t num() const noexcept { return numerator; }
+    constexpr std::int32_t den() const noexcept { return denominator; }
+
+    template<typename T = double>
+    constexpr T value() const noexcept {
+        return static_cast<T>(numerator) / static_cast<T>(denominator);
+    }
+
+    constexpr Ratio reciprocal() const {
+        assert(numerator != 0);
+        return Ratio(denominator, numerator);
+    }
+
+    friend constexpr Ratio operator+(const Ratio& a, const Ratio& b) {
+        // minimise overflow: a/b + c/d = (a*lcm_den/b)*lcm_den + ...
+        auto g = std::gcd(a.denominator, b.denominator);
+        // a/b + c/d = (a*(d/g) + c*(b/g)) / lcm
+        std::int32_t l = b.denominator / g;
+        std::int32_t r = a.denominator / g;
+        return Ratio(a.numerator * l + b.numerator * r, a.denominator * l);
+    }
+
+    friend constexpr Ratio operator-(const Ratio& a, const Ratio& b) {
+        auto         g = std::gcd(a.denominator, b.denominator);
+        std::int32_t l = b.denominator / g;
+        std::int32_t r = a.denominator / g;
+        return Ratio(a.numerator * l - b.numerator * r, a.denominator * l);
+    }
+
+    friend constexpr Ratio operator*(const Ratio& a, const Ratio& b) {
+        auto g1 = std::gcd(a.numerator, b.denominator);
+        auto g2 = std::gcd(b.numerator, a.denominator);
+        return Ratio((a.numerator / g1) * (b.numerator / g2), (a.denominator / g2) * (b.denominator / g1));
+    }
+
+    friend constexpr Ratio operator/(const Ratio& a, const Ratio& b) {
+        assert(b.numerator != 0);
+        // a/b ÷ c/d = (a*d)/(b*c)
+        auto g1 = std::gcd(a.numerator, b.numerator);
+        auto g2 = std::gcd(a.denominator, b.denominator);
+        return Ratio((a.numerator / g1) * (b.denominator / g2), (a.denominator / g2) * (b.numerator / g1));
+    }
+
+    friend constexpr Ratio operator-(const Ratio& r) { return Ratio(-r.numerator, r.denominator); }
+    friend constexpr auto  operator<=>(const Ratio& a, const Ratio& b) = default;
+    friend constexpr bool  operator==(const Ratio& a, const Ratio& b)  = default;
+
+    constexpr Ratio& operator+=(const Ratio& other) { return *this = *this + other; }
+    constexpr Ratio& operator-=(const Ratio& other) { return *this = *this - other; }
+    constexpr Ratio& operator*=(const Ratio& other) { return *this = *this * other; }
+    constexpr Ratio& operator/=(const Ratio& other) { return *this = *this / other; }
+
+    // helper
+    static constexpr std::optional<Ratio> parse(std::string_view sv) noexcept {
+        constexpr auto parse = [](std::string_view s) -> std::optional<std::int32_t> {
+            if (s.empty()) {
+                return std::nullopt;
+            }
+
+            bool        neg = (s.front() == '-');
+            std::size_t i   = (s.front() == '+' || neg) ? 1 : 0;
+            if (i == s.size()) {
+                return std::nullopt;
+            }
+
+            std::int32_t   v = 0;
+            constexpr auto M = std::numeric_limits<std::int32_t>::max();
+            constexpr auto m = std::numeric_limits<std::int32_t>::min();
+
+            for (; i < s.size(); ++i) {
+                char c = s[i];
+                if (c < '0' || c > '9') {
+                    return std::nullopt;
+                }
+                const std::int32_t d = c - '0';
+
+                if (!neg) {
+                    if (v > (M - d) / 10) {
+                        return std::nullopt;
+                    }
+                    v = v * 10 + d;
+                } else {
+                    if (v < (m + d) / 10) {
+                        return std::nullopt;
+                    }
+                    v = v * 10 - d;
+                }
+            }
+            return v;
+        };
+
+        const auto slash = sv.find('/');
+        const auto lhs   = sv.substr(0, slash);
+        const auto rhs   = (slash == std::string_view::npos) ? std::string_view{"1"} : sv.substr(slash + 1);
+
+        auto n = parse(lhs);
+        auto d = parse(rhs);
+        if (!n || !d || *d == 0) {
+            return std::nullopt;
+        }
+        return Ratio{*n, *d};
+    }
+
+    constexpr void normalise() {
+        if (denominator == 0) {
+            std::unreachable();
+        }
+        if (denominator < 0) {
+            denominator = -denominator;
+            numerator   = -numerator;
+        }
+        if (auto g = std::gcd(numerator, denominator); g > 1) {
+            numerator /= g;
+            denominator /= g;
+        }
+    }
+};
 
 } // namespace gr
+
+template<>
+struct std::formatter<gr::Ratio> : std::formatter<std::string_view> {
+    template<class FormatContext>
+    auto format(const gr::Ratio& r, FormatContext& ctx) const {
+        return std::formatter<std::string_view>::format((r.den() == 1) ? std::format("{}", r.num()) : std::format("{}/{}", r.num(), r.den()), ctx);
+    }
+};
 
 #endif // include guard

@@ -3,6 +3,7 @@
 
 #include "gnuradio-4.0/TriggerMatcher.hpp"
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
 #include <gnuradio-4.0/algorithm/dataset/DataSetUtils.hpp>
@@ -119,14 +120,17 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
     }
 
     void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
-        if (newSettings.contains("n_pre")) {
+        if (const auto it = newSettings.find("n_pre"); it != newSettings.end()) {
             if constexpr (streamOut) {
                 if (n_pre.value > out.buffer().streamBuffer.size()) {
                     using namespace gr::message;
                     throw gr::exception("n_pre must be <= output port CircularBuffer size");
                 }
             }
-            _history.resize(MIN_BUFFER_SIZE + std::get<gr::Size_t>(newSettings.at("n_pre")));
+            auto prePtr = it->second.get_if<gr::Size_t>();
+            if (prePtr != nullptr) {
+                _history.resize(MIN_BUFFER_SIZE + *prePtr);
+            }
         }
 
         if constexpr (!streamOut) {
@@ -314,7 +318,7 @@ private:
             assert(filterState.contains("isSingleTrigger"));
             result.startTrigger    = matchResult == trigger::MatchResult::Matching;
             result.endTrigger      = matchResult == trigger::MatchResult::NotMatching;
-            result.isSingleTrigger = std::get<bool>(filterState.at("isSingleTrigger"));
+            result.isSingleTrigger = filterState.at("isSingleTrigger").value_or(false);
         }
         return result;
     }
@@ -344,7 +348,7 @@ private:
         dataSet.signal_units.emplace_back(signal_unit);
         dataSet.signal_ranges.resize(1UZ);  // one data set
         dataSet.meta_information.resize(1); // one data set
-        dataSet.meta_information[0]["ctx"]    = filter;
+        dataSet.meta_information[0]["ctx"]    = filter.value;
         dataSet.meta_information[0]["n_pre"]  = n_pre;
         dataSet.meta_information[0]["n_post"] = n_post;
         dataSet.meta_information[0]["n_max"]  = n_max;

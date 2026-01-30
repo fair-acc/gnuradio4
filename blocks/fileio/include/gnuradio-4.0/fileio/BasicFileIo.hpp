@@ -75,8 +75,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     PortIn<T> in;
 
     A<std::string, "file name", Doc<"base filename, prefixed if ">, Visible>              file_name;
-    Mode                                                                                  _mode              = Mode::overwrite;
-    A<std::string, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>    mode               = std::string(magic_enum::enum_name(_mode));
+    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>           mode               = Mode::overwrite;
     A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">, Visible> max_bytes_per_file = 0U;
 
     GR_MAKE_REFLECTABLE(BasicFileSink, in, file_name, mode, max_bytes_per_file);
@@ -88,7 +87,6 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     std::string   _actualFileName;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        _mode = magic_enum::enum_cast<Mode>(mode, magic_enum::case_insensitive).value_or(_mode);
         if (lifecycle::isActive(this->state())) {
             closeFile();
             openNextFile();
@@ -145,7 +143,7 @@ private:
         }
 
         // Open file handle based on mode
-        switch (_mode) {
+        switch (mode) {
         case Mode::overwrite: {
             _actualFileName = file_name.value;
             _file.open(_actualFileName, std::ios::binary | std::ios::trunc);
@@ -156,7 +154,7 @@ private:
         } break;
         case Mode::multi: {
             // _fileCounter ensures that the filenames are unique and still sortable by date-time, with an additional counter to handle rapid successive file creation.
-            _actualFileName = filePath.parent_path() / (gr::time::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string());
+            _actualFileName = (filePath.parent_path() / (gr::time::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string())).string();
             _file.open(_actualFileName, std::ios::binary);
             break;
         }
@@ -184,8 +182,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     PortOut<T> out;
 
     A<std::string, "file name", Doc<"Base filename, prefixed if necessary">, Visible>          file_name;
-    Mode                                                                                       _mode        = Mode::overwrite;
-    A<std::string, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>         mode         = std::string(magic_enum::enum_name(_mode));
+    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>                mode         = Mode::overwrite;
     A<bool, "repeat", Doc<"true: repeat back-to-back">>                                        repeat       = false;
     A<gr::Size_t, "offset", Doc<"file start offset in bytes">, Visible>                        offset       = 0U;
     A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible> length       = 0U;
@@ -201,10 +198,6 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     std::size_t                        _currentFileIndex    = 0UZ;
     std::string                        _currentFileName;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { //
-        _mode = magic_enum::enum_cast<Mode>(mode, magic_enum::case_insensitive).value_or(_mode);
-    }
-
     void start() {
         _currentFileIndex = 0UZ;
         _totalBytesRead   = 0UZ;
@@ -215,7 +208,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
             throw gr::exception(std::format("path/file '{}' does not exist.", file_name.value));
         }
 
-        switch (_mode) {
+        switch (mode) {
         case Mode::overwrite:
         case Mode::append: {
             _filesToRead.push_back(filePath);
@@ -244,9 +237,9 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         if (!_emittedStartTrigger && !trigger_name.value.empty()) {
             dataOut.publishTag(
                 property_map{
-                    {std::string(tag::TRIGGER_NAME.shortKey()), trigger_name.value},                                                     //
-                    {std::string(tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(std::chrono::system_clock::now())}, //
-                    {std::string(tag::TRIGGER_OFFSET.shortKey()), 0.f}                                                                   //
+                    {std::pmr::string(tag::TRIGGER_NAME.shortKey()), trigger_name.value},                                                     //
+                    {std::pmr::string(tag::TRIGGER_TIME.shortKey()), settings::convertTimePointToUint64Ns(std::chrono::system_clock::now())}, //
+                    {std::pmr::string(tag::TRIGGER_OFFSET.shortKey()), 0.f}                                                                   //
                 },
                 0UZ);
             _emittedStartTrigger = true;

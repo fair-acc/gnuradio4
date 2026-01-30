@@ -30,7 +30,7 @@
 namespace gr::blocks::soapy {
 
 namespace detail {
-inline bool equalWithinOnePercent(const std::vector<double>& a, const std::vector<double>& b) {
+inline bool equalWithinOnePercent(const auto& a, const auto& b) {
     return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](double x, double y) { return std::abs(x - y) <= 0.01 * std::max(std::abs(x), std::abs(y)); });
 }
 } // namespace detail
@@ -57,11 +57,11 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     A<std::string, "device driver name", Visible>                                                        device;
     A<std::string, "add. device parameter", Visible>                                                     device_parameter;
     A<float, "sample rate", Unit<"samples/s">, Doc<"sampling rate in samples per second (Hz)">, Visible> sample_rate = 1'000'000.f;
-    A<std::vector<gr::Size_t>, "RX channel ID mapping vector", Visible>                                  rx_channels = initDefaultValues<true>(gr::Size_t(0U));
-    A<std::vector<std::string>, "RX channel antenna mapping", Visible>                                   rx_antennae;
-    A<std::vector<double>, "RX center frequency", Unit<"Hz">, Doc<"RX-RF center frequency">, Visible>    rx_center_frequency = initDefaultValues(107'000'000.);
-    A<std::vector<double>, "RX bandwidth", Unit<"Hz">, Doc<"RX-RF bandwidth">, Visible>                  rx_bandwdith        = initDefaultValues(double(sample_rate / 2));
-    A<std::vector<double>, "Rx gain", Unit<"dB">, Doc<"RX channel gain">, Visible>                       rx_gains            = initDefaultValues(10.);
+    A<Tensor<gr::Size_t>, "RX channel ID mapping vector", Visible>                                       rx_channels = initDefaultValues<true>(gr::Size_t(0U));
+    A<Tensor<pmt::Value>, "RX channel antenna mapping", Visible>                                         rx_antennae;
+    A<Tensor<double>, "RX center frequency", Unit<"Hz">, Doc<"RX-RF center frequency">, Visible>         rx_center_frequency = initDefaultValues(107'000'000.);
+    A<Tensor<double>, "RX bandwidth", Unit<"Hz">, Doc<"RX-RF bandwidth">, Visible>                       rx_bandwdith        = initDefaultValues(double(sample_rate / 2));
+    A<Tensor<double>, "Rx gain", Unit<"dB">, Doc<"RX channel gain">, Visible>                            rx_gains            = initDefaultValues(10.);
 
     // low-level ABI
     A<std::uint32_t, "max polling chunk size", Doc<"ideally N x 512">, Visible, TSizeChecker> max_chunck_size    = 512U << 4U;
@@ -145,7 +145,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
             for (std::size_t i = 0UZ; i < rx_channels->size(); ++i) {
                 output[i] = std::span<T>(outputs[i]).subspan(0, maxSamples);
             }
-            ret = _rxStream.readStreamIntoBufferList(flags, time_ns, max_time_out_us, output);
+            ret = _rxStream.readStreamIntoBufferList(flags, time_ns, static_cast<long int>(max_time_out_us), output);
         }
         // for detailed debugging: detail::printSoapyReturnDebugInfo(ret, flags, time_ns);
 
@@ -200,7 +200,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         std::size_t nChannels  = rx_channels->size();
         std::size_t nAntaennae = rx_antennae->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            std::string antenna = rx_antennae->at(std::min(i, nAntaennae - 1UZ));
+            std::string antenna = rx_antennae->at(std::min(i, nAntaennae - 1UZ)).value_or(std::string());
             if (!antenna.empty()) {
                 _device.setAntenna(SOAPY_SDR_RX, rx_channels->at(i), antenna);
             }

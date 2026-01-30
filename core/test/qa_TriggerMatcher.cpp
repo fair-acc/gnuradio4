@@ -71,7 +71,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(!std::get<bool>(state.at("isSingleTrigger")));
+            expect(!state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Ignore));
@@ -95,7 +95,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(!std::get<bool>(state.at("isSingleTrigger")));
+            expect(!state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Ignore));
@@ -115,7 +115,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(!std::get<bool>(state.at("isSingleTrigger")));
+            expect(!state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Ignore));
             expect(eq(matcher(filter, createTag("info", "room2"), state), Matching));
@@ -133,7 +133,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(!std::get<bool>(state.at("isSingleTrigger")));
+            expect(!state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Ignore)); // skipped due to ^alarm
             expect(eq(matcher(filter, createTag("other", "room1"), state), Matching));
@@ -152,7 +152,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(!std::get<bool>(state.at("isSingleTrigger")));
+            expect(!state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Ignore)); // skipped due to ^alarm/^room1
             expect(eq(matcher(filter, createTag("other", "room2"), state), Matching));
@@ -173,7 +173,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(!std::get<bool>(state.at("isSingleTrigger")));
+            expect(!state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Ignore));
             expect(eq(matcher(filter, createTag("alarm", "room2"), state), Matching));
@@ -192,7 +192,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(!std::get<bool>(state.at("isSingleTrigger")));
+            expect(!state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Ignore));
             expect(eq(matcher(filter, createTag("other", "room1"), state), Matching));
@@ -210,7 +210,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(std::get<bool>(state.at("isSingleTrigger")));
+            expect(state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));
@@ -225,7 +225,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(std::get<bool>(state.at("isSingleTrigger")));
+            expect(state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));
@@ -241,7 +241,7 @@ const boost::ut::suite<"BasicTriggerNameCtxMatcher"> triggerTest = [] {
             property_map   state;
 
             expect(nothrow([&state] { expect(eq(matcher(filter, Tag{}, state), Ignore)); }));
-            expect(std::get<bool>(state.at("isSingleTrigger")));
+            expect(state.at("isSingleTrigger").value_or(true));
 
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));
             expect(eq(matcher(filter, createTag("alarm", "room1"), state), Matching));

@@ -3,7 +3,7 @@ project(MyProject LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 
-option(ENABLE_SPLIT "Enable splitting of generated files (pass --split to the parser)" ON)
+option(ENABLE_SPLIT "Enable splitting of generated files (pass --split to the parser)" OFF)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -49,9 +49,13 @@ if(NOT
    build_result
    EQUAL
    0)
-  message(FATAL_ERROR "Failed to build gnuradio_4_0_parse_registrations tool: ${build_error}")
+  message(FATAL_ERROR "Failed to build gnuradio_4_0_parse_registrations tool: ${build_error} ${build_output}")
 else()
-  set(PARSER_EXECUTABLE "${TOOLS_BUILD_DIR}/gnuradio_4_0_parse_registrations")
+  if(WIN32)
+    set(PARSER_EXECUTABLE "${TOOLS_BUILD_DIR}/gnuradio_4_0_parse_registrations.exe")
+  else()
+    set(PARSER_EXECUTABLE "${TOOLS_BUILD_DIR}/gnuradio_4_0_parse_registrations")
+  endif()
   message(STATUS "Parser tool built: ${PARSER_EXECUTABLE}")
 endif()
 

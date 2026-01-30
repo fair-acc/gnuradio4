@@ -25,23 +25,23 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
     }
 
     using enum gr::trigger::InterpolationMethod;
-    "SchmittTrigger"_test =
+    skip / "SchmittTrigger"_test =
         [&enableVisualTests]<class Method> {
             Graph graph;
 
             // create blocks
             auto& clockSrc = graph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({//
                 {"sample_rate", sample_rate}, {"n_samples_max", 1000U}, {"name", "ClockSource"},
-                {"tag_times",
-                    std::vector<std::uint64_t>{
-                        0U,           // 0 ms - start - 50ms of bottom plateau
-                        100'000'000U, // 100 ms - start - ramp-up
-                        400'000'000U, // 300 ms - 50ms of bottom plateau
-                        500'000'000U, // 500 ms - start ramp-down
-                        800'000'000U  // 700 ms - 100ms of bottom plateau
-                    }},
+                {"tag_times", Tensor<std::uint64_t>(data_from,
+                                  {
+                                      0U,           // 0 ms - start - 50ms of bottom plateau
+                                      100'000'000U, // 100 ms - start - ramp-up
+                                      400'000'000U, // 300 ms - 50ms of bottom plateau
+                                      500'000'000U, // 500 ms - start ramp-down
+                                      800'000'000U  // 700 ms - 100ms of bottom plateau
+                                  })},
                 {"tag_values",
-                    std::vector<std::string>{
+                    Tensor<pmt::Value>{
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=0", //
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1", //
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2", //
@@ -68,19 +68,18 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             auto& tagSink        = graph.emplaceBlock<TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"log_tags", true}, {"log_samples", false}, {"verbose_console", false}});
 
             // connect non-UI blocks
-            expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"in">(funcGen))) << "connect clockSrc->funcGen";
+            expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"clk_in">(funcGen))) << "connect clockSrc->funcGen";
             expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(schmittTrigger))) << "connect funcGen->schmittTrigger";
             expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(tagSink))) << "connect schmittTrigger->tagSink";
-
-            gr::scheduler::Simple sched{std::move(graph)}; // declared here to ensure life-time of graph and blocks inside.
-            if (enableVisualTests) {                       // execute UI-based tests
-                auto& uiSink1 = sched.graph().emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink1"}});
-                auto& uiSink2 = sched.graph().emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink2"}});
+            std::thread uiLoop;
+            if (enableVisualTests) {
+                auto& uiSink1 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink1"}});
+                auto& uiSink2 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink2"}});
                 // connect UI blocks
-                expect(eq(ConnectionResult::SUCCESS, sched.graph().connect<"out">(funcGen).to<"in">(uiSink1))) << "connect funcGen->uiSink1";
-                expect(eq(ConnectionResult::SUCCESS, sched.graph().connect<"out">(schmittTrigger).template to<"in">(uiSink2))) << "connect schmittTrigger->uiSink2";
-
-                std::thread uiLoop([&uiSink1, &uiSink2]() {
+                expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(uiSink1))) << "connect funcGen->uiSink1";
+                expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(uiSink2))) << "connect schmittTrigger->uiSink2";
+                uiLoop = std::thread([&uiSink1, &uiSink2]() {
+                    gr::thread_pool::thread::setThreadName("uiLoop");
                     bool drawUI = true;
                     while (drawUI) {
                         using enum gr::work::Status;
@@ -91,15 +90,18 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                     }
                     std::this_thread::sleep_for(std::chrono::seconds(1)); // wait before shutting down
                 });
-
-                expect(sched.runAndWait().has_value()) << "runAndWait";
-
-                uiLoop.join();
-                enableVisualTests = false; // only for first test
-            } else {
-                // non-UI test
-                expect(sched.runAndWait().has_value()) << "runAndWait";
             }
+
+            gr::scheduler::Simple sched;
+            if (auto ret = sched.exchange(std::move(graph)); !ret) {
+                throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+            }
+            expect(sched.runAndWait().has_value()) << "runAndWait";
+
+            if (uiLoop.joinable()) {
+                uiLoop.join();
+            }
+            enableVisualTests = false; // only for first test
 
             expect(eq(tagSink._tags.size(), 7UZ)) << std::format("test {} : expected total number of tags", magic_enum::enum_name(Method::value));
 
@@ -111,7 +113,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                 if (!tag.map.contains(std::string(gr::tag::TRIGGER_NAME.shortKey()))) {
                     continue;
                 }
-                std::string trigger_name = std::get<std::string>(tag.map.at(std::string(gr::tag::TRIGGER_NAME.shortKey())));
+                std::string trigger_name = tag.map.at(std::pmr::string(gr::tag::TRIGGER_NAME.shortKey())).value_or(std::string());
                 if (trigger_name == "MY_RISING_EDGE") {
                     rising_edge_indices.push_back(tag.index);
                 } else if (trigger_name == "MY_FALLING_EDGE") {

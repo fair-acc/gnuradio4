@@ -48,9 +48,9 @@ const boost::ut::suite SequenceTests = [] {
     using namespace gr::filter;
 
     "FIR and IIR general tests"_test = [] {
-        std::vector<double> fir_coeffs(10, 0.1); // box car filter
-        std::vector<double> iir_coeffs_b{0.55, 0};
-        std::vector<double> iir_coeffs_a{1, -0.45};
+        Tensor<double> fir_coeffs(10, 0.1); // box car filter
+        Tensor<double> iir_coeffs_b(data_from, {0.55, 0.0});
+        Tensor<double> iir_coeffs_a(data_from, {1.0, -0.45});
 
         // Create FIR and IIR filter instances
         fir_filter<double> fir_filter;
@@ -90,8 +90,8 @@ const boost::ut::suite SequenceTests = [] {
     };
 
     "IIR equality tests"_test = [] {
-        std::vector<double> iir_coeffs_b{0.020083365564211, 0.040166731128423, 0.020083365564211};
-        std::vector<double> iir_coeffs_a{1.0, -1.561018075800718, 0.641351538057563};
+        Tensor<double> iir_coeffs_b(data_from, {0.020083365564211, 0.040166731128423, 0.020083365564211});
+        Tensor<double> iir_coeffs_a(data_from, {1.0, -1.561018075800718, 0.641351538057563});
 
         iir_filter<double, IIRForm::DF_I> iir_filter_I;
         iir_filter_I.b = iir_coeffs_b;
@@ -125,6 +125,12 @@ const boost::ut::suite SequenceTests = [] {
     };
 };
 
+template<typename T, gr::filter::FilterType type>
+struct FilterTestParam {
+    using value_type                  = T;
+    static constexpr auto filter_type = type;
+};
+
 const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
     using namespace boost::ut;
     using namespace gr::filter;
@@ -140,24 +146,19 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
     "BasicFilter - Low-pass Filter Test"_test =
         []<typename TTestParameter>() {
-            using T         = typename TTestParameter::first_type;
+            using T         = typename TTestParameter::value_type;
             using ValueType = meta::fundamental_base_value_type_t<T>;
-            const std::string filterType{TTestParameter::second_type::value.c_str()};
+            auto filterType = TTestParameter::filter_type;
 
             BasicFilter<T> filter;
             filter.filter_type       = filterType;
-            filter.filter_response   = "LOWPASS";
+            filter.filter_response   = filter::Type::LOWPASS;
             filter.filter_order      = filterOrder;
             filter.f_low             = f_low;
             filter.sample_rate       = sampleRate;
-            filter.iir_design_method = "CHEBYSHEV1";
-            filter.fir_design_method = "Hamming";
+            filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
+            filter.fir_design_method = algorithm::window::Type::Hamming;
             filter.designFilter(); // triggers filter re-computation and setting of internal enums
-
-            expect(eq(filterType, magic_enum::enum_name(filter._filter_type))) << "filter type mismatch";
-            expect(eq(filter.filter_response, magic_enum::enum_name(filter._filter_response))) << "filter response type mismatch";
-            expect(eq(filter.iir_design_method, magic_enum::enum_name(filter._iir_design_method))) << "filter IIR response type mismatch";
-            expect(eq(filter.fir_design_method, magic_enum::enum_name(filter._fir_design_method))) << "filter FIR response type mismatch";
 
             "verify in-band signal passes through"_test = [&filter] {
                 std::vector<T> outputSignal;
@@ -195,35 +196,31 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 expect(le(maxOutput, static_cast<ValueType>(.2f))) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
             };
         } |
-        std::tuple<std::pair<float, meta::constexpr_string<"FIR">>,           //
-            std::pair<double, meta::constexpr_string<"FIR">>,                 //
-            std::pair<UncertainValue<float>, meta::constexpr_string<"FIR">>,  //
-            std::pair<UncertainValue<double>, meta::constexpr_string<"FIR">>, //
-            std::pair<float, meta::constexpr_string<"IIR">>,                  //
-            std::pair<double, meta::constexpr_string<"IIR">>,                 //
-            std::pair<UncertainValue<float>, meta::constexpr_string<"IIR">>,  //
-            std::pair<UncertainValue<double>, meta::constexpr_string<"IIR">>>{};
+        std::tuple<FilterTestParam<float, FilterType::FIR>,           //
+            FilterTestParam<double, FilterType::FIR>,                 //
+            FilterTestParam<UncertainValue<float>, FilterType::FIR>,  //
+            FilterTestParam<UncertainValue<double>, FilterType::FIR>, //
+            FilterTestParam<float, FilterType::IIR>,                  //
+            FilterTestParam<double, FilterType::IIR>,                 //
+            FilterTestParam<UncertainValue<float>, FilterType::IIR>,  //
+            FilterTestParam<UncertainValue<double>, FilterType::IIR>>{};
 
-    "BasicDecimatingFilter - Low-pass Filter Test"_test = [](const std::string& filterType) {
+    "BasicDecimatingFilter - Low-pass Filter Test"_test = [](const FilterType& filterType) {
         using T = double;
 
         // Instantiate the BasicDecimatingFilter with the desired decimation rate
         BasicDecimatingFilter<T> filter;
         filter.filter_type       = filterType;
-        filter.filter_response   = "LOWPASS";
+        filter.filter_response   = filter::Type::LOWPASS;
         filter.filter_order      = filterOrder;
         filter.f_low             = f_low;
         filter.sample_rate       = sampleRate;
-        filter.iir_design_method = "CHEBYSHEV1";
-        filter.fir_design_method = "Hamming";
+        filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
+        filter.fir_design_method = algorithm::window::Type::Hamming;
         filter.decimate          = decimationRate;
         filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
         expect(eq(filter.input_chunk_size, decimationRate)) << "decimationRate type mismatch";
-        expect(eq(filterType, magic_enum::enum_name(filter._filter_type))) << "filter type mismatch";
-        expect(eq(filter.filter_response, magic_enum::enum_name(filter._filter_response))) << "filter response type mismatch";
-        expect(eq(filter.iir_design_method, magic_enum::enum_name(filter._iir_design_method))) << "filter IIR response type mismatch";
-        expect(eq(filter.fir_design_method, magic_enum::enum_name(filter._fir_design_method))) << "filter FIR response type mismatch";
 
         "verify in-band signal passes through"_test = [&filter] {
             std::vector<T> inputSignal(numSamples);
@@ -262,7 +259,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
             expect(le(maxOutput, T{0.2})) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
         };
-    } | std::vector<std::string>({"FIR", "IIR"});
+    } | std::vector<FilterType>({FilterType::FIR, FilterType::IIR});
 
     "Decimator - Low-pass Filter Test"_test = [] {
         using namespace gr::testing;
@@ -277,7 +274,11 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(decimator)));
         expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(sink)));
 
-        auto sched = gr::scheduler::Simple<>(std::move(flow));
+        gr::scheduler::Simple<> sched;
+        ;
+        if (auto ret = sched.exchange(std::move(flow)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
         expect(sched.runAndWait().has_value());
 
         expect(eq(decimator.decim, decimationFactor));

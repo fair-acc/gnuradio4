@@ -52,8 +52,6 @@ int main(int argc, char* argv[]) {
     std::println("3 optional settings are available: qa_PerformanceMonitor <run_time>[in sec] <test_case_id>[1:no tags,2:moderate,3:1-to-1] <output_file_path>");
     std::println("<run_time>:{} s, <test_case_id>:{}, <output_file_path>:{}", runTime, testCaseId, outFilePath);
 
-    auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 2);
-
     gr::Size_t         nSamples         = 0U;
     gr::Size_t         evaluatePerfRate = 100'000;
     Graph              testGraph;
@@ -78,7 +76,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (nSamplesPerTag > 0) {
-        src._tags = {gr::Tag(nSamplesPerTag - 1, {{tagName, 2000.f}})};
+        src._tags = {gr::Tag(nSamplesPerTag - 1, gr::property_map{{convert_string_domain(tagName), 2000.f}})};
     };
 
     auto& monitorBulk        = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitorBulk"}, {"log_samples", false}, {"log_tags", false}});
@@ -97,7 +95,10 @@ int main(int argc, char* argv[]) {
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outRes">(monitorPerformance).to<"in">(sinkRes)));
     expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outRate">(monitorPerformance).to<"in">(sinkRate)));
 
-    auto sched                                        = scheduler::Simple{std::move(testGraph), threadPool};
+    gr::scheduler::Simple<> sched;
+    if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, runTime > 0 ? std::chrono::seconds(runTime) : 2s);
     expect(sched.runAndWait().has_value());
 

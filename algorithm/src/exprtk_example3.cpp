@@ -50,8 +50,7 @@ int main() {
         T t = t_min + dt * T(i);
         return std::sin(2.f * std::numbers::pi_v<T> * t) + noise_dist(rng);
     });
-
-    v_in.assign(time_range.begin(), time_range.end());
+    std::ranges::copy(time_range, std::back_inserter(v_in));
 
     exprtk::symbol_table<T> symbol_table;
     symbol_table.add_vector("v_in", v_in);

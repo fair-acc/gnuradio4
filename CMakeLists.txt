@@ -48,6 +48,12 @@ if(NOT MSVC)
   set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${_LD_GC_SECTIONS}")
   set(CMAKE_EXE_LINKER_FLAGS_MINSIZEREL "${_LD_GC_SECTIONS}")
   set(CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL "${_LD_GC_SECTIONS}")
+  if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # we need to set -Wa,-mbig-obj or build fails with gcc
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wa,-mbig-obj")
+    # on windows gcc requires stdc++exp to link for <format> and <print> functions
+    set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} -lstdc++exp")
+  endif()
 elseif(MSVC)
   set(CMAKE_CXX_FLAGS_DEBUG "/Od /Zi /Zf /DDEBUG")
   set(CMAKE_CXX_FLAGS_RELEASE "/O2 /GL /DNDEBUG")
@@ -90,15 +96,17 @@ if(NOT DEFINED GR_TOPLEVEL_PROJECT)
   endif()
 endif()
 
+set(GR_USE_ADAPTIVE_CPP OFF) # Detect AdaptiveCpp via compiler executable name
+if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*" OR CMAKE_CXX_COMPILER MATCHES ".*adaptivecpp.*")
+  set(GR_USE_ADAPTIVE_CPP ON)
+  message(STATUS "Detected AdaptiveCpp based on compiler path: ${CMAKE_CXX_COMPILER}")
+endif()
+
 # Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
 option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
 option(USE_CCACHE "Use ccache if available" ON)
 option(INTERNAL_ENABLE_BLOCK_PLUGINS "Enable building the plugin system" ${REGISTRY_DEFAULT})
-if(EMSCRIPTEN)
-  option(WARNINGS_AS_ERRORS "Enable -Werror flags" OFF) # some ubiquitous warnings in UT need to be fixed first.
-else()
-  option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
-endif()
+option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 option(TIMETRACE "Enable clang's -ftime-trace" OFF)
 option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 option(UB_SANITIZER "Enable undefined behavior sanitizer" OFF)
@@ -106,12 +114,50 @@ option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
+set(GR_MAX_WASM_THREAD_COUNT
+    60
+    CACHE STRING "Max number of threads for WASM pthread pool")
+add_compile_definitions(GR_MAX_WASM_THREAD_COUNT=${GR_MAX_WASM_THREAD_COUNT}) # propagate to C++
+set(GR_ENABLE_HTTP
+    "ON"
+    CACHE
+      STRING
+      "HTTP client support (libcurl wrapper): ON=enable and require libcurl (error if not found), OFF=disable, OPTIONAL=enable only if libcurl is found, otherwise disable"
+)
+set_property(
+  CACHE GR_ENABLE_HTTP
+  PROPERTY STRINGS
+           ON
+           OFF
+           OPTIONAL)
 
-if(ENABLE_TESTING AND (UNIX OR APPLE))
+if(ENABLE_TESTING
+   AND (UNIX
+        OR APPLE
+        OR WIN32))
   include(CTest)
   list(APPEND CMAKE_CTEST_ARGUMENTS "--output-on-failure")
   enable_testing()
   message("Building Tests and benchmarks.")
+endif()
+
+# apply known LSAN suppressions to all tests
+if(ADDRESS_SANITIZER OR UB_SANITIZER)
+  set(ASAN_SUPPRESSION_FILE "${CMAKE_SOURCE_DIR}/cmake/asan_suppressions.supp")
+  if(EXISTS "${ASAN_SUPPRESSION_FILE}")
+    set(ENV_ASAN_OPTIONS "ASAN_OPTIONS=suppressions=${ASAN_SUPPRESSION_FILE}")
+    message(STATUS "LeakSanitizer suppression enabled: ${ASAN_SUPPRESSION_FILE}")
+  else()
+    message(WARNING "AddressSanitizer suppression file not found: ${ASAN_SUPPRESSION_FILE}")
+  endif()
+  set(LSAN_SUPPRESSION_FILE "${CMAKE_SOURCE_DIR}/cmake/lsan_suppressions.supp")
+  if(EXISTS "${LSAN_SUPPRESSION_FILE}")
+    set(ENV_LSAN_OPTIONS "LSAN_OPTIONS=suppressions=${LSAN_SUPPRESSION_FILE}")
+    message(STATUS "LeakSanitizer suppression enabled: ${LSAN_SUPPRESSION_FILE}")
+  else()
+    message(WARNING "LeakSanitizer suppression file not found: ${LSAN_SUPPRESSION_FILE}")
+  endif()
+  set_property(GLOBAL PROPERTY _GR_TEST_ENV "${ENV_ASAN_OPTIONS};${ENV_LSAN_OPTIONS}")
 endif()
 
 if(EMSCRIPTEN OR NOT GR_ENABLE_BLOCK_REGISTRY)
@@ -122,6 +168,16 @@ if((ADDRESS_SANITIZER AND UB_SANITIZER)
    OR (ADDRESS_SANITIZER AND THREAD_SANITIZER)
    OR (UB_SANITIZER AND THREAD_SANITIZER))
   message(FATAL_ERROR "Only one sanitizer can be enabled at a time.")
+endif()
+
+if(GR_USE_ADAPTIVE_CPP
+   AND ((ADDRESS_SANITIZER
+         OR UB_SANITIZER
+         OR THREAD_SANITIZER)))
+  message(
+    FATAL_ERROR
+      "SYCL is incompatible with ADDRESS_SANITIZER=${ADDRESS_SANITIZER} or UB_SANITIZER=${UB_SANITIZER} or THREAD_SANITIZER=${THREAD_SANITIZER}."
+  )
 endif()
 
 include(cmake/CompilerWarnings.cmake)
@@ -200,14 +256,19 @@ string(
           "${ALL_COMPILER_FLAGS}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
-  add_compile_options(-stdlib=libc++)
+  if(NOT GR_USE_ADAPTIVE_CPP)
+    message(STATUS "Using plain Clang – enabling libc++")
+    add_compile_options(-stdlib=libc++)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
+  else()
+    message(STATUS "AdaptiveCpp detected – skipping libc++ settings")
+  endif()
   if(TIMETRACE)
     add_compile_options(-ftime-trace)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -ftime-trace")
     message(STATUS "Enable TIMETRACE: ${TIMETRACE}")
   endif()
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(ENABLE_TBB)
     find_package(TBB REQUIRED)
@@ -224,26 +285,23 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(Clang|GNU)")
         -fsanitize-address-use-after-scope
         -fsanitize=leak
         -fno-omit-frame-pointer
-        -fstack-protector-strong
-        -fstack-clash-protection)
+        -fstack-protector-strong)
   elseif(UB_SANITIZER)
     set(SANITIZER_FLAGS
         -fsanitize=undefined
         -fsanitize-address-use-after-scope
         -fsanitize=leak
         -fno-omit-frame-pointer
-        -fstack-protector-strong
-        -fstack-clash-protection)
+        -fstack-protector-strong)
   elseif(THREAD_SANITIZER)
     set(SANITIZER_FLAGS -fsanitize=thread -fsanitize=thread)
   endif()
 
   if(DEFINED SANITIZER_FLAGS)
-    add_compile_options(
-      ${SANITIZER_FLAGS}
-      -fno-omit-frame-pointer
-      -fstack-protector-strong
-      -fstack-clash-protection)
+    add_compile_options(${SANITIZER_FLAGS} -fno-omit-frame-pointer -fstack-protector-strong)
+    if(NOT EMSCRIPTEN)
+      add_compile_options(${SANITIZER_FLAGS} -fstack-clash-protection)
+    endif()
     add_link_options(${SANITIZER_FLAGS})
     message(STATUS "Enabled sanitizer flags: ${SANITIZER_FLAGS}")
   endif()
@@ -270,7 +328,8 @@ if(EMSCRIPTEN)
     # for debug "SHELL:--profiling-funcs" # additional for debug "SHELL:--emit-symbol-map" # additional for debug
     -fwasm-exceptions
     -pthread
-    "SHELL:-s PTHREAD_POOL_SIZE=60"
+    "SHELL:-s PTHREAD_POOL_SIZE=${GR_MAX_WASM_THREAD_COUNT}"
+    "SHELL:-s PTHREAD_POOL_SIZE_STRICT=2"
     "SHELL:-s FETCH=1"
     "SHELL:-s WASM=1" # output as web-assembly
   )
@@ -281,6 +340,10 @@ if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
   target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
                              INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+
+  set(magic_enum_public_headers third_party/magic_enum/magic_enum.hpp third_party/magic_enum/magic_enum_utility.hpp)
+  set_target_properties(magic_enum PROPERTIES PUBLIC_HEADER "${magic_enum_public_headers}")
+  install(TARGETS magic_enum PUBLIC_HEADER DESTINATION include)
 endif()
 
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
@@ -292,18 +355,13 @@ target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_part
                                          "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
 if(EMSCRIPTEN)
   target_compile_options(exprtk PRIVATE -O1 -g0)
-elseif()
+else()
   target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
 endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
 # include exprtk header-only - END
 
 include(FetchContent)
-FetchContent_Declare(
-  pmt
-  GIT_REPOSITORY https://github.com/gnuradio/pmt.git
-  GIT_TAG e1a46cb61decb044f6ab0a58a77211beb3630340 # latest as of 2023-12-06
-)
 
 set(BOOST_UT_DISABLE_MODULE
     ON
@@ -324,115 +382,66 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG v0.18.1)
 
-FetchContent_MakeAvailable(
-  pmt
-  ut
-  vir-simd
-  cpp-httplib)
+set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
+# Native HTTP support using CPR and libCurl
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
+  set(GR_HTTP_ENABLED FALSE)
+
+  if(NOT
+     GR_ENABLE_HTTP
+     STREQUAL
+     "OFF")
+    find_package(CURL QUIET)
+
+    # ON  -> require libcurl (error if missing) OPTIONAL -> enable only if libcurl is found
+    if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT CURL_FOUND)
+      message(FATAL_ERROR "GR_ENABLE_HTTP is ON, but libcurl was not found. "
+                          "Install libcurl (e.g. libcurl4-openssl-dev) or set GR_ENABLE_HTTP=OFF/OPTIONAL.")
+    endif()
+
+    if(CURL_FOUND)
+      set(CPR_USE_SYSTEM_CURL
+          ON
+          CACHE BOOL "Use system libcurl in CPR" FORCE)
+
+      set(cpr_patch_command git apply --ignore-space-change --ignore-whitespace
+                            "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
+
+      message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}/patches/cpr-disable-std-fs-test.diff")
+
+      FetchContent_Declare(
+        cpr
+        GIT_REPOSITORY https://github.com/libcpr/cpr.git
+        GIT_TAG 1.14.1
+        PATCH_COMMAND ${cpr_patch_command} || true)
+
+      set(GR_HTTP_ENABLED TRUE)
+    endif()
+  endif()
+endif()
+
+set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
+
+if(GR_ENABLE_HTTP STREQUAL "ON" AND NOT EMSCRIPTEN)
+  list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS cpr)
+endif()
+
+FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 
 # Fetch SoapySDR -- needed since the distribution version is incompatible w.r.t. stdlibc++ vs. libc++
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
   find_package(SoapySDR CONFIG)
 endif()
 
-add_library(pmtv INTERFACE)
-target_include_directories(pmtv INTERFACE ${pmt_SOURCE_DIR}/include/)
-target_link_libraries(pmtv INTERFACE)
-
 add_library(vir INTERFACE)
 target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
 
-# FFTW3 is build 2 times for float and double precisions
-set(FFTW_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/fftw)
-if(EMSCRIPTEN)
-  set(FFTW_CFLAGS "${CFLAGS} -fPIC -w -O2 -g0 -ffunction-sections -fdata-sections")
-  set(FFTW_CONFIG
-      cd
-      ${FFTW_PREFIX}/src/
-      &&
-      emconfigure
-      ./configure
-      --enable-silent-rules
-      --quiet
-      --disable-fortran
-      --prefix=${FFTW_PREFIX}/install)
-  set(FFTW_BUILD
-      emmake
-      make
-      -j
-      CFLAGS=${FFTW_CFLAGS}
-      --silent
-      V=0
-      &&
-      emmake
-      make
-      install
-      --silent
-      V=0
-      &&
-      emmake
-      make
-      clean
-      --silent
-      V=0)
+# the script configure won't run on win32 without asking bash to do it
+if(WIN32)
+  set(BASH "bash.exe")
 else()
-  set(FFTW_CFLAGS "${CFLAGS} -fPIC -w -O2 -g0 -march=native -mtune=native -ffunction-sections -fdata-sections")
-  set(FFTW_CONFIG
-      ${FFTW_PREFIX}/src/configure
-      --enable-silent-rules
-      --quiet
-      --disable-fortran
-      --prefix=${FFTW_PREFIX}/install)
-  set(FFTW_BUILD
-      make
-      -j
-      CFLAGS=${FFTW_CFLAGS}
-      --silent
-      V=0
-      &&
-      make
-      install
-      --silent
-      V=0
-      &&
-      make
-      clean
-      --silent
-      V=0)
+  set(BASH "")
 endif()
-set(FFTW_INSTALL_COMMAND ${FFTW_CONFIG} && ${FFTW_BUILD} && ${FFTW_CONFIG} --enable-float && ${FFTW_BUILD})
-
-include(ExternalProject)
-ExternalProject_Add(
-  fftw_ext
-  PREFIX ${FFTW_PREFIX}
-  SOURCE_DIR ${FFTW_PREFIX}/src
-  BINARY_DIR ${FFTW_PREFIX}/build
-  INSTALL_DIR ${FFTW_INSTALL_DIR}
-  STAMP_DIR ${FFTW_PREFIX}/stamp
-  TMP_DIR ${FFTW_PREFIX}/tmp
-  DOWNLOAD_DIR ${FFTW_PREFIX}/download
-  LOG_DIR ${FFTW_PREFIX}/log
-  URL "https://fftw.org/fftw-3.3.10.tar.gz"
-  URL_MD5 8ccbf6a5ea78a16dbc3e1306e234cc5c
-  CONFIGURE_COMMAND ${FFTW_INSTALL_COMMAND}
-  BUILD_COMMAND ""
-  INSTALL_COMMAND ""
-  LOG_DOWNLOAD ON)
-
-add_library(fftw INTERFACE)
-target_link_libraries(
-  fftw
-  INTERFACE fftw3
-  INTERFACE fftw3f
-  INTERFACE m)
-target_include_directories(fftw INTERFACE ${FFTW_PREFIX}/install/include ${PROJECT_BINARY_DIR})
-target_link_directories(
-  fftw
-  INTERFACE
-  ${FFTW_PREFIX}/install/lib
-  ${FFTW_PREFIX}/install/lib64)
-add_dependencies(fftw fftw_ext)
 
 # check for CPython and Numpy dependencies
 set(PYTHON_FORCE_INCLUDE OFF)
@@ -453,8 +462,6 @@ if(Python3_FOUND AND NOT EMSCRIPTEN)
   # If NumPy is found, set PYTHON_AVAILABLE to ON
   if(NOT NUMPY_NOT_FOUND)
     set(PYTHON_AVAILABLE ON)
-    include_directories(${Python3_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR})
-    add_definitions(-DPYTHON_AVAILABLE)
     message(STATUS "Using Python Include Dirs: ${Python3_INCLUDE_DIRS} and ${NUMPY_INCLUDE_DIR}")
   else()
     message(STATUS "Python and Numpy Include headers not found!!")
@@ -469,7 +476,9 @@ add_subdirectory(algorithm)
 add_subdirectory(blocks)
 
 if(ENABLE_TESTING
-   AND (UNIX OR APPLE)
+   AND (UNIX
+        OR APPLE
+        OR WIN32)
    AND ENABLE_COVERAGE)
   message("Coverage reporting enabled")
   include(cmake/CodeCoverage.cmake) # https://github.com/bilke/cmake-modules/blob/master/CodeCoverage.cmake #
@@ -498,7 +507,8 @@ if(ENABLE_TESTING
     qa_DataSink
     qa_DynamicPort
     qa_DynamicBlock
-    qa_HierBlock
+    qa_UnmanagedSubGraph
+    qa_ManagedSubGraph
     qa_filter
     qa_Settings
     qa_Tags
@@ -520,7 +530,8 @@ if(ENABLE_TESTING
     qa_DataSink
     qa_DynamicPort
     qa_DynamicBlock
-    qa_HierBlock
+    qa_UnmanagedSubGraph
+    qa_ManagedSubGraph
     qa_filter
     qa_Settings
     qa_Tags
@@ -531,6 +542,13 @@ if(ENABLE_TESTING
     EXCLUDE
     "$CMAKE_BUILD_DIR/*")
 endif()
+
+# Configure and install the pkg-config file TODO: This should become more granular - .pc for each in-tree module
+configure_file(cmake/gnuradio4.pc.in ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc @ONLY)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig # Standard location
+        # for .pc files
+)
 
 # print effective options
 message(STATUS "================================================")
@@ -549,6 +567,8 @@ message(STATUS "ENABLE_TBB                   : ${ENABLE_TBB}")
 message(STATUS "ENABLE_EXAMPLES              : ${ENABLE_EXAMPLES}")
 message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
+message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
+message(STATUS "GR_ENABLE_HTTP               : ${GR_ENABLE_HTTP}")
 message(STATUS "------------------------------------------------")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)
@@ -587,6 +607,7 @@ message(STATUS "------------------------------------------------")
 message(STATUS "Toolchain details")
 message(STATUS "------------------------------------------------")
 message(STATUS "C++ compiler ID          : ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "GR_USE_ADAPTIVE_CPP?     : ${GR_USE_ADAPTIVE_CPP}")
 message(STATUS "C++ compiler path        : ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ compiler version     : ${CMAKE_CXX_COMPILER_VERSION}")
 string(

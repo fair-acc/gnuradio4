@@ -1,42 +1,44 @@
-#include "pmtv/pmt.hpp"
 #include <boost/ut.hpp>
 
 #include <cstdint>
-#include <gnuradio-4.0/meta/formatter.hpp>
-
-#include <gnuradio-4.0/YamlPmt.hpp>
 #include <limits>
 #include <variant>
 
-auto fuzzy_eq(std::string_view str1, std::string_view str2) { return std::equal(str1.begin(), str1.begin() + std::min(str1.size(), str2.size()), str2.begin()); }
+#include <gnuradio-4.0/meta/formatter.hpp>
 
-template<typename T>
-std::string_view typeName() {
-    return typeid(T).name();
+#include <gnuradio-4.0/Value.hpp>
+#include <gnuradio-4.0/YamlPmt.hpp>
+
+using namespace gr;
+namespace yaml = gr::pmt::yaml;
+
+auto fuzzy_eq(std::string_view str1, std::string_view str2) {
+    const auto len = std::min(str1.size(), str2.size());
+    return std::equal(str1.data(), str1.data() + len, str2.data());
 }
 
-template<typename... Ts>
-std::string_view variantTypeName(const std::variant<Ts...>& v) {
-    return std::visit(
-        [](auto&& arg) {
-            // Get the type name of the current alternative
-            using T = std::decay_t<decltype(arg)>;
-            return typeName<T>();
-        },
-        v);
+std::string variantTypeName(const pmt::Value& v) {
+    std::string result;
+    pmt::ValueVisitor([&result](const auto& arg) {
+        // Get the type name of the current alternative
+        using T = std::decay_t<decltype(arg)>;
+        result  = gr::meta::type_name<T>();
+    }).visit(v);
+    return result;
 }
 
-bool diff(const pmtv::map_t& original, const pmtv::map_t& deserialized);
+bool diff(const gr::property_map& original, const gr::property_map& deserialized);
 
-void printDiff(const std::string& key, const pmtv::pmt& originalValue, const pmtv::pmt& deserializedValue) {
+void printDiff(std::string_view key, const gr::pmt::Value& originalValue, const gr::pmt::Value& deserializedValue) {
     std::ostringstream originalOss;
     std::ostringstream deserializedOss;
-    pmtv::yaml::detail::serialize(originalOss, originalValue);
-    pmtv::yaml::detail::serialize<>(deserializedOss, deserializedValue);
-    std::cout << "Difference found at key: " << key << "\n";
+    yaml::detail::serialize(originalOss, originalValue);
+    yaml::detail::serialize<>(deserializedOss, deserializedValue);
 
-    std::cout << "  Expected: " << originalOss.str() << "\n";
-    std::cout << "  Deserialized: " << deserializedOss.str() << "\n";
+    std::println("Difference found at key: {}\n    expected:     {}\n    deserialized: {}", key, originalOss.str(), deserializedOss.str());
+
+    std::println("Values are equal? {}\n    original:     {}\n    deserialized: {}", (originalValue == deserializedValue), originalValue, deserializedValue);
+    std::println("Stringified are equal? {}", (std::format("{}", originalValue) == std::format("{}", deserializedValue)));
 }
 
 // Work around NaN != NaN when comparing floats/doubles
@@ -45,63 +47,91 @@ bool testEqual(const T& lhs, const T& rhs) {
     if constexpr (std::is_floating_point_v<T>) {
         if (std::isnan(lhs) && std::isnan(rhs)) {
             return true;
+        } else {
+            return lhs == rhs;
         }
-    }
 
-    if constexpr (std::ranges::random_access_range<T>) {
+    } else if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> || std::is_same_v<T, std::pmr::string>) {
+        return lhs == rhs;
+
+    } else if constexpr (std::is_same_v<T, gr::property_map>) {
+        return !diff(lhs, rhs);
+
+    } else if constexpr (std::ranges::random_access_range<T>) {
         if (lhs.size() != rhs.size()) {
             return false;
         }
         for (size_t i = 0; i < lhs.size(); ++i) {
             if (!testEqual(lhs[i], rhs[i])) {
-                return false;
+                // Values of tensors have a broken operator==
+                if (std::format("{}", lhs) != std::format("{}", rhs)) {
+                    return false;
+                }
             }
         }
         return true;
-    }
 
-    if constexpr (std::is_same_v<T, pmtv::map_t>) {
-        return !diff(lhs, rhs);
+    } else {
+        return lhs == rhs;
     }
-    return lhs == rhs;
 }
 
-bool diff(const pmtv::map_t& original, const pmtv::map_t& deserialized) {
+std::ostream& printAnyString(std::ostream& out, auto s) {
+    for (char c : s) {
+        if (std::isprint(c)) {
+            out << static_cast<char>(c);
+        } else {
+            out << '<' << static_cast<int>(c) << '>';
+        }
+    }
+    return out;
+}
+
+bool diff(const gr::property_map& original, const gr::property_map& deserialized) {
     bool foundDiff = false;
     for (const auto& [key, originalValue] : original) {
         auto it = deserialized.find(key);
         if (it == deserialized.end()) {
-            std::cout << "Missing key in deserialized map: '" << key << "'\n";
+            std::cout << "Missing key in deserialized map: '";
+            printAnyString(std::cout, key) << "'\n";
             foundDiff = true;
             continue;
         }
         const auto& deserializedValue = it->second;
-        if (originalValue.index() != deserializedValue.index()) {
-            std::cout << "Found different types for: " << key << "\n";
+        if (originalValue.value_type() != deserializedValue.value_type() || originalValue.container_type() != deserializedValue.container_type()) {
+            std::cout << "Found different types for: ";
+            printAnyString(std::cout, key) << "'\n";
             std::cout << "  Expected: " << variantTypeName(originalValue) << "\n";
             std::cout << "  Deserialized: " << variantTypeName(deserializedValue) << "\n";
             foundDiff = true;
-        } else if (!std::visit(
-                       [&](const auto& arg) {
-                           using T = std::decay_t<decltype(arg)>;
-                           return testEqual(arg, std::get<T>(deserializedValue));
-                       },
-                       originalValue)) {
-            printDiff(key, originalValue, deserializedValue);
-            foundDiff = true;
+        } else {
+            bool equal = false;
+            pmt::ValueVisitor([&equal, &deserializedValue](const auto& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (!std::is_same_v<T, std::monostate>) {
+                    equal = testEqual(arg, deserializedValue.value_or(T{}));
+                } else {
+                    equal = deserializedValue.is_monostate();
+                }
+            }).visit(originalValue);
+            if (!equal) {
+                printDiff(key, originalValue, deserializedValue);
+                foundDiff = true;
+            }
         }
     }
     for (const auto& [key, deserializedValue] : deserialized) {
         if (original.find(key) == original.end()) {
-            std::cout << "Extra key in deserialized map: '" << key << "'\n";
+            std::cout << "Extra key in deserialized map: '";
+            printAnyString(std::cout, key) << "'\n";
             foundDiff = true;
         }
     }
     return foundDiff;
 }
 
-template<typename T>
-std::string formatResult(const std::expected<T, pmtv::yaml::ParseError>& result) {
+template<typename T, typename Error>
+std::string formatResult(const std::expected<T, Error>& result) {
     if (!result.has_value()) {
         const auto& error = result.error();
         return std::format("Error in {}:{}: {}", error.line, error.column, error.message);
@@ -110,41 +140,146 @@ std::string formatResult(const std::expected<T, pmtv::yaml::ParseError>& result)
     }
 }
 
-void testYAML(std::string_view src, const pmtv::map_t expected, std::source_location location = std::source_location::current()) {
+void testYAML(std::string_view src, const gr::property_map expected, std::source_location location = std::source_location::current()) {
     using namespace boost::ut;
     // First test that the deserialized map matches the expected map
-    const auto deserializedMap = pmtv::yaml::deserialize(src);
+    const auto deserializedMap = yaml::deserialize(src);
     if (deserializedMap) {
-        expect(eq(diff(expected, *deserializedMap), false)) << std::format("testYAML unexpected error at: {}\n\n", location);
+        expect(eq(diff(expected, *deserializedMap), false), location) << std::format("testYAML unexpected error at: {}:{}\n\n", location.file_name(), location.line());
     } else {
-        expect(false) << std::format("testYAML unexpected error at: {}:\n{}\n\n", location, pmtv::yaml::formatAsLines(src, deserializedMap.error()));
+        expect(false, location) << std::format("testYAML unexpected error at: {}:{}:\n{}\n\n", location.file_name(), location.line(), yaml::formatAsLines(src, deserializedMap.error()));
         return;
     }
 
     // Then test that serializing and deserializing the map again results in the same map
-    const auto serializedStr    = pmtv::yaml::serialize(expected);
-    const auto deserializedMap2 = pmtv::yaml::deserialize(serializedStr);
+    const auto serializedStr    = yaml::serialize(expected);
+    const auto deserializedMap2 = yaml::deserialize(serializedStr);
     if (deserializedMap2) {
-        expect(eq(diff(expected, *deserializedMap2), false)) << std::format("testYAML unexpected error at: {} - string:\n{}\n\n", location, serializedStr);
+        expect(eq(diff(expected, *deserializedMap2), false), location) << std::format("testYAML unexpected error at: {}:{} - string:\n{}\n\n", location.file_name(), location.line(), serializedStr);
     } else {
-        expect(false) << std::format("testYAML unexpected error at: {}:\n {}\nYAML:\n{}", location, formatResult(deserializedMap2), serializedStr);
-        ;
+        expect(false, location) << std::format("testYAML unexpected error at: {}:{}:\n {}\nYAML:\n{}", location.file_name(), location.line(), formatResult(deserializedMap2), serializedStr);
     }
 }
+
+const boost::ut::suite<"GrepTests"> _GrepTests = [] {
+    using namespace boost::ut;
+    static auto grepTest = [](const gr::property_map& map, std::initializer_list<std::string_view> patterns, std::source_location location = std::source_location::current()) {
+        const auto& serialized = pmt::yaml::serialize(map);
+        for (const auto& pattern : patterns) {
+            expect(serialized.find(pattern) != std::string::npos) << std::format("Pattern [{}] not found in [{}], called from {}:{}", pattern, serialized, location.file_name(), location.line());
+            if (serialized.find(pattern) == std::string::npos) {
+                std::terminate();
+            }
+        }
+    };
+
+    "Basic serialization grep tests for int"_test = [] {
+        {
+            gr::property_map map;
+            map["answer"] = 42;
+            grepTest(map, {"42", "answer"});
+        }
+        {
+            gr::property_map map;
+            map["answer"] = Tensor<int>(data_from, {42, 43, 44});
+            grepTest(map, {"42", "43", "44", "answer"});
+        }
+    };
+    "Basic serialization grep tests for string"_test = [] {
+        {
+            gr::property_map map;
+            map["answer"] = "Hello"s;
+            grepTest(map, {"Hello", "answer"});
+        }
+        {
+            gr::property_map map;
+            map["answer"] = Tensor<pmt::Value>(data_from, {"42"s, "43"s, "44"s});
+            grepTest(map, {"42", "43", "44", "answer"});
+        }
+    };
+    "Basic serialization grep tests for a mix"_test = [] {
+        {
+            gr::property_map map;
+            map["answer"]   = 42;
+            map["question"] = "universe"s;
+            grepTest(map, {"42", "universe", "answer", "question"});
+        }
+        {
+            gr::property_map map;
+            map["answer"] = Tensor<pmt::Value>(data_from, {pmt::Value(42), pmt::Value("question"s), pmt::Value("universe"s)});
+            grepTest(map, {"42", "universe", "answer", "question"});
+        }
+    };
+    "Basic serialization grep tests for nested maps"_test = [] {
+        {
+            gr::property_map nested;
+            nested["answer"]   = 42;
+            nested["question"] = "universe"s;
+
+            property_map map;
+            map["nested"] = std::move(nested);
+            grepTest(map, {"42", "universe", "answer", "question", "nested"});
+        }
+        {
+            gr::property_map nested;
+            nested["answer"]   = 42;
+            nested["question"] = "universe"s;
+
+            gr::property_map middle;
+            middle["nested"] = std::move(nested);
+
+            property_map map;
+            map["middle"] = std::move(middle);
+            grepTest(map, {"42", "universe", "answer", "question", "nested", "middle"});
+        }
+    };
+
+    "Basic serialization grep tests for tensors"_test = [] {
+        {
+            property_map map;
+            map["answers"] = Tensor<int>(data_from, {42, 43, 44});
+            map["names"]   = Tensor<pmt::Value>(data_from, {pmt::Value("John"s), pmt::Value("Smith"s)});
+            grepTest(map, {"42", "43", "44", "John", "Smith"});
+        }
+        {
+            gr::property_map nested;
+            nested["answer"]   = 42;
+            nested["question"] = "universe"s;
+
+            property_map map;
+            map["nested"] = std::move(nested);
+            grepTest(map, {"42", "universe", "answer", "question", "nested"});
+        }
+        {
+            gr::property_map nested;
+            nested["answer"]   = 42;
+            nested["question"] = "universe"s;
+
+            gr::property_map middle;
+            middle["nested"] = std::move(nested);
+
+            property_map map;
+            map["middle"] = std::move(middle);
+            grepTest(map, {"42", "universe", "answer", "question", "nested", "middle"});
+        }
+    };
+};
 
 const boost::ut::suite<"YamlPmtTests"> _yamlPmtTests = [] {
 #ifndef __clang__
 #pragma GCC diagnostic ignored "-Wuseless-cast" // we want explicit casts for testing
 #endif
     using namespace boost::ut;
-    using namespace pmtv;
     using namespace std::string_literals;
     using namespace std::string_view_literals;
 
     "Comments and Whitespace"_test = [] {
         constexpr std::string_view src1 = R"(# Comment
 double: !!float64 42 # Comment
-string: "#Hello" # Comment
+stringQ1: "#Hello1" # Comment
+stringQ2: "   #Hello2   "       # Comment
+string1: Hello1 # Comment
+string2:        Hello2        # Comment
 null:  # Comment
 #Comment: 43
 # string: | # Comment
@@ -159,14 +294,17 @@ map:
   {}
 )";
 
-        pmtv::map_t expected;
-        expected["double"] = 42.0;
-        expected["string"] = "#Hello";
-        expected["null"]   = std::monostate{};
-        expected["number"] = static_cast<int64_t>(42);
-        expected["list"]   = std::vector<pmtv::pmt>{};
-        expected["list2"]  = std::vector<pmtv::pmt>{static_cast<int64_t>(42)};
-        expected["map"]    = pmtv::map_t{};
+        gr::property_map expected;
+        expected["double"]   = 42.0;
+        expected["stringQ1"] = "#Hello1";
+        expected["stringQ2"] = "   #Hello2   ";
+        expected["string1"]  = "Hello1";
+        expected["string2"]  = "Hello2";
+        expected["null"]     = gr::pmt::Value();
+        expected["number"]   = static_cast<int64_t>(42);
+        expected["list"]     = gr::Tensor<gr::pmt::Value>{};
+        expected["list2"]    = gr::Tensor<gr::pmt::Value>{pmt::Value(static_cast<int64_t>(42))};
+        expected["map"]      = gr::property_map{};
 
         testYAML(src1, expected);
     };
@@ -224,7 +362,7 @@ special_chars: !!str "!@#$%^&*()"
 unprintable_chars: !!str "\0\x01\x02\x03\x04\x05\x00\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
 )yaml";
 
-        pmtv::map_t expected;
+        gr::property_map expected;
         expected["empty"]                = ""s;
         expected["spaces_only"]          = "   "s;
         expected["value_with_colon"]     = "value: with colon"s;
@@ -276,17 +414,17 @@ null_at_end:
 
 )yaml";
 
-        pmtv::map_t expected;
-        expected["null_value"]  = std::monostate{};
-        expected["null_value2"] = std::monostate{};
-        expected["null_value3"] = std::monostate{};
-        expected["null_value4"] = std::monostate{};
-        expected["null_value5"] = std::monostate{};
-        expected["null_value6"] = std::monostate{};
-        expected["null_value7"] = std::monostate{};
-        expected["null_value8"] = std::monostate{};
+        gr::property_map expected;
+        expected["null_value"]  = gr::pmt::Value();
+        expected["null_value2"] = gr::pmt::Value();
+        expected["null_value3"] = gr::pmt::Value();
+        expected["null_value4"] = gr::pmt::Value();
+        expected["null_value5"] = gr::pmt::Value();
+        expected["null_value6"] = gr::pmt::Value();
+        expected["null_value7"] = gr::pmt::Value();
+        expected["null_value8"] = gr::pmt::Value();
         expected["not_null"]    = "NuLl";
-        expected["null_at_end"] = std::monostate{};
+        expected["null_at_end"] = gr::pmt::Value();
         testYAML(src, expected);
     };
 
@@ -302,7 +440,7 @@ untagged_true3: TRUE
 untagged_false3: FALSE
 )yaml";
 
-        pmtv::map_t expected;
+        gr::property_map expected;
         expected["true"]            = true;
         expected["false"]           = false;
         expected["untagged_true"]   = true;
@@ -368,9 +506,9 @@ doubles:
   untagged_negative_zero: -0.0
 )yaml";
 
-        pmtv::map_t expected;
+        gr::property_map expected;
 
-        pmtv::map_t integers;
+        gr::property_map integers;
         integers["hex"]          = static_cast<int64_t>(255);
         integers["oct"]          = static_cast<int64_t>(63);
         integers["bin"]          = static_cast<int64_t>(10);
@@ -390,7 +528,7 @@ doubles:
         integers["untagged_oct"] = static_cast<int64_t>(63);
         integers["untagged_bin"] = static_cast<int64_t>(10);
 
-        pmtv::map_t doubles;
+        gr::property_map doubles;
         doubles["normal"]                 = 123.456;
         doubles["scientific"]             = 1.23e-4;
         doubles["infinity"]               = std::numeric_limits<double>::infinity();
@@ -475,7 +613,9 @@ emptyPmtVector: []
 emptyAfterNewline:
   []
 flowDouble: !!float64 [1, 2, 3]
-flowString: !!str ["Hello, ", "World", "Multiple\nlines"]
+flowString1: !!str ["Hello1, ", "World1", "Multiple1\nlines1"]
+flowString2: !!str [Hello2, World2, Single2]
+flowString3: !!str [   Hello3   ,   World3  ,     Single3  ]
 flowMultiline: !!str [ "Hello, "    , #]
   "][", # Comment ,
   "World"  ,
@@ -504,27 +644,33 @@ vectorWithColons:
   - "key2: value2"
 )";
 
-        pmtv::map_t expected;
-        expected["boolVector"]                 = std::vector<bool>{true, false, true};
-        expected["pmtVectorWithBools"]         = std::vector<pmtv::pmt>{true, false, true};
-        expected["pmtVectorWithUntaggedBools"] = std::vector<pmtv::pmt>{true, false, true};
-        expected["mixedPmtVector"]             = std::vector<pmtv::pmt>{true, 42.0, "Hello"};
-        expected["floatVector"]                = std::vector<float>{1.0f, 2.0f, 3.0f};
-        expected["doubleVector"]               = std::vector<double>{1.0, 2.0, 3.0};
-        expected["stringVector"]               = std::vector<std::string>{"Hello", "World", "Multiple\nlines"};
-        expected["complexVector"]              = std::vector<std::complex<double>>{{1.0, -1.0}, {2.0, -2.0}, {3.0, -3.0}};
-        expected["nullVector"]                 = std::monostate{};
-        expected["emptyVector"]                = std::vector<std::string>{};
-        expected["emptyPmtVector"]             = std::vector<pmtv::pmt>{};
-        expected["emptyAfterNewline"]          = std::vector<pmtv::pmt>{};
-        expected["flowDouble"]                 = std::vector<double>{1.0, 2.0, 3.0};
-        expected["flowString"]                 = std::vector<std::string>{"Hello, ", "World", "Multiple\nlines"};
-        expected["flowMultiline"]              = std::vector<std::string>{"Hello, ", "][", "World", "Multiple\nlines"};
-        expected["nestedVector"]               = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
-        expected["nestedFlow"]                 = std::vector<pmtv::pmt>{std::vector<std::string>{"1", "2"}, std::vector<pmtv::pmt>{static_cast<int64_t>(3), static_cast<int64_t>(4)}};
-        expected["nestedVector2"]              = std::vector<pmtv::pmt>{static_cast<int64_t>(42), std::vector<std::string>{"1", "2"}, std::vector<std::string>{"3", "4"}, pmtv::map_t{{"key", std::vector<std::string>{"5", "6"}}}};
-        expected["vectorWithBlockMap"]         = std::vector<pmtv::pmt>{pmtv::map_t{{"name", "ArraySink"}, {"id", "gr::testing::ArraySink<double>"}, {"parameters", pmtv::map_t{{"name", "Block"}}}}};
-        expected["vectorWithColons"]           = std::vector<pmtv::pmt>{"key: value", "key2: value2"};
+        gr::property_map expected;
+        expected["boolVector"]                 = Tensor<bool>(gr::data_from, {true, false, true});
+        expected["pmtVectorWithBools"]         = Tensor<pmt::Value>{pmt::Value(true), pmt::Value(false), pmt::Value(true)};
+        expected["pmtVectorWithUntaggedBools"] = Tensor<pmt::Value>{pmt::Value(true), pmt::Value(false), pmt::Value(true)};
+        expected["mixedPmtVector"]             = Tensor<pmt::Value>{gr::pmt::Value(true), gr::pmt::Value(42.0), gr::pmt::Value("Hello")};
+        expected["floatVector"]                = Tensor<float>{1.0f, 2.0f, 3.0f};
+        expected["doubleVector"]               = Tensor<double>{1.0, 2.0, 3.0};
+        expected["stringVector"]               = Tensor<pmt::Value>{pmt::Value("Hello"), pmt::Value("World"), pmt::Value("Multiple\nlines")};
+        expected["complexVector"]              = Tensor<std::complex<double>>{std::complex<double>{1.0, -1.0}, std::complex<double>{2.0, -2.0}, std::complex<double>{3.0, -3.0}};
+        expected["nullVector"]                 = pmt::Value();
+        expected["emptyVector"]                = Tensor<pmt::Value>{};
+        expected["emptyPmtVector"]             = Tensor<pmt::Value>{};
+        expected["emptyAfterNewline"]          = Tensor<pmt::Value>{};
+        expected["flowDouble"]                 = Tensor<double>{1.0, 2.0, 3.0};
+        expected["flowString1"]                = Tensor<pmt::Value>{pmt::Value("Hello1, "), pmt::Value("World1"), pmt::Value("Multiple1\nlines1")};
+        expected["flowString2"]                = Tensor<pmt::Value>{pmt::Value("Hello2"), pmt::Value("World2"), pmt::Value("Single2")};
+        expected["flowString3"]                = Tensor<pmt::Value>{pmt::Value("Hello3"), pmt::Value("World3"), pmt::Value("Single3")};
+        expected["flowMultiline"]              = Tensor<pmt::Value>{pmt::Value("Hello, "), pmt::Value("]["), pmt::Value("World"), pmt::Value("Multiple\nlines")};
+        expected["nestedVector"]               = Tensor<pmt::Value>{Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}, Tensor<pmt::Value>{pmt::Value(static_cast<int64_t>(3)), pmt::Value(static_cast<int64_t>(4))}};
+        expected["nestedFlow"]                 = Tensor<pmt::Value>{Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}, Tensor<pmt::Value>{pmt::Value(static_cast<int64_t>(3)), pmt::Value(static_cast<int64_t>(4))}};
+        expected["nestedVector2"]              = Tensor<pmt::Value>{                                                   //
+            pmt::Value(static_cast<int64_t>(42)),                                                         //
+            pmt::Value(Tensor<pmt::Value>{pmt::Value("1"), pmt::Value("2")}),                             //
+            pmt::Value(Tensor<pmt::Value>{pmt::Value("3"), pmt::Value("4")}),                             //
+            pmt::Value(gr::property_map{{"key", Tensor<pmt::Value>{pmt::Value("5"), pmt::Value("6")}}})}; //
+        expected["vectorWithBlockMap"]         = Tensor<pmt::Value>{gr::property_map{{"name", "ArraySink"}, {"id", "gr::testing::ArraySink<double>"}, {"parameters", gr::property_map{{"name", "Block"}}}}};
+        expected["vectorWithColons"]           = Tensor<pmt::Value>{"key: value", "key2: value2"};
 
         testYAML(src1, expected);
 
@@ -589,6 +735,9 @@ nested:
         key5: !!int8 44
         key6: !!int8 45
 flow: {key1: !!int8 42, key2: !!int8 43}
+flow2: {key1: value1, key2: value2}
+flow3: {key1: " value1  ", key2: "value2   "} # Add extra spaces inside quotes
+flow4: {  key1  :  value1  ,  key2  : value2   } # Add extra spaces without quotes
 flow_multiline: {key1: !!int8 42,
                  key2: !!int8 43}
 flow_nested: {key1: {key2: !!int8 42, key3: !!int8 43}, key4: {key5: !!int8 44, key6: !!int8 45}}
@@ -596,15 +745,18 @@ flow_braces: {"}{": !!int8 42}
 last: # End of document, null value
 )yaml";
 
-        pmtv::map_t expected;
-        expected["simple"]         = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
-        expected["empty"]          = pmtv::map_t{};
-        expected["nested"]         = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"unknown_property", static_cast<int64_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
-        expected["flow"]           = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
-        expected["flow_multiline"] = pmtv::map_t{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
-        expected["flow_nested"]    = pmtv::map_t{{"key1", pmtv::map_t{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", pmtv::map_t{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
-        expected["flow_braces"]    = pmtv::map_t{{"}{", static_cast<int8_t>(42)}};
-        expected["last"]           = std::monostate{};
+        gr::property_map expected;
+        expected["simple"]         = gr::property_map{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["empty"]          = gr::property_map{};
+        expected["nested"]         = gr::property_map{{"key1", gr::property_map{{"key2", static_cast<int8_t>(42)}, {"unknown_property", static_cast<int64_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", gr::property_map{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
+        expected["flow"]           = gr::property_map{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["flow2"]          = gr::property_map{{"key1", "value1"}, {"key2", "value2"}};
+        expected["flow3"]          = gr::property_map{{"key1", " value1  "}, {"key2", "value2   "}};
+        expected["flow4"]          = gr::property_map{{"key1", "value1"}, {"key2", "value2"}};
+        expected["flow_multiline"] = gr::property_map{{"key1", static_cast<int8_t>(42)}, {"key2", static_cast<int8_t>(43)}};
+        expected["flow_nested"]    = gr::property_map{{"key1", gr::property_map{{"key2", static_cast<int8_t>(42)}, {"key3", static_cast<int8_t>(43)}}}, {"key4", gr::property_map{{"key5", static_cast<int8_t>(44)}, {"key6", static_cast<int8_t>(45)}}}};
+        expected["flow_braces"]    = gr::property_map{{"}{", static_cast<int8_t>(42)}};
+        expected["last"]           = pmt::Value();
         testYAML(src, expected);
 
         expect(fuzzy_eq(formatResult(yaml::deserialize("{")), "Error in 2:1: Unexpected end of document"sv));
@@ -669,21 +821,25 @@ connections:
   - [ArraySource<double>, [1, 1], ArraySink<double>, [0, 1]]
 )";
 
-        pmtv::map_t expected;
-        pmtv::map_t block1;
+        gr::property_map expected;
+        gr::property_map block1;
         block1["name"]       = "ArraySink<double>";
         block1["id"]         = "gr::testing::ArraySink<double>";
-        block1["parameters"] = pmtv::map_t{{"name", "ArraySink<double>"}};
-        pmtv::map_t block2;
+        block1["parameters"] = gr::property_map{{"name", "ArraySink<double>"}};
+        gr::property_map block2;
         block2["name"]       = "ArraySource<double>";
         block2["id"]         = "gr::testing::ArraySource<double>";
-        block2["parameters"] = pmtv::map_t{{"name", "ArraySource<double>"}};
-        expected["blocks"]   = std::vector<pmtv::pmt>{block1, block2};
-        const auto zero      = pmtv::pmt{static_cast<int64_t>(0)};
-        const auto one       = pmtv::pmt{static_cast<int64_t>(1)};
-        using PmtVec         = std::vector<pmtv::pmt>;
+        block2["parameters"] = gr::property_map{{"name", "ArraySource<double>"}};
+        expected["blocks"]   = Tensor<pmt::Value>{block1, block2};
+        const auto zero      = pmt::Value{static_cast<int64_t>(0)};
+        const auto one       = pmt::Value{static_cast<int64_t>(1)};
+        using PmtVec         = Tensor<pmt::Value>;
 
-        expected["connections"] = std::vector<pmtv::pmt>{PmtVec{"ArraySource<double>", std::vector{zero, zero}, "ArraySink<double>", std::vector{one, one}}, PmtVec{"ArraySource<double>", std::vector{zero, one}, "ArraySink<double>", std::vector{one, zero}}, PmtVec{"ArraySource<double>", std::vector{one, zero}, "ArraySink<double>", std::vector{zero, zero}}, PmtVec{"ArraySource<double>", std::vector{one, one}, "ArraySink<double>", std::vector{zero, one}}};
+        expected["connections"] = Tensor<pmt::Value>{                                                                                                  //
+            PmtVec{pmt::Value("ArraySource<double>"), pmt::Value(Tensor{zero, zero}), pmt::Value("ArraySink<double>"), pmt::Value(Tensor{one, one})},  //
+            PmtVec{pmt::Value("ArraySource<double>"), pmt::Value(Tensor{zero, one}), pmt::Value("ArraySink<double>"), pmt::Value(Tensor{one, zero})},  //
+            PmtVec{pmt::Value("ArraySource<double>"), pmt::Value(Tensor{one, zero}), pmt::Value("ArraySink<double>"), pmt::Value(Tensor{zero, zero})}, //
+            PmtVec{pmt::Value("ArraySource<double>"), pmt::Value(Tensor{one, one}), pmt::Value("ArraySink<double>"), pmt::Value(Tensor{zero, one})}};
 
         testYAML(src, expected);
     };
@@ -697,7 +853,7 @@ complex4: !!complex32 (1.0,-1.0)
 complex5: !!complex32 (  1.0  ,   -1.0)
 )";
 
-        pmtv::map_t expected;
+        gr::property_map expected;
         expected["complex"]  = std::complex<double>(1.0, -1.0);
         expected["complex2"] = std::complex<float>(1.0, -1.0);
         expected["complex3"] = std::complex<double>(1.0, -1.0);
@@ -712,6 +868,190 @@ complex5: !!complex32 (  1.0  ,   -1.0)
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.0, -1.0, 2.0)")), "Error in 1:22: Invalid value for complex<>-type"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (foo, bar)")), "Error in 1:22: std::invalid_argument exception for expected floating-point value of 'foo' - error: stod"sv));
         expect(fuzzy_eq(formatResult(yaml::deserialize("complex: !!complex64 (1.0, bar)")), "Error in 1:22: std::invalid_argument exception for expected floating-point value of 'bar' - error: stod"sv));
+    };
+
+    "empty lines"_test = [] {
+        "at the end of map"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+
+)";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+
+        "at the end of map - comment"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+ # comment only
+)";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+
+        "in between map"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+
+key1: !!float32 42.0
+)";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5f;
+            expected["key1"] = 42.f;
+            testYAML(src, expected);
+        };
+
+        "in between map - comment"_test = [] {
+            constexpr std::string_view src = R"(
+key0: !!float32 0.5
+ # comment only
+key1: !!float32 42.0
+)";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5f;
+            expected["key1"] = 42.f;
+            testYAML(src, expected);
+        };
+
+        "at the end list"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+  - 42
+
+list2: !!float32
+  - 43
+
+)";
+
+            gr::property_map expected;
+            expected["list1"] = Tensor{0.5f, 42.f};
+            expected["list2"] = Tensor{43.f};
+            testYAML(src, expected);
+        };
+
+        "at the end list - comment"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+  - 42
+ # just a comment
+list2: !!float32
+  - 43
+ # another comment
+)";
+
+            gr::property_map expected;
+            expected["list1"] = Tensor{0.5f, 42.f};
+            expected["list2"] = Tensor{43.f};
+            testYAML(src, expected);
+        };
+
+        "in between list"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+
+  - 42
+
+list2: !!float32
+  - 43
+
+)";
+
+            gr::property_map expected;
+            expected["list1"] = Tensor{0.5f, 42.f};
+            expected["list2"] = Tensor{43.f};
+            testYAML(src, expected);
+        };
+
+        "in between list - comment"_test = [] {
+            constexpr std::string_view src = R"(
+list1: !!float32
+  - 0.5
+ # comment
+  - 42
+# comment 2
+list2: !!float32
+  - 43
+  # com...ment
+)";
+
+            gr::property_map expected;
+            expected["list1"] = Tensor{0.5f, 42.f};
+            expected["list2"] = Tensor{43.f};
+            testYAML(src, expected);
+        };
+    };
+
+    "trim values"_test = [] {
+        "trim float"_test = [] {
+            constexpr std::string_view src = R"(key0: !!float32 0.5 )";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+        "trim float - comment"_test = [] {
+            constexpr std::string_view src = R"(key0: !!float32 0.5 # comment)";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5f;
+            testYAML(src, expected);
+        };
+
+        "trim float2"_test = [] {
+            constexpr std::string_view src = R"(key0: 0.5 )";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5;
+            testYAML(src, expected);
+        };
+        "trim float - comment2"_test = [] {
+            constexpr std::string_view src = R"(key0: 0.5 # comment)";
+
+            gr::property_map expected;
+            expected["key0"] = 0.5;
+            testYAML(src, expected);
+        };
+
+        "trim String w/ space"_test = [] {
+            constexpr std::string_view src = R"(key0: TestString )"; // note: space at the end
+
+            gr::property_map expected;
+            expected["key0"] = "TestString"s;
+            testYAML(src, expected);
+        };
+
+        "trim String  w/ space in the middle"_test = [] {
+            constexpr std::string_view src = R"(key0: Test String)";
+
+            gr::property_map expected;
+            expected["key0"] = "Test String"s;
+            testYAML(src, expected);
+        };
+
+        "trim String  w/ space in the middle and comment"_test = [] {
+            constexpr std::string_view src = R"(key0: Test String # comment)"; // note: space and comment at the end
+
+            gr::property_map expected;
+            expected["key0"] = "Test String"s;
+            testYAML(src, expected);
+        };
+
+        "trim String  w/ space in the middle and comment"_test = [] {
+            constexpr std::string_view src = R"(key0: "Test String" # comment)"; // note: space and comment at the end, quoted string
+
+            gr::property_map expected;
+            expected["key0"] = "Test String"s;
+            testYAML(src, expected);
+        };
     };
 
     "Odd Keys"_test = [] {
@@ -729,30 +1069,30 @@ Key with spaces: !!int8 42
 key::with::colons: !!int8 51
 )yaml";
 
-        pmtv::map_t expected;
-        expected[""]                         = "empty key";
-        expected["Key with spaces"]          = static_cast<int8_t>(42);
-        expected["quoted key with spaces"]   = static_cast<int8_t>(43);
-        expected["key with colon:"]          = static_cast<int8_t>(44);
-        expected["key with null byte \x00"s] = static_cast<int8_t>(45);
-        expected["key with newline \n"]      = static_cast<int8_t>(46);
-        expected["key with tab \t"]          = static_cast<int8_t>(47);
-        expected["key with CR \r"]           = static_cast<int8_t>(48);
-        expected["key with backslash \\"]    = static_cast<int8_t>(49);
-        expected["key with quote \""]        = static_cast<int8_t>(50);
-        expected["key::with::colons"]        = static_cast<int8_t>(51);
+        gr::property_map expected;
+        expected[""]                             = "empty key";
+        expected["Key with spaces"]              = static_cast<int8_t>(42);
+        expected["quoted key with spaces"]       = static_cast<int8_t>(43);
+        expected["key with colon:"]              = static_cast<int8_t>(44);
+        expected["key with null byte \x00"_spmr] = static_cast<int8_t>(45);
+        expected["key with newline \n"]          = static_cast<int8_t>(46);
+        expected["key with tab \t"]              = static_cast<int8_t>(47);
+        expected["key with CR \r"]               = static_cast<int8_t>(48);
+        expected["key with backslash \\"]        = static_cast<int8_t>(49);
+        expected["key with quote \""]            = static_cast<int8_t>(50);
+        expected["key::with::colons"]            = static_cast<int8_t>(51);
 
         testYAML(src, expected);
     };
 
     "Empty"_test = [] {
-        testYAML({}, pmtv::map_t{});
-        testYAML("  ", pmtv::map_t{});
-        testYAML("---", pmtv::map_t{});
-        testYAML("\n", pmtv::map_t{});
-        testYAML("{}", pmtv::map_t{});
-        testYAML("# Empty\n", pmtv::map_t{});
-        testYAML("\n# Empty\n", pmtv::map_t{});
+        testYAML({}, gr::property_map{});
+        testYAML("  ", gr::property_map{});
+        testYAML("---", gr::property_map{});
+        testYAML("\n", gr::property_map{});
+        testYAML("{}", gr::property_map{});
+        testYAML("# Empty\n", gr::property_map{});
+        testYAML("\n# Empty\n", gr::property_map{});
     };
 
     "Errors"_test = [] {
@@ -788,7 +1128,6 @@ value: 43
 
 const boost::ut::suite<"yaml error formatter"> _yamlFormatter = [] {
     using namespace boost::ut;
-    using namespace pmtv;
     using namespace std::string_literals;
     using namespace std::string_view_literals;
 

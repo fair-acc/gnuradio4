@@ -8,6 +8,8 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   HEADERS
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
+  include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp
+  include/gnuradio-4.0/filter/SvdDenoiser.hpp
   include/gnuradio-4.0/filter/time_domain_filter.hpp
   LINK_LIBRARIES
   gr-filter

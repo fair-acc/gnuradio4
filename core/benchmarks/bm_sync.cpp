@@ -34,8 +34,8 @@ void runTest() {
     if constexpr (std::is_same_v<TBlock, gr::basic::SyncBlock<int>>) {
         perfBlockProperties = {{"n_ports", nPorts}};
     } else if constexpr (std::is_same_v<TBlock, gr::basic::Selector<int>>) {
-        auto                    iotaView = std::views::iota(gr::Size_t(0), nPorts);
-        std::vector<gr::Size_t> indMap(iotaView.begin(), iotaView.end());
+        auto               iotaView = std::views::iota(gr::Size_t(0), nPorts);
+        Tensor<gr::Size_t> indMap(iotaView.begin(), iotaView.end());
         perfBlockProperties = {{"n_inputs", nPorts}, {"n_outputs", nPorts}, {"map_in", indMap}, {"map_out", indMap}};
     } else {
         throw std::invalid_argument("incorrect TBlock type");
@@ -63,7 +63,10 @@ void runTest() {
         expect(gr::ConnectionResult::SUCCESS == graph.connect(perfBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
     }
 
-    gr::scheduler::Simple sched{std::move(graph)};
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(graph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     ::benchmark::benchmark<nRepeats>(std::format("src->{}->sink", gr::meta::type_name<TBlock>()), nSamples) = [&]() {
         sched.runAndWait();
         expect(eq(sinks[0]->_nSamplesProduced, nSamples));
@@ -94,7 +97,10 @@ void runTestPureCopy() {
         expect(gr::ConnectionResult::SUCCESS == graph.connect(*copies[i], "out"s, *sinks[i], "in"s));
     }
 
-    gr::scheduler::Simple sched{std::move(graph)};
+    gr::scheduler::Simple sched;
+    if (auto ret = sched.exchange(std::move(graph)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
     ::benchmark::benchmark<nRepeats>("src->copy->sink", nSamples) = [&]() {
         sched.runAndWait();
         expect(eq(sinks[0]->_nSamplesProduced, nSamples));

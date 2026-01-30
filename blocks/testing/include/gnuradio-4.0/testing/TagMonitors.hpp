@@ -21,12 +21,12 @@ inline constexpr void print_tag(const Tag& tag, std::string_view prefix = {}) no
         std::print("{} @index= {}: map: {{ <empty map> }}\n", prefix, tag.index);
         return;
     }
-    std::print("{} @index= {}: map: {{ {} }}\n", prefix, tag.index, gr::join(tag.map, ", "));
+    std::print("{} @index= {}: map: {{ {} }}\n", prefix, tag.index, gr::join(tag.map | std::views::transform([](const auto& kvp) { return std::make_pair(std::string_view(kvp.first), kvp.second); }), ", "));
 }
 
 template<typename MapType>
 inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, const std::string& name1, const std::string& name2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
-    const auto skipKey = [&](const auto& key) { return ignoreKeys != std::nullopt && std::ranges::find(ignoreKeys.value(), key) != ignoreKeys.value().end(); };
+    const auto skipKey = [&](const auto& key) { return ignoreKeys != std::nullopt && std::ranges::find(ignoreKeys.value(), convert_string_domain(key)) != ignoreKeys.value().end(); };
 
     for (const auto& [key, value] : map1) {
         if (skipKey(key)) {
@@ -34,9 +34,9 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         }
         const auto it = map2.find(key);
         if (it == map2.end()) {
-            std::print("    key '{}' is present in {} but not in {}\n", key, name1, name2);
+            std::print("    key '{}' is present in {} but not in {}\n", std::string_view(key), name1, name2);
         } else if (it->second != value) {
-            std::print("    key '{}' has different values ('{}' vs '{}')\n", key, value, it->second);
+            std::print("    key '{}' has different values ('{}' {} {} vs '{}' {} {})\n", std::string_view(key), value, value.value_type(), value.container_type(), it->second, it->second.value_type(), it->second.container_type());
         }
     }
 
@@ -44,7 +44,7 @@ inline constexpr void map_diff_report(const MapType& map1, const MapType& map2, 
         if (skipKey(key) || map1.contains(key)) {
             continue;
         }
-        std::print("    key '{}' is present in {} but not in {}\n", key, name2, name1);
+        std::print("    key '{}' is present in {} but not in {}\n", std::string_view(key), name2, name1);
     }
 }
 
@@ -75,8 +75,8 @@ inline constexpr bool equal_tag_lists(const std::vector<Tag>& tags1, const std::
             auto map1 = tag1.map;
             auto map2 = tag2.map;
             for (const auto& ignoreKey : ignoreKeys.value()) {
-                map1.erase(ignoreKey);
-                map2.erase(ignoreKey);
+                map1.erase(convert_string_domain(ignoreKey));
+                map2.erase(convert_string_domain(ignoreKey));
             }
             return map1 == map2;
         }
@@ -98,23 +98,26 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     PortOut<T> out;
 
     // settings
-    bool           repeat_tags = false; // if true tags are repeated from the beginning. Example: Given the tag indices {1, 3, 5}, the output tag indices would be: 1, 3, 5, 6, 8, 10, ...
-    std::vector<T> values{};            // if values are set it works like repeated source. Example: values = { 1, 2, 3 }; output: 1,2,3,1,2,3... `mark_tag` is ignored in this case.
-    gr::Size_t     n_samples_max{1024}; // if 0 -> infinite samples
-    float          sample_rate     = 1000.0f;
-    std::string    signal_name     = "unknown signal";
-    std::string    signal_unit     = "unknown unit";
-    float          signal_min      = std::numeric_limits<float>::lowest();
-    float          signal_max      = std::numeric_limits<float>::max();
-    bool           verbose_console = false;
-    bool           mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
+    bool        repeat_tags = false; // if true tags are repeated from the beginning. Example: Given the tag indices {1, 3, 5}, the output tag indices would be: 1, 3, 5, 6, 8, 10, ...
+    Tensor<T>   values{};            // if values are set it works like repeated source. Example: values = { 1, 2, 3 }; output: 1,2,3,1,2,3... `mark_tag` is ignored in this case.
+    gr::Size_t  n_samples_max{1024}; // if 0 -> infinite samples
+    float       sample_rate     = 1000.0f;
+    std::string signal_name     = "unknown signal";
+    std::string signal_unit     = "unknown unit";
+    std::string signal_quantity = "unknown quantity";
+    float       signal_min      = std::numeric_limits<float>::lowest();
+    float       signal_max      = std::numeric_limits<float>::max();
+    bool        verbose_console = false;
+    bool        mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
 
-    GR_MAKE_REFLECTABLE(TagSource, out, n_samples_max, sample_rate, signal_name, signal_unit, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
+    GR_MAKE_REFLECTABLE(TagSource, out, n_samples_max, sample_rate, signal_name, signal_unit, signal_quantity, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
 
     std::vector<Tag> _tags{};                 // It is expected that Tag.index is in ascending order
     std::size_t      _tagIndex{0};            // current index in tags array
     std::size_t      _valueIndex{0};          // current index in values array
     gr::Size_t       _nSamplesProduced{0ULL}; // for infinite samples the counter wraps around back to 0, _tagIndex = 0, _valueIndex = 0
+
+    std::function<void(const Tag&)> _tagCallback{}; // optional tag callback
 
     void start() {
         _nSamplesProduced = 0U;
@@ -132,7 +135,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     T processOne() noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                //
+        const auto [nGeneratedTags, tagRepeatStarted] = generateTag(                              //
             [this](const auto& map, std::size_t tagOffset) { this->publishTag(map, tagOffset); }, //
             "processOne(...)");
 
@@ -153,13 +156,13 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             _valueIndex++;
             return currentValue;
         }
-        return mark_tag ? (tagGenerated ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
+        return mark_tag ? (nGeneratedTags > 0 ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
     }
 
     work::Status processBulk(OutputSpanLike auto& outSpan) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        const auto [tagGenerated, tagRepeatStarted] = generateTag(                                //
+        const auto [nGeneratedTags, tagRepeatStarted] = generateTag(                              //
             [&outSpan](const auto& map, std::size_t offset) { outSpan.publishTag(map, offset); }, //
             "processBulk(...)");
 
@@ -191,7 +194,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             }
         } else {
             if (mark_tag) {
-                outSpan[0] = tagGenerated ? static_cast<T>(1) : static_cast<T>(0);
+                outSpan[0] = nGeneratedTags > 0 ? static_cast<T>(1) : static_cast<T>(0);
             } else {
                 for (std::size_t i = 0; i < nSamples; ++i) {
                     outSpan[i] = static_cast<T>(_nSamplesProduced + i);
@@ -212,24 +215,38 @@ private:
     template<typename TPublishTagFunction>
     [[nodiscard]] auto generateTag(TPublishTagFunction&& publishTagFn, std::string_view processFunctionName) {
         struct {
-            bool tagGenerated     = false;
-            bool tagRepeatStarted = false;
+            std::size_t nGeneratedTags   = 0UZ;
+            bool        tagRepeatStarted = false;
         } result;
 
-        const auto nSamplesRemainder = getNProducedSamplesRemainder();
-        if (_tagIndex < _tags.size() && static_cast<gr::Size_t>(_tags[_tagIndex].index) <= nSamplesRemainder) {
+        if (_tags.empty() || _tagIndex >= _tags.size()) {
+            return result;
+        }
+
+        const std::size_t targetIndex       = _tags[_tagIndex].index;
+        const gr::Size_t  nSamplesRemainder = getNProducedSamplesRemainder();
+        if (static_cast<gr::Size_t>(targetIndex) > nSamplesRemainder) {
+            return result;
+        }
+
+        do {
             if (verbose_console) {
                 print_tag(_tags[_tagIndex], std::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
             publishTagFn(_tags[_tagIndex].map, 0UZ);
+            if (_tagCallback) {
+                _tagCallback(_tags[_tagIndex]);
+            }
             this->_outputTagsChanged = true;
             _tagIndex++;
-            if (repeat_tags && _tagIndex == _tags.size()) {
-                _tagIndex               = 0;
-                result.tagRepeatStarted = true;
-            }
-            result.tagGenerated = true;
+            result.nGeneratedTags++;
+        } while (_tagIndex < _tags.size() && _tags[_tagIndex].index == targetIndex);
+
+        if (repeat_tags && _tagIndex == _tags.size()) {
+            _tagIndex               = 0;
+            result.tagRepeatStarted = true;
         }
+
         return result;
     }
 
@@ -257,9 +274,11 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
 
     GR_MAKE_REFLECTABLE(TagMonitor, in, out, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
 
-    std::vector<T>   _samples;
+    Tensor<T>        _samples;
     std::vector<Tag> _tags;
     gr::Size_t       _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
+
+    std::function<void(const Tag&)> _tagCallback{}; // optional tag callback
 
     void start() {
         if (verbose_console) {
@@ -281,7 +300,10 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
         if (log_samples) {
@@ -300,12 +322,17 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
 
         if (log_samples) {
-            _samples.insert(_samples.end(), input.begin(), input.end());
+            for (const auto& value : input) {
+                _samples.emplace_back(value);
+            }
         }
 
         _nSamplesProduced += static_cast<gr::Size_t>(input.size());
@@ -332,9 +359,11 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
 
     GR_MAKE_REFLECTABLE(TagSink, in, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
 
-    std::vector<T>   _samples{};
+    Tensor<T>        _samples{};
     std::vector<Tag> _tags{};
     gr::Size_t       _nSamplesProduced{0}; // for infinite samples the counter wraps around back to 0
+
+    std::function<void(const Tag&)> _tagCallback{};
 
     void start() {
         if (verbose_console) {
@@ -362,7 +391,10 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processOne(...1)    \t received tag at {:6}", this->name, _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
         if (log_samples) {
@@ -384,11 +416,16 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
                 print_tag(tag, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));
             }
             if (log_tags) {
-                _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                if (_tagCallback) {
+                    _tagCallback(newTag);
+                }
             }
         }
         if (log_samples) {
-            _samples.insert(_samples.end(), input.begin(), input.end());
+            for (const auto& value : input) {
+                _samples.push_back(value);
+            }
         }
         _nSamplesProduced += static_cast<gr::Size_t>(input.size());
         return n_samples_expected > 0 && _nSamplesProduced >= n_samples_expected ? work::Status::DONE : work::Status::OK;

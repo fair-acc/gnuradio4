@@ -8,7 +8,8 @@
 #include <gnuradio-4.0/config.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "BlockModel.hpp"
+#include <gnuradio-4.0/BlockModel.hpp>
+#include <gnuradio-4.0/SchedulerModel.hpp>
 
 #include <gnuradio-4.0/Export.hpp>
 
@@ -39,33 +40,30 @@ namespace gr {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-namespace detail {
+template<typename TModel, template<typename...> typename TWrapper>
+class GeneralRegistry {
+    using this_t = GeneralRegistry<TModel, TWrapper>;
+    static std::unique_ptr<TModel> factoryProto(property_map params);
 
-template<typename TBlock>
-requires std::is_constructible_v<TBlock, property_map>
-std::unique_ptr<gr::BlockModel> blockFactory(property_map params) {
-    return std::make_unique<gr::BlockWrapper<TBlock>>(std::move(params));
-}
+    template<typename TBlock>
+    static std::unique_ptr<TModel> defaultFactory(property_map params) { //
+        return std::make_unique<TWrapper<TBlock>>(std::move(params));
+    }
 
-std::unique_ptr<gr::BlockModel> blockFactoryProto(property_map params);
-
-} // namespace detail
-
-class BlockRegistry {
-    struct TBlockTypeHandler {
-        std::string                          alias;
-        decltype(detail::blockFactoryProto)* createFunction = nullptr;
+    struct TTypeHandler {
+        std::string                     alias;
+        decltype(this_t::factoryProto)* createFunction = nullptr;
     };
 
-    std::map<std::string, TBlockTypeHandler, std::less<>> _blockTypeHandlers;
+    std::map<std::string, TTypeHandler, std::less<>> _blockTypeHandlers;
 
 public:
-    BlockRegistry()                                      = default;
-    BlockRegistry(const BlockRegistry& other)            = delete;
-    BlockRegistry& operator=(const BlockRegistry& other) = delete;
+    GeneralRegistry()                               = default;
+    GeneralRegistry(const this_t& other)            = delete;
+    GeneralRegistry& operator=(const this_t& other) = delete;
 
-    BlockRegistry(BlockRegistry&& other) noexcept : _blockTypeHandlers(std::exchange(other._blockTypeHandlers, {})) {}
-    BlockRegistry& operator=(BlockRegistry&& other) noexcept {
+    GeneralRegistry(this_t&& other) noexcept : _blockTypeHandlers(std::exchange(other._blockTypeHandlers, {})) {}
+    GeneralRegistry& operator=(this_t&& other) noexcept {
         auto tmp = std::move(other);
         std::swap(_blockTypeHandlers, tmp._blockTypeHandlers);
         return *this;
@@ -89,7 +87,7 @@ public:
             return meta::detail::makePortableTypeName(std::string{alias} + "<" + std::string{aliasParameters} + ">");
         }();
 
-        auto handler = TBlockTypeHandler{.alias = fullAlias, .createFunction = detail::blockFactory<TBlock>};
+        auto handler = TTypeHandler{.alias = fullAlias, .createFunction = defaultFactory<TBlock>};
 
         auto resName = _blockTypeHandlers.insert_or_assign(name, handler);
 
@@ -113,10 +111,11 @@ public:
     }
 #endif
 
-    [[nodiscard]] std::unique_ptr<gr::BlockModel> create(std::string_view blockName, property_map blockParams) const {
+    [[nodiscard]] std::unique_ptr<TModel> create(std::string_view blockName, property_map blockParams) const {
         if (auto blockIt = _blockTypeHandlers.find(blockName); blockIt != _blockTypeHandlers.end()) {
             return blockIt->second.createFunction(std::move(blockParams));
         }
+
         return nullptr;
     }
 
@@ -127,9 +126,8 @@ public:
 
     [[nodiscard]] bool contains(std::string_view blockName) const { return _blockTypeHandlers.contains(blockName); }
 
-    template<typename TBlock>
-    std::string typeName(const TBlock& block) {
-        auto name = block.typeName();
+    std::string typeName(const std::shared_ptr<BlockModel>& block) {
+        auto name = block->typeName();
         auto it   = _blockTypeHandlers.find(name);
         if (it != _blockTypeHandlers.end() && !it->second.alias.empty()) {
             return it->second.alias;
@@ -137,25 +135,37 @@ public:
         return std::string(name);
     }
 
-    void merge(gr::BlockRegistry& anotherRegistry) {
+    void merge(this_t& anotherRegistry) {
         if (this == std::addressof(anotherRegistry)) {
             return;
         }
 
         _blockTypeHandlers.insert(anotherRegistry._blockTypeHandlers.cbegin(), anotherRegistry._blockTypeHandlers.cend());
     }
+};
 
+class BlockRegistry : public GeneralRegistry<BlockModel, BlockWrapper> {
     friend BlockRegistry& globalBlockRegistry(std::source_location location);
+};
+
+class SchedulerRegistry : public GeneralRegistry<SchedulerModel, SchedulerWrapper> {
+    friend SchedulerRegistry& globalSchedulerRegistry(std::source_location location);
 };
 
 GNURADIO_EXPORT
 BlockRegistry& globalBlockRegistry(std::source_location location = std::source_location::current());
+
+GNURADIO_EXPORT
+SchedulerRegistry& globalSchedulerRegistry(std::source_location location = std::source_location::current());
 
 } // namespace gr
 
 extern "C" {
 GNURADIO_EXPORT
 gr::BlockRegistry* grGlobalBlockRegistry(std::source_location location = std::source_location::current());
+
+GNURADIO_EXPORT
+gr::SchedulerRegistry* grGlobalSchedulerRegistry(std::source_location location = std::source_location::current());
 }
 
 #endif // GNURADIO_BLOCK_REGISTRY_HPP

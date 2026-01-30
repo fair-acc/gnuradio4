@@ -3,7 +3,7 @@
 #include <charconv>
 #include <vector>
 
-GR_PLUGIN("Good Conversion Plugin", "Unknown", "LGPL3", "v1")
+GR_PLUGIN("Good Conversion Plugin", "Unknown", "MIT", "v1")
 
 namespace good {
 

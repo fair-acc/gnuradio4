@@ -472,9 +472,10 @@ template<MetaInfo mode = MetaInfo::Apply, DataSetLike D, typename T = typename s
         const std::uint64_t period          = 1'000'000'000;
         const std::uint64_t time            = static_cast<std::uint64_t>(gr::value(value)) * period;
         const std::uint64_t timeUncertainty = static_cast<std::uint64_t>(gr::uncertainty(value)) * period;
-        property_map        data            = property_map{{gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)}, //,                        //
-                              {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},                 //
-                              {gr::tag::CONTEXT.shortKey(), context}};
+        property_map        data            = property_map{                                                                                                 //
+            {gr::tag::TRIGGER_NAME.shortKey(), std::format("{}_EDGE_LEVEL_{}", isRising ? "RISING" : "FALLING", threshold)},              //
+            {gr::tag::TRIGGER_TIME.shortKey(), time}, {"trigger_time_error", timeUncertainty}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
+            {gr::tag::CONTEXT.shortKey(), context}};
         dataSet.timing_events[signalIndex].push_back({idx, std::move(data)});
     }
     return value;

@@ -13,7 +13,6 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <memory_resource>
 #endif
 #include <algorithm>
-#include <atomic>
 #include <bit>
 #include <cassert> // to assert if compiled for debugging
 #include <functional>
@@ -227,44 +226,71 @@ enum class WriterSpanReservePolicy {
  */
 template<typename T, std::size_t SIZE = std::dynamic_extent, ProducerType producerType = ProducerType::Single, WaitStrategyLike TWaitStrategy = SleepingWaitStrategy>
 class CircularBuffer {
+public:
+    using value_type = T;
     using Allocator  = std::pmr::polymorphic_allocator<T>;
     using BufferType = CircularBuffer<T, SIZE, producerType, TWaitStrategy>;
     using ClaimType  = detail::producer_type_v<SIZE, producerType, TWaitStrategy>;
 
+private:
     struct BufferImpl {
         Allocator                 _allocator{};
         const bool                _isMmapAllocated;
-        const std::size_t         _size; // pre-condition: std::has_single_bit(_size)
+        const std::size_t         _size;
+        const std::size_t         _mask;
+        const bool                _is_power_of_two;
         std::vector<T, Allocator> _data;
         ClaimType                 _claimStrategy;
-        std::atomic<std::size_t>  _reader_count{0UZ};
-        std::atomic<std::size_t>  _writer_count{0UZ};
+        std::size_t               _reader_count{0UZ};
+        std::size_t               _writer_count{0UZ};
 
         BufferImpl() = delete;
         BufferImpl(const std::size_t min_size, Allocator allocator)
             : _allocator(allocator),                                                                 //
               _isMmapAllocated(dynamic_cast<double_mapped_memory_resource*>(_allocator.resource())), //
-              _size(align_with_page_size(std::bit_ceil(min_size), _isMmapAllocated)),                //
+              _size(align_with_page_size(min_size, _isMmapAllocated)), _mask(_size - 1),             //
+              _is_power_of_two(std::has_single_bit(_size)),                                          //
               _data(buffer_size(_size, _isMmapAllocated), _allocator),                               //
               _claimStrategy(ClaimType(_size)) {}
 
-#ifdef HAS_POSIX_MAP_INTERFACE
-        static std::size_t align_with_page_size(const std::size_t min_size, bool _isMmapAllocated) {
-            if (_isMmapAllocated) {
-                const std::size_t pageSize    = static_cast<std::size_t>(getpagesize());
-                const std::size_t elementSize = sizeof(T);
-                // least common multiple (lcm) of elementSize and pageSize
-                std::size_t lcmValue = elementSize * pageSize / std::gcd(elementSize, pageSize);
+        BufferImpl(const BufferImpl&)            = delete;
+        BufferImpl(BufferImpl&&)                 = delete;
+        BufferImpl& operator=(const BufferImpl&) = delete;
+        BufferImpl& operator=(BufferImpl&&)      = delete;
 
-                // adjust lcmValue to be larger than min_size
-                while (lcmValue < min_size) {
-                    lcmValue += lcmValue;
-                }
-                return lcmValue;
-            } else {
-                return min_size;
+        [[nodiscard]] std::size_t calculateIndex(std::size_t cursor) const noexcept {
+            if (_is_power_of_two) { // fast path: use bitwise AND for power-of-2 sizes
+                return cursor & _mask;
+            } else { // general case: use modulo for arbitrary sizes
+                return cursor % _size;
             }
         }
+
+#ifdef HAS_POSIX_MAP_INTERFACE
+        constexpr static std::size_t align_with_page_size(std::size_t min_elems, bool isMmap) {
+            if (!isMmap) {
+                return min_elems;
+            }
+            // pick N elems so (N*sizeof(T)) % page == 0.
+            // start at bit_ceil(min) to preserve mask fast path; bump by stepElems.
+            const std::size_t page_size    = static_cast<std::size_t>(getpagesize());
+            const std::size_t element_size = sizeof(T);
+
+            // use LCM to ensure both page alignment AND integral number of elements
+            const std::size_t gcd_value        = std::gcd(page_size, element_size);
+            const std::size_t lcm              = (page_size / gcd_value) * element_size;
+            const std::size_t elements_per_lcm = lcm / element_size;
+
+            // round up to nearest multiple of elements_per_lcm
+            const std::size_t num_blocks = (min_elems + elements_per_lcm - 1) / elements_per_lcm;
+            const std::size_t result     = num_blocks * elements_per_lcm;
+
+            // Verify our constraints are met (for debugging)
+            assert((result * element_size) % page_size == 0);
+
+            return result;
+        }
+
 #else
         static std::size_t align_with_page_size(const std::size_t min_size, bool) {
             return min_size; // mmap() & getpagesize() not supported for non-POSIX OS
@@ -325,13 +351,30 @@ class CircularBuffer {
 
                 if (!_parent->_buffer->_isMmapAllocated) {
                     const std::size_t size = _parent->_buffer->_size;
-                    // mirror samples below/above the buffer's wrap-around point
+
+                    // mirror samples below/above the wrap point
                     const std::size_t nFirstHalf  = std::min(size - _parent->_index, _parent->_nRequestedSamplesToPublish);
                     const std::size_t nSecondHalf = _parent->_nRequestedSamplesToPublish - nFirstHalf;
 
-                    auto& data = _parent->_buffer->_data;
-                    std::copy(&data[_parent->_index], &data[_parent->_index + nFirstHalf], &data[_parent->_index + size]);
-                    std::copy(&data[size], &data[size + nSecondHalf], &data[0]);
+                    auto* base = _parent->_buffer->_data.data();
+
+                    // A) copy the contiguous tail (in first half) to second half
+                    //    [index, index+nFirstHalf) -> [index+size, index+size+nFirstHalf)
+                    if constexpr (std::is_trivially_copyable_v<T>) {
+                        std::memcpy(base + (_parent->_index + size), base + _parent->_index, nFirstHalf * sizeof(T));
+                    } else {
+                        std::copy_n(base + _parent->_index, nFirstHalf, base + (_parent->_index + size));
+                    }
+
+                    // B) mirror back the wrapped head we just wrote contiguously at
+                    //    [size, size + nSecondHalf) down to [0, nSecondHalf)
+                    if (nSecondHalf) {
+                        if constexpr (std::is_trivially_copyable_v<T>) {
+                            std::memcpy(base, base + size, nSecondHalf * sizeof(T));
+                        } else {
+                            std::copy_n(base + size, nSecondHalf, base);
+                        }
+                    }
                 }
                 _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
                 _parent->_offset += _parent->_nRequestedSamplesToPublish;
@@ -406,7 +449,7 @@ class CircularBuffer {
 
     public:
         Writer() = delete;
-        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { _buffer->_writer_count.fetch_add(1UZ, std::memory_order_relaxed); };
+        explicit Writer(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(std::move(buffer)) { atomic_ref(_buffer->_writer_count).fetch_add(1UZ); };
 
         Writer(Writer&& other) noexcept
             : _buffer(std::move(other._buffer)),                                                  //
@@ -429,11 +472,13 @@ class CircularBuffer {
 
         ~Writer() {
             if (_buffer) {
-                _buffer->_writer_count.fetch_sub(1UZ, std::memory_order_relaxed);
+                gr::atomic_ref(_buffer->_writer_count).fetch_sub(1UZ);
             }
         }
 
         [[nodiscard]] constexpr BufferType buffer() const noexcept { return CircularBuffer(_buffer); };
+
+        [[nodiscard]] std::size_t bufferIndex() const noexcept { return _buffer->calculateIndex(_buffer->_claimStrategy._publishCursor.value()); }
 
         template<SpanReleasePolicy policy = SpanReleasePolicy::ProcessNone>
         [[nodiscard]] constexpr auto tryReserve(std::size_t nSamples) noexcept -> WriterSpan<U, policy> {
@@ -447,7 +492,7 @@ class CircularBuffer {
 
             const std::optional<std::size_t> sequence = _buffer->_claimStrategy.tryNext(nSamples);
             if (sequence.has_value()) {
-                const std::size_t index = (sequence.value() + _buffer->_size - nSamples) % _buffer->_size;
+                const std::size_t index = _buffer->calculateIndex(sequence.value() + _buffer->_size - nSamples);
                 return WriterSpan<U, policy>(this, index, sequence.value(), nSamples);
             } else {
                 return WriterSpan<U, policy>(this);
@@ -465,7 +510,7 @@ class CircularBuffer {
             }
 
             const auto        sequence = _buffer->_claimStrategy.next(nSamples);
-            const std::size_t index    = (sequence + _buffer->_size - nSamples) % _buffer->_size;
+            const std::size_t index    = _buffer->calculateIndex(sequence + _buffer->_size - nSamples);
             return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
@@ -635,23 +680,20 @@ class CircularBuffer {
         std::size_t _nRequestedSamplesToConsume{std::numeric_limits<std::size_t>::max()}; // The number of samples requested for consumption by explicitly invoking the consume() method.
         std::size_t _nSamplesConsumed{0UZ};                                               // The number of samples actually consumed.
 
-        std::size_t bufferIndex() const noexcept {
-            const auto bitmask = _buffer->_size - 1;
-            return _readIndexCached & bitmask;
-        }
+        std::size_t bufferIndex() const noexcept { return _buffer->calculateIndex(_readIndexCached); }
 
     public:
         Reader() = delete;
         explicit Reader(std::shared_ptr<BufferImpl> buffer) noexcept : _buffer(buffer) {
             gr::detail::addSequences(_buffer->_claimStrategy._readSequences, _buffer->_claimStrategy._publishCursor, {_readIndex});
-            _buffer->_reader_count.fetch_add(1UZ, std::memory_order_relaxed);
+            gr::atomic_ref(_buffer->_reader_count).fetch_add(1UZ);
             _readIndexCached = _readIndex->value();
         }
 
         Reader(Reader&& other) noexcept
             : _readIndex(std::move(other._readIndex)),                                      //
               _readIndexCached(std::exchange(other._readIndexCached, _readIndex->value())), //
-              _buffer(other._buffer),                                                       //
+              _buffer(std::move(other._buffer)),                                            //
               _nSamplesFirstGet(other._nSamplesFirstGet),                                   //
               _instanceCount(other._instanceCount),                                         //
               _nRequestedSamplesToConsume(other._nRequestedSamplesToConsume),               //
@@ -668,8 +710,10 @@ class CircularBuffer {
             return *this;
         };
         ~Reader() {
-            gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
-            _buffer->_reader_count.fetch_sub(1UZ, std::memory_order_relaxed);
+            if (_buffer) {
+                gr::detail::removeSequence(_buffer->_claimStrategy._readSequences, _readIndex);
+                gr::atomic_ref(_buffer->_reader_count).fetch_sub(1UZ);
+            }
         }
 
         [[nodiscard]] constexpr BufferType  buffer() const noexcept { return CircularBuffer(_buffer); };
@@ -720,13 +764,20 @@ public:
     explicit CircularBuffer(std::size_t minSize, Allocator allocator = DefaultAllocator()) : _sharedBufferPtr(std::make_shared<BufferImpl>(minSize, allocator)) {}
     ~CircularBuffer() = default;
 
+    // CircularBuffer is just a shared pointer over BufferImpl,
+    // it is Ok to have copy and move operations.
+    CircularBuffer(const CircularBuffer&)            = default;
+    CircularBuffer(CircularBuffer&&)                 = default;
+    CircularBuffer& operator=(const CircularBuffer&) = default;
+    CircularBuffer& operator=(CircularBuffer&&)      = default;
+
     [[nodiscard]] std::size_t           size() const noexcept { return _sharedBufferPtr->_size; }
     [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_sharedBufferPtr); }
     [[nodiscard]] BufferReaderLike auto new_reader() { return Reader<T>(_sharedBufferPtr); }
 
     // implementation specific interface -- not part of public Buffer / production-code API
-    [[nodiscard]] std::size_t n_writers() const { return _sharedBufferPtr->_writer_count.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::size_t n_readers() const { return _sharedBufferPtr->_reader_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t n_writers() const { return gr::atomic_ref(_sharedBufferPtr->_writer_count).load_acquire(); }
+    [[nodiscard]] std::size_t n_readers() const { return gr::atomic_ref(_sharedBufferPtr->_reader_count).load_acquire(); }
     [[nodiscard]] const auto& claim_strategy() { return _sharedBufferPtr->_claimStrategy; }
     [[nodiscard]] const auto& wait_strategy() { return _sharedBufferPtr->_claimStrategy._wait_strategy; }
     [[nodiscard]] const auto& cursor_sequence() { return _sharedBufferPtr->_claimStrategy._publishCursor; }

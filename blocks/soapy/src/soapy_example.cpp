@@ -22,13 +22,13 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
     using TDataType = std::complex<float>;
 
     auto& source = flow.emplaceBlock<SoapyBlock<TDataType, 2UZ>>({
-        {"device", "lime"},                                                                 //
-        {"sample_rate", sampleRate},                                                        //
-        {"rx_channels", std::vector<gr::Size_t>{0U, 1U}},                                   //
-        {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}},                          //
-        {"rx_center_frequency", std::vector<double>{rxCenterFrequency, rxCenterFrequency}}, //
-        {"rx_bandwdith", std::vector<double>{bandwidth, bandwidth}},                        //
-        {"rx_gains", std::vector<double>{rxGains, rxGains}},
+        {"device", "lime"},                                                            //
+        {"sample_rate", sampleRate},                                                   //
+        {"rx_channels", Tensor<gr::Size_t>(data_from, {0U, 1U})},                      //
+        {"rx_antennae", Tensor<pmt::Value>{pmt::Value("LNAW"), pmt::Value("LNAW")}},   //
+        {"rx_center_frequency", Tensor<double>{rxCenterFrequency, rxCenterFrequency}}, //
+        {"rx_bandwdith", Tensor<double>{bandwidth, bandwidth}},                        //
+        {"rx_gains", Tensor<double>{rxGains, rxGains}},
     });
     std::println("set parameter:\n   sample_rate: {} SP/s\n   rx_center_frequency: {} Hz\n   rx_bandwdith: {} Hz\n   rx_gains: {} [dB]", //
         sampleRate, rxCenterFrequency, bandwidth, rxGains);
@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
     constexpr double     defaultRxGains           = 10.0;            // 10 dB
 
     std::filesystem::path exePath    = std::filesystem::current_path();
-    auto                  parsedArgs = parseArguments(argc, argv, exePath / "test_ch0.bin", exePath / "test_ch1.bin", defaultMaxFileSize, defaultSampleRate, defaultRxCenterFrequency, defaultBandwidth, defaultRxGains);
+    auto                  parsedArgs = parseArguments(argc, argv, (exePath / "test_ch0.bin").string(), (exePath / "test_ch1.bin").string(), defaultMaxFileSize, defaultSampleRate, defaultRxCenterFrequency, defaultBandwidth, defaultRxGains);
     if (!parsedArgs) {
         std::println(R"(
 Usage:
@@ -94,9 +94,11 @@ Default:
 
     Graph flow = createGraph(fileName1, fileName2, maxFileSize, sampleRate, rxCenterFrequency, bandwidth, rxGains);
 
-    auto threadPool = std::make_shared<gr::thread_pool::BasicThreadPool>("custom pool", gr::thread_pool::CPU_BOUND, 2, 10UZ);
-    auto sched      = gr::scheduler::Simple<>{std::move(flow), threadPool};
-    auto retVal     = sched.runAndWait();
+    gr::scheduler::Simple<> sched;
+    if (auto ret = sched.exchange(std::move(flow)); !ret) {
+        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+    }
+    auto retVal = sched.runAndWait();
     expect(retVal.has_value()) << std::format("scheduler execution error: {}", retVal.error());
 
     return 0;
