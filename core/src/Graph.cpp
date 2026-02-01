@@ -6,10 +6,10 @@ namespace gr {
 Graph::Graph(property_map settings) : gr::Block<Graph>(std::move(settings)), _pluginLoader(std::addressof(gr::globalPluginLoader())) {
     _blocks.reserve(100); // TODO: remove
 
-    propertyCallbacks[graph::property::kInspectBlock]           = std::mem_fn(&Graph::propertyCallbackInspectBlock);
-    propertyCallbacks[graph::property::kGraphInspect]           = std::mem_fn(&Graph::propertyCallbackGraphInspect);
-    propertyCallbacks[graph::property::kRegistryBlockTypes]     = std::mem_fn(&Graph::propertyCallbackRegistryBlockTypes);
-    propertyCallbacks[graph::property::kRegistrySchedulerTypes] = std::mem_fn(&Graph::propertyCallbackRegistrySchedulerTypes);
+    propertyCallbacks[graph::property::kInspectBlock]           = static_cast<PropertyCallback>(&Graph::propertyCallbackInspectBlock);
+    propertyCallbacks[graph::property::kGraphInspect]           = static_cast<PropertyCallback>(&Graph::propertyCallbackGraphInspect);
+    propertyCallbacks[graph::property::kRegistryBlockTypes]     = static_cast<PropertyCallback>(&Graph::propertyCallbackRegistryBlockTypes);
+    propertyCallbacks[graph::property::kRegistrySchedulerTypes] = static_cast<PropertyCallback>(&Graph::propertyCallbackRegistrySchedulerTypes);
 }
 
 [[maybe_unused]] std::shared_ptr<BlockModel> const& Graph::emplaceBlock(std::string_view type, property_map initialSettings) {

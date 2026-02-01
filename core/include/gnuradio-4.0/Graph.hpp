@@ -132,38 +132,43 @@ protected:
     std::unordered_multimap<std::string, PortNameMapper> _exportedInputPortsForBlock;
     std::unordered_multimap<std::string, PortNameMapper> _exportedOutputPortsForBlock;
 
+    static std::optional<Message> subgraphExportHandler(void* context, Message message) {
+        auto*       wrapper             = static_cast<GraphWrapper*>(context);
+        const auto& data                = message.data.value();
+        const auto  uniqueBlockName     = data.at("uniqueBlockName").value_or(std::string_view{});
+        const auto  portDirectionString = data.at("portDirection").value_or(std::string_view{});
+        const auto  portName            = data.at("portName").value_or(std::string_view{});
+        const auto  exportFlag          = checked_access_ptr{data.at("exportFlag").get_if<bool>()};
+        if (uniqueBlockName.data() == nullptr || portDirectionString.data() == nullptr || portName.data() == nullptr || exportFlag == nullptr) {
+            message.data = std::unexpected(Error{std::format("Invalid definition for the kSubgraphExportPort message {}", message)});
+            return message;
+        }
+
+        const auto portDirection = portDirectionString == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;
+
+        if (*exportFlag) {
+            const auto exportedName = data.at("exportedName").value_or(std::string_view{});
+            if (exportedName.data() == nullptr) {
+                message.data = std::unexpected(Error{std::format("Invalid definition for exportName in the kSubgraphExportPort message {}", message)});
+                return message;
+            }
+            wrapper->exportPort(*exportFlag, uniqueBlockName, portDirection, portName, exportedName);
+        } else {
+            wrapper->exportPort(*exportFlag, uniqueBlockName, portDirection, portName, {});
+        }
+
+        message.endpoint = graph::property::kSubgraphExportedPort;
+        return message;
+    }
+
     void initExportPorts() {
         // We need to make sure nobody touches our dynamic ports
         // as this class will handle them
         this->_dynamicPortsLoader.instance = nullptr;
 
-        this->_block.propertyCallbacks[graph::property::kSubgraphExportPort] = [this](auto& /*self*/, std::string_view /*property*/, Message message) -> std::optional<Message> {
-            const auto& data                = message.data.value();
-            const auto  uniqueBlockName     = data.at("uniqueBlockName").value_or(std::string_view{});
-            const auto  portDirectionString = data.at("portDirection").value_or(std::string_view{});
-            const auto  portName            = data.at("portName").value_or(std::string_view{});
-            const auto  exportFlag          = checked_access_ptr{data.at("exportFlag").get_if<bool>()};
-            if (uniqueBlockName.data() == nullptr || portDirectionString.data() == nullptr || portName.data() == nullptr || exportFlag == nullptr) {
-                message.data = std::unexpected(Error{std::format("Invalid definition for the kSubgraphExportPort message {}", message)});
-                return message;
-            }
-
-            const auto portDirection = portDirectionString == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;
-
-            if (*exportFlag) {
-                const auto exportedName = data.at("exportedName").value_or(std::string_view{});
-                if (exportedName.data() == nullptr) {
-                    message.data = std::unexpected(Error{std::format("Invalid definition for exportName in the kSubgraphExportPort message {}", message)});
-                    return message;
-                }
-                exportPort(*exportFlag, uniqueBlockName, portDirection, portName, exportedName);
-            } else {
-                exportPort(*exportFlag, uniqueBlockName, portDirection, portName, {});
-            }
-
-            message.endpoint = graph::property::kSubgraphExportedPort;
-            return message;
-        };
+        // Register the handler for subgraph export port messages
+        this->_block._subgraphExportHandler = &GraphWrapper::subgraphExportHandler;
+        this->_block._subgraphExportContext = this;
     }
 
 public:
@@ -284,6 +289,8 @@ struct Graph : Block<Graph> {
     std::shared_ptr<gr::Sequence> _progress = std::make_shared<gr::Sequence>();
 
     gr::PluginLoader* _pluginLoader = nullptr;
+
+    // _subgraphExportHandler and _subgraphExportContext are on Block<T>
 
     // Just a dummy class that stores the graph and the source block and port
     // to be able to split the connection into two separate calls

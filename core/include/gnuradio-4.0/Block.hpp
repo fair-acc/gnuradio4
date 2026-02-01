@@ -774,22 +774,34 @@ public:
     MsgPortInBuiltin  msgIn;
     MsgPortOutBuiltin msgOut;
 
-    using PropertyCallback = std::function<std::optional<Message>(Derived&, std::string_view, Message)>;
+    using PropertyCallback = std::optional<Message> (Block::*)(std::string_view, Message);
     std::map<std::string, PropertyCallback> propertyCallbacks{
-        {block::property::kHeartbeat, std::mem_fn(&Block::propertyCallbackHeartbeat)},               //
-        {block::property::kEcho, std::mem_fn(&Block::propertyCallbackEcho)},                         //
-        {block::property::kLifeCycleState, std::mem_fn(&Block::propertyCallbackLifecycleState)},     //
-        {block::property::kSetting, std::mem_fn(&Block::propertyCallbackSettings)},                  //
-        {block::property::kStagedSetting, std::mem_fn(&Block::propertyCallbackStagedSettings)},      //
-        {block::property::kStoreDefaults, std::mem_fn(&Block::propertyCallbackStoreDefaults)},       //
-        {block::property::kResetDefaults, std::mem_fn(&Block::propertyCallbackResetDefaults)},       //
-        {block::property::kActiveContext, std::mem_fn(&Block::propertyCallbackActiveContext)},       //
-        {block::property::kSettingsCtx, std::mem_fn(&Block::propertyCallbackSettingsCtx)},           //
-        {block::property::kSettingsContexts, std::mem_fn(&Block::propertyCallbackSettingsContexts)}, //
-        {block::property::kMetaInformation, std::mem_fn(&Block::propertyCallbackMetaInformation)},   //
-        {block::property::kUiConstraints, std::mem_fn(&Block::propertyCallbackUiConstraints)},       //
+        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},               //
+        {block::property::kEcho, &Block::propertyCallbackEcho},                         //
+        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState},     //
+        {block::property::kSetting, &Block::propertyCallbackSettings},                  //
+        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},      //
+        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},       //
+        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},       //
+        {block::property::kActiveContext, &Block::propertyCallbackActiveContext},       //
+        {block::property::kSettingsCtx, &Block::propertyCallbackSettingsCtx},           //
+        {block::property::kSettingsContexts, &Block::propertyCallbackSettingsContexts}, //
+        {block::property::kMetaInformation, &Block::propertyCallbackMetaInformation},   //
+        {block::property::kUiConstraints, &Block::propertyCallbackUiConstraints},       //
     };
     std::map<std::string, std::set<std::string>> propertySubscriptions;
+
+    // Hook for GraphWrapper to handle subgraph export port messages on any block type
+    using SubgraphExportHandler                  = std::optional<Message> (*)(void* context, Message);
+    SubgraphExportHandler _subgraphExportHandler = nullptr;
+    void*                 _subgraphExportContext = nullptr;
+
+    std::optional<Message> unmatchedPropertyHandler(std::string_view propertyName, Message message) {
+        if (propertyName == graph::property::kSubgraphExportPort && _subgraphExportHandler != nullptr) {
+            return _subgraphExportHandler(_subgraphExportContext, std::move(message));
+        }
+        return std::nullopt;
+    }
 
     PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
@@ -2359,7 +2371,7 @@ public:
                 if constexpr (requires(std::string_view sv, Message m) {
                                   { self().unmatchedPropertyHandler(sv, m) } -> std::same_as<std::optional<Message>>;
                               }) {
-                    callback = &Derived::unmatchedPropertyHandler;
+                    callback = static_cast<PropertyCallback>(&Derived::unmatchedPropertyHandler);
                 }
             }
 
@@ -2369,7 +2381,7 @@ public:
 
             std::optional<Message> retMessage;
             try {
-                retMessage = callback(self(), message.endpoint, message); // N.B. life-time: message is copied
+                retMessage = (this->*callback)(message.endpoint, message); // N.B. life-time: message is copied
             } catch (const gr::exception& e) {
                 retMessage       = Message{message};
                 retMessage->data = std::unexpected(Error(e));
