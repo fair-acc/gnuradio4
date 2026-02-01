@@ -158,15 +158,16 @@ protected:
 
     void registerPropertyCallbacks() noexcept {
         _forbid_reserved_overrides();
+        using PropertyCallback                            = typename base_t::PropertyCallback;
         auto& callbacks                                   = this->propertyCallbacks;
-        callbacks[scheduler::property::kEmplaceBlock]     = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceBlock);
-        callbacks[scheduler::property::kRemoveBlock]      = std::mem_fn(&SchedulerBase::propertyCallbackRemoveBlock);
-        callbacks[scheduler::property::kRemoveEdge]       = std::mem_fn(&SchedulerBase::propertyCallbackRemoveEdge);
-        callbacks[scheduler::property::kEmplaceEdge]      = std::mem_fn(&SchedulerBase::propertyCallbackEmplaceEdge);
-        callbacks[scheduler::property::kReplaceBlock]     = std::mem_fn(&SchedulerBase::propertyCallbackReplaceBlock);
-        callbacks[scheduler::property::kGraphGRC]         = std::mem_fn(&SchedulerBase::propertyCallbackGraphGRC);
-        callbacks[scheduler::property::kSchedulerInspect] = std::mem_fn(&SchedulerBase::propertyCallbackSchedulerInspect);
-        callbacks[graph::property::kInspectBlock]         = std::mem_fn(&SchedulerBase::propertyCallbackInspectBlock);
+        callbacks[scheduler::property::kEmplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceBlock);
+        callbacks[scheduler::property::kRemoveBlock]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);
+        callbacks[scheduler::property::kRemoveEdge]       = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveEdge);
+        callbacks[scheduler::property::kEmplaceEdge]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceEdge);
+        callbacks[scheduler::property::kReplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackReplaceBlock);
+        callbacks[scheduler::property::kGraphGRC]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackGraphGRC);
+        callbacks[scheduler::property::kSchedulerInspect] = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackSchedulerInspect);
+        callbacks[graph::property::kInspectBlock]         = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackInspectBlock);
         this->settings().updateActiveParameters();
     }
 
