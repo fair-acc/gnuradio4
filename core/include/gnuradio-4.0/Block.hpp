@@ -2726,8 +2726,8 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto for_each_port(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
-    return gr::meta::tuple_for_each(
+inline constexpr void for_each_port(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    gr::meta::tuple_for_each(
         [&function](auto&&... args) {
             (..., ([&function](auto&& arg) {
                 using ArgType = std::decay_t<decltype(arg)>;
@@ -2746,8 +2746,8 @@ inline constexpr auto for_each_port(Function&& function, Tuple&& tuple, Tuples&&
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto for_each_reader_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
-    return gr::meta::tuple_for_each(
+inline constexpr void for_each_reader_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    gr::meta::tuple_for_each(
         [&function](auto&&... args) {
             (..., ([&function](auto&& arg) {
                 using ArgType = std::decay_t<decltype(arg)>;
@@ -2765,8 +2765,8 @@ inline constexpr auto for_each_reader_span(Function&& function, Tuple&& tuple, T
 }
 
 template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr auto for_each_writer_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
-    return gr::meta::tuple_for_each(
+inline constexpr void for_each_writer_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+    gr::meta::tuple_for_each(
         [&function](auto&&... args) {
             (..., ([&function](auto&& arg) {
                 using ArgType = std::decay_t<decltype(arg)>;
