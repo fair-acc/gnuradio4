@@ -2725,62 +2725,54 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
     return {};
 }
 
-template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr void for_each_port(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+template<typename Function, typename Tuple>
+inline constexpr void for_each_port(Function&& function, Tuple&& tuple) {
     gr::meta::tuple_for_each(
-        [&function](auto&&... args) {
-            (..., ([&function](auto&& arg) {
-                using ArgType = std::decay_t<decltype(arg)>;
-                if constexpr (traits::port::is_port_v<ArgType>) {
-                    function(arg); // arg is a port, apply function directly
-                } else if constexpr (traits::port::is_port_collection_v<ArgType>) {
-                    for (auto& port : arg) { // arg is a collection of ports, apply function to each port
-                        function(port);
-                    }
-                } else {
-                    static_assert(gr::meta::always_false<Tuple>, "not a port or collection of ports");
+        [&function](auto&& arg) {
+            using ArgType = std::decay_t<decltype(arg)>;
+            if constexpr (traits::port::is_port_v<ArgType>) {
+                function(arg); // arg is a port, apply function directly
+            } else if constexpr (traits::port::is_port_collection_v<ArgType>) {
+                for (auto& port : arg) { // arg is a collection of ports, apply function to each port
+                    function(port);
                 }
-            }(args)));
+            } else {
+                static_assert(gr::meta::always_false<ArgType>, "not a port or collection of ports");
+            }
         },
-        std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
+        std::forward<Tuple>(tuple));
 }
 
-template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr void for_each_reader_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+template<typename Function, typename Tuple>
+inline constexpr void for_each_reader_span(Function&& function, Tuple&& tuple) {
     gr::meta::tuple_for_each(
-        [&function](auto&&... args) {
-            (..., ([&function](auto&& arg) {
-                using ArgType = std::decay_t<decltype(arg)>;
-
-                if constexpr (ReaderSpanLike<typename ArgType::value_type>) {
-                    for (auto& param : arg) {
-                        function(param);
-                    }
-                } else if (ReaderSpanLike<ArgType>) {
-                    function(arg);
+        [&function](auto&& arg) {
+            using ArgType = std::decay_t<decltype(arg)>;
+            if constexpr (ReaderSpanLike<typename ArgType::value_type>) {
+                for (auto& param : arg) {
+                    function(param);
                 }
-            }(args)));
+            } else if constexpr (ReaderSpanLike<ArgType>) {
+                function(arg);
+            }
         },
-        std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
+        std::forward<Tuple>(tuple));
 }
 
-template<typename Function, typename Tuple, typename... Tuples>
-inline constexpr void for_each_writer_span(Function&& function, Tuple&& tuple, Tuples&&... tuples) {
+template<typename Function, typename Tuple>
+inline constexpr void for_each_writer_span(Function&& function, Tuple&& tuple) {
     gr::meta::tuple_for_each(
-        [&function](auto&&... args) {
-            (..., ([&function](auto&& arg) {
-                using ArgType = std::decay_t<decltype(arg)>;
-
-                if constexpr (WriterSpanLike<typename ArgType::value_type>) {
-                    for (auto& param : arg) {
-                        function(param);
-                    }
-                } else if (WriterSpanLike<ArgType>) {
-                    function(arg);
+        [&function](auto&& arg) {
+            using ArgType = std::decay_t<decltype(arg)>;
+            if constexpr (WriterSpanLike<typename ArgType::value_type>) {
+                for (auto& param : arg) {
+                    function(param);
                 }
-            }(args)));
+            } else if constexpr (WriterSpanLike<ArgType>) {
+                function(arg);
+            }
         },
-        std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
+        std::forward<Tuple>(tuple));
 }
 
 template<typename TFunction, typename TPortsTuple, typename TSpansTuple>
