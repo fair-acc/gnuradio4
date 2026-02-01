@@ -485,7 +485,7 @@ class CtxSettings : public SettingsBase {
     // because `_defaultParameters` cannot be initialized using Settings::storeDefaults() within the Block constructor.
     // Instead, we store them now and set them later in the Block::init method.
     property_map                                 _initBlockParameters{};
-    std::set<std::string>                        _allWritableMembers{};   // all `isWritableMember` class members
+    // _allWritableMembers replaced by static allWritableMembers() function below
     std::map<SettingsCtx, std::set<std::string>> _autoUpdateParameters{}; // for each SettingsCtx auto updated members are stored separately
     std::set<std::string>                        _autoForwardParameters{};
     MatchPredicate                               _matchPred = settings::nullMatchPred;
@@ -499,6 +499,25 @@ public:
     // Settings configuration
     std::uint64_t expiry_time{std::numeric_limits<std::uint64_t>::max()}; // in ns, expiry time of parameter set after the last use, std::numeric_limits<std::uint64_t>::max() == no expiry time
 
+    // Static function - computed once per block type (Optimization B)
+    [[nodiscard]] static const std::set<std::string>& allWritableMembers() {
+        static const std::set<std::string> members = [] {
+            std::set<std::string> result;
+            if constexpr (refl::reflectable<TBlock>) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using RawType    = std::remove_cvref_t<MemberType>;
+                    using Type       = unwrap_if_wrapped_t<RawType>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        result.emplace(std::string(refl::data_member_name<TBlock, kIdx>.view()));
+                    }
+                });
+            }
+            return result;
+        }();
+        return members;
+    }
+
 public:
     explicit CtxSettings(TBlock& block, MatchPredicate matchPred = settings::nullMatchPred) noexcept : SettingsBase(), _block(&block), _matchPred(matchPred) {
         if constexpr (requires { &TBlock::settingsChanged; }) { // if settingsChanged is defined
@@ -509,39 +528,7 @@ public:
         if constexpr (requires { &TBlock::reset; }) { // if reset is defined
             static_assert(HasSettingsResetCallback<TBlock>, "if provided, reset() may have no function parameters");
         }
-
-        if constexpr (refl::reflectable<TBlock>) {
-            constexpr bool hasMetaInfo = requires(TBlock t) {
-                {
-                    unwrap_if_wrapped_t<decltype(t.meta_information)> {}
-                } -> std::same_as<property_map>;
-            };
-
-            if constexpr (hasMetaInfo && requires(TBlock t) { t.description; }) {
-                static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(TBlock::description)>>, std::string_view>);
-                _block->meta_information.value["description"] = std::string(_block->description);
-            }
-
-            // handle meta-information for UI and other non-processing-related purposes
-            refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                using MemberType = refl::data_member_type<TBlock, kIdx>;
-                using RawType    = std::remove_cvref_t<MemberType>;
-                using Type       = unwrap_if_wrapped_t<RawType>;
-                auto memberName  = std::string(refl::data_member_name<TBlock, kIdx>.view());
-
-                if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
-                    auto& meta_information                                                  = _block->meta_information;
-                    meta_information[convert_string_domain(memberName) + "::description"]   = std::string(RawType::description());
-                    meta_information[convert_string_domain(memberName) + "::documentation"] = std::string(RawType::documentation());
-                    meta_information[convert_string_domain(memberName) + "::unit"]          = std::string(RawType::unit());
-                    meta_information[convert_string_domain(memberName) + "::visible"]       = RawType::visible();
-                }
-
-                if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                    _allWritableMembers.emplace(std::move(memberName));
-                }
-            });
-        }
+        // meta_information population deferred to init() (Optimization B)
         _autoForwardParameters.insert(gr::tag::kDefaultTags.begin(), gr::tag::kDefaultTags.end());
     }
 
@@ -568,7 +555,7 @@ public:
         _storedParameters      = other._storedParameters;
         _defaultParameters     = other._defaultParameters;
         _initBlockParameters   = other._initBlockParameters;
-        _allWritableMembers    = other._allWritableMembers;
+        // _allWritableMembers is now static, no need to copy
         _autoUpdateParameters  = other._autoUpdateParameters;
         _autoForwardParameters = other._autoForwardParameters;
         _matchPred             = other._matchPred;
@@ -583,7 +570,7 @@ public:
         _storedParameters      = std::move(other._storedParameters);
         _defaultParameters     = std::move(other._defaultParameters);
         _initBlockParameters   = std::move(other._initBlockParameters);
-        _allWritableMembers    = std::move(other._allWritableMembers);
+        // _allWritableMembers is now static, no need to move
         _autoUpdateParameters  = std::move(other._autoUpdateParameters);
         _autoForwardParameters = std::move(other._autoForwardParameters);
         _matchPred             = std::exchange(other._matchPred, settings::nullMatchPred);
@@ -600,6 +587,34 @@ public:
     void setInitBlockParameters(const property_map& parameters) override { _initBlockParameters = parameters; }
 
     NO_INLINE void init() override {
+        // Populate meta_information at runtime (deferred from constructor - Optimization B)
+        if constexpr (refl::reflectable<TBlock>) {
+            constexpr bool hasMetaInfo = requires(TBlock t) {
+                {
+                    unwrap_if_wrapped_t<decltype(t.meta_information)> {}
+                } -> std::same_as<property_map>;
+            };
+
+            if constexpr (hasMetaInfo && requires(TBlock t) { t.description; }) {
+                static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(TBlock::description)>>, std::string_view>);
+                _block->meta_information.value["description"] = std::string(_block->description);
+            }
+
+            // handle meta-information for UI and other non-processing-related purposes
+            refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                using MemberType = refl::data_member_type<TBlock, kIdx>;
+                using RawType    = std::remove_cvref_t<MemberType>;
+                if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
+                    auto  memberName       = std::string(refl::data_member_name<TBlock, kIdx>.view());
+                    auto& meta_information = _block->meta_information;
+                    meta_information[convert_string_domain(memberName) + "::description"]   = std::string(RawType::description());
+                    meta_information[convert_string_domain(memberName) + "::documentation"] = std::string(RawType::documentation());
+                    meta_information[convert_string_domain(memberName) + "::unit"]          = std::string(RawType::unit());
+                    meta_information[convert_string_domain(memberName) + "::visible"]       = RawType::visible();
+                }
+            });
+        }
+
         storeDefaults();
 
         if (const property_map failed = set(_initBlockParameters); !failed.empty()) {
@@ -624,7 +639,7 @@ public:
             // initialize with empty property_map when best match parameters not found
             property_map newParameters = getBestMatchStoredParameters(ctx).value_or(_defaultParameters);
             if (!_autoUpdateParameters.contains(ctx)) {
-                _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(_allWritableMembers);
+                _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
             }
             auto& currentAutoUpdateParameters = _autoUpdateParameters[ctx];
 
@@ -1278,7 +1293,7 @@ private:
 
     NO_INLINE void addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx) {
         if (!_autoUpdateParameters.contains(ctx)) {
-            _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(_allWritableMembers);
+            _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
         }
 
         std::vector<CtxSettingsPair>& sortedVectorForContext = _storedParameters[ctx.context];
