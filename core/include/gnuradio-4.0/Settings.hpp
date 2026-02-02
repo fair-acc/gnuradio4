@@ -518,6 +518,271 @@ public:
         return members;
     }
 
+    // ===== Static dispatch tables for compile-time optimization (Optimization F) =====
+    // These tables are computed once per block type and enable O(1) member lookup
+    // instead of O(members) iteration for each parameter operation.
+
+    // Type aliases for dispatch function pointers
+    using ParameterSetter       = std::optional<std::string> (*)(std::string_view key, const pmt::Value& value, property_map& newParameters);
+    using StagedParameterSetter = std::optional<std::string> (*)(std::string_view key, const pmt::Value& value, property_map& stagedParameters);
+    using AutoUpdateHandler     = bool (*)(std::string_view key, const pmt::Value& value, const std::set<std::string>& autoUpdateParams, property_map& stagedParameters);
+    using StagedApplier         = bool (*)(TBlock* block, std::string_view key, const pmt::Value& value, property_map& applied, property_map& staged, bool hasCallback);
+    using ParameterReader       = void (*)(const TBlock* block, property_map& parameters);
+    using ActiveParameterReader = void (*)(const TBlock* block, property_map& activeParameters);
+
+private:
+    // Helper template for parameter setting (set method) - instantiated once per member type
+    template<typename Type>
+    static std::optional<std::string> setParameterImpl(std::string_view key, const pmt::Value& value, property_map& newParameters) {
+        if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
+            const auto keyStr = std::pmr::string(key);
+            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+                newParameters.insert_or_assign(keyStr, detail::enumToString(convertedValue.value()));
+            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+                newParameters.insert_or_assign(keyStr, pmt::Value(detail::collectionToTensor(*convertedValue)));
+            } else {
+                newParameters.insert_or_assign(keyStr, detail::castToGrSizeIfNeeded(convertedValue.value()));
+            }
+            return std::nullopt; // success
+        } else {
+            return convertedValue.error(); // error message
+        }
+    }
+
+    // Helper template for autoUpdate - checks type compatibility and updates staged parameters
+    template<typename Type>
+    static bool autoUpdateImpl(std::string_view key, const pmt::Value& value, const std::set<std::string>& autoUpdateParams, property_map& stagedParameters) {
+        const auto keyStr = std::string(key);
+        if (!autoUpdateParams.contains(keyStr)) {
+            return false;
+        }
+        const auto keyPmr = std::pmr::string(key);
+        if constexpr (std::is_enum_v<Type>) {
+            if (value.holds<std::string>()) {
+                stagedParameters.insert_or_assign(keyPmr, value);
+                return true;
+            }
+#ifdef __EMSCRIPTEN__
+        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+            if (value.holds<gr::Size_t>()) {
+                stagedParameters.insert_or_assign(keyPmr, value);
+                return true;
+            }
+#endif
+        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+            using TValue = typename Type::value_type;
+            if (value.holds<Tensor<TValue>>()) {
+                auto vectorValue = pmt::convertTo<Tensor<TValue>>(value);
+                stagedParameters.insert_or_assign(keyPmr, std::move(vectorValue.value()));
+                return true;
+            }
+        } else {
+            if (value.holds<Type>()) {
+                stagedParameters.insert_or_assign(keyPmr, value);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Helper template for applyStagedParameters - applies value to block member
+    template<std::size_t kIdx, typename RawType, typename Type>
+    static bool applyStagedImpl(TBlock* block, std::string_view key, const pmt::Value& stagedValue, property_map& applied, property_map& staged, bool hasCallback) {
+        auto& member = refl::data_member<kIdx>(*block);
+        const auto keyPmr = std::pmr::string(key);
+
+        std::expected<Type, std::string> maybe_value;
+        if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
+            maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
+        } else if constexpr (std::is_same_v<Type, std::string>) {
+            auto str = stagedValue.value_or(std::string_view{});
+            if (str.data() != nullptr) {
+                maybe_value = std::string(str);
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
+        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+            using TValue       = typename Type::value_type;
+            using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
+            auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
+            if (tensor != nullptr) {
+                maybe_value = typename decltype(maybe_value)::value_type{};
+                if (auto conversionResult = pmt::assignTo(*maybe_value, *tensor); !conversionResult) {
+                    maybe_value = std::unexpected(conversionResult.error().message);
+                }
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
+#ifdef __EMSCRIPTEN__
+        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+            auto ptr = checked_access_ptr{stagedValue.get_if<gr::Size_t>()};
+            if (ptr != nullptr) {
+                maybe_value = static_cast<std::size_t>(*ptr);
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
+#endif
+        } else {
+            auto ptr = checked_access_ptr{stagedValue.get_if<Type>()};
+            if (ptr != nullptr) {
+                maybe_value = *ptr;
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
+        }
+
+        if constexpr (is_annotated<RawType>()) {
+            if (maybe_value && member.validate_and_set(*maybe_value)) {
+                applied.insert_or_assign(keyPmr, stagedValue);
+                if (hasCallback) {
+                    staged.insert_or_assign(keyPmr, stagedValue);
+                }
+                return true;
+            } else {
+                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", std::string_view(key), stagedValue).c_str(), stderr);
+                return false;
+            }
+        } else {
+            if (!maybe_value) {
+                std::fputs(std::format("Failed to convert key '{}': {}\n", std::string_view(key), maybe_value.error()).c_str(), stderr);
+                return false;
+            }
+            member = *maybe_value;
+            applied.insert_or_assign(keyPmr, stagedValue);
+            if (hasCallback) {
+                staged.insert_or_assign(keyPmr, stagedValue);
+            }
+            return true;
+        }
+    }
+
+    // Helper template for storeCurrentParameters - reads member value into property_map
+    template<std::size_t kIdx, typename Type>
+    static void storeParameterImpl(const TBlock* block, property_map& parameters) {
+        const auto& key    = std::pmr::string(refl::data_member_name<TBlock, kIdx>.view());
+        const auto& member = refl::data_member<kIdx>(*block);
+        if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+            parameters.insert_or_assign(key, detail::enumToString(member));
+        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+            const auto& from = detail::unwrap_decorated_value(member);
+            parameters.insert_or_assign(key, detail::collectionToTensor(from));
+        } else {
+            parameters.insert_or_assign(key, detail::unwrap_decorated_value(member));
+        }
+    }
+
+    // Helper template for updateActiveParameters - reads member value for active parameters
+    template<std::size_t kIdx, typename RawType, typename Type>
+    static void updateActiveParameterImpl(const TBlock* block, property_map& activeParameters) {
+        const auto& key    = std::string(refl::data_member_name<TBlock, kIdx>.view());
+        const auto& member = refl::data_member<kIdx>(*block);
+        if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
+            activeParameters.insert_or_assign(convert_string_domain(key), detail::enumToString(member));
+        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+            const auto& from = detail::unwrap_decorated_reference(member);
+            activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::collectionToTensor(from)));
+        } else {
+            activeParameters.insert_or_assign(convert_string_domain(key), detail::unwrap_decorated_value(member));
+        }
+    }
+
+public:
+    // Static dispatch table for set() method
+    [[nodiscard]] static const std::unordered_map<std::string_view, ParameterSetter>& parameterSetters() {
+        static const std::unordered_map<std::string_view, ParameterSetter> setters = [] {
+            std::unordered_map<std::string_view, ParameterSetter> result;
+            if constexpr (refl::reflectable<TBlock>) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using RawType    = std::remove_cvref_t<MemberType>;
+                    using Type       = unwrap_if_wrapped_t<RawType>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
+                        result[fieldName.view()] = &setParameterImpl<Type>;
+                    }
+                });
+            }
+            return result;
+        }();
+        return setters;
+    }
+
+    // Static dispatch table for autoUpdate() method
+    [[nodiscard]] static const std::unordered_map<std::string_view, AutoUpdateHandler>& autoUpdateHandlers() {
+        static const std::unordered_map<std::string_view, AutoUpdateHandler> handlers = [] {
+            std::unordered_map<std::string_view, AutoUpdateHandler> result;
+            if constexpr (refl::reflectable<TBlock>) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
+                        result[fieldName.view()] = &autoUpdateImpl<Type>;
+                    }
+                });
+            }
+            return result;
+        }();
+        return handlers;
+    }
+
+    // Static dispatch table for applyStagedParameters() method
+    [[nodiscard]] static const std::unordered_map<std::string_view, StagedApplier>& stagedAppliers() {
+        static const std::unordered_map<std::string_view, StagedApplier> appliers = [] {
+            std::unordered_map<std::string_view, StagedApplier> result;
+            if constexpr (refl::reflectable<TBlock>) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using RawType    = std::remove_cvref_t<MemberType>;
+                    using Type       = unwrap_if_wrapped_t<RawType>;
+                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
+                        constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
+                        result[fieldName.view()] = &applyStagedImpl<kIdx, RawType, Type>;
+                    }
+                });
+            }
+            return result;
+        }();
+        return appliers;
+    }
+
+    // Static list of parameter readers for storeCurrentParameters()
+    [[nodiscard]] static const std::vector<ParameterReader>& parameterReaders() {
+        static const std::vector<ParameterReader> readers = [] {
+            std::vector<ParameterReader> result;
+            if constexpr (refl::reflectable<TBlock>) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
+                    if constexpr (settings::isReadableMember<Type>()) {
+                        result.push_back(&storeParameterImpl<kIdx, Type>);
+                    }
+                });
+            }
+            return result;
+        }();
+        return readers;
+    }
+
+    // Static list of active parameter readers for updateActiveParameters()
+    [[nodiscard]] static const std::vector<ActiveParameterReader>& activeParameterReaders() {
+        static const std::vector<ActiveParameterReader> readers = [] {
+            std::vector<ActiveParameterReader> result;
+            if constexpr (refl::reflectable<TBlock>) {
+                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                    using MemberType = refl::data_member_type<TBlock, kIdx>;
+                    using RawType    = std::remove_cvref_t<MemberType>;
+                    using Type       = unwrap_if_wrapped_t<RawType>;
+                    if constexpr (settings::isReadableMember<Type>()) {
+                        result.push_back(&updateActiveParameterImpl<kIdx, RawType, Type>);
+                    }
+                });
+            }
+            return result;
+        }();
+        return readers;
+    }
+
 public:
     explicit CtxSettings(TBlock& block, MatchPredicate matchPred = settings::nullMatchPred) noexcept : SettingsBase(), _block(&block), _matchPred(matchPred) {
         if constexpr (requires { &TBlock::settingsChanged; }) { // if settingsChanged is defined
@@ -643,40 +908,23 @@ public:
             }
             auto& currentAutoUpdateParameters = _autoUpdateParameters[ctx];
 
+            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
+            const auto& setters = parameterSetters();
             for (const auto& [key, value] : parameters) {
                 if (value.is_monostate()) {
                     continue;
                 }
 
-                bool isSet = false;
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                        if (fieldName != key) {
-                            return;
-                        }
-                        if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-                            auto it = currentAutoUpdateParameters.find(std::string(key));
-                            if (it != currentAutoUpdateParameters.end()) {
-                                currentAutoUpdateParameters.erase(it);
-                            }
-                            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                                newParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
-                            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-                                newParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(*convertedValue)));
-
-                            } else {
-                                newParameters.insert_or_assign(key, detail::castToGrSizeIfNeeded(convertedValue.value()));
-                            }
-                            isSet = true;
-                        } else {
-                            throw gr::exception(convertedValue.error());
-                        }
+                auto it = setters.find(key);
+                if (it != setters.end()) {
+                    if (auto error = it->second(key, value, newParameters)) {
+                        throw gr::exception(*error);
                     }
-                });
-                if (!isSet) {
+                    // Remove from auto-update set if present
+                    if (auto autoIt = currentAutoUpdateParameters.find(std::string(key)); autoIt != currentAutoUpdateParameters.end()) {
+                        currentAutoUpdateParameters.erase(autoIt);
+                    }
+                } else {
                     ret.insert_or_assign(key, value);
                 }
             }
@@ -825,45 +1073,22 @@ public:
 
             const bool activeCtxChanged = _activeCtx == ctx;
 
-            const auto autoUpdateParameters = _autoUpdateParameters.find(ctx);
-            if (autoUpdateParameters == _autoUpdateParameters.end()) {
+            const auto autoUpdateParametersIt = _autoUpdateParameters.find(ctx);
+            if (autoUpdateParametersIt == _autoUpdateParameters.end()) {
                 return;
             }
 
+            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
+            const auto& handlers   = autoUpdateHandlers();
             const auto& parameters = tag.map;
             bool        wasChanged = false;
             for (const auto& [key, value] : parameters) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        if constexpr (std::is_enum_v<Type>) {
-                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<std::string>()) {
-                                _stagedParameters.insert_or_assign(key, value);
-                                wasChanged = true;
-                            }
-#ifdef __EMSCRIPTEN__
-                        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
-                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<gr::Size_t>()) {
-                                _stagedParameters.insert_or_assign(key, value);
-                                wasChanged = true;
-                            }
-#endif
-                        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-                            using TValue = typename Type::value_type;
-                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<Tensor<TValue>>()) {
-                                auto vectorValue = pmt::convertTo<Tensor<TValue>>(value);
-                                _stagedParameters.insert_or_assign(key, std::move(vectorValue.value()));
-                                wasChanged = true;
-                            }
-                        } else {
-                            if (refl::data_member_name<TBlock, kIdx>.view() == key && autoUpdateParameters->second.contains(convert_string_domain(key)) && value.holds<Type>()) {
-                                _stagedParameters.insert_or_assign(key, value);
-                                wasChanged = true;
-                            }
-                        }
+                auto it = handlers.find(key);
+                if (it != handlers.end()) {
+                    if (it->second(key, value, autoUpdateParametersIt->second, _stagedParameters)) {
+                        wasChanged = true;
                     }
-                });
+                }
             }
 
             if (tagCtx == std::nullopt && !wasChanged) { // not context and no parameters in the Tag
@@ -983,90 +1208,19 @@ public:
                 resetDefaults();
             }
 
-            // update staged and forward parameters based on member properties
+            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
+            const auto&  appliers = stagedAppliers();
             property_map staged;
             for (const auto& [key, stagedValue] : _stagedParameters) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using RawType    = std::remove_cvref_t<MemberType>;
-                    using Type       = unwrap_if_wrapped_t<RawType>;
-
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        if (refl::data_member_name<TBlock, kIdx>.view() != key) {
-                            return;
-                        }
-                        auto& member = refl::data_member<kIdx>(*_block);
-
-                        std::expected<Type, std::string> maybe_value;
-                        if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
-                            maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
-
-                        } else if constexpr (std::is_same_v<Type, std::string>) {
-                            auto str = stagedValue.value_or(std::string_view{});
-                            if (str.data() != nullptr) {
-                                maybe_value = std::string(str);
-                            } else {
-                                maybe_value = std::unexpected("Unexpected type in stagedValue");
-                            }
-
-                        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-                            using TValue       = typename Type::value_type;
-                            using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
-                            auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
-                            if (tensor != nullptr) {
-                                maybe_value = typename decltype(maybe_value)::value_type{};
-                                if (auto conversionResult = pmt::assignTo(*maybe_value, *tensor); !conversionResult) {
-                                    maybe_value = std::unexpected(conversionResult.error().message);
-                                }
-                            } else {
-                                maybe_value = std::unexpected("Unexpected type in stagedValue");
-                            }
-
-#ifdef __EMSCRIPTEN__
-                        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
-                            auto ptr = checked_access_ptr{stagedValue.get_if<gr::Size_t>()};
-                            if (ptr != nullptr) {
-                                maybe_value = static_cast<std::size_t>(*ptr);
-                            } else {
-                                maybe_value = std::unexpected("Unexpected type in stagedValue");
-                            }
-#endif
-
-                        } else {
-                            auto ptr = checked_access_ptr{stagedValue.get_if<Type>()};
-                            if (ptr != nullptr) {
-                                maybe_value = *ptr;
-                            } else {
-                                maybe_value = std::unexpected("Unexpected type in stagedValue");
-                            }
-                        }
-
-                        if constexpr (is_annotated<RawType>()) {
-                            if (maybe_value && member.validate_and_set(*maybe_value)) {
-                                result.appliedParameters.insert_or_assign(key, stagedValue);
-                                if constexpr (HasSettingsChangedCallback<TBlock>) {
-                                    staged.insert_or_assign(key, stagedValue);
-                                }
-                            } else {
-                                std::fputs(std::format("Failed to validate field '{}' with value '{}'.\n", std::string_view(key), stagedValue).c_str(), stderr);
-                            }
-                        } else {
-                            if (!maybe_value) {
-                                std::fputs(std::format("Failed to convert key '{}': {}\n", std::string_view(key), maybe_value.error()).c_str(), stderr);
-                                return;
-                            }
-                            member = *maybe_value;
-                            result.appliedParameters.insert_or_assign(key, stagedValue);
-                            if constexpr (HasSettingsChangedCallback<TBlock>) {
-                                staged.insert_or_assign(key, stagedValue);
-                            }
-                        }
-
-                        if (_autoForwardParameters.contains(convert_string_domain(key))) {
-                            result.forwardParameters.insert_or_assign(key, stagedValue);
-                        }
+                auto it = appliers.find(key);
+                if (it != appliers.end()) {
+                    constexpr bool hasCallback = HasSettingsChangedCallback<TBlock>;
+                    std::ignore = it->second(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
+                    // Forward parameters check is independent of validation success (matches original behavior)
+                    if (_autoForwardParameters.contains(std::string(key))) {
+                        result.forwardParameters.insert_or_assign(key, stagedValue);
                     }
-                });
+                }
             }
 
             updateActiveParametersImpl();
@@ -1114,23 +1268,14 @@ public:
     }
 
     NO_INLINE void loadParametersFromPropertyMap(const property_map& parameters, SettingsCtx ctx = {}) override {
+        // Use static dispatch table for O(1) membership check instead of O(members) iteration (Optimization F)
+        const auto&  setters = parameterSetters();
         property_map newProperties;
 
         for (const auto& [key, value] : parameters) {
-            bool isSet = false;
-            refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
-                using MemberType = refl::data_member_type<TBlock, kIdx>;
-                using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                    const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                    if (!isSet && fieldName == key) {
-                        newProperties[key] = value;
-                        isSet              = true;
-                    }
-                }
-            });
-
-            if (!isSet) {
+            if (setters.contains(key)) {
+                newProperties[key] = value;
+            } else {
                 auto str = ctx.context.value_or(std::string_view{});
                 if (str.empty()) { // store meta_information only for default
                     _block->meta_information[key] = value;
@@ -1145,25 +1290,11 @@ public:
 
 private:
     NO_INLINE void updateActiveParametersImpl() noexcept {
-        refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
-            using MemberType   = refl::data_member_type<TBlock, kIdx>;
-            using RawType      = std::remove_cvref_t<MemberType>;
-            using Type         = unwrap_if_wrapped_t<RawType>;
-            const auto& member = refl::data_member<kIdx>(*_block);
-            const auto& key    = std::string(refl::data_member_name<TBlock, kIdx>.view());
-
-            if constexpr (settings::isReadableMember<Type>()) {
-                if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
-                    _activeParameters.insert_or_assign(convert_string_domain(key), detail::enumToString(member));
-                } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-                    const auto& from = detail::unwrap_decorated_reference(member);
-                    _activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::collectionToTensor(from)));
-
-                } else {
-                    _activeParameters.insert_or_assign(convert_string_domain(key), detail::unwrap_decorated_value(member));
-                }
-            }
-        });
+        // Use static dispatch table for reduced template instantiation (Optimization F)
+        const auto& readers = activeParameterReaders();
+        for (const auto& reader : readers) {
+            reader(_block, _activeParameters);
+        }
     }
 
     [[nodiscard]] NO_INLINE std::optional<pmt::Value> findBestMatchCtx(const pmt::Value& contextToSearch) const {
@@ -1255,32 +1386,15 @@ private:
     [[nodiscard]] NO_INLINE property_map setStagedImpl(const property_map& parameters) {
         property_map ret;
         if constexpr (refl::reflectable<TBlock>) {
+            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
+            const auto& setters = parameterSetters();
             for (const auto& [key, value] : parameters) {
-                bool isSet = false;
-                refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
-                    using MemberType = refl::data_member_type<TBlock, kIdx>;
-                    using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                    if constexpr (settings::isWritableMember<Type, MemberType>()) {
-                        const auto fieldName = refl::data_member_name<TBlock, kIdx>.view();
-                        if (fieldName != key) {
-                            return;
-                        }
-
-                        if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-                            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                                _stagedParameters.insert_or_assign(key, detail::enumToString(convertedValue.value()));
-                            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-                                _stagedParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(*convertedValue)));
-                            } else {
-                                _stagedParameters.insert_or_assign(key, detail::castToGrSizeIfNeeded(convertedValue.value()));
-                            }
-                            isSet = true;
-                        } else {
-                            throw gr::exception(convertedValue.error());
-                        }
+                auto it = setters.find(key);
+                if (it != setters.end()) {
+                    if (auto error = it->second(key, value, _stagedParameters)) {
+                        throw gr::exception(*error);
                     }
-                });
-                if (!isSet) {
+                } else {
                     ret.insert_or_assign(key, value);
                 }
             }
@@ -1384,24 +1498,12 @@ private:
     }
 
     NO_INLINE void storeCurrentParameters(property_map& parameters) {
-        // take a copy of the field -> map value of the old settings
+        // Use static dispatch table for reduced template instantiation (Optimization F)
         if constexpr (refl::reflectable<TBlock>) {
-            refl::for_each_data_member_index<TBlock>([&, this](auto kIdx) {
-                using MemberType = refl::data_member_type<TBlock, kIdx>;
-                using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
-                if constexpr (settings::isReadableMember<Type>()) {
-                    const auto& key    = std::pmr::string(refl::data_member_name<TBlock, kIdx>.view());
-                    const auto& member = refl::data_member<kIdx>(*_block);
-                    if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                        parameters.insert_or_assign(key, detail::enumToString(member));
-                    } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-                        const auto& from = detail::unwrap_decorated_value(member);
-                        parameters.insert_or_assign(key, detail::collectionToTensor(from));
-                    } else {
-                        parameters.insert_or_assign(key, detail::unwrap_decorated_value(member));
-                    }
-                }
-            });
+            const auto& readers = parameterReaders();
+            for (const auto& reader : readers) {
+                reader(_block, parameters);
+            }
         }
     }
 
