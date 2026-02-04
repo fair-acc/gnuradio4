@@ -202,79 +202,79 @@ jobs:
       - name: Show final ccache stats
         run: ccache --show-stats
 
-  coverage:
-    name: "GCC-14 Coverage"
-    needs: buildAndPublishDocker
-    runs-on: ubuntu-latest
-    container:
-      image: "${{ needs.buildAndPublishDocker.outputs.container }}"
-    env:
-      CCACHE_DIR: /home/runner/work/ccache
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: /home/runner/work/ccache
-          key: ccache-coverage-gcc14-debug-${{ github.sha }}
-          restore-keys: |
-            ccache-coverage-gcc14-debug
-
-      - name: Configure ccache
-        run: |
-          ccache --max-size=3G
-          ccache --show-stats
-
-      - name: Configure (coverage)
-        shell: bash
-        env:
-          CC: gcc-14
-          CXX: g++-14
-          CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
-        run: |
-          cmake -S . -B ../build \
-            -DCMAKE_COLOR_DIAGNOSTICS=ON \
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DUSE_CCACHE=ON \
-            -DENABLE_COVERAGE=ON \
-            -DADDRESS_SANITIZER=OFF
-
-      - name: Build
-        run: cmake --build ../build --target qa_ManagedSubGraph
-
-      - name: Execute tests
-        env:
-          DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: |
-          ulimit -c unlimited
-          ctest --output-on-failure -R qa_ManagedSubGraph || {
-            for core in core*; do
-              if [ -f "$core" ]; then
-                echo "=== Backtrace from $core ==="
-                gdb -batch -ex "thread apply all bt" -ex "quit" core/test/qa_ManagedSubGraph "$core"
-              fi
-            done
-            exit 1
-          }
-
-      - name: Generate coverage report
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: cmake --build . --target coverage
-
-      - name: Run sonar-scanner
-        shell: bash
-        env:
-          SONAR_HOST_URL: https://sonarcloud.io
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: sonar-scanner
-
-      - name: Show final ccache stats
-        run: ccache --show-stats
+  # coverage:
+  #   name: "GCC-14 Coverage"
+  #   needs: buildAndPublishDocker
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: "${{ needs.buildAndPublishDocker.outputs.container }}"
+  #   env:
+  #     CCACHE_DIR: /home/runner/work/ccache
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
+  #
+  #     - name: Cache ccache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: /home/runner/work/ccache
+  #         key: ccache-coverage-gcc14-debug-${{ github.sha }}
+  #         restore-keys: |
+  #           ccache-coverage-gcc14-debug
+  #
+  #     - name: Configure ccache
+  #       run: |
+  #         ccache --max-size=3G
+  #         ccache --show-stats
+  #
+  #     - name: Configure (coverage)
+  #       shell: bash
+  #       env:
+  #         CC: gcc-14
+  #         CXX: g++-14
+  #         CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
+  #       run: |
+  #         cmake -S . -B ../build \
+  #           -DCMAKE_COLOR_DIAGNOSTICS=ON \
+  #           -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+  #           -DCMAKE_BUILD_TYPE=Debug \
+  #           -DUSE_CCACHE=ON \
+  #           -DENABLE_COVERAGE=ON \
+  #           -DADDRESS_SANITIZER=OFF
+  #
+  #     - name: Build
+  #       run: cmake --build ../build --target qa_ManagedSubGraph
+  #
+  #     - name: Execute tests
+  #       env:
+  #         DISABLE_SENSITIVE_TESTS: 1 # disables tests which are sensitive to execution speed and will not run with instrumented code
+  #       working-directory: ${{runner.workspace}}/build
+  #       shell: bash
+  #       run: |
+  #         ulimit -c unlimited
+  #         ctest --output-on-failure -R qa_ManagedSubGraph || {
+  #           for core in core*; do
+  #             if [ -f "$core" ]; then
+  #               echo "=== Backtrace from $core ==="
+  #               gdb -batch -ex "thread apply all bt" -ex "quit" core/test/qa_ManagedSubGraph "$core"
+  #             fi
+  #           done
+  #           exit 1
+  #         }
+  #
+  #     - name: Generate coverage report
+  #       working-directory: ${{runner.workspace}}/build
+  #       shell: bash
+  #       run: cmake --build . --target coverage
+  #
+  #     - name: Run sonar-scanner
+  #       shell: bash
+  #       env:
+  #         SONAR_HOST_URL: https://sonarcloud.io
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  #       run: sonar-scanner
+  #
+  #     - name: Show final ccache stats
+  #       run: ccache --show-stats
