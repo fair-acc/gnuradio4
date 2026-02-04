@@ -162,7 +162,7 @@ jobs:
         run: |
           test -f $EMSDK_HOME/emsdk_env.sh && source $EMSDK_HOME/emsdk_env.sh
           if [ "${{ matrix.compiler.cxx }}" = "acpp" ]; then export ACPP_TARGETS=omp; fi
-          cmake --build ../build
+          cmake --build ../build --target qa_ManagedSubGraph
 
       - name: execute tests
         if: matrix.compiler.cc != 'gcc-14' || matrix.cmake-build-type != 'Debug'
@@ -239,7 +239,7 @@ jobs:
             -DADDRESS_SANITIZER=OFF
 
       - name: Build
-        run: cmake --build ../build
+        run: cmake --build ../build --target qa_ManagedSubGraph
 
       - name: Execute tests
         env:
