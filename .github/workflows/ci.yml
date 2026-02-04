@@ -172,8 +172,8 @@ jobs:
         shell: bash
         run: |
           ulimit -c unlimited
-          for i in {1..20}; do
-            echo "=== Test run $i/20 ==="
+          for i in {1..50}; do
+            echo "=== Test run $i/50 ==="
             if ! ctest --output-on-failure -R qa_ManagedSubGraph; then
               echo "=== Test failed on run $i ==="
               for core in core*; do
@@ -185,7 +185,7 @@ jobs:
               exit 1
             fi
           done
-          echo "=== All 20 test runs passed ==="
+          echo "=== All 50 test runs passed ==="
 
       # - name: execute native main binary
       #   if: matrix.compiler.cmake_wrapper == null
