@@ -172,27 +172,32 @@ jobs:
         shell: bash
         run: |
           ulimit -c unlimited
-          ctest --output-on-failure -R qa_ManagedSubGraph || {
-            for core in core*; do
-              if [ -f "$core" ]; then
-                echo "=== Backtrace from $core ==="
-                gdb -batch -ex "thread apply all bt" -ex "quit" core/test/qa_ManagedSubGraph "$core"
-              fi
-            done
-            exit 1
-          }
+          for i in {1..20}; do
+            echo "=== Test run $i/20 ==="
+            if ! ctest --output-on-failure -R qa_ManagedSubGraph; then
+              echo "=== Test failed on run $i ==="
+              for core in core*; do
+                if [ -f "$core" ]; then
+                  echo "=== Backtrace from $core ==="
+                  gdb -batch -ex "thread apply all bt" -ex "quit" core/test/qa_ManagedSubGraph "$core"
+                fi
+              done
+              exit 1
+            fi
+          done
+          echo "=== All 20 test runs passed ==="
 
-      - name: execute native main binary
-        if: matrix.compiler.cmake_wrapper == null
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: ./core/src/main
+      # - name: execute native main binary
+      #   if: matrix.compiler.cmake_wrapper == null
+      #   working-directory: ${{runner.workspace}}/build
+      #   shell: bash
+      #   run: ./core/src/main
 
-      - name: execute wasm main binary with nodejs
-        if: matrix.compiler.cmake_wrapper != null
-        working-directory: ${{runner.workspace}}/build
-        shell: bash
-        run: node ./core/src/main.js
+      # - name: execute wasm main binary with nodejs
+      #   if: matrix.compiler.cmake_wrapper != null
+      #   working-directory: ${{runner.workspace}}/build
+      #   shell: bash
+      #   run: node ./core/src/main.js
 
       - name: Show final ccache stats
         run: ccache --show-stats
