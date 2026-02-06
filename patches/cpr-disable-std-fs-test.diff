@@ -1,7 +1,7 @@
-diff --git a/cmake/std_fs_support_test.cpp b/cmake/std_fs_support_test.cpp
+diff --git i/cmake/std_fs_support_test.cpp w/cmake/std_fs_support_test.cpp
 index 44bac77..237c8ce 100644
---- a/cmake/std_fs_support_test.cpp
-+++ b/cmake/std_fs_support_test.cpp
+--- i/cmake/std_fs_support_test.cpp
++++ w/cmake/std_fs_support_test.cpp
 @@ -1,11 +1 @@
 -#if __has_include(<filesystem>)
 -#include <filesystem>
@@ -15,3 +15,105 @@ index 44bac77..237c8ce 100644
 -    auto cwd = fs::current_path();
 -}
 +int main() {}
+diff --git i/include/CMakeLists.txt w/include/CMakeLists.txt
+index 74eedd7..371e2c9 100644
+--- i/include/CMakeLists.txt
++++ w/include/CMakeLists.txt
+@@ -55,50 +55,53 @@ target_sources(cpr PRIVATE
+ )
+ 
+ # Filesystem
+-if(CPR_USE_BOOST_FILESYSTEM)
+-  find_package(Boost 1.77 REQUIRED COMPONENTS filesystem)
+-  if(Boost_FOUND)
+-    target_link_libraries(cpr PUBLIC Boost::filesystem)
+-  endif()
+-else()
+-  try_compile(
+-    STD_FS_SUPPORTED
+-    "${CMAKE_CURRENT_BINARY_DIR}/std_fs"
+-    SOURCES "${PROJECT_SOURCE_DIR}/cmake/std_fs_support_test.cpp"
+-    CXX_STANDARD ${CMAKE_CXX_STANDARD}
+-    CXX_STANDARD_REQUIRED ON
+-    CXX_EXTENSIONS OFF
+-  )
+-  if(NOT STD_FS_SUPPORTED)
+-    try_compile(
+-      STDCXXFS_SUPPORTED
+-      "${CMAKE_CURRENT_BINARY_DIR}/stdcxxfs"
+-      SOURCES "${PROJECT_SOURCE_DIR}/cmake/std_fs_support_test.cpp"
+-      LINK_LIBRARIES "stdc++fs"
+-      CXX_STANDARD ${CMAKE_CXX_STANDARD}
+-      CXX_STANDARD_REQUIRED ON
+-      CXX_EXTENSIONS OFF
+-    )
+-    if(STDCXXFS_SUPPORTED)
+-      target_link_libraries(cpr PUBLIC stdc++fs)
+-    else()
+-      try_compile(
+-        CXXFS_SUPPORTED
+-        "${CMAKE_CURRENT_BINARY_DIR}/cxxfs"
+-        SOURCES "${PROJECT_SOURCE_DIR}/cmake/std_fs_support_test.cpp"
+-        LINK_LIBRARIES "c++fs"
+-        CXX_STANDARD ${CMAKE_CXX_STANDARD}
+-        CXX_STANDARD_REQUIRED ON
+-        CXX_EXTENSIONS OFF
+-      )
+-      if(CXXFS_SUPPORTED)
+-        target_link_libraries(cpr PUBLIC c++fs)
+-      else()
+-        message(FATAL_ERROR "Your compiler does not support the `<filesystem>` include or cpr is unable to determine the proper compiler flags for it.")
+-      endif()
+-    endif()
+-  endif()
+-endif()
++# if(CPR_USE_BOOST_FILESYSTEM)
++#   find_package(Boost 1.77 REQUIRED COMPONENTS filesystem)
++#   if(Boost_FOUND)
++#     target_link_libraries(cpr PUBLIC Boost::filesystem)
++#   endif()
++# else()
++#   try_compile(
++#     STD_FS_SUPPORTED
++#     "${CMAKE_CURRENT_BINARY_DIR}/std_fs"
++#     SOURCES "${PROJECT_SOURCE_DIR}/cmake/std_fs_support_test.cpp"
++#     CXX_STANDARD ${CMAKE_CXX_STANDARD}
++#     CXX_STANDARD_REQUIRED ON
++#     CXX_EXTENSIONS OFF
++#     OUTPUT_VARIABLE COMPILE_OUTPUT
++#   )
++#   if(NOT STD_FS_SUPPORTED)
++#     try_compile(
++#       STDCXXFS_SUPPORTED
++#       "${CMAKE_CURRENT_BINARY_DIR}/stdcxxfs"
++#       SOURCES "${PROJECT_SOURCE_DIR}/cmake/std_fs_support_test.cpp"
++#       LINK_LIBRARIES "stdc++fs"
++#       CXX_STANDARD ${CMAKE_CXX_STANDARD}
++#       CXX_STANDARD_REQUIRED ON
++#       CXX_EXTENSIONS OFF
++#       OUTPUT_VARIABLE COMPILE_OUTPUT
++#     )
++#     if(STDCXXFS_SUPPORTED)
++#       target_link_libraries(cpr PUBLIC stdc++fs)
++#     else()
++#       try_compile(
++#         CXXFS_SUPPORTED
++#         "${CMAKE_CURRENT_BINARY_DIR}/cxxfs"
++#         SOURCES "${PROJECT_SOURCE_DIR}/cmake/std_fs_support_test.cpp"
++#         LINK_LIBRARIES "c++fs"
++#         CXX_STANDARD ${CMAKE_CXX_STANDARD}
++#         CXX_STANDARD_REQUIRED ON
++#         CXX_EXTENSIONS OFF
++#         OUTPUT_VARIABLE COMPILE_OUTPUT
++#       )
++#       if(CXXFS_SUPPORTED)
++#         target_link_libraries(cpr PUBLIC c++fs)
++#       else()
++#           message(FATAL_ERROR "Your compiler does not support the `<filesystem>` include or cpr is unable to determine the proper compiler flags for it. Compiler error: ${COMPILE_OUTPUT}")
++#       endif()
++#     endif()
++#   endif()
++# endif()
+ 
+ install(DIRECTORY cpr DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+ install(DIRECTORY ${PROJECT_BINARY_DIR}/cpr_generated_includes/cpr DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
