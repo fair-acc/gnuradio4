@@ -469,7 +469,8 @@ inline constexpr void for_each_reader_span(Function&& function, Tuple&& tuple) {
 - **Optimization D:** `def10ba7` - perf: simplify tuple_for_each with template lambda helper
 - **Optimization E:** `9ad7ad3d` - perf: simplify for_each_port/reader_span/writer_span
 - **Optimization F:** `6ebb13d8` - perf: static dispatch table for CtxSettings
-- **Optimization G:** *(pending)* - perf: enable Identical Code Folding (ICF) via mold linker
+- 
+- **Optimization G:** `a862d05e` - perf: enable Identical Code Folding (ICF) via mold linker
 
 ---
 
@@ -642,5 +643,133 @@ which functions can be merged. The main savings come from std:: internal helpers
 (e.g., `_Rb_tree::_M_get_insert_unique_pos`, `_Rb_tree::_M_get_insert_hint_unique_pos`)
 that were duplicated across container instantiations.
 
-**Git commit:** *(see below)*
+**Git commit:** `ab87478e`
+
+---
+
+## Optimization H: Move propertyCallbacks to non-templated BlockBase (WIP)
+
+**Goal:** Compile the 12 standard propertyCallback methods once (in a `.cpp` file)
+instead of per `Block<T>` instantiation. These callbacks are type-independent (operate
+exclusively through `SettingsBase&` virtual methods and `property_map` data) yet were
+previously instantiated for every block type.
+
+**Status:** Builds and all tests pass (including qa_SchedulerMessages).
+
+**Files modified:**
+- `core/include/gnuradio-4.0/Block.hpp` — Added `BlockBase` struct before `Block<T>`:
+  - Non-templated base with `PropertyCallback` type alias
+  - Function pointers for type-erased access to `Block<T>` members (settings, state, name, etc.)
+  - `void* _blockSelf` to store the actual `Block*` address (required because `Block<T>` uses
+    multiple inheritance: `StateMachine<T>` + `BlockBase`, so `BlockBase::this != Block*`)
+  - Declarations for all 12 `propertyCallback*()` methods
+  - `Block<T>` now inherits from `BlockBase`, initializes function pointers + `_blockSelf` in constructor
+  - Removed all 12 callback implementations from `Block<T>` template (~400 lines deleted)
+- `core/src/BlockBase.cpp` — New file with all 12 callback implementations (compiled once)
+- `core/CMakeLists.txt` — Added `BlockBase.cpp` to `gnuradio-core` static library
+- `core/include/gnuradio-4.0/Scheduler.hpp` — `PropertyCallback` type changed to `BlockBase::PropertyCallback`
+- `core/src/Graph.cpp` — `PropertyCallback` casts changed to `BlockBase::PropertyCallback`
+
+**Key Design Decisions:**
+1. Function pointers (not virtual functions) to avoid introducing a vtable that would break
+   aggregate initialization of user-defined block types.
+2. `void* _blockSelf` member required because `Block<Derived>` inherits from both
+   `lifecycle::StateMachine<D>` (non-empty, has `_state` member) and `BlockBase`, so
+   `BlockBase::this` is at a different address than `Block*`. The function pointer callbacks
+   `static_cast<Block*>(self)` from void*, so they need the correct `Block*` address.
+
+### Compile-Time Comparison (Opt A-G vs Opt A-H)
+
+**Method:** Single-file recompilation, GCC 15.2.1, Release (`-O2 -g0 -DNDEBUG`), `-j1`,
+`CCACHE_DISABLE=1`, dependencies pre-built. Measures template instantiation cost per TU.
+
+#### qa_Converter.cpp (GCC 15, Release)
+
+| Metric | Opt A-G | Opt A-H | Delta |
+|--------|---------|---------|-------|
+| Wall time | 2:57.75 (178s) | 2:23.28 (143s) | **-35s (-19.7%)** |
+| User time | 174.31s | 138.88s | **-35s (-20.3%)** |
+| Peak RAM | 4,732 MB | 4,181 MB | **-551 MB (-11.6%)** |
+| Object size | 21.3 MB | 17.1 MB | **-4.2 MB (-19.7%)** |
+
+#### qa_Math.cpp (GCC 15, Release)
+
+| Metric | Opt A-G | Opt A-H | Delta |
+|--------|---------|---------|-------|
+| Wall time | 5:59.95 (360s) | 5:03.74 (304s) | **-56s (-15.6%)** |
+| User time | 353.05s | 296.56s | **-56s (-16.0%)** |
+| Peak RAM | 9,091 MB | 8,204 MB | **-887 MB (-9.8%)** |
+| Object size | 42.7 MB | 37.2 MB | **-5.5 MB (-12.9%)** |
+
+#### Cumulative Improvement (Baseline → Opt A-H)
+
+Using documented GCC 15 Release baseline values (full from-scratch build, -j1):
+
+| Test | Baseline | After A+B | After A-H | Baseline→A-H |
+|------|----------|-----------|-----------|--------------|
+| qa_Converter | 5:45 (345s) | 5:33 (333s) | ~2:23 (143s)* | **~-59%** |
+| qa_Math | 6:33 (393s) | 6:20 (380s) | ~5:04 (304s)* | **~-23%** |
+
+*Note: A-H measured as single-file recompilation (deps pre-built), not full from-scratch.
+The delta is indicative but not directly comparable to baseline methodology.
+
+### Binary Size Comparison (core/src/main, GCC 15, Release, mold --icf=safe)
+
+| Metric | Baseline (main) | Opt A-G | Opt A-H | A-G→A-H | Baseline→A-H |
+|--------|-----------------|---------|---------|---------|--------------|
+| File size | 1,987,720 | 1,883,200 | 1,883,576 | **+376 (+0.0%)** | -104,144 (-5.2%) |
+| Stripped size | 1,558,176 | 1,230,568 | 1,242,920 | +12,352 (+1.0%) | **-315,256 (-20.2%)** |
+| .text | 1,524,150 | 1,209,410 | 1,225,309 | +15,899 (+1.3%) | **-298,841 (-19.6%)** |
+| .data | 29,376 | 16,976 | 13,424 | **-3,552 (-20.9%)** | -15,952 (-54.3%) |
+| .bss | 6,392 | 11,272 | 11,208 | -64 (-0.6%) | +4,816 |
+
+**Note:** The +1.3% .text increase (A-G→A-H) in the small test binary comes from 7 static
+`cbXxxImpl()` trampolines per Block type (~15 KiB total) and constructor overhead. This is
+offset by reduced metadata sections (.data.rel.ro -3.5 KiB, .strtab -8.3 KiB, .rodata -2.3 KiB).
+Net file size change: **+376 bytes (+0.0%)** — effectively binary-size neutral.
+In larger binaries with more block types, the savings from compiling callbacks once would dominate.
+
+### Runtime Performance (5-run median)
+
+| Metric | Baseline (main) | Opt A-G | Opt A-H |
+|--------|-----------------|---------|---------|
+| Wall clock | 0.08s | 0.08s | 0.08s |
+| User time | 0.02s | 0.02-0.03s | 0.02-0.03s |
+| System time | 0.05s | 0.05s | 0.05s |
+| Max RSS | 49,645 KB | 49,267 KB | 48,455 KB |
+
+**Conclusion:** No runtime regression. Memory usage improved slightly vs Opt A-G (-812 KB, -1.6%)
+and vs baseline (-1,190 KB, -2.4%).
+
+### Symbol-Level Changes (bloaty, Opt A-H vs Opt A-G)
+
+**Major code reductions:**
+| Symbol | Delta | Description |
+|--------|-------|-------------|
+| `MergedGraph<>::~MergedGraph()` | -13.7 KiB (-65.6%) | Destructor simplified |
+| `Block<>` template | -6.34 KiB (deleted) | Callback bodies removed |
+| `StateMachine<>` | -5.02 KiB (deleted) | Reduced instantiation |
+| `Block<>::cbChangeStateTo()` | -2.95 KiB (deleted) | Moved to BlockBase |
+| `Block<>::~Block()` | -2.87 KiB (-13.1%) | Lighter destructor |
+| Various destructors | ~-8 KiB | Simpler inheritance chain |
+
+**New/grown functions:**
+| Symbol | Delta | Description |
+|--------|-------|-------------|
+| 7× `Block<>::cbXxxImpl()` | +15.5 KiB (new) | Static trampolines per type |
+| `Block<>::Block()` | +2.71 KiB (+4.9%) | Function pointer setup |
+
+### Test Verification
+
+All key tests pass:
+- `qa_Block` - passed
+- `qa_Settings` - passed
+- `qa_Graph` - passed
+- `qa_Scheduler` - passed
+- `qa_SchedulerMessages` - passed (was segfaulting before `_blockSelf` fix)
+- `qa_LifeCycle` - passed
+- `qa_Converter` - passed
+- `qa_GraphMessages` - passed
+- `qa_BlockModel` - passed
+- `qa_BlockingSync` - passed
 

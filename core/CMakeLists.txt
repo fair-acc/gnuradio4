@@ -2,6 +2,7 @@ add_library(
   gnuradio-core STATIC
   src/Value.cpp
   src/ValueHelper.cpp
+  src/Block.cpp
   src/Graph.cpp
   src/PluginLoader.cpp
   src/PmtTypeHelpers.cpp)
