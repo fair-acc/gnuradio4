@@ -469,6 +469,7 @@ inline constexpr void for_each_reader_span(Function&& function, Tuple&& tuple) {
 - **Optimization D:** `def10ba7` - perf: simplify tuple_for_each with template lambda helper
 - **Optimization E:** `9ad7ad3d` - perf: simplify for_each_port/reader_span/writer_span
 - **Optimization F:** `6ebb13d8` - perf: static dispatch table for CtxSettings
+- **Optimization G:** *(pending)* - perf: enable Identical Code Folding (ICF) via mold linker
 
 ---
 
@@ -537,4 +538,109 @@ inline constexpr void for_each_reader_span(Function&& function, Tuple&& tuple) {
 1. Run `bm-nosonar_node_api` and `bm_Scheduler` benchmarks for comprehensive performance validation
 2. Analyze remaining binary bloat contributors (pmt::ValueVisitor, Block<> callbacks)
 3. Consider further optimizations for Block<> and CtxSettings<> size reduction
+
+---
+
+## Phase 4: Binary Size Deep Analysis (2026-02-06)
+
+### Test Binary
+
+- **Binary:** `core/src/main` (14 block types: 6 leaf + 8 MergedGraph wrappers)
+- **Compiler:** GCC 15.2.1, Release (`-O2 -g0 -DNDEBUG`)
+- **Linker:** mold 2.40.1 with `--gc-sections`
+- **Stripped size:** 1,586,736 bytes (1.51 MiB)
+- **.text section:** 1,556,424 bytes (1.49 MiB)
+
+### Binary Bloat by Category
+
+| Category | Size (KiB) | % of .text | Notes |
+|----------|-----------|------------|-------|
+| **CtxSettings\<T>** | **595** | **40.7%** | 14 types x ~43 KiB each |
+| **Block\<T>** | **335** | **22.9%** | 14 types x ~24 KiB each |
+| **pmt::Value/Visitor** | **231** | **15.8%** | 239 symbols, visitor explosion |
+| std::format/print | 78 | 5.3% | chrono, fp, int formatters |
+| other gr:: | 60 | 4.1% | |
+| MergedGraph\<> | 42 | 2.9% | |
+| Port\<> | 41 | 2.8% | |
+| other std:: | 43 | 2.9% | |
+| main() + other | 38 | 2.6% | |
+
+### Per Block-Type Overhead
+
+Each of the 14 block types generates **~66.5 KiB** of code:
+- CtxSettings\<T>: ~43 KiB (init, get, set, apply, store, 30+ methods)
+- Block\<T>: ~24 KiB (constructor, 12 propertyCallbacks, destructor)
+
+### Key Finding: propertyCallbacks Are Type-Independent
+
+All 12 `propertyCallback*` methods in `Block<T>` are **100% type-independent**.
+They exclusively operate through `SettingsBase&` virtual methods on `property_map` data.
+Each callback is byte-identical across all 14 types (e.g., `propertyCallbackSettingsCtx`
+is exactly 3,090 bytes for every type), yet cannot be merged by the compiler because
+they are different template instantiations.
+
+**12 callbacks × 14 types = 168 instantiations → ~147 KiB of redundant code**
+
+### Key Finding: Most CtxSettings Methods Are Type-Independent
+
+Only these truly need per-type code:
+- 6 static dispatch tables (built once per type) that convert between pmt::Value and typed fields
+- `init()` — reflection-driven meta_information population
+- `applyStagedParameters()` — applies values to typed fields + calls settingsChanged()
+- `storeCurrentParameters()` / `updateActiveParametersImpl()` — reads typed fields
+
+Everything else (~25 methods: get, set, getStored, activateContext, removeContext, etc.)
+just manipulates `property_map`, `SettingsCtx`, and `std::set<std::string>`.
+
+### Hot Path Safety Analysis
+
+The `processOne`/`processBulk` hot path is **completely clean** — zero Settings, pmt::Value,
+or propertyCallback involvement. The `workInternal()` wrapper touches Settings only through:
+1. `settings().changed()` — atomic bool load (essentially free in common case)
+2. `settings().autoUpdate(tag)` — only when tags are present, through virtual SettingsBase
+
+All proposed optimizations target the cold path (settings management, property callbacks)
+and will not affect the hot path.
+
+### Optimization Strategy
+
+| Phase | Approach | Est. Savings | Risk to Hot Path | Difficulty |
+|-------|----------|-------------|-------------------|------------|
+| **G** | Enable mold `--icf=safe` (Identical Code Folding) | ~100-200 KiB | Zero | Trivial |
+| **H** | Move propertyCallbacks to non-templated BlockBase | ~130 KiB | Zero | Medium |
+| **I** | Extract type-independent CtxSettings logic to base | ~250-350 KiB | Zero | Hard |
+| **J** | Reduce pmt::ValueVisitor instantiation explosion | ~100 KiB | Zero | Medium |
+
+---
+
+## Optimization G: Enable Identical Code Folding (ICF)
+
+**Goal:** Have the linker merge byte-identical function bodies across template instantiations.
+
+**Change:** Add `--icf=safe` to mold linker flags in CMakeLists.txt.
+mold's `--icf=safe` merges functions with identical code while preserving distinct
+addresses for functions whose address is taken (safe for function pointer comparison).
+
+**Files modified:**
+- `CMakeLists.txt`
+
+**Results:**
+
+| Metric | Before (Opt A-F) | After (+ICF) | Delta |
+|--------|-------------------|--------------|-------|
+| Stripped size | 1,586,736 bytes | 1,551,760 bytes | **-34,976 (-2.2%)** |
+| .text section | 1,556,424 bytes | 1,521,392 bytes | **-35,032 (-2.3%)** |
+| .bss section | 12,456 bytes | 10,568 bytes | -1,888 bytes |
+| Runtime (wall) | 0.08s | 0.08s | no change |
+| User time | 0.02s | 0.02s | no change |
+| Max RSS | 47,716 KB | 47,428 KB | -288 KB |
+
+**Note:** The savings are smaller than initially estimated (~35 KiB vs ~100-200 KiB).
+This is because mold's `--icf=safe` preserves distinct addresses for functions whose
+address is taken (pointer-to-member-function in `propertyCallbacks` map), limiting
+which functions can be merged. The main savings come from std:: internal helpers
+(e.g., `_Rb_tree::_M_get_insert_unique_pos`, `_Rb_tree::_M_get_insert_hint_unique_pos`)
+that were duplicated across container instantiations.
+
+**Git commit:** *(see below)*
 
