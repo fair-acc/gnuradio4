@@ -158,7 +158,7 @@ protected:
 
     void registerPropertyCallbacks() noexcept {
         _forbid_reserved_overrides();
-        using PropertyCallback                            = typename base_t::PropertyCallback;
+        using PropertyCallback                            = BlockBase::PropertyCallback;
         auto& callbacks                                   = this->propertyCallbacks;
         callbacks[scheduler::property::kEmplaceBlock]     = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackEmplaceBlock);
         callbacks[scheduler::property::kRemoveBlock]      = static_cast<PropertyCallback>(&SchedulerBase::propertyCallbackRemoveBlock);

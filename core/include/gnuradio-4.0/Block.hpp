@@ -549,6 +549,65 @@ inline static const char* kSettingsContexts = "SettingsContexts"; ///< retrieve/
 
 } // namespace block::property
 
+/**
+ * @brief Non-templated base providing accessor function pointers for the 12 standard propertyCallback implementations.
+ *
+ * By compiling these callbacks once (in BlockBase.cpp) instead of per Block<T> instantiation,
+ * this eliminates ~147 KiB of duplicated .text across 14 block types. The callbacks operate
+ * exclusively through stored function pointers to SettingsBase& and non-templated data.
+ *
+ * Uses function pointers (not virtual functions) to avoid introducing a vtable, which would
+ * break aggregate initialization of derived block types.
+ */
+struct BlockBase {
+    using PropertyCallback = std::optional<Message> (BlockBase::*)(std::string_view, Message);
+
+    // Pointer to the actual Block<Derived> object. Required because Block<Derived> uses multiple
+    // inheritance (StateMachine + BlockBase), so BlockBase's `this` differs from the Block* address.
+    void* _blockSelf = nullptr;
+
+    // Non-virtual accessor function pointers, set by Block<Derived> constructor (cold-path only)
+    SettingsBase&              (*_cbSettings)(void*)        = nullptr;
+    lifecycle::State           (*_cbState)(const void*)     = nullptr;
+    std::expected<void, Error> (*_cbChangeStateTo)(void*, lifecycle::State) = nullptr;
+    std::string_view           (*_cbUniqueName)(const void*)  = nullptr;
+    std::string_view           (*_cbName)(const void*)        = nullptr;
+    property_map&              (*_cbMetaInformation)(void*)   = nullptr;
+    property_map&              (*_cbUiConstraints)(void*)     = nullptr;
+
+    // Hook for GraphWrapper to handle subgraph export port messages on any block type
+    using SubgraphExportHandler                  = std::optional<Message> (*)(void* context, Message);
+    SubgraphExportHandler _subgraphExportHandler = nullptr;
+    void*                 _subgraphExportContext = nullptr;
+
+    std::map<std::string, PropertyCallback>      propertyCallbacks;
+    std::map<std::string, std::set<std::string>> propertySubscriptions;
+
+    // accessor helpers (delegate to function pointers, using _blockSelf for correct Block* address)
+    SettingsBase&              cbSettings()                      { return _cbSettings(_blockSelf); }
+    lifecycle::State           cbState() const                   { return _cbState(_blockSelf); }
+    std::expected<void, Error> cbChangeStateTo(lifecycle::State s) { return _cbChangeStateTo(_blockSelf, s); }
+    std::string_view           cbUniqueName() const              { return _cbUniqueName(_blockSelf); }
+    std::string_view           cbName() const                    { return _cbName(_blockSelf); }
+    property_map&              cbMetaInformation()               { return _cbMetaInformation(_blockSelf); }
+    property_map&              cbUiConstraints()                 { return _cbUiConstraints(_blockSelf); }
+
+    // 12 callback implementations (compiled once, not per block type)
+    std::optional<Message> propertyCallbackHeartbeat(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackEcho(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackLifecycleState(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackSettings(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackStagedSettings(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackStoreDefaults(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackResetDefaults(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackActiveContext(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackSettingsCtx(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackSettingsContexts(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackMetaInformation(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackUiConstraints(std::string_view propertyName, Message message);
+    std::optional<Message> propertyCallbackSubgraphExport(std::string_view propertyName, Message message);
+};
+
 namespace block {
 enum class Category {
     All,                   ///< all Blocks
@@ -682,7 +741,7 @@ enum class Category {
  * @tparam Arguments NTTP list containing the compile-time defined port instances, setting structs, or other constraints.
  */
 template<typename Derived, typename... Arguments>
-class Block : public lifecycle::StateMachine<Derived> {
+class Block : public lifecycle::StateMachine<Derived>, public BlockBase {
     static std::atomic_size_t _uniqueIdCounter;
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
@@ -774,34 +833,7 @@ public:
     MsgPortInBuiltin  msgIn;
     MsgPortOutBuiltin msgOut;
 
-    using PropertyCallback = std::optional<Message> (Block::*)(std::string_view, Message);
-    std::map<std::string, PropertyCallback> propertyCallbacks{
-        {block::property::kHeartbeat, &Block::propertyCallbackHeartbeat},               //
-        {block::property::kEcho, &Block::propertyCallbackEcho},                         //
-        {block::property::kLifeCycleState, &Block::propertyCallbackLifecycleState},     //
-        {block::property::kSetting, &Block::propertyCallbackSettings},                  //
-        {block::property::kStagedSetting, &Block::propertyCallbackStagedSettings},      //
-        {block::property::kStoreDefaults, &Block::propertyCallbackStoreDefaults},       //
-        {block::property::kResetDefaults, &Block::propertyCallbackResetDefaults},       //
-        {block::property::kActiveContext, &Block::propertyCallbackActiveContext},       //
-        {block::property::kSettingsCtx, &Block::propertyCallbackSettingsCtx},           //
-        {block::property::kSettingsContexts, &Block::propertyCallbackSettingsContexts}, //
-        {block::property::kMetaInformation, &Block::propertyCallbackMetaInformation},   //
-        {block::property::kUiConstraints, &Block::propertyCallbackUiConstraints},       //
-    };
-    std::map<std::string, std::set<std::string>> propertySubscriptions;
-
-    // Hook for GraphWrapper to handle subgraph export port messages on any block type
-    using SubgraphExportHandler                  = std::optional<Message> (*)(void* context, Message);
-    SubgraphExportHandler _subgraphExportHandler = nullptr;
-    void*                 _subgraphExportContext = nullptr;
-
-    std::optional<Message> unmatchedPropertyHandler(std::string_view propertyName, Message message) {
-        if (propertyName == graph::property::kSubgraphExportPort && _subgraphExportHandler != nullptr) {
-            return _subgraphExportHandler(_subgraphExportContext, std::move(message));
-        }
-        return std::nullopt;
-    }
+    // PropertyCallback, propertyCallbacks and propertySubscriptions are inherited from BlockBase
 
     PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
@@ -817,6 +849,15 @@ protected:
 
     [[nodiscard]] constexpr auto&       self() noexcept { return *static_cast<Derived*>(this); }
     [[nodiscard]] constexpr const auto& self() const noexcept { return *static_cast<const Derived*>(this); }
+
+    // BlockBase accessor function pointer initializers (cold-path only, used by propertyCallbacks)
+    static SettingsBase&              cbSettingsImpl(void* self) { return static_cast<Block*>(self)->_settings; }
+    static lifecycle::State           cbStateImpl(const void* self) { return static_cast<const Block*>(self)->state(); }
+    static std::expected<void, Error> cbChangeStateToImpl(void* self, lifecycle::State s) { return static_cast<Block*>(self)->changeStateTo(s); }
+    static std::string_view           cbUniqueNameImpl(const void* self) { return static_cast<const Block*>(self)->unique_name; }
+    static std::string_view           cbNameImpl(const void* self) { return static_cast<const Block*>(self)->name; }
+    static property_map&              cbMetaInformationImpl(void* self) { return static_cast<Block*>(self)->meta_information.value; }
+    static property_map&              cbUiConstraintsImpl(void* self) { return static_cast<Block*>(self)->ui_constraints.value; }
 
     template<typename TFunction, typename... Args>
     [[maybe_unused]] constexpr inline auto invokeUserProvidedFunction(std::string_view callingSite, TFunction&& func, Args&&... args, const std::source_location& location = std::source_location::current()) noexcept {
@@ -843,6 +884,34 @@ public:
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
           _settings(CtxSettings<Derived>(*static_cast<Derived*>(this))) {                                  // N.B. safe delegated use of this (i.e. not used during construction)
 
+        // store the actual Block* address (differs from BlockBase's this due to multiple inheritance)
+        _blockSelf = static_cast<void*>(this);
+
+        // initialize inherited BlockBase accessor function pointers
+        _cbSettings        = &Block::cbSettingsImpl;
+        _cbState           = &Block::cbStateImpl;
+        _cbChangeStateTo   = &Block::cbChangeStateToImpl;
+        _cbUniqueName      = &Block::cbUniqueNameImpl;
+        _cbName            = &Block::cbNameImpl;
+        _cbMetaInformation = &Block::cbMetaInformationImpl;
+        _cbUiConstraints   = &Block::cbUiConstraintsImpl;
+
+        // initialize inherited BlockBase::propertyCallbacks
+        propertyCallbacks = {
+            {block::property::kHeartbeat, &BlockBase::propertyCallbackHeartbeat},
+            {block::property::kEcho, &BlockBase::propertyCallbackEcho},
+            {block::property::kLifeCycleState, &BlockBase::propertyCallbackLifecycleState},
+            {block::property::kSetting, &BlockBase::propertyCallbackSettings},
+            {block::property::kStagedSetting, &BlockBase::propertyCallbackStagedSettings},
+            {block::property::kStoreDefaults, &BlockBase::propertyCallbackStoreDefaults},
+            {block::property::kResetDefaults, &BlockBase::propertyCallbackResetDefaults},
+            {block::property::kActiveContext, &BlockBase::propertyCallbackActiveContext},
+            {block::property::kSettingsCtx, &BlockBase::propertyCallbackSettingsCtx},
+            {block::property::kSettingsContexts, &BlockBase::propertyCallbackSettingsContexts},
+            {block::property::kMetaInformation, &BlockBase::propertyCallbackMetaInformation},
+            {block::property::kUiConstraints, &BlockBase::propertyCallbackUiConstraints},
+        };
+
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
 
@@ -853,6 +922,7 @@ public:
 
     Block(Block&& other) noexcept
         : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                                                                                    //
+          BlockBase(std::move(other)),                                                                                                                                                                                            //
           input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                                                                                            //
           stride(std::move(other.stride)),                                                                                                                                                                                       //
           disconnect_on_done(other.disconnect_on_done),                                                                                                                                                                          //
@@ -861,10 +931,13 @@ public:
           unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                                                                                         //
           ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                                                                                  //
           msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                                                                                        //
-          propertyCallbacks(std::move(other.propertyCallbacks)), propertySubscriptions(std::move(other.propertySubscriptions)), inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                                                                                      //
           _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)),                                                                 //
           _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                                                                                              //
-    {}
+    {
+        _blockSelf       = static_cast<void*>(this);
+        other._blockSelf = nullptr;
+    }
 
     Block& operator=(Block&& other) noexcept = delete;
 
@@ -1295,406 +1368,6 @@ public:
         };
         processPort(msgIn);
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
-    }
-
-protected:
-    std::optional<Message> propertyCallbackHeartbeat(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kHeartbeat);
-
-        if (message.cmd == Set || message.cmd == Get) {
-            std::uint64_t nanoseconds_count = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-            message.data                    = pmt::Value::Map{{"heartbeat", nanoseconds_count}};
-            return message;
-        } else if (message.cmd == Subscribe) {
-            if (!message.clientRequestID.empty()) {
-                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
-            }
-            return std::nullopt;
-        } else if (message.cmd == Unsubscribe) {
-            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackEcho(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kEcho);
-
-        if (message.cmd == Set) {
-            return message; // mirror message as is
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackLifecycleState(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kLifeCycleState);
-
-        if (message.cmd == Set) {
-            if (!message.data.has_value() || !message.data.value().contains("state")) { // Changed '&&' to '||'
-                throw gr::exception(std::format("propertyCallbackLifecycleState - cannot set block state w/o 'state' data msg: {}", message));
-            }
-
-            const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
-            auto        it      = dataMap.find("state");
-            if (it == dataMap.end()) {
-                throw gr::exception(std::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
-            }
-
-            const auto stateStr = it->second.value_or(std::string_view{});
-            if (!stateStr.data()) {
-                throw gr::exception(std::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
-            }
-
-            auto state = magic_enum::enum_cast<lifecycle::State>(stateStr); // Changed to dereference stateStr
-            if (!state.has_value()) {
-                throw gr::exception(std::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", stateStr, message));
-            }
-
-            if (auto e = this->changeStateTo(state.value()); !e) {
-                throw gr::exception(std::format("propertyCallbackLifecycleState - error in state transition - what: {}", e.error().message, e.error().sourceLocation, e.error().errorTime));
-            }
-
-            return std::nullopt;
-        }
-
-        if (message.cmd == Get) { // Merged 'else if' with 'if'
-            message.data = pmt::Value::Map{{"state", std::string(magic_enum::enum_name(this->state()))}};
-            return message;
-        }
-
-        if (message.cmd == Subscribe) { // Merged 'else if' with 'if'
-            if (!message.clientRequestID.empty()) {
-                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
-            }
-            return std::nullopt;
-        }
-
-        if (message.cmd == Unsubscribe) { // Merged 'else if' with 'if'
-            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("propertyCallbackLifecycleState - does not implement command {}, msg: {}", message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackSettings(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kSetting);
-
-        if (message.cmd == Set) {
-            if (!message.data.has_value()) {
-                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
-            }
-            // delegate to 'propertyCallbackStagedSettings' since we cannot set but only stage new settings due to mandatory real-time/non-real-time decoupling
-            // settings are applied during the next work(...) invocation.
-            propertyCallbackStagedSettings(block::property::kStagedSetting, message);
-            return std::nullopt;
-        } else if (message.cmd == Get) {
-            message.data = self().settings().get();
-            return message;
-        } else if (message.cmd == Subscribe) {
-            if (!message.clientRequestID.empty()) {
-                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
-            }
-            return std::nullopt;
-        } else if (message.cmd == Unsubscribe) {
-            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackStagedSettings(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kStagedSetting);
-        const auto keys = [](const property_map& map) noexcept {
-            std::string result;
-            for (const auto& pair : map) {
-                if (!result.empty()) {
-                    result += ", ";
-                }
-                result += pair.first;
-            }
-            return result;
-        };
-
-        if (message.cmd == Set) {
-            if (!message.data.has_value()) {
-                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
-            }
-
-            property_map notSet          = self().settings().setStaged(*message.data);
-            property_map stagedParameter = self().settings().stagedParameters();
-
-            if (notSet.empty()) {
-                if (!message.clientRequestID.empty()) {
-                    message.cmd  = Final;
-                    message.data = std::move(stagedParameter);
-                    return message;
-                }
-                return std::nullopt;
-            }
-
-            throw gr::exception(std::format("propertyCallbackStagedSettings - could not set fields: {}\nvs. available: {}", keys(std::move(notSet)), keys(settings().get())));
-        } else if (message.cmd == Get) {
-            message.data = self().settings().stagedParameters();
-            return message;
-        } else if (message.cmd == Subscribe) {
-            if (!message.clientRequestID.empty()) {
-                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
-            }
-            return std::nullopt;
-        } else if (message.cmd == Unsubscribe) {
-            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackStoreDefaults(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kStoreDefaults);
-
-        if (message.cmd == Set) {
-            settings().storeDefaults();
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackResetDefaults(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kResetDefaults);
-
-        if (message.cmd == Set) {
-            settings().resetDefaults();
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackActiveContext(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kActiveContext);
-
-        if (message.cmd == Set) {
-            if (!message.data.has_value()) {
-                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
-            }
-
-            const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
-
-            std::string contextStr;
-            if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-                if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
-                    contextStr = str;
-                } else {
-                    throw gr::exception(std::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
-                }
-            } else {
-                throw gr::exception(std::format("propertyCallbackActiveContext - context name not found, msg: {}", message));
-            }
-
-            std::uint64_t time = 0;
-            if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-                if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
-                    time = *timePtr;
-                }
-            }
-
-            auto ctx = settings().activateContext(SettingsCtx{
-                .time    = time,
-                .context = contextStr,
-            });
-
-            if (!ctx.has_value()) {
-                throw gr::exception(std::format("propertyCallbackActiveContext - failed to activate context {}, msg: {}", contextStr, message));
-            }
-        }
-
-        if (message.cmd == Get || message.cmd == Set) {
-            const auto& ctx = settings().activeContext();
-            message.data    = property_map{
-                   {gr::tag::CONTEXT.shortKey(), ctx.context},  //
-                   {gr::tag::CONTEXT_TIME.shortKey(), ctx.time} //
-            };
-            return message;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackSettingsCtx(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kSettingsCtx);
-
-        if (!message.data.has_value()) {
-            throw gr::exception(std::format("block {} (aka. {}) cannot get/set {} w/o data msg: {}", unique_name, name, propertyName, message));
-        }
-
-        const auto& dataMap = message.data.value(); // Introduced const auto& dataMap
-
-        std::string contextStr;
-        if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-            if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
-                contextStr = str;
-            } else {
-                throw gr::exception(std::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
-            }
-        } else {
-            throw gr::exception(std::format("propertyCallbackSettingsCtx - context name not found, msg: {}", message));
-        }
-
-        std::uint64_t time = 0;
-        if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-            if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
-                time = *timePtr;
-            }
-        }
-
-        SettingsCtx ctx{
-            .time    = time,
-            .context = contextStr,
-        };
-
-        pmt::Value::Map parameters;
-        if (message.cmd == Get) {
-            Tensor<pmt::Value> paramKeys;
-            auto               itParam = dataMap.find("parameters");
-            if (itParam != dataMap.end()) {
-                auto keys = itParam->second.get_if<Tensor<pmt::Value>>();
-                if (keys) {
-                    paramKeys = *keys;
-                } else {
-                    std::println("Warning: keys are not Tensor<Value>");
-                }
-            }
-
-            auto paramKeyStrings =                                                                                                                         //
-                paramKeys | std::views::transform([](const auto& keyValue) { return keyValue.value_or(std::string()); }) | std::ranges::to<std::vector>(); //
-            if (auto params = settings().getStored(paramKeyStrings, ctx); params.has_value()) {
-                parameters = params.value();
-            }
-            message.data = pmt::Value::Map{{"parameters", parameters}};
-            return message;
-        }
-
-        if (message.cmd == Set) {
-            if (auto it = dataMap.find("parameters"); it != dataMap.end()) {
-                auto params = it->second.get_if<pmt::Value::Map>();
-                if (params) {
-                    parameters = *params;
-                }
-            }
-
-            message.data = property_map{{"failed_to_set", settings().set(parameters, ctx)}};
-            return message;
-        }
-
-        // Removed a Context
-        if (message.cmd == Disconnect) {
-            auto str = ctx.context.value_or(std::string_view{});
-            if (str.empty()) {
-                throw gr::exception(std::format("propertyCallbackSettingsCtx - cannot delete default context, msg: {}", message));
-            }
-
-            if (!settings().removeContext(ctx)) {
-                throw gr::exception(std::format("propertyCallbackSettingsCtx - could not delete context {}, msg: {}", ctx.context, message));
-            }
-            return message;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackSettingsContexts(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kSettingsContexts);
-
-        if (message.cmd == Get) {
-            const std::map<pmt::Value, std::vector<SettingsBase::CtxSettingsPair>, settings::PMTCompare>& stored = settings().getStoredAll();
-
-            Tensor<pmt::Value>    contexts;
-            Tensor<std::uint64_t> times;
-            for (const auto& [ctxName, ctxParameters] : stored) {
-                for (const auto& [ctx, properties] : ctxParameters) {
-                    if (!ctx.context.holds<std::string>()) {
-                        continue;
-                    }
-                    const auto str = ctx.context.value_or(std::string_view{});
-                    contexts.push_back(str);
-                    times.push_back(ctx.time);
-                }
-            }
-
-            message.data = pmt::Value::Map{
-                {"contexts", std::move(contexts)},
-                {"times", std::move(times)},
-            };
-            return message;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackMetaInformation(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kMetaInformation);
-
-        if (message.cmd == Set) {
-            throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-            return std::nullopt;
-        } else if (message.cmd == Get) {
-            message.data = self().meta_information.value; // get
-            return message;
-        } else if (message.cmd == Subscribe) {
-            if (!message.clientRequestID.empty()) {
-                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
-            }
-            return std::nullopt;
-        } else if (message.cmd == Unsubscribe) {
-            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
-    }
-
-    std::optional<Message> propertyCallbackUiConstraints(std::string_view propertyName, Message message) {
-        using enum gr::message::Command;
-        assert(propertyName == block::property::kUiConstraints);
-
-        if (message.cmd == Set) {
-            if (!message.data.has_value()) {
-                throw gr::exception(std::format("block {} (aka. {}) cannot set {} w/o data msg: {}", unique_name, name, propertyName, message));
-            }
-            // delegate to 'propertyCallbackStagedSettings' since we cannot set but only stage new settings due to mandatory real-time/non-real-time decoupling
-            // settings are applied during the next work(...) invocation.
-            propertyCallbackStagedSettings(block::property::kStagedSetting, message);
-            return std::nullopt;
-        } else if (message.cmd == Get) {                // only return ui_constraints
-            message.data = self().ui_constraints.value; // get
-            return message;
-        } else if (message.cmd == Subscribe) {
-            if (!message.clientRequestID.empty()) {
-                propertySubscriptions[std::string(propertyName)].insert(message.clientRequestID);
-            }
-            return std::nullopt;
-        } else if (message.cmd == Unsubscribe) {
-            propertySubscriptions[std::string(propertyName)].erase(message.clientRequestID);
-            return std::nullopt;
-        }
-
-        throw gr::exception(std::format("block {} property {} does not implement command {}, msg: {}", unique_name, propertyName, message.cmd, message));
     }
 
 protected:
@@ -2363,21 +2036,11 @@ public:
                 continue;
             }
 
-            PropertyCallback callback = nullptr;
-            // Attempt to find a matching property callback or use the unmatchedPropertyHandler.
-            if (auto it = propertyCallbacks.find(message.endpoint); it != propertyCallbacks.end()) {
-                callback = it->second;
-            } else {
-                if constexpr (requires(std::string_view sv, Message m) {
-                                  { self().unmatchedPropertyHandler(sv, m) } -> std::same_as<std::optional<Message>>;
-                              }) {
-                    callback = static_cast<PropertyCallback>(&Derived::unmatchedPropertyHandler);
-                }
-            }
-
-            if (callback == nullptr) {
+            auto it = propertyCallbacks.find(message.endpoint);
+            if (it == propertyCallbacks.end()) {
                 continue; // did not find matching property callback
             }
+            BlockBase::PropertyCallback callback = it->second;
 
             std::optional<Message> retMessage;
             try {

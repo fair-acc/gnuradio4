@@ -166,9 +166,11 @@ protected:
         // as this class will handle them
         this->_dynamicPortsLoader.instance = nullptr;
 
-        // Register the handler for subgraph export port messages
-        this->_block._subgraphExportHandler = &GraphWrapper::subgraphExportHandler;
-        this->_block._subgraphExportContext = this;
+        // Register the handler for subgraph export port messages on the inner block
+        // (works for both Graph and Scheduler wrapped types via BlockBase fields)
+        this->_block._subgraphExportHandler                                  = &GraphWrapper::subgraphExportHandler;
+        this->_block._subgraphExportContext                                  = this;
+        this->_block.propertyCallbacks[graph::property::kSubgraphExportPort] = &BlockBase::propertyCallbackSubgraphExport;
     }
 
 public:
@@ -290,7 +292,7 @@ struct Graph : Block<Graph> {
 
     gr::PluginLoader* _pluginLoader = nullptr;
 
-    // _subgraphExportHandler and _subgraphExportContext are on Block<T>
+    // _subgraphExportHandler and _subgraphExportContext are on BlockBase
 
     // Just a dummy class that stores the graph and the source block and port
     // to be able to split the connection into two separate calls
