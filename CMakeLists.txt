@@ -258,7 +258,7 @@ string(
 if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
   if(NOT GR_USE_ADAPTIVE_CPP)
     message(STATUS "Using plain Clang – enabling libc++")
-    add_compile_options(-stdlib=libc++)
+    add_compile_options(-stdlib=libc++ -Wno-unused-command-line-argument)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++")
   else()
