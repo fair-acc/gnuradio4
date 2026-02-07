@@ -460,33 +460,23 @@ struct SettingsBase {
 
 }; // struct SettingsBase
 
-template<typename TBlock>
-class CtxSettings : public SettingsBase {
-    /**
-     * A predicate for matching two contexts
-     * The third "attempt" parameter indicates the current round of matching being done.
-     * This is useful for hierarchical matching schemes,
-     * e.g. in the first round the predicate could look for almost exact matches only,
-     * then in a a second round (attempt=1) it could be more forgiving, given that there are no exact matches available.
-     *
-     * The predicate will be called until it returns "true" (a match is found), or until it returns std::nullopt,
-     * which indicates that no matches were found and there is no chance of matching anything in a further round.
-     */
+/**
+ * @brief Non-templated base class for CtxSettings containing all type-independent data and logic.
+ * This is compiled once in Settings.cpp rather than instantiated per block type. (Optimization I)
+ */
+class CtxSettingsBase : public SettingsBase {
+public:
     using MatchPredicate = std::function<std::optional<bool>(const pmt::Value&, const pmt::Value&, std::size_t)>;
 
-    TBlock*            _block = nullptr;
+protected:
     std::atomic_bool   _changed{false};
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
     mutable std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
     property_map                                                                     _defaultParameters{};
-    // Store the initial parameters provided in the Block constructor. These parameters cannot be set directly in the constructor
-    // because `_defaultParameters` cannot be initialized using Settings::storeDefaults() within the Block constructor.
-    // Instead, we store them now and set them later in the Block::init method.
     property_map                                 _initBlockParameters{};
-    // _allWritableMembers replaced by static allWritableMembers() function below
-    std::map<SettingsCtx, std::set<std::string>> _autoUpdateParameters{}; // for each SettingsCtx auto updated members are stored separately
+    std::map<SettingsCtx, std::set<std::string>> _autoUpdateParameters{};
     std::set<std::string>                        _autoForwardParameters{};
     MatchPredicate                               _matchPred = settings::nullMatchPred;
     SettingsCtx                                  _activeCtx{};
@@ -495,10 +485,95 @@ class CtxSettings : public SettingsBase {
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
+    // Virtual hooks for type-dependent logic called from type-independent methods
+    [[nodiscard]] virtual property_map                doSetStagedImpl(const property_map& parameters) = 0;
+    [[nodiscard]] virtual const std::set<std::string>& doGetAllWritableMembers() const                = 0;
+
 public:
     // Settings configuration
-    std::uint64_t expiry_time{std::numeric_limits<std::uint64_t>::max()}; // in ns, expiry time of parameter set after the last use, std::numeric_limits<std::uint64_t>::max() == no expiry time
+    std::uint64_t expiry_time{std::numeric_limits<std::uint64_t>::max()};
 
+    // --- Type-independent virtual method implementations (defined in Settings.cpp) ---
+
+    [[nodiscard]] bool changed() const noexcept override;
+    void               setChanged(bool b) noexcept override;
+    void               setInitBlockParameters(const property_map& parameters) override;
+
+    [[nodiscard]] const SettingsCtx& activeContext() const noexcept override;
+
+    [[nodiscard]] std::set<std::string>& autoForwardParameters() noexcept override;
+    [[nodiscard]] const property_map&    defaultParameters() const noexcept override;
+    [[nodiscard]] const property_map&    activeParameters() const noexcept override;
+
+    [[nodiscard]] property_map              get(std::span<const std::string> parameterKeys = {}) const noexcept override;
+    [[nodiscard]] std::optional<pmt::Value> get(const std::string& parameterKey) const noexcept override;
+
+    [[nodiscard]] std::optional<property_map> getStored(std::span<const std::string> parameterKeys = {}, SettingsCtx ctx = {}) const noexcept override;
+    [[nodiscard]] std::optional<pmt::Value>   getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override;
+
+    [[nodiscard]] gr::Size_t getNStoredParameters() const noexcept override;
+    [[nodiscard]] gr::Size_t getNAutoUpdateParameters() const noexcept override;
+
+    [[nodiscard]] std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override;
+
+    [[nodiscard]] const property_map& stagedParameters() const override;
+
+    [[nodiscard]] std::set<std::string> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override;
+
+    [[nodiscard]] property_map setStaged(const property_map& parameters) override;
+
+    [[nodiscard]] std::optional<SettingsCtx> activateContext(SettingsCtx ctx = {}) override;
+    [[nodiscard]] bool                       removeContext(SettingsCtx ctx) override;
+
+    void assignFrom(const CtxSettingsBase& other);
+    void assignFrom(CtxSettingsBase&& other) noexcept;
+
+protected:
+    // --- Private helpers (defined in Settings.cpp) ---
+    [[nodiscard]] std::optional<pmt::Value>               findBestMatchCtx(const pmt::Value& contextToSearch) const;
+    [[nodiscard]] std::optional<SettingsCtx>               findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<property_map>              getBestMatchStoredParameters(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<std::set<std::string>>     getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
+    void                                                   resolveDuplicateTimestamp(SettingsCtx& ctx);
+    void                                                   addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
+    void                                                   removeExpiredStoredParameters();
+    [[nodiscard]] std::optional<std::string>               contextInTag(const Tag& tag) const;
+    [[nodiscard]] std::optional<std::uint64_t>             triggeredTimeInTag(const Tag& tag) const;
+    [[nodiscard]] std::optional<SettingsCtx>               createSettingsCtxFromTag(const Tag& tag) const;
+}; // class CtxSettingsBase
+
+template<typename TBlock>
+class CtxSettings : public CtxSettingsBase {
+    TBlock* _block = nullptr;
+
+    // Virtual hook: delegates to type-dependent setStagedImpl using static dispatch table
+    [[nodiscard]] property_map doSetStagedImpl(const property_map& parameters) override {
+        property_map ret;
+        if constexpr (refl::reflectable<TBlock>) {
+            const auto& setters = parameterSetters();
+            for (const auto& [key, value] : parameters) {
+                auto it = setters.find(key);
+                if (it != setters.end()) {
+                    if (auto error = it->second(key, value, _stagedParameters)) {
+                        throw gr::exception(*error);
+                    }
+                } else {
+                    ret.insert_or_assign(key, value);
+                }
+            }
+        }
+        if (!_stagedParameters.empty()) {
+            setChanged(true);
+        }
+        return ret;
+    }
+
+    // Virtual hook: returns the static allWritableMembers set for this block type
+    [[nodiscard]] const std::set<std::string>& doGetAllWritableMembers() const override {
+        return allWritableMembers();
+    }
+
+public:
     // Static function - computed once per block type (Optimization B)
     [[nodiscard]] static const std::set<std::string>& allWritableMembers() {
         static const std::set<std::string> members = [] {
@@ -519,8 +594,6 @@ public:
     }
 
     // ===== Static dispatch tables for compile-time optimization (Optimization F) =====
-    // These tables are computed once per block type and enable O(1) member lookup
-    // instead of O(members) iteration for each parameter operation.
 
     // Type aliases for dispatch function pointers
     using ParameterSetter       = std::optional<std::string> (*)(std::string_view key, const pmt::Value& value, property_map& newParameters);
@@ -784,7 +857,8 @@ public:
     }
 
 public:
-    explicit CtxSettings(TBlock& block, MatchPredicate matchPred = settings::nullMatchPred) noexcept : SettingsBase(), _block(&block), _matchPred(matchPred) {
+    explicit CtxSettings(TBlock& block, MatchPredicate matchPred = settings::nullMatchPred) noexcept : CtxSettingsBase(), _block(&block) {
+        _matchPred = std::move(matchPred);
         if constexpr (requires { &TBlock::settingsChanged; }) { // if settingsChanged is defined
             static_assert(HasSettingsChangedCallback<TBlock>, "if provided, settingsChanged must have either a `(const property_map& old, property_map& new, property_map& fwd)`"
                                                               "or `(const property_map& old, property_map& new)` paremeter signatures.");
@@ -804,52 +878,15 @@ public:
     CtxSettings& operator=(const CtxSettings& other) = delete;
     CtxSettings& operator=(CtxSettings&& other)      = delete;
 
-    CtxSettings(TBlock& block, const CtxSettings& other) {
+    CtxSettings(TBlock& block, const CtxSettings& other) : CtxSettingsBase() {
         _block = std::addressof(block);
         assignFrom(other);
     }
 
-    CtxSettings(TBlock& block, CtxSettings&& other) noexcept {
+    CtxSettings(TBlock& block, CtxSettings&& other) noexcept : CtxSettingsBase() {
         _block = std::addressof(block);
         assignFrom(std::move(other));
     }
-
-    void assignFrom(const CtxSettings& other) {
-        std::scoped_lock lock(_mutex, other._mutex);
-        std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
-        _storedParameters      = other._storedParameters;
-        _defaultParameters     = other._defaultParameters;
-        _initBlockParameters   = other._initBlockParameters;
-        // _allWritableMembers is now static, no need to copy
-        _autoUpdateParameters  = other._autoUpdateParameters;
-        _autoForwardParameters = other._autoForwardParameters;
-        _matchPred             = other._matchPred;
-        _activeCtx             = other._activeCtx;
-        _stagedParameters      = other._stagedParameters;
-        _activeParameters      = other._activeParameters;
-    }
-
-    void assignFrom(CtxSettings&& other) noexcept {
-        std::scoped_lock lock(_mutex, other._mutex);
-        std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
-        _storedParameters      = std::move(other._storedParameters);
-        _defaultParameters     = std::move(other._defaultParameters);
-        _initBlockParameters   = std::move(other._initBlockParameters);
-        // _allWritableMembers is now static, no need to move
-        _autoUpdateParameters  = std::move(other._autoUpdateParameters);
-        _autoForwardParameters = std::move(other._autoForwardParameters);
-        _matchPred             = std::exchange(other._matchPred, settings::nullMatchPred);
-        _activeCtx             = std::exchange(other._activeCtx, {});
-        _stagedParameters      = std::move(other._stagedParameters);
-        _activeParameters      = std::move(other._activeParameters);
-    }
-
-public:
-    [[nodiscard]] bool changed() const noexcept override { return _changed; }
-
-    void setChanged(bool b) noexcept override { _changed.store(b); }
-
-    void setInitBlockParameters(const property_map& parameters) override { _initBlockParameters = parameters; }
 
     NO_INLINE void init() override {
         // Populate meta_information at runtime (deferred from constructor - Optimization B)
@@ -944,11 +981,6 @@ public:
         return ret; // N.B. returns those <key:value> parameters that could not be set
     }
 
-    [[nodiscard]] property_map setStaged(const property_map& parameters) override {
-        std::lock_guard lg(_mutex);
-        return setStagedImpl(parameters);
-    }
-
     void storeDefaults() override { this->storeCurrentParameters(_defaultParameters); }
 
     NO_INLINE void resetDefaults() override {
@@ -966,92 +998,6 @@ public:
         if constexpr (HasSettingsResetCallback<TBlock>) {
             _block->reset();
         }
-    }
-
-    [[nodiscard]] NO_INLINE const SettingsCtx& activeContext() const noexcept override { return _activeCtx; }
-
-    [[nodiscard]] NO_INLINE bool removeContext(SettingsCtx ctx) override {
-        auto str = ctx.context.value_or(std::string_view{});
-        if (str.empty()) {
-            return false; // Forbid removing default context
-        }
-
-        auto it = _storedParameters.find(ctx.context);
-        if (it == _storedParameters.end()) {
-            return false;
-        }
-
-        if (ctx.time == 0ULL) {
-            ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-#ifdef __EMSCRIPTEN__
-            ctx.time += _timePrecisionTolerance;
-#endif
-        }
-
-        std::vector<CtxSettingsPair>& vec     = it->second;
-        auto                          exactIt = std::find_if(vec.begin(), vec.end(), [&ctx](const auto& pair) { return pair.context.time == ctx.time; });
-
-        if (exactIt == vec.end()) {
-            return false;
-        }
-        vec.erase(exactIt);
-
-        if (vec.empty()) {
-            _storedParameters.erase(ctx.context);
-        }
-
-        if (_activeCtx.context == ctx.context) {
-            std::ignore = activateContext(); // Activate default context
-        }
-
-        return true;
-    }
-
-    [[nodiscard]] NO_INLINE std::optional<SettingsCtx> activateContext(SettingsCtx ctx = {}) override {
-        if (ctx.time == 0ULL) {
-            ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-#ifdef __EMSCRIPTEN__
-            ctx.time += _timePrecisionTolerance;
-#endif
-        }
-
-        const std::optional<SettingsCtx> bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
-        if (!bestMatchSettingsCtx || bestMatchSettingsCtx == _activeCtx) {
-            return bestMatchSettingsCtx;
-        }
-
-        if (bestMatchSettingsCtx.value().context == _activeCtx.context) {
-            std::optional<property_map> parameters = getBestMatchStoredParameters(ctx);
-            if (parameters) {
-                const std::set<std::string>& currentAutoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
-                // auto                         notAutoUpdateView       = parameters.value() | std::views::filter([&](const auto& pair) { return !currentAutoUpdateParams.contains(pair.first); });
-                // property_map                 notAutoUpdateParams(notAutoUpdateView.begin(), notAutoUpdateView.end());
-
-                // the following is more compile-time friendly
-                property_map notAutoUpdateParams;
-                for (const auto& pair : parameters.value()) {
-                    if (!currentAutoUpdateParams.contains(std::string(pair.first))) {
-                        notAutoUpdateParams.insert(pair);
-                    }
-                }
-
-                std::ignore = setStagedImpl(std::move(notAutoUpdateParams));
-                _activeCtx  = bestMatchSettingsCtx.value();
-                setChanged(true);
-            }
-        } else {
-            std::optional<property_map> _parameters = getBestMatchStoredParameters(ctx);
-            if (_parameters) {
-                auto& parameters = *_parameters;
-                _stagedParameters.insert(parameters.begin(), parameters.end());
-                _activeCtx = bestMatchSettingsCtx.value();
-                setChanged(true);
-            } else {
-                return std::nullopt;
-            }
-        }
-
-        return bestMatchSettingsCtx;
     }
 
     NO_INLINE void autoUpdate(const Tag& tag) override {
@@ -1099,98 +1045,6 @@ public:
             }
         }
     }
-
-    [[nodiscard]] property_map get(std::span<const std::string> parameterKeys = {}) const noexcept override {
-        std::lock_guard lg(_mutex);
-        if (parameterKeys.empty()) {
-            return _activeParameters;
-        }
-        property_map ret;
-        for (const auto& key : parameterKeys) {
-            if (_activeParameters.contains(convert_string_domain(key))) {
-                ret.insert_or_assign(convert_string_domain(key), _activeParameters.at(convert_string_domain(key)));
-            }
-        }
-        return ret;
-    }
-
-    [[nodiscard]] std::optional<pmt::Value> get(const std::string& parameterKey) const noexcept override {
-        auto res = get(std::array<std::string, 1>({parameterKey}));
-        auto it  = res.find(convert_string_domain(parameterKey));
-        if (it != res.end()) {
-            return it->second;
-        } else {
-            return std::nullopt;
-        }
-    }
-
-    [[nodiscard]] NO_INLINE std::optional<property_map> getStored(std::span<const std::string> parameterKeys = {}, SettingsCtx ctx = {}) const noexcept override {
-        std::lock_guard lg(_mutex);
-        if (ctx.time == 0ULL) {
-            ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-        }
-#ifdef __EMSCRIPTEN__
-        ctx.time += _timePrecisionTolerance;
-#endif
-        std::optional<property_map> allBestMatchParameters = this->getBestMatchStoredParameters(ctx);
-
-        if (allBestMatchParameters == std::nullopt) {
-            return std::nullopt;
-        }
-
-        if (parameterKeys.empty()) {
-            return allBestMatchParameters;
-        }
-        property_map ret;
-        for (const auto& key : parameterKeys) {
-            if (allBestMatchParameters->contains(convert_string_domain(key))) {
-                ret.insert_or_assign(convert_string_domain(key), allBestMatchParameters->at(convert_string_domain(key)));
-            }
-        }
-        return ret;
-    }
-
-    [[nodiscard]] std::optional<pmt::Value> getStored(const std::string& parameterKey, SettingsCtx ctx = {}) const noexcept override {
-        auto res = getStored(std::array<std::string, 1>({parameterKey}), ctx);
-
-        if (res.has_value() && res->contains(convert_string_domain(parameterKey))) {
-            return res->at(convert_string_domain(parameterKey));
-        } else {
-            return std::nullopt;
-        }
-    }
-
-    [[nodiscard]] gr::Size_t getNStoredParameters() const noexcept override {
-        std::lock_guard lg(_mutex);
-        gr::Size_t      nParameters{0};
-        for (const auto& stored : _storedParameters) {
-            nParameters += static_cast<gr::Size_t>(stored.second.size());
-        }
-        return nParameters;
-    }
-
-    [[nodiscard]] gr::Size_t getNAutoUpdateParameters() const noexcept override {
-        std::lock_guard lg(_mutex);
-        return static_cast<gr::Size_t>(_autoUpdateParameters.size());
-    }
-
-    [[nodiscard]] std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> getStoredAll() const noexcept override { return _storedParameters; }
-
-    [[nodiscard]] const property_map& stagedParameters() const noexcept override {
-        std::lock_guard lg(_mutex);
-        return _stagedParameters;
-    }
-
-    [[nodiscard]] NO_INLINE std::set<std::string> autoUpdateParameters(SettingsCtx ctx = {}) noexcept override {
-        auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
-        return bestMatchSettingsCtx == std::nullopt ? std::set<std::string>() : _autoUpdateParameters[bestMatchSettingsCtx.value()];
-    }
-
-    [[nodiscard]] NO_INLINE std::set<std::string>& autoForwardParameters() noexcept override { return _autoForwardParameters; }
-
-    [[nodiscard]] NO_INLINE const property_map& defaultParameters() const noexcept override { return _defaultParameters; }
-
-    [[nodiscard]] NO_INLINE const property_map& activeParameters() const noexcept override { return _activeParameters; }
 
     [[nodiscard]] NO_INLINE ApplyStagedParametersResult applyStagedParameters() override {
         ApplyStagedParametersResult result;
@@ -1294,206 +1148,6 @@ private:
         const auto& readers = activeParameterReaders();
         for (const auto& reader : readers) {
             reader(_block, _activeParameters);
-        }
-    }
-
-    [[nodiscard]] NO_INLINE std::optional<pmt::Value> findBestMatchCtx(const pmt::Value& contextToSearch) const {
-        if (_storedParameters.empty()) {
-            return std::nullopt;
-        }
-
-        // exact match
-        if (_storedParameters.find(contextToSearch) != _storedParameters.end()) {
-            return contextToSearch;
-        }
-
-        // retry until we either get a match or std::nullopt
-        for (std::size_t attempt = 0;; ++attempt) {
-            for (const auto& i : _storedParameters) {
-                const auto matches = _matchPred(i.first, contextToSearch, attempt);
-                if (!matches) {
-                    return std::nullopt;
-                } else if (*matches) {
-                    return i.first; // return the best matched SettingsCtx.context
-                }
-            }
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] NO_INLINE std::optional<SettingsCtx> findBestMatchSettingsCtx(const SettingsCtx& ctx) const {
-        const auto bestMatchCtx = findBestMatchCtx(ctx.context);
-        if (bestMatchCtx == std::nullopt) {
-            return std::nullopt;
-        }
-        const auto& vec = _storedParameters[bestMatchCtx.value()];
-        if (vec.empty()) {
-            return std::nullopt;
-        }
-        if (ctx.time == 0ULL || vec.back().context.time <= ctx.time) {
-            return vec.back().context;
-        } else {
-            auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& a) { return a.context.time; });
-            if (lower == vec.end()) {
-                return vec.back().context;
-            } else {
-                if (lower->context.time == ctx.time) {
-                    return lower->context;
-                } else if (lower != vec.begin()) {
-                    --lower;
-                    return lower->context;
-                }
-            }
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] inline std::optional<property_map> getBestMatchStoredParameters(const SettingsCtx& ctx) const {
-        const auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
-        if (bestMatchSettingsCtx == std::nullopt) {
-            return std::nullopt;
-        }
-        const auto& vec        = _storedParameters[bestMatchSettingsCtx.value().context];
-        const auto  parameters = std::ranges::find_if(vec, [&](const CtxSettingsPair& contextSettings) { return contextSettings.context == bestMatchSettingsCtx.value(); });
-
-        return parameters != vec.end() ? std::optional(parameters->settings) : std::nullopt;
-    }
-
-    [[nodiscard]] inline std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const {
-        const auto bestMatchSettingsCtx = findBestMatchSettingsCtx(ctx);
-        if (bestMatchSettingsCtx == std::nullopt || !_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
-            return std::nullopt;
-        } else {
-            return _autoUpdateParameters.at(bestMatchSettingsCtx.value());
-        }
-    }
-
-    NO_INLINE void resolveDuplicateTimestamp(SettingsCtx& ctx) {
-        const auto vecIt = _storedParameters.find(ctx.context);
-        if (vecIt == _storedParameters.end() || vecIt->second.empty()) {
-            return;
-        }
-        const auto&       vec       = vecIt->second;
-        const std::size_t tolerance = 1000; // ns
-        // find the last context in sorted vector such that `ctx.time <= ctxToFind <= ctx.time + tolerance`
-        const auto lower = std::ranges::lower_bound(vec, ctx.time, {}, [](const auto& elem) { return elem.context.time; });
-        const auto upper = std::ranges::upper_bound(vec, ctx.time + tolerance, {}, [](const auto& elem) { return elem.context.time; });
-        if (lower != upper && lower != vec.end()) {
-            ctx.time = (*(upper - 1)).context.time + 1;
-        }
-    }
-
-    [[nodiscard]] NO_INLINE property_map setStagedImpl(const property_map& parameters) {
-        property_map ret;
-        if constexpr (refl::reflectable<TBlock>) {
-            // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
-            const auto& setters = parameterSetters();
-            for (const auto& [key, value] : parameters) {
-                auto it = setters.find(key);
-                if (it != setters.end()) {
-                    if (auto error = it->second(key, value, _stagedParameters)) {
-                        throw gr::exception(*error);
-                    }
-                } else {
-                    ret.insert_or_assign(key, value);
-                }
-            }
-        }
-        if (!_stagedParameters.empty()) {
-            setChanged(true);
-        }
-        return ret; // N.B. returns those <key:value> parameters that could not be set
-    }
-
-    NO_INLINE void addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx) {
-        if (!_autoUpdateParameters.contains(ctx)) {
-            _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
-        }
-
-        std::vector<CtxSettingsPair>& sortedVectorForContext = _storedParameters[ctx.context];
-        // binary search and merge-sort
-        auto it = std::ranges::lower_bound(sortedVectorForContext, ctx.time, std::less<>{}, [](const auto& pair) { return pair.context.time; });
-        sortedVectorForContext.insert(it, {ctx, newParameters});
-    }
-
-    NO_INLINE void removeExpiredStoredParameters() {
-        const auto removeFromAutoUpdateParameters = [this](const auto& begin, const auto& end) {
-            for (auto it = begin; it != end; it++) {
-                _autoUpdateParameters.erase(it->context);
-            }
-        };
-        std::uint64_t now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-#ifdef __EMSCRIPTEN__
-        now += _timePrecisionTolerance;
-#endif
-        for (auto& [ctx, vec] : _storedParameters) {
-            // remove all expired parameters
-            if (expiry_time != std::numeric_limits<std::uint64_t>::max()) {
-                const auto [first, last] = std::ranges::remove_if(vec, [&](const auto& elem) { return elem.context.time + expiry_time <= now; });
-                removeFromAutoUpdateParameters(first, last);
-                vec.erase(first, last);
-            }
-
-            if (vec.empty()) {
-                continue;
-            }
-            // always keep at least one past parameter set
-            auto lower = std::ranges::lower_bound(vec, now, {}, [](const auto& elem) { return elem.context.time; });
-            if (lower == vec.end()) {
-                removeFromAutoUpdateParameters(vec.begin(), vec.end() - 1);
-                vec.erase(vec.begin(), vec.end() - 1);
-            } else {
-                if (lower->context.time == now) {
-                    removeFromAutoUpdateParameters(vec.begin(), lower);
-                    vec.erase(vec.begin(), lower);
-                } else if (lower != vec.begin() && lower - 1 != vec.begin()) {
-                    removeFromAutoUpdateParameters(vec.begin(), lower - 1);
-                    vec.erase(vec.begin(), lower - 1);
-                }
-            }
-        }
-    }
-
-    [[nodiscard]] NO_INLINE std::optional<std::string> contextInTag(const Tag& tag) const {
-        if (tag.map.contains(gr::tag::CONTEXT.shortKey())) {
-            const pmt::Value& ctxInfo = tag.map.at(gr::tag::CONTEXT.shortKey());
-            auto              result  = ctxInfo.value_or(std::string_view{});
-            if (result.data() != nullptr) {
-                return {std::string(result)};
-            }
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] NO_INLINE std::optional<std::uint64_t> triggeredTimeInTag(const Tag& tag) const {
-        if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
-            const pmt::Value& pmtTimeUtcNs = tag.map.at(gr::tag::TRIGGER_TIME.shortKey());
-            auto              result       = pmt::convert_safely<std::uint64_t>(pmtTimeUtcNs);
-            if (result) {
-                return *result;
-            }
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] NO_INLINE std::optional<SettingsCtx> createSettingsCtxFromTag(const Tag& tag) const {
-        // If CONTEXT is not present then return std::nullopt
-        // IF TRIGGER_TIME is not present then time = now()
-
-        if (auto ctxValue = contextInTag(tag); ctxValue.has_value()) {
-            SettingsCtx ctx{};
-            ctx.context = ctxValue.value();
-
-            // update trigger time if present
-            if (auto triggerTime = triggeredTimeInTag(tag); triggerTime.has_value()) {
-                ctx.time = triggerTime.value();
-            }
-            if (ctx.time == 0ULL) {
-                ctx.time = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-            }
-            return ctx;
-        } else {
-            return std::nullopt;
         }
     }
 

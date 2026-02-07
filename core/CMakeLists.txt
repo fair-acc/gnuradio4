@@ -3,6 +3,7 @@ add_library(
   src/Value.cpp
   src/ValueHelper.cpp
   src/Block.cpp
+  src/Settings.cpp
   src/Graph.cpp
   src/PluginLoader.cpp
   src/PmtTypeHelpers.cpp)
