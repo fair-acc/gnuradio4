@@ -8,6 +8,37 @@ namespace gr::pmr {
 template<typename T, bool managed>
 struct vector;
 
+#ifdef _LIBCPP_VERSION
+//
+// uninitialized_move in libc++ tries to move from the iterator even if
+// operator* returns a value and not a reference (std::views::transform
+// for example).
+//
+// The __iter_move constructs a value (operator*) and then returns
+// a reference to it, which leads to UB.
+//
+// auto __iter_move = [](auto&& __iter) -> decltype(auto) { return std::move(*__iter); };
+//
+// auto __result = std::__uninitialized_move<_ValueType>(std::move(__ifirst), std::move(__ilast), std::move(__ofirst), std::__always_false(), __iter_move);
+// return std::move(__result.second);
+//
+// The fix applied here removes the UB while preserving move semantics
+// in the case when it is possible.
+//
+template<class InputIterator, class ForwardIterator>
+inline ForwardIterator libcxx_fixed_uninitialized_move(InputIterator ifirst, InputIterator ilast, ForwardIterator ofirst) {
+    using ValueType = typename std::iterator_traits<ForwardIterator>::value_type;
+    if constexpr (std::is_reference_v<ValueType>) {
+        return std::uninitialized_move(ifirst, ilast, ofirst);
+    } else {
+        // If operator* returns a value, construction will be a move
+        // from the returned value, as uninitialized_copy doesn't try
+        // to do anyting smart as std::uninitialized_move does in libc++
+        return std::uninitialized_copy(ifirst, ilast, ofirst);
+    }
+}
+#endif
+
 template<class T>
 struct vector<T, false> { // trivially copyable, no lifetime management
     using iterator       = T*;
@@ -202,14 +233,10 @@ struct vector<T, true> { // managed vector
                         std::memcpy(_data, std::to_address(first), n * sizeof(T));
                     } else {
 
-#if !defined(__clang__) // issue with clang's libc++ std::uninitialized_move as of clang20
-                        std::uninitialized_move(first, last, _data);
+#ifdef _LIBCPP_VERSION
+                        libcxx_fixed_uninitialized_move(first, last, _data); // only use move for non-integral types where it matters
 #else
-                        if constexpr (detail::iter_yields_nonconst_T_ref<T, decltype(first)> && !std::is_integral_v<T>) {
-                            std::uninitialized_copy(first, last, _data); // only use move for non-integral types where it matters
-                        } else {
-                            std::uninitialized_copy(first, last, _data);
-                        }
+                        std::uninitialized_move(first, last, _data);
 #endif
                     }
                 } else {
