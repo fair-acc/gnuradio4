@@ -385,7 +385,7 @@ std::optional<Message> BlockBase::propertyCallbackUiConstraints(std::string_view
         // settings are applied during the next work(...) invocation.
         propertyCallbackStagedSettings(block::property::kStagedSetting, message);
         return std::nullopt;
-    } else if (message.cmd == Get) {              // only return ui_constraints
+    } else if (message.cmd == Get) {      // only return ui_constraints
         message.data = cbUiConstraints(); // get
         return message;
     } else if (message.cmd == Subscribe) {
