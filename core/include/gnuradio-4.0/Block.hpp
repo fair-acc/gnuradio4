@@ -567,13 +567,13 @@ struct BlockBase {
     void* _blockSelf = nullptr;
 
     // Non-virtual accessor function pointers, set by Block<Derived> constructor (cold-path only)
-    SettingsBase&              (*_cbSettings)(void*)        = nullptr;
-    lifecycle::State           (*_cbState)(const void*)     = nullptr;
+    SettingsBase& (*_cbSettings)(void*)                                     = nullptr;
+    lifecycle::State (*_cbState)(const void*)                               = nullptr;
     std::expected<void, Error> (*_cbChangeStateTo)(void*, lifecycle::State) = nullptr;
-    std::string_view           (*_cbUniqueName)(const void*)  = nullptr;
-    std::string_view           (*_cbName)(const void*)        = nullptr;
-    property_map&              (*_cbMetaInformation)(void*)   = nullptr;
-    property_map&              (*_cbUiConstraints)(void*)     = nullptr;
+    std::string_view (*_cbUniqueName)(const void*)                          = nullptr;
+    std::string_view (*_cbName)(const void*)                                = nullptr;
+    property_map& (*_cbMetaInformation)(void*)                              = nullptr;
+    property_map& (*_cbUiConstraints)(void*)                                = nullptr;
 
     // Hook for GraphWrapper to handle subgraph export port messages on any block type
     using SubgraphExportHandler                  = std::optional<Message> (*)(void* context, Message);
@@ -584,13 +584,13 @@ struct BlockBase {
     std::map<std::string, std::set<std::string>> propertySubscriptions;
 
     // accessor helpers (delegate to function pointers, using _blockSelf for correct Block* address)
-    SettingsBase&              cbSettings()                      { return _cbSettings(_blockSelf); }
-    lifecycle::State           cbState() const                   { return _cbState(_blockSelf); }
+    SettingsBase&              cbSettings() { return _cbSettings(_blockSelf); }
+    lifecycle::State           cbState() const { return _cbState(_blockSelf); }
     std::expected<void, Error> cbChangeStateTo(lifecycle::State s) { return _cbChangeStateTo(_blockSelf, s); }
-    std::string_view           cbUniqueName() const              { return _cbUniqueName(_blockSelf); }
-    std::string_view           cbName() const                    { return _cbName(_blockSelf); }
-    property_map&              cbMetaInformation()               { return _cbMetaInformation(_blockSelf); }
-    property_map&              cbUiConstraints()                 { return _cbUiConstraints(_blockSelf); }
+    std::string_view           cbUniqueName() const { return _cbUniqueName(_blockSelf); }
+    std::string_view           cbName() const { return _cbName(_blockSelf); }
+    property_map&              cbMetaInformation() { return _cbMetaInformation(_blockSelf); }
+    property_map&              cbUiConstraints() { return _cbUiConstraints(_blockSelf); }
 
     // 12 callback implementations (compiled once, not per block type)
     std::optional<Message> propertyCallbackHeartbeat(std::string_view propertyName, Message message);
@@ -921,19 +921,19 @@ public:
     }
 
     Block(Block&& other) noexcept
-        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                                                                                    //
-          BlockBase(std::move(other)),                                                                                                                                                                                            //
-          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                                                                                            //
-          stride(std::move(other.stride)),                                                                                                                                                                                       //
-          disconnect_on_done(other.disconnect_on_done),                                                                                                                                                                          //
-          compute_domain(std::move(other.compute_domain)),                                                                                                                                                                       //
-          strideCounter(other.strideCounter),                                                                                                                                                                                    //
-          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                                                                                         //
-          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                                                                                  //
-          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                                                                                        //
-          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                                                                                      //
-          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)),                                                                 //
-          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                                                                                              //
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
+          BlockBase(std::move(other)),                                                                                                                           //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
+          stride(std::move(other.stride)),                                                                                                                       //
+          disconnect_on_done(other.disconnect_on_done),                                                                                                          //
+          compute_domain(std::move(other.compute_domain)),                                                                                                       //
+          strideCounter(other.strideCounter),                                                                                                                    //
+          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                         //
+          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                  //
+          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                        //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
+          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), //
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                              //
     {
         _blockSelf       = static_cast<void*>(this);
         other._blockSelf = nullptr;

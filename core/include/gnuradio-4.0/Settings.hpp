@@ -475,19 +475,19 @@ protected:
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
     mutable std::map<pmt::Value, std::vector<CtxSettingsPair>, settings::PMTCompare> _storedParameters{};
     property_map                                                                     _defaultParameters{};
-    property_map                                 _initBlockParameters{};
-    std::map<SettingsCtx, std::set<std::string>> _autoUpdateParameters{};
-    std::set<std::string>                        _autoForwardParameters{};
-    MatchPredicate                               _matchPred = settings::nullMatchPred;
-    SettingsCtx                                  _activeCtx{};
-    property_map                                 _stagedParameters{};
-    property_map                                 _activeParameters{};
+    property_map                                                                     _initBlockParameters{};
+    std::map<SettingsCtx, std::set<std::string>>                                     _autoUpdateParameters{};
+    std::set<std::string>                                                            _autoForwardParameters{};
+    MatchPredicate                                                                   _matchPred = settings::nullMatchPred;
+    SettingsCtx                                                                      _activeCtx{};
+    property_map                                                                     _stagedParameters{};
+    property_map                                                                     _activeParameters{};
 
     const std::size_t _timePrecisionTolerance = 100; // ns, now used for emscripten
 
     // Virtual hooks for type-dependent logic called from type-independent methods
-    [[nodiscard]] virtual property_map                doSetStagedImpl(const property_map& parameters) = 0;
-    [[nodiscard]] virtual const std::set<std::string>& doGetAllWritableMembers() const                = 0;
+    [[nodiscard]] virtual property_map                 doSetStagedImpl(const property_map& parameters) = 0;
+    [[nodiscard]] virtual const std::set<std::string>& doGetAllWritableMembers() const                 = 0;
 
 public:
     // Settings configuration
@@ -530,16 +530,16 @@ public:
 
 protected:
     // --- Private helpers (defined in Settings.cpp) ---
-    [[nodiscard]] std::optional<pmt::Value>               findBestMatchCtx(const pmt::Value& contextToSearch) const;
-    [[nodiscard]] std::optional<SettingsCtx>               findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
-    [[nodiscard]] std::optional<property_map>              getBestMatchStoredParameters(const SettingsCtx& ctx) const;
-    [[nodiscard]] std::optional<std::set<std::string>>     getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
-    void                                                   resolveDuplicateTimestamp(SettingsCtx& ctx);
-    void                                                   addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
-    void                                                   removeExpiredStoredParameters();
-    [[nodiscard]] std::optional<std::string>               contextInTag(const Tag& tag) const;
-    [[nodiscard]] std::optional<std::uint64_t>             triggeredTimeInTag(const Tag& tag) const;
-    [[nodiscard]] std::optional<SettingsCtx>               createSettingsCtxFromTag(const Tag& tag) const;
+    [[nodiscard]] std::optional<pmt::Value>            findBestMatchCtx(const pmt::Value& contextToSearch) const;
+    [[nodiscard]] std::optional<SettingsCtx>           findBestMatchSettingsCtx(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<property_map>          getBestMatchStoredParameters(const SettingsCtx& ctx) const;
+    [[nodiscard]] std::optional<std::set<std::string>> getBestMatchAutoUpdateParameters(const SettingsCtx& ctx) const;
+    void                                               resolveDuplicateTimestamp(SettingsCtx& ctx);
+    void                                               addStoredParameters(const property_map& newParameters, const SettingsCtx& ctx);
+    void                                               removeExpiredStoredParameters();
+    [[nodiscard]] std::optional<std::string>           contextInTag(const Tag& tag) const;
+    [[nodiscard]] std::optional<std::uint64_t>         triggeredTimeInTag(const Tag& tag) const;
+    [[nodiscard]] std::optional<SettingsCtx>           createSettingsCtxFromTag(const Tag& tag) const;
 }; // class CtxSettingsBase
 
 template<typename TBlock>
@@ -569,9 +569,7 @@ class CtxSettings : public CtxSettingsBase {
     }
 
     // Virtual hook: returns the static allWritableMembers set for this block type
-    [[nodiscard]] const std::set<std::string>& doGetAllWritableMembers() const override {
-        return allWritableMembers();
-    }
+    [[nodiscard]] const std::set<std::string>& doGetAllWritableMembers() const override { return allWritableMembers(); }
 
 public:
     // Static function - computed once per block type (Optimization B)
@@ -661,7 +659,7 @@ private:
     // Helper template for applyStagedParameters - applies value to block member
     template<std::size_t kIdx, typename RawType, typename Type>
     static bool applyStagedImpl(TBlock* block, std::string_view key, const pmt::Value& stagedValue, property_map& applied, property_map& staged, bool hasCallback) {
-        auto& member = refl::data_member<kIdx>(*block);
+        auto&      member = refl::data_member<kIdx>(*block);
         const auto keyPmr = std::pmr::string(key);
 
         std::expected<Type, std::string> maybe_value;
@@ -907,8 +905,8 @@ public:
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using RawType    = std::remove_cvref_t<MemberType>;
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
-                    auto  memberName       = std::string(refl::data_member_name<TBlock, kIdx>.view());
-                    auto& meta_information = _block->meta_information;
+                    auto  memberName                                                        = std::string(refl::data_member_name<TBlock, kIdx>.view());
+                    auto& meta_information                                                  = _block->meta_information;
                     meta_information[convert_string_domain(memberName) + "::description"]   = std::string(RawType::description());
                     meta_information[convert_string_domain(memberName) + "::documentation"] = std::string(RawType::documentation());
                     meta_information[convert_string_domain(memberName) + "::unit"]          = std::string(RawType::unit());
@@ -1069,7 +1067,7 @@ public:
                 auto it = appliers.find(key);
                 if (it != appliers.end()) {
                     constexpr bool hasCallback = HasSettingsChangedCallback<TBlock>;
-                    std::ignore = it->second(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
+                    std::ignore                = it->second(_block, key, stagedValue, result.appliedParameters, staged, hasCallback);
                     // Forward parameters check is independent of validation success (matches original behavior)
                     if (_autoForwardParameters.contains(std::string(key))) {
                         result.forwardParameters.insert_or_assign(key, stagedValue);
@@ -1094,7 +1092,7 @@ public:
             if constexpr (TBlock::ResamplingControl::kEnabled) {
                 if (result.forwardParameters.contains(gr::tag::SAMPLE_RATE.shortKey()) && (_block->input_chunk_size != 1ULL || _block->output_chunk_size != 1ULL)) {
                     const float ratio         = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
-                    const float newSampleRate = ratio * (*_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()).get_if<float>());
+                    const float newSampleRate = ratio * (*_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()).template get_if<float>());
                     result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
                 }
             }
