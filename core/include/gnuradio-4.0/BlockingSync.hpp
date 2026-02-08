@@ -260,6 +260,8 @@ public:
      */
     void blockingSyncStop() { stopTimer(); }
 
+    ~BlockingSync() { stopTimer(); }
+
 private:
     void startTimer() {
         if (_blockingSync_timerRunning.exchange(true)) {
@@ -272,10 +274,14 @@ private:
 
             TimePoint nextWakeUp = ClockSourceType::now();
 
-            while (getSampleRate() > 0.f && lifecycle::isActive(self().state())) {
+            while (_blockingSync_timerRunning.load(std::memory_order_acquire) && getSampleRate() > 0.f && lifecycle::isActive(self().state())) {
                 const auto period = getChunkPeriod();
                 nextWakeUp += period;
                 std::this_thread::sleep_until(nextWakeUp);
+
+                if (!_blockingSync_timerRunning.load(std::memory_order_acquire)) {
+                    break; // stop requested — exit without touching self()
+                }
 
                 if (self().state() == lifecycle::State::PAUSED) {
                     _blockingSync_lastUpdateTime = ClockSourceType::now();
@@ -286,16 +292,13 @@ private:
                 self().progress->notify_all();
             }
 
-            _blockingSync_timerRunning = false;
-            _blockingSync_timerDone    = true;
+            _blockingSync_timerDone.store(true, std::memory_order_release);
             _blockingSync_timerDone.notify_all();
         });
     }
 
     void stopTimer() {
-        if (!_blockingSync_timerRunning.exchange(false)) {
-            return;
-        }
+        _blockingSync_timerRunning.store(false, std::memory_order_release);
         _blockingSync_timerDone.wait(false);
     }
 };
