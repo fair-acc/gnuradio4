@@ -69,6 +69,8 @@ bool ValueVisitor::visit(const Value& value) {
     MAKE_VISITOR_CHECK(Tensor<std::complex<float>>, tensor_complex_float)
     MAKE_VISITOR_CHECK(Tensor<std::complex<double>>, tensor_complex_double)
 
+    MAKE_VISITOR_CHECK(Tensor<std::pmr::string>, tensor_pmr_string)
+
     MAKE_VISITOR_CHECK(Tensor<Value>, tensor_value)
 
     if (value.is_monostate()) {

@@ -95,7 +95,13 @@ inline constexpr std::string value_to_string(const Value& v) {
                         out += ",";
                     }
                     first = false;
-                    out += std::format("{}", _v);
+
+                    using TValue = typename T::value_type;
+                    if constexpr (std::is_same_v<TValue, std::pmr::string>) {
+                        out += std::format("{}", std::string_view(_v));
+                    } else {
+                        out += std::format("{}", _v);
+                    }
                 }
             }
         }).visit(v);

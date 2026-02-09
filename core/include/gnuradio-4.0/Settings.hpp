@@ -35,7 +35,7 @@ template<typename T>
 constexpr bool isSupportedVectorOrTensorType() {
     if constexpr (gr::meta::vector_type<T> || is_tensor<T>) {
         using ValueType = typename T::value_type;
-        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, pmt::Value>;
+        return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, pmt::Value>;
     } else {
         return false;
     }
@@ -640,6 +640,13 @@ private:
                 return true;
             }
 #endif
+        } else if constexpr (std::is_same_v<Type, std::vector<std::string>>) {
+            using TValue = std::pmr::string;
+            if (value.holds<Tensor<TValue>>()) {
+                auto vectorValue = pmt::convertTo<Tensor<TValue>>(value);
+                stagedParameters.insert_or_assign(keyPmr, std::move(vectorValue.value()));
+                return true;
+            }
         } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
             using TValue = typename Type::value_type;
             if (value.holds<Tensor<TValue>>()) {
