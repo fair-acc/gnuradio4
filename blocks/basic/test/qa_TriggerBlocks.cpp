@@ -36,7 +36,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                                   {
                                       0U,           // 0 ms - start - 50ms of bottom plateau
                                       100'000'000U, // 100 ms - start - ramp-up
-                                      400'000'000U, // 300 ms - 50ms of bottom plateau
+                                      400'000'000U, // 300 ms - 50ms of top ceiling
                                       500'000'000U, // 500 ms - start ramp-down
                                       800'000'000U  // 700 ms - 100ms of bottom plateau
                                   })},
@@ -47,8 +47,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2", //
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=3", //
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=4"  //
-                    }},
-                {"do_zero_order_hold", true}});
+                    }}});
 
             auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}, {"start_value", 0.1f}});
             using namespace function_generator;
