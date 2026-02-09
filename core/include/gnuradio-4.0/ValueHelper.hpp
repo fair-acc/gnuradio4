@@ -1099,6 +1099,8 @@ private:
     MAKE_HANDLER_MEMBER(const Tensor<std::complex<float>>&, tensor_complex_float);
     MAKE_HANDLER_MEMBER(const Tensor<std::complex<double>>&, tensor_complex_double);
 
+    MAKE_HANDLER_MEMBER(const Tensor<std::pmr::string>&, tensor_pmr_string);
+
     MAKE_HANDLER_MEMBER(const Tensor<Value>&, tensor_value);
 
     MAKE_HANDLER_MEMBER(std::monostate, monostate);
@@ -1141,6 +1143,8 @@ public:
           MAKE_FIELD_INIT(const Tensor<double>&, tensor_double),                       //
           MAKE_FIELD_INIT(const Tensor<std::complex<float>>&, tensor_complex_float),   //
           MAKE_FIELD_INIT(const Tensor<std::complex<double>>&, tensor_complex_double), //
+
+          MAKE_FIELD_INIT(const Tensor<std::pmr::string>&, tensor_pmr_string), //
 
           MAKE_FIELD_INIT(const Tensor<Value>&, tensor_value), //
           MAKE_FIELD_INIT(std::monostate, monostate)           //

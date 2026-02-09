@@ -58,14 +58,21 @@ bool testEqual(const T& lhs, const T& rhs) {
         return !diff(lhs, rhs);
 
     } else if constexpr (std::ranges::random_access_range<T>) {
+        using TValue = typename T::value_type;
         if (lhs.size() != rhs.size()) {
             return false;
         }
         for (size_t i = 0; i < lhs.size(); ++i) {
             if (!testEqual(lhs[i], rhs[i])) {
                 // Values of tensors have a broken operator==
-                if (std::format("{}", lhs) != std::format("{}", rhs)) {
-                    return false;
+                if constexpr (std::is_same_v<std::pmr::string, TValue>) {
+                    if (std::format("{}", std::string_view(lhs[i])) != std::format("{}", std::string_view(rhs[i]))) {
+                        return false;
+                    }
+                } else {
+                    if (std::format("{}", lhs[i]) != std::format("{}", rhs[i])) {
+                        return false;
+                    }
                 }
             }
         }
