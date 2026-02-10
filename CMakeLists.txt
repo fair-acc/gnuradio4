@@ -318,20 +318,22 @@ set_project_warnings(gnuradio-options)
 
 if(EMSCRIPTEN)
   set(CMAKE_EXECUTABLE_SUFFIX ".js")
-  add_compile_options(-fwasm-exceptions -pthread -g)
+  add_compile_options(-fwasm-exceptions -pthread -g -O0)
   add_link_options(
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-    "SHELL:-s ASSERTIONS=1"
     "SHELL:-s INITIAL_MEMORY=256MB"
-    # "SHELL:-s SAFE_HEAP=1" # additional for debug "SHELL:-s ASSERTIONS=2" # additional for debug "SHELL:-s
-    # STACK_OVERFLOW_CHECK=2" # additional for debug "SHELL:-g" # additional for debug "SHELL:-gsource-map" # additional
-    # for debug "SHELL:--profiling-funcs" # additional for debug "SHELL:--emit-symbol-map" # additional for debug
+    "SHELL:-s ASSERTIONS=2"
+    "SHELL:-s SAFE_HEAP=1"
+    "SHELL:-s STACK_OVERFLOW_CHECK=2"
+    "SHELL:-s STACK_SIZE=65536"
+    "SHELL:-g"
+    "SHELL:--profiling-funcs"
     -fwasm-exceptions
     -pthread
     "SHELL:-s PTHREAD_POOL_SIZE=${GR_MAX_WASM_THREAD_COUNT}"
     "SHELL:-s PTHREAD_POOL_SIZE_STRICT=2"
     "SHELL:-s FETCH=1"
-    "SHELL:-s WASM=1" # output as web-assembly
+    "SHELL:-s WASM=1"
   )
 endif()
 
