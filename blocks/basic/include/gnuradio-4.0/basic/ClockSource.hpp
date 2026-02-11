@@ -105,8 +105,7 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
-        const auto now              = ClockSourceType::now();
-        const auto currentTimePoint = this->blockingSyncLastUpdateTime();
+        const auto now = ClockSourceType::now();
 
         gr::Size_t samplesToNextTimeTag = std::numeric_limits<gr::Size_t>::max();
         if (!tag_times.value.empty()) {
@@ -120,9 +119,7 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
                 _nextTimeTag                       = 0;
             }
             if (_nextTimeTag < tag_times.value.size()) {
-                const auto currentTagTime = std::chrono::microseconds(tag_times.value[_nextTimeTag] / 1000);
-                const auto timeToNextTag  = std::chrono::duration_cast<std::chrono::microseconds>((_beginSequenceTimePoint + currentTagTime - currentTimePoint));
-                samplesToNextTimeTag      = static_cast<gr::Size_t>(std::max(0.0, (static_cast<double>(timeToNextTag.count()) / 1.e6) * static_cast<double>(sample_rate)));
+                samplesToNextTimeTag = std::max(0U, static_cast<gr::Size_t>(std::lround(static_cast<double>(tag_times.value[_nextTimeTag]) / 1.e9 * static_cast<double>(sample_rate))) - n_samples_produced);
             }
         }
 
