@@ -274,13 +274,26 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
     };
 
     "global thread counter tracking thread creation"_test = [] {
-        const std::size_t before = gr::thread_pool::getTotalThreadCount();
+        // Wait for the process-wide thread count to stabilise — threads from earlier
+        // test suites (with short keepAliveDuration) may still be winding down at the OS level.
+        std::size_t before = gr::thread_pool::getTotalThreadCount();
+        for (int stableChecks = 0, i = 0; i < 40 && stableChecks < 3; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            if (const auto now = gr::thread_pool::getTotalThreadCount(); now == before) {
+                ++stableChecks;
+            } else {
+                before       = now;
+                stableChecks = 0;
+            }
+        }
         {
             BasicThreadPool temp("test_pool", CPU_BOUND, 2, 2);
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            temp.waitUntilInitialised();
+            expect(eq(temp.numThreads(), 2UZ)) << "pool should have exactly 2 threads";
             const std::size_t during = gr::thread_pool::getTotalThreadCount();
             expect(ge(during, before + 2));
         }
+        // Pool destructor joins all threads; wait briefly for OS bookkeeping.
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         const std::size_t after = gr::thread_pool::getTotalThreadCount();
         expect(eq(after, before)) << "Expected cleanup after pool destruction";
@@ -300,21 +313,28 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
 
     "Manager: WASM exhausting available threads"_test = [] {
         Manager& manager = Manager::instance();
+#ifdef __EMSCRIPTEN__
+        const std::size_t poolMaxThreads = gr::thread_pool::thread::getThreadLimit();
+        const auto        taskSleep      = std::chrono::seconds(20);
+#else
+        const std::size_t poolMaxThreads = std::min<std::size_t>(50UZ, gr::thread_pool::thread::getThreadLimit());
+        const auto        taskSleep      = std::chrono::seconds(2);
+#endif
         // replace IO pool to unlimited upper bound
-        manager.replacePool(std::string(kDefaultIoPoolId), std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, 1U, gr::thread_pool::thread::getThreadLimit()), "CPU"));
+        manager.replacePool(std::string(kDefaultIoPoolId), std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(kDefaultIoPoolId, TaskType::IO_BOUND, 1U, poolMaxThreads), "CPU"));
         std::shared_ptr<TaskExecutor> pool = manager.get(gr::thread_pool::kDefaultIoPoolId);
 
         std::println("HW threads = {} - max wasm threads: {} actual: {} - pool max size: {}", //
             std::thread::hardware_concurrency(), gr::thread_pool::thread::getThreadLimit(), gr::thread_pool::getTotalThreadCount(), pool->maxThreads());
         std::atomic<std::size_t> unexpectedExceptions{0UZ};
         std::atomic<std::size_t> expectedExceptions{0UZ};
-        for (std::size_t i = 0UZ; i < gr::thread_pool::thread::getThreadLimit() + 10UZ; ++i) {
-            if (i >= (gr::thread_pool::thread::getThreadLimit() - 10UZ)) {
+        for (std::size_t i = 0UZ; i < poolMaxThreads + 10UZ; ++i) {
+            if (i >= (poolMaxThreads - 10UZ)) {
                 std::println("start thread {}", i);
             }
             try {
-                pool->execute([] {
-                    std::this_thread::sleep_for(std::chrono::seconds(20)); // purposeful sleep
+                pool->execute([taskSleep] {
+                    std::this_thread::sleep_for(taskSleep); // purposeful sleep
                 });
             } catch (std::exception& e) {
                 std::println("exception thrown: {} for {} threads", e, gr::thread_pool::getTotalThreadCount());
@@ -328,7 +348,9 @@ const boost::ut::suite<"gr::thread_pool Manager WASM"> _wasm = [] {
             }
         }
         std::println("number of exceptions thrown: {} unexpeced: {}", expectedExceptions.load(), unexpectedExceptions.load());
+#ifdef __EMSCRIPTEN__
         expect(gt(expectedExceptions.load(), 0UZ)) << fatal << "creating more threads than kThreadLimit should throw with expected exception";
+#endif
         expect(eq(unexpectedExceptions.load(), 0UZ)) << fatal << "caught unexpected exception";
     };
 

@@ -538,11 +538,22 @@ private:
         _globalThreadCount.fetch_add(1UZ, std::memory_order_relaxed);
         const std::size_t nTotalThreads = getTotalThreadCount();
         if (nTotalThreads + 1UZ >= thread::getThreadLimit()) {
+            _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
             throw std::out_of_range(std::format("pool({}): about to exhaust global thread limit: {} out of {} : at {}", poolName(), nTotalThreads, thread::getThreadLimit(), location));
         }
-        const std::size_t nThreads = numThreads();
-        std::thread&      thread   = _threads.emplace_back(&BasicThreadPool::worker, this);
-        updateThreadConstraints(nThreads + 1UZ, thread);
+        const std::size_t threadIdx = _numThreads.fetch_add(1UZ, std::memory_order_acq_rel);
+        try {
+            std::thread& thread = _threads.emplace_back(&BasicThreadPool::worker, this, threadIdx);
+            updateThreadConstraints(threadIdx + 1UZ, thread);
+        } catch (...) {
+            _numThreads.fetch_sub(1UZ, std::memory_order_acq_rel);
+            _globalThreadCount.fetch_sub(1UZ, std::memory_order_relaxed);
+            throw;
+        }
+        if (numThreads() >= minThreads()) {
+            std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
+            _initialised.notify_all();
+        }
     }
 
     template<typename F, typename... A>
@@ -588,20 +599,15 @@ private:
         return result;
     }
 
-    void worker() {
+    void worker(std::size_t threadID) {
         constexpr uint32_t N_SPIN       = 1 << 8;
         uint32_t           noop_counter = 0;
-        const auto         threadID     = _numThreads.fetch_add(1UZ, std::memory_order_relaxed);
-        std::mutex         mutex;
-        std::unique_lock   lock(mutex);
-        auto               lastUsed              = std::chrono::steady_clock::now();
-        auto               timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
-        if (numThreads() >= minThreads()) {
-            std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
-            _initialised.notify_all();
-        }
-        _numThreads.notify_one();
-        bool running = true;
+        // _numThreads incremented in createWorkerThread()
+        std::mutex       mutex;
+        std::unique_lock lock(mutex);
+        auto             lastUsed              = std::chrono::steady_clock::now();
+        auto             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
+        bool             running               = true;
         do {
             if (TaskQueue::TaskContainer currentTaskContainer = popTask(); !currentTaskContainer.empty()) {
                 assert(!currentTaskContainer.empty());
