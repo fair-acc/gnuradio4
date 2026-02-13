@@ -329,7 +329,9 @@ inline void setProcessSchedulingParameter(Policy scheduler, int priority, const 
         throw std::system_error(THREAD_VALUE_RANGE, thread_exception(), std::format("setProcessSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, pid, minPriority, maxPriority));
     }
 
-    struct sched_param param{.sched_priority = priority};
+    struct sched_param param {
+        .sched_priority = priority
+    };
 
     if (int rc = sched_setscheduler(pid, scheduler, &param); rc != 0) {
         throw std::system_error(rc, thread_exception(), std::format("setProcessSchedulingParameter({}, {}, {}) - sched_setscheduler return code: {}", scheduler, priority, pid, rc));
@@ -368,7 +370,9 @@ inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_
         throw std::system_error(THREAD_VALUE_RANGE, thread_exception(), std::format("setThreadSchedulingParameter({}, {}, {}) -- requested priority out-of-range [{}, {}]", scheduler, priority, detail::getThreadName(handle), minPriority, maxPriority));
     }
 
-    struct sched_param param{.sched_priority = priority};
+    struct sched_param param {
+        .sched_priority = priority
+    };
 
     if (int rc = pthread_setschedparam(handle, scheduler, &param); rc != 0) {
         throw std::system_error(rc, thread_exception(), std::format("setThreadSchedulingParameter({}, {}, {}) - pthread_setschedparam return code: {}", scheduler, priority, detail::getThreadName(handle), rc));
