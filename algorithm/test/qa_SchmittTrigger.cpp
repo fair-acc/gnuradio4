@@ -161,6 +161,43 @@ const suite<"SchmittTrigger"> SchmittTriggerTests = [] {
                 convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}), //
                 {{RISING, 0.5}, {FALLING, 1.5}});
         };
+
+        "polynomial interpolation"_test = [] {
+            SchmittTrigger<T, POLYNOMIAL_INTERPOLATION, 12> trigger(value_t(0.1f) /* threshold */, value_t(0.5f) /* offset */);
+
+            test_schmitt_trigger_with_signal<T, "slow rising edge (polynomial)">(trigger,                      //
+                convert_signal<T>({0.3, 0.4, 0.45, 0.5 /* RISING */, 0.55, 0.6, 1.0, 1.0 /* FALLING */, 0.0}), //
+                {{RISING, 3}, {FALLING, 7.5f}});
+
+            trigger.reset();
+            // N.B. SG cubic fit on linear ramp has small boundary effects → crossing at ~8.79 vs. 9.0 for linear regression
+            test_schmitt_trigger_with_signal<T, "slow falling edge (polynomial)">(trigger,                                                  //
+                convert_signal<T>({/* RISING */ 1.0, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5 /* FALLING */, 0.45, 0.4, 0.35, 0.3}), //
+                {{RISING, -0.5}, {FALLING, 8.79f}});
+
+            trigger.reset();
+            // N.B. last falling edge differs from LINEAR (9.97 vs 11.5) because SG cubic fit captures the non-linear 1.1→1.0→0 transition shape
+            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (polynomial)">(trigger,                                                                  //
+                convert_signal<T>({0.0 /* RISING */, 0.8, 1.2, 0.9 /* FALLING */, 0.4, -0.2, -1.1, -0.5, 0.0 /* RISING */, 1.1, 1.1, 1.0 /* FALLING */, 0.0, 0.0}), //
+                {{RISING, 0.625}, {FALLING, 3.8}, {RISING, 8.45455}, {FALLING, 9.97f}});
+
+            trigger.reset();
+            test_schmitt_trigger_with_signal<T, "Dirac delta (polynomial)">(trigger, //
+                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}),       //
+                {{RISING, 0.5}, {FALLING, 1.5}});
+
+            // Verify reset() clears _lastState and _historyBuffer:
+            // end in high state (_lastState = true), reset, then feed a signal starting above threshold.
+            // Without proper reset, the trigger would still think it's high and miss the rising edge.
+            trigger.reset();
+            test_schmitt_trigger_with_signal<T, "signal ending high (polynomial)">(trigger, //
+                convert_signal<T>({0.0, 1.0 /* RISING */, 1.0}),                            //
+                {{RISING, 0.5}});
+            trigger.reset();
+            test_schmitt_trigger_with_signal<T, "reset after high state (polynomial)">(trigger, //
+                convert_signal<T>({0.0, 1.0 /* RISING */, 0.0 /* FALLING */}),                  //
+                {{RISING, 0.5}, {FALLING, 1.5}});
+        };
     } | std::tuple<float, gr::UncertainValue<float>>{};
 
     "SchmittTrigger (unsigned) integer values"_test = []<typename T>() {
@@ -190,6 +227,21 @@ const suite<"SchmittTrigger"> SchmittTriggerTests = [] {
             test_schmitt_trigger_with_signal<T, "fast rising/falling edges (basic interpolation)">(trigger,                  //
                 convert_signal<T>(gr::Tensor<double>(gr::data_from, {0 /* RISING */, 10 /* FALLING */, 0 /* RISING */, 8})), //
                 {{RISING, 0.5f}, {FALLING, 1.5f}, {RISING, 2.625f}});
+        };
+
+        "integer-type: polynomial interpolation"_test = [] {
+            SchmittTrigger<T, POLYNOMIAL_INTERPOLATION> trigger(value_t(1) /* threshold */, value_t(5) /* offset */);
+
+            // N.B. integer types lose sub-sample precision through findCrossingIndex (truncated to integer).
+            // With short signals the SG path falls back to linear regression.
+            test_schmitt_trigger_with_signal<T, "slow rising edge (polynomial interpolation)">(trigger,                                                    //
+                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0, 1, 5 /* >= offset + threshold */, 7, 7, 7, 8 /* <= offset - threshold */, 0, 0})), //
+                {{RISING, 2}, {FALLING, 6}});
+
+            trigger.reset();
+            test_schmitt_trigger_with_signal<T, "fast rising/falling edges (polynomial interpolation)">(trigger,             //
+                convert_signal<T>(gr::Tensor<double>(gr::data_from, {0 /* RISING */, 10 /* FALLING */, 0 /* RISING */, 8})), //
+                {{RISING, 0}, {FALLING, 1}, {RISING, 2}});
         };
     } | std::tuple<uint8_t, int16_t>{};
 };
