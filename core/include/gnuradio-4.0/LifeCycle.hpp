@@ -11,6 +11,12 @@
 #include <source_location>
 #include <string>
 
+// including windows.h sets a macro ERROR to 0.  This causes compile errors with
+// LIfeCycle.hpp.  If we undefine it, this builds properly.
+#ifdef _WIN32
+#undef ERROR
+#endif
+
 namespace gr::lifecycle {
 /**
  * @enum lifecycle::State enumerates the possible states of a `Scheduler` lifecycle.
