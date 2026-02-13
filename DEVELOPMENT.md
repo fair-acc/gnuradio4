@@ -50,4 +50,281 @@ me@host$ cd gnuradio4
 me@host$ cmake -S . -B build
 me@host$ cmake --build build
 me@host$ ctest --test-dir build
+```
+
+### Win32 Development Environment - MSYS2
+
+The current development environment in Windows uses `MSYS2`, specifically `UCRT64` and `CLANG64` to allow for building gnuradio4.  While this is not the desired end development environment for Windows, it currently builds and runs the testsuite.  To setup the `MSYS2` environment, navigate to https://www.msys2.org and download the installer, currently `msys2-x86_64-20251213.exe`.  `MSYS2` is a rolling release, so I hope these instructions continue to work as the code gets updated.  Chances are new build packages will cause small breakages, but hopefully not insurmountable ones.
+
+To install `msys2`, follow the instructions on https://www.msys2.org.  Once installed, open either the `UCRT64` or `CLANG64` environment and update the environment via the pacman package installer.
+
+```bash
+me@host UCRT64
+$ pacman -Syu
+```
+
+This will likely require the closing of the terminal and reopening it.  Once the terminal is reopened we should install the deveopment programs.  The minimal requirement would be the developement programs for `UCRT64` as follows.
+
+```bash
+me@host UCRT64
+$ pacman -S git moreutils \
+                    mingw-w64-ucrt-x86_64-ccache \
+                    mingw-w64-ucrt-x86_64-toolchain \
+                    mingw-w64-ucrt-x86_64-python-numpy \
+                    mingw-w64-ucrt-x86_64-cmake \
+                    mingw-w64-ucrt-x86_64-ninja \
+                    mingw-w64-ucrt-x86_64-clang-tools-extra \
+                    mingw-w64-ucrt-x86_64-dlfcn \
+                    mingw-w64-ucrt-x86_64-neovim \
+                    mingw-w64-ucrt-x86_64-nodejs \
+                    mingw-w64-ucrt-x86_64-soapysdr
+```
+
+If one wants to use `CLANG64` to build instead of `UCRT64`, you can use the comamnd that follows.
+
+```bash
+me@host CLANG64
+$ pacman -S git moreutils \
+                    mingw-w64-clang-x86_64-ccache \
+                    mingw-w64-clang-x86_64-toolchain \
+                    mingw-w64-clang-x86_64-python-numpy \
+                    mingw-w64-clang-x86_64-cmake \
+                    mingw-w64-clang-x86_64-ninja \
+                    mingw-w64-clang-x86_64-clang-tools-extra \
+                    mingw-w64-clang-x86_64-dlfcn \
+                    mingw-w64-clang-x86_64-neovim \
+                    mingw-w64-clang-x86_64-nodejs \
+                    mingw-w64-clang-x86_64-soapysdr
+```
+
+And of course both can be run to install both environments.  Of note the `MINGW64` environment is not being used.  The only difference between it and `UCRT64` is the use of the `msvcrt` C library instead of `ucrt`.  None the less there were problems building for this environment, so instructions for it are not included in this document.
+
+To configure `nvim` to properly use `clangd` and format your work properly, some modifications must be made to your the end of your `.bashrc`.  Add the following code snippet.
+
+```bash
+export LANG=en_US.UTF-8
+
+# Set history
+shopt -s histappend
+export HISTSIZE=999999
+export HISTFILESIZE=999999
+HISTCONTROL=erasedups
+PROMPT_COMMAND="history -w; $PROMPT_COMMAND"
+tac $HISTFILE | awk '!x[$0]++' | tac | sponge $HISTFILE
+
+export EDITOR=nvim
+
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_STATE_HOME="$HOME/.local/state"
+export XDG_RUNTIME_DIR="/tmp/$USER-runtime-dir"
+```
+
+Now close the terminal and reopen a new one to update the bash environment variables.  The next program to configure is `neovim` or `nvim`.  To configure it, make the directory `$HOME/.config/nvim` and put the following script into it as `init.lua`.  When `nvim` is launched after the script is put in place, it will download and setup `lazy.nvim`, `mason.nvim`, `mason-lspconfig`, `nvim-lspconfig`, and `nvim-cmp`.  These helper programs or scripts for `nvim` allow it to use `clangd`, perform autocompletion, and load headers or examine funcitons by making a pair of keystrokes (gd) over the header or function name in the file you're editing,  It also allows for formatting CMakeLists.txt files properly.
+
+```bash
+-- Bootstrap lazy.nvim
+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
+if not vim.loop.fs_stat(lazypath) then
+  vim.fn.system({
+    "git", "clone", "--filter=blob:none",
+    "https://github.com/folke/lazy.nvim.git",
+    lazypath,
+  })
+end
+vim.opt.rtp:prepend(lazypath)
+
+-- Install and configure plugins
+require("lazy").setup({
+  -- Mason, keeping for other tools, but not clangd
+  {
+    "williamboman/mason.nvim",
+    config = true,
+  },
+
+  -- Mason-lspconfig setup
+  {
+    "williamboman/mason-lspconfig.nvim",
+    dependencies = { "williamboman/mason.nvim" },
+    config = function()
+      require("mason-lspconfig").setup({
+        ensure_installed = {},
+      })
+    end,
+  },
+
+  -- LSP setup
+  {
+    "neovim/nvim-lspconfig",
+  },
+
+  -- Autocompletion
+  {
+    "hrsh7th/nvim-cmp",
+    dependencies = {
+      "hrsh7th/cmp-nvim-lsp",
+      "hrsh7th/cmp-buffer",
+      "hrsh7th/cmp-path",
+      "hrsh7th/cmp-cmdline",
+      "L3MON4D3/LuaSnip",
+      "saadparwaiz1/cmp_luasnip",
+    },
+    config = function()
+      local cmp = require("cmp")
+      local luasnip = require("luasnip")
+
+      cmp.setup({
+        snippet = {
+          expand = function(args)
+            luasnip.lsp_expand(args.body)
+          end,
+        },
+        mapping = cmp.mapping.preset.insert({
+          ["<Tab>"]   = cmp.mapping.select_next_item(),
+          ["<S-Tab>"] = cmp.mapping.select_prev_item(),
+          ["<CR>"]    = cmp.mapping.confirm({ select = true }),
+        }),
+        sources = {
+          { name = "nvim_lsp" },
+          { name = "luasnip" },
+          { name = "buffer" },
+          { name = "path" },
+        },
+      })
+    end,
+  },
+})
+
+-- lsp keybindings
+local on_attach = function(_, bufnr)
+  local opts = { noremap = true, silent = true, buffer = bufnr }
+
+  vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+  vim.keymap.set("n", "gD", vim.lsp.buf.declaration, opts)
+  vim.keymap.set("n", "gi", vim.lsp.buf.implementation, opts)
+  vim.keymap.set("n", "gr", vim.lsp.buf.references, opts)
+  vim.keymap.set("n", "K",  vim.lsp.buf.hover, opts)
+  vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts)
+  vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, opts)
+  vim.keymap.set("n", "[d", vim.diagnostic.goto_prev, opts)
+  vim.keymap.set("n", "]d", vim.diagnostic.goto_next, opts)
+
+  vim.api.nvim_create_autocmd("BufWritePre", {
+    buffer = bufnr,
+    callback = function()
+      vim.lsp.buf.format({ async = false })
+    end,
+  })
+end
+
+-- Setup clangd
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = { "c", "cpp", "objc", "objcpp" },
+  callback = function()
+    vim.lsp.start({
+      name = "clangd",
+      cmd = {
+        "clangd",
+        "--clang-tidy",
+        "--header-insertion=never",
+        "--fallback-style=LLVM",
+        "--background-index",
+        "--completion-style=detailed",
+        "--cross-file-rename",
+        "--suggest-missing-includes",
+      },
+
+      root_dir = vim.fs.root(0, {
+        "compile_commands.json",
+        "compile_flags.txt",
+        ".clangd",
+        ".git",
+      }) or vim.fn.getcwd(),
+
+      capabilities = require("cmp_nvim_lsp").default_capabilities(),
+      on_attach = on_attach,
+
+      init_options = {
+        fallbackFlags = { "-std=c++17" },
+        clangdFileStatus = true,
+      },
+    })
+  end,
+})
+
+-- Function to go to the last cursor position
+vim.api.nvim_create_autocmd("BufReadPost", {
+  pattern = "*",
+  callback = function()
+    local last_pos = vim.fn.line("'\"")
+    if last_pos > 0 and last_pos <= vim.fn.line("$") then
+      vim.cmd('normal! g`"')
+    end
+  end,
+})
+
+-- Autocommand to trigger the fuction when a buffer is read
+vim.api.nvim_create_autocmd("BufWritePost", {
+  pattern = { "*.cmake", "CMakeLists.txt" },
+  callback = function()
+    -- Get full path with proper escaping
+    local file = vim.fn.expand("%:p")
+
+    -- Use raw vim.fm.system to call cmake-format directly
+    local result = vim.fn.system({ "cmake-format", "-i", file })
+
+    -- Show stderr or error
+    if vim.v.shell_error ~= 0 then
+      vim.notify("cmake-format failed:\n" .. result, vim.log.levels.ERROR)
+    else
+      vim.cmd("edit!")
+    end
+  end,
+})
+```
+
+To use the text fonts for gnuradio4, edit `$HOME/.minttyrc` and add the following to it.
+
+```bash
+FontHeight=9
+Font=DejaVu Sans Mono
+Locale=en_US
+Charset=UTF-8
+CtrlShiftShortcuts=no
+CursorType=block
+```
+
+Initial build for ucrt64 and clang64 environments.  We will need to set `-DWARNINGS_AS_ERRORS=OFF` as both `g++` and `clang++` generate warnings during the build.  Also we need to set `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` to be able to use the full features of the language server protocol of `nvim`.
+
+```bash
+me@host CLANG64
+$ cmake -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_VERBOSE_MAKEFILE=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DWARNINGS_AS_ERRORS=OFF \
+            -DCMAKE_INSTALL_PREFIX=/home/$USER/gr4 \
+            -S . -B build
+```
+
+Once the `compile_commands.json` is created copy it to the root gnuradio directory so it can be used by nvim.
+
+```bash
+me@host CLANG64
+$ cp build/compile_commands.json .
+```
+
+Then follow the rest of the build steps outlined above.  Build gnuradio4 by running the following.
+
+```bash
+me@host CLANG64
+$ cmake --build build
+```
+
+Once the system is built, run the testsuite.
+
+```bash
+me@host CLANG64
+$ ctest --timeout 120 --test-dir build
+```
 
