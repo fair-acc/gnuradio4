@@ -5,6 +5,7 @@
 #include <cstddef>
 
 #include <gnuradio-4.0/HistoryBuffer.hpp>
+#include <gnuradio-4.0/algorithm/filter/SavitzkyGolay.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 namespace gr::trigger {
@@ -34,12 +35,10 @@ enum class EdgeDetection { NONE = 0, RISING = 1, FALLING = 2 };
  *    the lower and upper threshold has been crossed and vice versa
  *  * POLYNOMIAL_INTERPOLATION: Savitzky–Golay filter-based methods
  *    https://en.wikipedia.org/wiki/Savitzky%E2%80%93Golay_filter
- *     (TODO: WIP needs Tensor<T> and SVD implementation)
  */
 template<typename T, InterpolationMethod Method = InterpolationMethod::NO_INTERPOLATION, std::size_t interpolationWindow = 16UZ>
 requires(std::is_arithmetic_v<T> or (UncertainValueLike<T> && std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>))
 struct SchmittTrigger {
-    static_assert(Method != InterpolationMethod::POLYNOMIAL_INTERPOLATION, "POLYNOMIAL_INTERPOLATION not implemented yet");
     using value_t  = meta::fundamental_base_value_type_t<T>;
     using EdgeType = UncertainValue<float>; // always float precision similar to `sample_rate` definition
 
@@ -58,8 +57,23 @@ struct SchmittTrigger {
     EdgeType      lastEdgeOffset{0}; /// relative sub-sample offset [0, 1[ of the last detected edge
 
     std::size_t accumulatedSamples = 0UZ; // number of samples accumulated once threshold has been entered
+    std::size_t _validSamples      = 0UZ; // tracks fresh samples since construction/reset (for SG window limiting)
 
-    constexpr explicit SchmittTrigger(value_t threshold = 1, value_t offset = 0) noexcept : _threshold(threshold), _offset(offset), _upperThreshold(_offset + _threshold), _lowerThreshold(_offset - _threshold) {}
+    // -- Savitzky-Golay members (only materialised for POLYNOMIAL_INTERPOLATION) --
+    static constexpr std::size_t _sgPolyOrder = 3UZ;
+    using sg_compute_t                        = std::conditional_t<std::is_floating_point_v<value_t>, value_t, float>;
+    std::vector<sg_compute_t> _sgCoeffs;
+
+    constexpr explicit SchmittTrigger(value_t threshold = 1, value_t offset = 0) noexcept(Method != InterpolationMethod::POLYNOMIAL_INTERPOLATION) : _threshold(threshold), _offset(offset), _upperThreshold(_offset + _threshold), _lowerThreshold(_offset - _threshold) {
+        if constexpr (Method == InterpolationMethod::POLYNOMIAL_INTERPOLATION) {
+            namespace sg      = gr::algorithm::savitzky_golay;
+            const auto config = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
+            _sgCoeffs         = sg::computeCoefficients<sg_compute_t>(interpolationWindow, std::min(_sgPolyOrder, interpolationWindow - 1UZ), config);
+        }
+        for (std::size_t i = 0; i < _historyBuffer.capacity(); ++i) { // prime the history buffer
+            _historyBuffer.push_front(T{});
+        }
+    }
 
     constexpr void setThreshold(value_t threshold) {
         _threshold      = threshold;
@@ -75,9 +89,15 @@ struct SchmittTrigger {
 
     constexpr void reset() {
         accumulatedSamples = 0UZ;
-        lastEdge           = EdgeDetection::NONE;
-        lastEdgeIdx        = 1;
-        lastEdgeOffset     = 0.0f;
+        _validSamples      = 0UZ;
+        _lastState         = false;
+        _historyBuffer.reset();
+        for (std::size_t i = 0; i < _historyBuffer.capacity(); ++i) { // prime the history buffer
+            _historyBuffer.push_front(T{});
+        }
+        lastEdge       = EdgeDetection::NONE;
+        lastEdgeIdx    = 1;
+        lastEdgeOffset = 0.0f;
     }
 
     EdgeDetection processOne(T input) {
@@ -202,7 +222,70 @@ struct SchmittTrigger {
         }
 
         if constexpr (Method == POLYNOMIAL_INTERPOLATION) {
-            static_assert(gr::meta::always_false<T>, "POLYNOMIAL_INTERPOLATION not implemented yet");
+            _historyBuffer.push_front(input);
+            _validSamples++;
+
+            if (_historyBuffer.size() < 2) {
+                return EdgeDetection::NONE;
+            }
+
+            const T    yPrev     = _historyBuffer[1];
+            const T    yCurr     = _historyBuffer[0];
+            const bool wasInZone = accumulatedSamples > 0;
+
+            if (!wasInZone && !_lastState && yPrev <= _lowerThreshold && yCurr > _lowerThreshold) {
+                accumulatedSamples = 1UZ;
+            }
+
+            if (!wasInZone && _lastState && yPrev >= _upperThreshold && yCurr < _upperThreshold) {
+                accumulatedSamples = 1UZ;
+            }
+
+            if (wasInZone) {
+                accumulatedSamples++;
+            }
+
+            if (accumulatedSamples > 0) {
+                if ((!_lastState && yCurr >= _upperThreshold) || (_lastState && yCurr <= _lowerThreshold)) {
+                    EdgeDetection detectedEdge = (!_lastState && yCurr >= _upperThreshold) ? EdgeDetection::RISING : EdgeDetection::FALLING;
+
+                    // Use full history window for SG fit (limited to valid fresh samples)
+                    std::size_t      n = std::min({interpolationWindow, _historyBuffer.size(), _validSamples});
+                    std::optional<T> crossing;
+
+                    if (n >= interpolationWindow && n >= _sgPolyOrder + 1) {
+                        crossing = findCrossingIndexSavitzkyGolay(_historyBuffer, n, _offset);
+                    }
+
+                    if (!crossing) { // fall back to linear regression
+                        n        = std::min(std::max(accumulatedSamples, 2UZ), _historyBuffer.size());
+                        crossing = findCrossingIndexLinearRegression(_historyBuffer, n, _offset);
+                    }
+
+                    if (crossing) {
+                        // N.B. use float to avoid unsigned integer underflow for unsigned value_t
+                        const float relativeIndex = static_cast<float>(gr::value(*crossing)) - static_cast<float>(n - 1);
+
+                        lastEdge    = detectedEdge;
+                        lastEdgeIdx = static_cast<std::int32_t>(std::round(relativeIndex));
+                        if constexpr (UncertainValueLike<T>) {
+                            lastEdgeOffset = T{relativeIndex - static_cast<float>(gr::value(lastEdgeIdx)), static_cast<float>(gr::uncertainty(*crossing))};
+                        } else {
+                            lastEdgeOffset = EdgeType{relativeIndex - static_cast<float>(lastEdgeIdx)};
+                        }
+
+                        // update state and reset accumulation
+                        _lastState         = !_lastState;
+                        accumulatedSamples = 0UZ;
+                        return detectedEdge;
+                    }
+                } else {
+                    // reset accumulation if threshold zone is left without crossing the opposite threshold
+                    if ((!_lastState && yCurr < _lowerThreshold) || (_lastState && yCurr > _upperThreshold)) {
+                        accumulatedSamples = 0UZ;
+                    }
+                }
+            }
         }
 
         return EdgeDetection::NONE;
@@ -269,6 +352,86 @@ struct SchmittTrigger {
 
             return T{static_cast<value_t>(crossingIndex), static_cast<float>((var_ci < comp_t{0}) ? comp_t{0} : std::sqrt(var_ci))};
         } else { // fundamental type ->  no uncertainty
+            return std::make_optional(static_cast<value_t>(crossingIndex));
+        }
+    }
+
+    std::optional<T> findCrossingIndexSavitzkyGolay(const auto& samples, std::size_t nSamples, value_t offset) {
+        namespace sg = gr::algorithm::savitzky_golay;
+        if (nSamples < 2) {
+            return std::nullopt;
+        }
+
+        // a) Extract samples oldest-first, converting to sg_compute_t
+        std::array<sg_compute_t, interpolationWindow> rawData{};
+        std::array<sg_compute_t, interpolationWindow> smoothedData{};
+
+        for (std::size_t i = 0; i < nSamples; ++i) {
+            rawData[i] = static_cast<sg_compute_t>(gr::value(samples[nSamples - 1 - i]));
+        }
+
+        // b) Apply SG smoothing using pre-cached coefficients
+        const auto sgConfig = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
+
+        sg::apply(std::span<const sg_compute_t>(rawData.data(), nSamples), std::span<sg_compute_t>(smoothedData.data(), nSamples), std::span<const sg_compute_t>(_sgCoeffs), sgConfig);
+
+        // c) Scan for where smoothed signal crosses offset (search from newest end)
+        const sg_compute_t offsetVal = static_cast<sg_compute_t>(offset);
+        std::size_t        crossIdx  = 0;
+        bool               found     = false;
+
+        for (std::size_t i = nSamples - 1; i > 0; --i) {
+            if ((smoothedData[i] >= offsetVal && smoothedData[i - 1] < offsetVal) || (smoothedData[i] <= offsetVal && smoothedData[i - 1] > offsetVal)) {
+                crossIdx = i;
+                found    = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            return std::nullopt;
+        }
+
+        // d) Linear interpolation between bracketing smoothed samples for sub-sample precision
+        const sg_compute_t y1            = smoothedData[crossIdx - 1];
+        const sg_compute_t y2            = smoothedData[crossIdx];
+        const sg_compute_t frac          = (y2 != y1) ? (offsetVal - y1) / (y2 - y1) : sg_compute_t{0.5};
+        const sg_compute_t crossingIndex = static_cast<sg_compute_t>(crossIdx - 1) + frac;
+
+        // e) Return crossing index (0 = oldest sample, nSamples-1 = newest)
+        if constexpr (UncertainValueLike<T>) {
+            // f) Propagate uncertainty through SG coefficients
+            //    u_smooth[n] = sqrt(sum(c_k^2 * u_k^2))
+            const std::size_t W = _sgCoeffs.size();
+            const auto        D = static_cast<std::ptrdiff_t>((W - 1UZ) / 2UZ);
+
+            auto computeSmoothedUncertainty = [&](std::size_t n) -> sg_compute_t {
+                sg_compute_t varSum = sg_compute_t{0};
+                for (std::size_t k = 0; k < W; ++k) {
+                    const auto        idx    = static_cast<std::ptrdiff_t>(n) + static_cast<std::ptrdiff_t>(k) - D;
+                    const std::size_t srcIdx = sg::detail::boundaryIndex(idx, nSamples, sgConfig);
+                    // rawData[srcIdx] came from samples[nSamples - 1 - srcIdx]
+                    const sg_compute_t u = static_cast<sg_compute_t>(gr::uncertainty(samples[nSamples - 1 - srcIdx]));
+                    const sg_compute_t c = _sgCoeffs[k];
+                    varSum += c * c * u * u;
+                }
+                return std::sqrt(varSum);
+            };
+
+            const sg_compute_t u1 = computeSmoothedUncertainty(crossIdx - 1);
+            const sg_compute_t u2 = computeSmoothedUncertainty(crossIdx);
+
+            // Propagate through linear interpolation: crossingIndex = (crossIdx-1) + (offset - y1)/(y2 - y1)
+            const sg_compute_t dy                  = y2 - y1;
+            sg_compute_t       crossingUncertainty = sg_compute_t{0};
+            if (dy != sg_compute_t{0}) {
+                const sg_compute_t dfdy1 = (offsetVal - y2) / (dy * dy);
+                const sg_compute_t dfdy2 = (y1 - offsetVal) / (dy * dy);
+                crossingUncertainty      = std::sqrt(dfdy1 * dfdy1 * u1 * u1 + dfdy2 * dfdy2 * u2 * u2);
+            }
+
+            return T{static_cast<value_t>(crossingIndex), static_cast<float>(crossingUncertainty)};
+        } else {
             return std::make_optional(static_cast<value_t>(crossingIndex));
         }
     }
