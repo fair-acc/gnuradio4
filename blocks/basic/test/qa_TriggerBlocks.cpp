@@ -132,6 +132,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
         } |
         std::tuple<std::integral_constant<gr::trigger::InterpolationMethod, LINEAR_INTERPOLATION>, //
             std::integral_constant<gr::trigger::InterpolationMethod, BASIC_LINEAR_INTERPOLATION>,  //
+            std::integral_constant<gr::trigger::InterpolationMethod, POLYNOMIAL_INTERPOLATION>,    //
             std::integral_constant<gr::trigger::InterpolationMethod, NO_INTERPOLATION>>{};
 };
 
