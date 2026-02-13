@@ -137,6 +137,11 @@ Operating modes:
                     _currentTime = T(0.);
                 } else {
                     // trigger does not match required signal_trigger -- revert to previous
+                    if (auto oldType = oldSettings.at("signal_type").value_or(std::string_view{}); oldType.data() != nullptr) {
+                        if (auto parsed = magic_enum::enum_cast<function_generator::SignalType>(oldType); parsed.has_value()) {
+                            signal_type = parsed.value();
+                        }
+                    }
                     start_value    = oldSettings.at("start_value").value_or(T{});
                     final_value    = oldSettings.at("final_value").value_or(T{});
                     duration       = oldSettings.at("duration").value_or(T{});
