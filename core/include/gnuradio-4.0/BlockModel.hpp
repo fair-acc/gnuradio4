@@ -8,6 +8,7 @@
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <charconv>
+#include <mutex>
 
 namespace gr {
 class BlockModel;
@@ -180,10 +181,10 @@ protected:
         }
     };
 
-    bool               _dynamicPortsLoaded = false;
-    DynamicPortsLoader _dynamicPortsLoader;
-    DynamicPorts       _dynamicInputPorts;
-    DynamicPorts       _dynamicOutputPorts;
+    mutable std::once_flag _dynamicPortsInitFlag;
+    DynamicPortsLoader     _dynamicPortsLoader;
+    DynamicPorts           _dynamicInputPorts;
+    DynamicPorts           _dynamicOutputPorts;
 
     BlockModel() = default;
 
@@ -267,11 +268,7 @@ public:
     BlockModel(BlockModel&& other)            = delete;
     BlockModel& operator=(BlockModel&& other) = delete;
 
-    void initDynamicPorts() const {
-        if (!_dynamicPortsLoaded) {
-            _dynamicPortsLoader();
-        }
-    }
+    void initDynamicPorts() const { std::call_once(_dynamicPortsInitFlag, _dynamicPortsLoader); }
 
     MsgPortInBuiltin*  msgIn;
     MsgPortOutBuiltin* msgOut;
@@ -741,10 +738,6 @@ protected:
     }
 
     void dynamicPortsLoader() {
-        if (_dynamicPortsLoaded) {
-            return;
-        }
-
         auto processPort = []<typename TPort>(auto& where, TPort& port) -> auto& {
             where.push_back(gr::DynamicPort(port, DynamicPort::non_owned_reference_tag{}));
             return where.back();
@@ -771,8 +764,6 @@ protected:
             traits::block::all_input_ports<TBlock>::for_each(registerPort, _dynamicInputPorts);
             traits::block::all_output_ports<TBlock>::for_each(registerPort, _dynamicOutputPorts);
         }
-
-        _dynamicPortsLoaded = true;
     }
 
     static void blockWrapperDynamicPortsLoader(BlockModel* base) {
