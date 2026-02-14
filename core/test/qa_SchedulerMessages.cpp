@@ -411,11 +411,16 @@ const boost::ut::suite TopologyGraphTests = [] {
             return result;
         };
 
-        awaitCondition(200ms, [&] {
-            return copy1->settings().applyStagedParameters().forwardParameters.empty() && //
-                   copy2->settings().applyStagedParameters().forwardParameters.empty() && //
-                   !uiConstraintsFor(copy1).empty();
-        });
+        expect(awaitCondition(2s, [&] {
+            auto c1 = uiConstraintsFor(copy1);
+            auto c2 = uiConstraintsFor(copy2);
+            if (c1.empty() || c2.empty()) {
+                return false;
+            }
+            auto* c1x = c1["x"].get_if<float>();
+            auto* c2x = c2["x"].get_if<float>();
+            return c1x && *c1x == 42.f && c2x && *c2x == 43.f;
+        })) << "waiting for ui_constraints to be applied (copy1.x==42, copy2.x==43)";
 
         expect(eq(42.f, gr::test::get_value_or_fail<float>(uiConstraintsFor(copy1)["x"])));
         expect(eq(43.f, gr::test::get_value_or_fail<float>(uiConstraintsFor(copy2)["x"])));
@@ -448,17 +453,10 @@ const boost::ut::suite TopologyGraphTests = [] {
                 expect(seenUiConstraintsX == std::set<float>{42, 43});
                 expect(seenUiConstraintsY == std::set<float>{6, 7070});
             }
-
-            scheduler.scheduler().requestStop();
-
-            auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
-            auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
-
-            expect(eq(42.f, gr::test::get_value_or_fail<float>(copy1direct->ui_constraints["x"])));
-            expect(eq(43.f, gr::test::get_value_or_fail<float>(copy2direct->ui_constraints["x"])));
         }
 
         scheduler.scheduler().requestStop();
+        expect(awaitCondition(2s, [&] { return scheduler.state() != lifecycle::State::RUNNING; })) << "scheduler stopped";
 
         auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
         auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
