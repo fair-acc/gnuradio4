@@ -148,7 +148,9 @@ protected:
     std::vector<gr::Message> _pendingMessagesToChildren;
     bool                     _messagePortsConnected = false;
 
-    std::atomic_flag _processingScheduledMessages;
+    std::atomic_flag         _processingScheduledMessages;
+    std::atomic<bool>        _workQuiescenceRequested{false};
+    std::atomic<std::size_t> _nWorkersInWork{0};
 
     void rebuildProfiler(const profiling::Options& opt) {
         std::destroy_at(std::addressof(_profiler));
@@ -187,6 +189,37 @@ public:
     constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
 
     [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
+
+    void requestWorkQuiescence() {
+        _workQuiescenceRequested.store(true, std::memory_order_release);
+        while (_nWorkersInWork.load(std::memory_order_acquire) > 0) {
+            std::this_thread::yield();
+        }
+    }
+
+    void releaseWorkQuiescence() { _workQuiescenceRequested.store(false, std::memory_order_release); }
+
+    void requestWorkQuiescenceAll() {
+        requestWorkQuiescence();
+        graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
+            if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
+                if (auto* sm = dynamic_cast<SchedulerModel*>(block.get())) {
+                    sm->requestWorkQuiescence();
+                }
+            }
+        });
+    }
+
+    void releaseWorkQuiescenceAll() {
+        graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
+            if (block->blockCategory() == block::Category::ScheduledBlockGroup) {
+                if (auto* sm = dynamic_cast<SchedulerModel*>(block.get())) {
+                    sm->releaseWorkQuiescence();
+                }
+            }
+        });
+        releaseWorkQuiescence();
+    }
 
     SchedulerBase() : base_t(gr::property_map()) { registerPropertyCallbacks(); }
 
@@ -617,12 +650,22 @@ protected:
             }
 
             if (activeState == RUNNING) {
-                gr::work::Result result = traverseBlockListOnce(localBlockList);
-                if (result.status == work::Status::DONE) {
-                    break; // nothing happened -> shutdown this worker
-                } else if (result.status == work::Status::ERROR) {
-                    this->emitErrorMessageIfAny("LifecycleState (ERROR)", this->changeStateTo(ERROR));
-                    break;
+                if (_workQuiescenceRequested.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                } else {
+                    _nWorkersInWork.fetch_add(1, std::memory_order_acq_rel);
+                    if (_workQuiescenceRequested.load(std::memory_order_acquire)) {
+                        _nWorkersInWork.fetch_sub(1, std::memory_order_release);
+                    } else {
+                        gr::work::Result result = traverseBlockListOnce(localBlockList);
+                        _nWorkersInWork.fetch_sub(1, std::memory_order_release);
+                        if (result.status == work::Status::DONE) {
+                            break; // nothing happened -> shutdown this worker
+                        } else if (result.status == work::Status::ERROR) {
+                            this->emitErrorMessageIfAny("LifecycleState (ERROR)", this->changeStateTo(ERROR));
+                            break;
+                        }
+                    }
                 }
             } else if (activeState == PAUSED) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
@@ -732,10 +775,12 @@ protected:
 
     void resume() {
         using enum lifecycle::State;
+        requestWorkQuiescenceAll();
         auto result = connectPendingEdges();
         if (!result) {
             this->emitErrorMessage("init()", "Failed to connect blocks in graph");
         }
+        releaseWorkQuiescenceAll();
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this](auto& block) { this->emitErrorMessageIfAny("resume() -> LifecycleState", block->changeStateTo(RUNNING)); });
         if constexpr (requires(Derived& d) { d.customResume(); }) {
             static_cast<Derived*>(this)->customResume();
@@ -872,7 +917,9 @@ protected:
         }
 
         messageData["_targetGraph"] = targetGraph->unique_name.value();
+        requestWorkQuiescenceAll();
         targetGraph->removeEdgeBySourcePort(sourceBlock, sourcePort);
+        releaseWorkQuiescenceAll();
 
         return message;
     }
@@ -904,7 +951,9 @@ protected:
         }
 
         messageData["_targetGraph"] = targetGraph->unique_name.value();
+        requestWorkQuiescenceAll();
         targetGraph->emplaceEdge(sourceBlock, std::string(sourcePort), destinationBlock, std::string(destinationPort), *minBufferSize, *weight, edgeName);
+        releaseWorkQuiescenceAll();
 
         return message;
     }
@@ -1197,6 +1246,7 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
         }
 
         std::lock_guard lock(this->_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         this->_executionOrder->clear();
@@ -1301,8 +1351,8 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
 
         const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
-        std::lock_guard guard(this->_adoptionBlocksMutex);
         std::lock_guard lock(this->_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
@@ -1364,8 +1414,8 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
 
         const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
-        std::lock_guard guard(this->_adoptionBlocksMutex);
         std::lock_guard lock(this->_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);

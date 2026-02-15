@@ -96,8 +96,8 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         }
         const std::size_t size_half = size / 2;
 
-        static std::size_t _counter;
-        const auto         buffer_name  = std::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        static std::size_t _counter{0};
+        const auto         buffer_name  = std::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, gr::AtomicRef<std::size_t>(_counter).fetch_add(1));
         const auto         memfd_create = [name = buffer_name.c_str()](unsigned int flags) { return syscall(__NR_memfd_create, name, flags); };
         auto               shm_fd       = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
@@ -416,8 +416,8 @@ private:
         [[nodiscard]] constexpr T*               data() const noexcept { return _parent->_internalSpan.data(); }
         T&                                       operator[](std::size_t i) const noexcept { return _parent->_internalSpan[i]; }
         T&                                       operator[](std::size_t i) noexcept { return _parent->_internalSpan[i]; }
-        explicit(false) operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
-        explicit(false) operator std::span<T>&() noexcept { return _parent->_internalSpan; }
+        explicit(false)                          operator std::span<T>&() const noexcept { return _parent->_internalSpan; }
+        explicit(false)                          operator std::span<T>&() noexcept { return _parent->_internalSpan; }
 
         constexpr void publish(std::size_t nSamplesToPublish) noexcept {
             assert(nSamplesToPublish <= _parent->_internalSpan.size() - _parent->_nRequestedSamplesToPublish && "n_produced must be <= than unpublished samples");
@@ -613,8 +613,8 @@ private:
         [[nodiscard]] constexpr const T*         data() const noexcept { return _internalSpan.data(); }
         const T&                                 operator[](std::size_t i) const noexcept { return _internalSpan[i]; }
         const T&                                 operator[](std::size_t i) noexcept { return _internalSpan[i]; }
-        explicit(false) operator const std::span<const T>&() const noexcept { return _internalSpan; }
-        explicit(false) operator std::span<const T>&() noexcept { return _internalSpan; }
+        explicit(false)                          operator const std::span<const T>&() const noexcept { return _internalSpan; }
+        explicit(false)                          operator std::span<const T>&() noexcept { return _internalSpan; }
         // operator std::span<const T>&&() = delete;
 
         template<bool strict_check = true>

@@ -33,6 +33,9 @@ public:
 
     virtual void start() = 0;
     virtual void stop()  = 0;
+
+    virtual void requestWorkQuiescence() = 0;
+    virtual void releaseWorkQuiescence() = 0;
 };
 
 template<BlockLike TScheduler>
@@ -72,6 +75,9 @@ public:
             }
         });
     }
+
+    void requestWorkQuiescence() override { this->blockRef().requestWorkQuiescence(); }
+    void releaseWorkQuiescence() override { this->blockRef().releaseWorkQuiescence(); }
 
     void stop() override {
         if (this->blockRef().changeStateTo(gr::lifecycle::State::REQUESTED_STOP)) {

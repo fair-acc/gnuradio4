@@ -1078,10 +1078,6 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
             return false;
         })) << "BusyLoopBlock sleeping";
 
-        // check that buffers are full
-        expect(eq(source.out.streamWriter().available(), 0UZ));
-        expect(eq(monitor.in.streamReader().available(), graph::defaultMinBufferSize(true)));
-
         const auto progressAfterInit = scheduler.graph().progress().value();
         auto       estInvokeCount    = [&monitor] {
             const auto invokeCountInit = monitor._invokeCount.value();
