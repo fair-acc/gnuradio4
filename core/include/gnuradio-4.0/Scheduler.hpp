@@ -1257,6 +1257,7 @@ struct Simple : SchedulerBase<Simple<execution, TProfiler>, execution, TProfiler
         }
 
         std::lock_guard lock(this->_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         this->_executionOrder->clear();
@@ -1361,8 +1362,8 @@ detecting cycles and blocks which can be reached from several source blocks.)"">
 
         const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
-        std::lock_guard guard(this->_adoptionBlocksMutex);
         std::lock_guard lock(this->_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);
@@ -1424,8 +1425,8 @@ struct DepthFirst : SchedulerBase<DepthFirst<execution, TProfiler>, execution, T
 
         const std::size_t n_batches = (execution == ExecutionPolicy::multiThreaded) ? std::min(static_cast<std::size_t>(this->_pool->maxThreads()), blockList.size()) : 1UZ;
 
-        std::lock_guard guard(this->_adoptionBlocksMutex);
         std::lock_guard lock(this->_executionOrderMutex);
+        std::lock_guard guard(this->_adoptionBlocksMutex);
         this->_adoptionBlocks.clear();
         this->_adoptionBlocks.resize(n_batches);
         *this->_executionOrder = detail::batchBlocks(blockList, n_batches);

@@ -96,8 +96,8 @@ class double_mapped_memory_resource : public std::pmr::memory_resource {
         }
         const std::size_t size_half = size / 2;
 
-        static std::size_t _counter;
-        const auto         buffer_name  = std::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, _counter++);
+        static std::size_t _counter{0};
+        const auto         buffer_name  = std::format("/double_mapped_memory_resource-{}-{}-{}", getpid(), size, gr::AtomicRef<std::size_t>(_counter).fetch_add(1));
         const auto         memfd_create = [name = buffer_name.c_str()](unsigned int flags) { return syscall(__NR_memfd_create, name, flags); };
         auto               shm_fd       = static_cast<int>(memfd_create(0));
         if (shm_fd < 0) {
