@@ -40,7 +40,7 @@ struct ParseError {
 
 namespace detail {
 
-auto value_construct = [](const auto& value) { return pmt::Value(value); };
+inline constexpr auto value_construct = [](const auto& value) { return pmt::Value(value); };
 
 template<typename T>
 struct is_complex : std::false_type {};
