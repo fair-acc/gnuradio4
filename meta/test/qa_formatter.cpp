@@ -52,6 +52,23 @@ const boost::ut::suite<"gr::join helper"> joinHelpers = [] {
         gr::format_join(std::ostream_iterator<char>(oss), v, "; ");
         expect(eq("1; 2; 3"s, oss.str()));
     };
+
+    "std::format<pmr::string>"_test = [] {
+        std::pmr::string s = "abc";
+        expect(eq("abc"s, std::format("{}", s)));
+    };
+
+    "gr::join<vector<pmr::string>>"_test = [] {
+        std::vector<std::pmr::string> v{std::pmr::string{"a"}, std::pmr::string{"b"}};
+        expect(eq("a, b"s, gr::join(v)));
+    };
+
+    "gr::join<property_map> with pmr::string keys"_test = [] {
+        gr::property_map map{{"alpha", 1}, {"beta", 2}};
+        const auto       joined = gr::join(map);
+        expect(joined.contains("(alpha, "));
+        expect(joined.contains("(beta, "));
+    };
 };
 
 const boost::ut::suite<"std::complex formatter"> complexFormatter = [] {
