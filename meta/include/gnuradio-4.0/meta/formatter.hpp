@@ -16,6 +16,7 @@
 #include <magic_enum.hpp>
 
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
 #pragma GCC diagnostic pop
 #endif
@@ -203,7 +204,7 @@ std::ostream& operator<<(std::ostream& os, const gr::Range<T>& v) {
 namespace gr {
 
 template<typename R>
-concept FormattableRange = std::ranges::range<R> && !std::same_as<std::remove_cvref_t<R>, std::string> && !std::same_as<std::remove_cvref_t<R>, std::string_view> && !std::is_array_v<std::remove_cvref_t<R>> && std::formattable<std::ranges::range_value_t<R>, char>;
+concept FormattableRange = std::ranges::range<R> && !gr::meta::string_like<std::remove_cvref_t<R>> && !std::is_array_v<std::remove_cvref_t<R>> && std::formattable<std::ranges::range_value_t<R>, char>;
 
 template<typename OutputIt, typename Container>
 constexpr auto format_join(OutputIt out, const Container& container, std::string_view separator = ", ") {
