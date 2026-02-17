@@ -95,6 +95,67 @@ const boost::ut::suite TagTests = [] {
         }
     };
 
+    "SignalGenerator FastSin/FastCos match Sin/Cos"_test = [] {
+        constexpr std::size_t N = 200;
+        for (const auto& [fast, precise] : std::vector<std::pair<std::string, std::string>>{{"FastSin", "Sin"}, {"FastCos", "Cos"}}) {
+            SignalGenerator<double> genFast({{"signal_type", fast}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
+            SignalGenerator<double> genPrecise({{"signal_type", precise}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
+            genFast.init(genFast.progress);
+            genPrecise.init(genPrecise.progress);
+            for (std::size_t i = 0; i < N; ++i) {
+                expect(approx(genPrecise.generateSample(), genFast.generateSample(), 1e-10)) << std::format("{} vs {} at sample {}", fast, precise, i);
+            }
+        }
+    };
+
+    "SignalGenerator noise types produce bounded output"_test = [] {
+        constexpr std::size_t N = 10000;
+        for (const auto& noiseType : {"UniformNoise", "TriangularNoise", "GaussianNoise"}) {
+            SignalGenerator<double> gen({{"signal_type", std::string(noiseType)}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"amplitude", 2.f}, {"offset", 1.f}, {"seed", std::uint64_t(42)}});
+            gen.init(gen.progress);
+            double sum = 0.;
+            for (std::size_t i = 0; i < N; ++i) {
+                const double v = gen.generateSample();
+                sum += v;
+                if (std::string_view(noiseType) != "GaussianNoise") {
+                    expect(ge(v, -2. + 1.)) << std::format("{} sample {} out of range: {}", noiseType, i, v);
+                    expect(le(v, 2. + 1.)) << std::format("{} sample {} out of range: {}", noiseType, i, v);
+                }
+            }
+            const double mean = sum / static_cast<double>(N);
+            expect(approx(1., mean, 0.2)) << std::format("{} mean {} far from offset 1.0", noiseType, mean);
+        }
+    };
+
+    "SignalGenerator integer output clamps correctly"_test = [] {
+        SignalGenerator<std::int16_t> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 40000.f}, {"offset", 0.f}});
+        gen.init(gen.progress);
+        bool hitMax = false, hitMin = false;
+        for (std::size_t i = 0; i < 100; ++i) {
+            const auto v = gen.generateSample();
+            expect(ge(v, std::numeric_limits<std::int16_t>::min()));
+            expect(le(v, std::numeric_limits<std::int16_t>::max()));
+            if (v == std::numeric_limits<std::int16_t>::max()) {
+                hitMax = true;
+            }
+            if (v == std::numeric_limits<std::int16_t>::min()) {
+                hitMin = true;
+            }
+        }
+        expect(hitMax) << "amplitude 40000 should clamp to int16 max";
+        expect(hitMin) << "amplitude 40000 should clamp to int16 min";
+    };
+
+    "SignalGenerator complex output produces analytic signal"_test = [] {
+        SignalGenerator<std::complex<double>> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE.shortKey(), 1000.f}, {"frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
+        gen.init(gen.progress);
+        for (std::size_t i = 0; i < 50; ++i) {
+            const auto   sample = gen.generateSample();
+            const double mag    = std::abs(sample);
+            expect(approx(1., mag, 1e-10)) << std::format("analytic signal magnitude at sample {} should be ~1.0, got {}", i, mag);
+        }
+    };
+
     "SignalGenerator ImChart test"_test = [] {
         const std::size_t        N = 512; // test points
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
@@ -296,6 +357,172 @@ const boost::ut::suite TagTests = [] {
         auto chart = gr::graphs::ImChart<128, 32>({{0., static_cast<double>(N)}, {0., 35.}});
         chart.draw(xValues, yValues, "Signal");
         chart.draw();
+    };
+    "FunctionGenerator tone types produce correct waveform"_test = [] {
+        using namespace function_generator;
+        constexpr float sampleRate = 1000.f;
+        constexpr float freq       = 50.f;
+        constexpr float amplitude  = 3.f;
+        constexpr float offset     = 1.f;
+        constexpr float phase      = 0.f;
+
+        for (const auto& toneType : {Sin, Cos, FastSin, FastCos}) {
+            FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), sampleRate}});
+            funcGen.init(funcGen.progress);
+            const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
+            property_map params{createPropertyMapEntry(signal_type, toneType), createPropertyMapEntry(ParameterType::frequency, freq), createPropertyMapEntry(final_value, amplitude), createPropertyMapEntry(start_value, offset), createPropertyMapEntry(ParameterType::phase, phase), createPropertyMapEntry(duration, 0.f)};
+            expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
+            expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+            std::ignore = funcGen.settings().applyStagedParameters();
+
+            constexpr std::size_t N     = 20; // one full period at 50 Hz / 1000 Hz
+            double                sumSq = 0.;
+            for (std::size_t i = 0; i < N; ++i) {
+                const double v = funcGen.generateSample();
+                sumSq += (v - static_cast<double>(offset)) * (v - static_cast<double>(offset));
+            }
+            const double rms = std::sqrt(sumSq / static_cast<double>(N));
+            expect(approx(static_cast<double>(amplitude) / std::numbers::sqrt2, rms, 0.15)) << std::format("tone {} RMS mismatch", toString(toneType));
+        }
+    };
+
+    "FunctionGenerator tone duration expiry holds at offset"_test = [] {
+        using namespace function_generator;
+        constexpr float sampleRate = 1000.f;
+
+        FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), sampleRate}});
+        funcGen.init(funcGen.progress);
+        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
+        property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::frequency, 100.f), createPropertyMapEntry(final_value, 5.f), // amplitude
+            createPropertyMapEntry(start_value, 2.f),                                                                                                                    // offset
+            createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.01f)};                                                                 // 10 ms = 10 samples
+        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
+        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+        std::ignore = funcGen.settings().applyStagedParameters();
+
+        // generate past the duration
+        for (std::size_t i = 0; i < 15; ++i) {
+            std::ignore = funcGen.generateSample();
+        }
+        // after expiry, output should hold at start_value (offset = 2.0)
+        for (std::size_t i = 0; i < 10; ++i) {
+            expect(approx(2., funcGen.generateSample(), 1e-10)) << std::format("sample {} after expiry should be offset", i);
+        }
+    };
+
+    "FunctionGenerator noise types produce output"_test = [] {
+        using namespace function_generator;
+        constexpr float sampleRate = 1000.f;
+
+        for (const auto& noiseType : {UniformNoise, TriangularNoise, GaussianNoise}) {
+            FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), sampleRate}});
+            funcGen.init(funcGen.progress);
+            const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
+            property_map params{createPropertyMapEntry(signal_type, noiseType), createPropertyMapEntry(start_value, 2.f)};
+            expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
+            expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+            std::ignore = funcGen.settings().applyStagedParameters();
+
+            bool nonZero = false;
+            for (std::size_t i = 0; i < 100; ++i) {
+                if (funcGen.generateSample() != 0.) {
+                    nonZero = true;
+                }
+            }
+            expect(nonZero) << std::format("noise type {} should produce non-zero output", toString(noiseType));
+        }
+    };
+
+    "FunctionGenerator complex output for tone type"_test = [] {
+        using namespace function_generator;
+        FunctionGenerator<std::complex<double>> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), 1000.f}});
+        funcGen.init(funcGen.progress);
+        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
+        property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::frequency, 50.f), createPropertyMapEntry(final_value, 1.f), createPropertyMapEntry(start_value, 0.f), createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.f)};
+        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
+        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+        std::ignore = funcGen.settings().applyStagedParameters();
+
+        for (std::size_t i = 0; i < 20; ++i) {
+            const auto   sample = funcGen.generateSample();
+            const double mag    = std::abs(sample);
+            expect(approx(1., mag, 1e-10)) << std::format("analytic signal magnitude at sample {} should be ~1.0, got {}", i, mag);
+        }
+    };
+
+    "FunctionGenerator integer output for tone type"_test = [] {
+        using namespace function_generator;
+        FunctionGenerator<std::int16_t> funcGen({{gr::tag::SAMPLE_RATE.shortKey(), 1000.f}});
+        funcGen.init(funcGen.progress);
+        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
+        property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::frequency, 50.f), createPropertyMapEntry(final_value, 40000.f), createPropertyMapEntry(start_value, 0.f), createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.f)};
+        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
+        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
+        std::ignore = funcGen.settings().applyStagedParameters();
+
+        bool hitMax = false, hitMin = false;
+        for (std::size_t i = 0; i < 100; ++i) {
+            const auto v = funcGen.generateSample();
+            expect(ge(v, std::numeric_limits<std::int16_t>::min()));
+            expect(le(v, std::numeric_limits<std::int16_t>::max()));
+            if (v == std::numeric_limits<std::int16_t>::max()) {
+                hitMax = true;
+            }
+            if (v == std::numeric_limits<std::int16_t>::min()) {
+                hitMin = true;
+            }
+        }
+        expect(hitMax) << "amplitude 40000 should clamp to int16 max";
+        expect(hitMin) << "amplitude 40000 should clamp to int16 min";
+    };
+
+    "FunctionGenerator + ClockSource tone segment test"_test = [] {
+        using namespace std::string_literals;
+        using namespace function_generator;
+        constexpr std::uint32_t N           = 500;
+        constexpr float         sample_rate = 1000.f;
+        Graph                   testGraph;
+        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+
+        clockSrc.tags = {Tag(0, {{tag::CONTEXT.shortKey(), "1"s}}), Tag(100, {{tag::CONTEXT.shortKey(), "2"s}}), Tag(300, {{tag::CONTEXT.shortKey(), "3"s}})};
+
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "FunctionGenerator"}});
+        expect(funcGen.settings().set(createConstPropertyMap("", 0.f), SettingsCtx{now, "1"}).empty());
+        expect(funcGen.settings().set(createSinPropertyMap("", 50.f, 5.f, 0.f, 1.f, 0.f), SettingsCtx{now, "2"}).empty());
+        expect(funcGen.settings().set(createConstPropertyMap("", 1.f), SettingsCtx{now, "3"}).empty());
+
+        auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"clk_in">(funcGen)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(funcGen).to<"in">(sink)));
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+        expect(eq(N, static_cast<std::uint32_t>(sink._samples.size()))) << "number of samples does not match";
+
+        // segment 1 (samples 0–99): Const = 0
+        for (std::size_t i = 0; i < 100 && i < sink._samples.size(); ++i) {
+            expect(approx(0.f, sink._samples[i], 1e-4f)) << std::format("const segment sample {}", i);
+        }
+        // segment 2 (samples 100–299): Sin with amplitude=5, offset=1 -> oscillating around 1.0
+        double sumSq = 0.;
+        for (std::size_t i = 100; i < 300 && i < sink._samples.size(); ++i) {
+            sumSq += static_cast<double>((sink._samples[i] - 1.f) * (sink._samples[i] - 1.f));
+        }
+        const double rms = std::sqrt(sumSq / 200.);
+        expect(approx(5. / std::numbers::sqrt2, rms, 0.3)) << std::format("sine segment RMS mismatch: {}", rms);
+        // segment 3 (samples 300+): Const = 1
+        for (std::size_t i = 300; i < sink._samples.size(); ++i) {
+            expect(approx(1.f, sink._samples[i], 1e-4f)) << std::format("const-after-sine segment sample {}", i);
+        }
     };
 };
 
