@@ -17,7 +17,7 @@
 
 #if !defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__))) || defined(__MINGW32__) // UNIX-style OS
 #include <unistd.h>
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__)
 #include <pthread.h>
 #include <sched.h>
 #endif
@@ -69,7 +69,7 @@ concept thread_type = std::is_same_v<type, std::thread>;
 #endif
 
 namespace detail {
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 template<typename Tp, typename... Us>
 constexpr decltype(auto) firstElement(Tp&& t, Us&&...) noexcept {
     return std::forward<Tp>(t);
@@ -113,7 +113,7 @@ inline std::string getProcessName(const int pid = detail::getPid()) {
 inline std::string getProcessName(const int /*pid*/ = -1) { return "unknown_process"; }
 #endif
 
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline std::string getThreadName(thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
@@ -138,7 +138,7 @@ inline void setProcessName(const std::string_view& processName, int pid = detail
 inline void setProcessName(const std::string_view& /*processName*/, int /*pid*/ = -1) {}
 #endif
 
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline void setThreadName(const std::string_view& threadName, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
@@ -292,7 +292,7 @@ struct SchedulingParameter {
 namespace detail {
 inline Policy getEnumPolicy(const int policy) {
     switch (policy) {
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
     case SCHED_FIFO: return Policy::FIFO;
     case SCHED_RR: return Policy::ROUND_ROBIN;
     case SCHED_OTHER: return Policy::OTHER;
@@ -318,7 +318,7 @@ inline struct SchedulingParameter getProcessSchedulingParameter(const int pid = 
 inline struct SchedulingParameter getProcessSchedulingParameter(const int /*pid*/ = -1) { return {}; }
 #endif
 
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline void setProcessSchedulingParameter(Policy scheduler, int priority, const int pid = detail::getPid()) {
     if (pid <= 0) {
         throw std::system_error(THREAD_UNINITIALISED, thread_exception(), std::format("setProcessSchedulingParameter({}, {}, {}) -- invalid pid", scheduler, priority, pid));
@@ -341,7 +341,7 @@ inline void setProcessSchedulingParameter(Policy scheduler, int priority, const 
 inline void setProcessSchedulingParameter(Policy /*scheduler*/, int /*priority*/, const int /*pid*/ = -1) {}
 #endif
 
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
@@ -358,7 +358,7 @@ inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto&
 inline struct SchedulingParameter getThreadSchedulingParameter(thread_type auto&... /*thread*/) { return {}; }
 #endif
 
-#if defined(_POSIX_VERSION) || defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
+#if defined(_POSIX_THREADS) && not defined(__EMSCRIPTEN__) && not defined(__APPLE__)
 inline void setThreadSchedulingParameter(Policy scheduler, int priority, thread_type auto&... thread) {
     const pthread_t handle = detail::getPosixHandler(thread...);
     if (handle == 0U) {
