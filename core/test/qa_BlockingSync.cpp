@@ -356,7 +356,7 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         auto& src  = testGraph.emplaceBlock<TestClockSource<std::uint8_t>>({{"n_samples_max", nSamples}, {"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{50}}, {"name", "ClockSource"}});
         auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(src, src.out, sink, sink.in)));
 
         scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
@@ -377,7 +377,7 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
 
         auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(src, src.out, sink, sink.in)));
 
         scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
@@ -394,7 +394,7 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
         // clk_in not connected -> free-running mode
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(gen).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(gen, gen.out, sink, sink.in)));
 
         scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking> sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
@@ -418,8 +418,8 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
         auto& gen   = testGraph.emplaceBlock<TestGenerator<float>>({{"sample_rate", sampleRate}, {"chunk_size", gr::Size_t{100}}, {"name", "ConnectedGen"}});
         auto& sink  = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clock).to<"clk_in">(gen)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(gen).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(clock, clock.out, gen, gen.clk_in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(gen, gen.out, sink, sink.in)));
 
         scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
@@ -447,8 +447,8 @@ const boost::ut::suite<"Graph Integration"> graphIntegration = [] {
 
         auto& sink = testGraph.emplaceBlock<testing::TagSink<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clock).to<"clk_in">(gen)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(gen).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(clock, clock.out, gen, gen.clk_in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(gen, gen.out, sink, sink.in)));
 
         scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());
@@ -471,7 +471,7 @@ const boost::ut::suite<"Scheduler-driven free-running"> schedulerDriven = [] {
 
         auto& sink = testGraph.emplaceBlock<testing::TagSink<std::uint8_t, testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "Sink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(src, src.out, sink, sink.in)));
 
         scheduler::Simple sched;
         expect(sched.exchange(std::move(testGraph)).has_value());

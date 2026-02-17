@@ -448,13 +448,23 @@ inline std::string makePortableTypeName(std::string_view name) {
     using namespace std::string_literals;
     using gr::meta::detail::local_type_name;
     static const auto typeMapping = std::array<std::pair<std::string, std::string>, 17>{{
-        {local_type_name<std::int8_t>(), "int8"s}, {local_type_name<std::int16_t>(), "int16"s}, {local_type_name<std::int32_t>(), "int32"s}, {local_type_name<std::int64_t>(), "int64"s},         //
-        {local_type_name<std::uint8_t>(), "uint8"s}, {local_type_name<std::uint16_t>(), "uint16"s}, {local_type_name<std::uint32_t>(), "uint32"s}, {local_type_name<std::uint64_t>(), "uint64"s}, //
-        {local_type_name<float>(), "float32"s}, {local_type_name<double>(), "float64"},                                                                                                           //                                                                                                                                                                                                                                                        //
-        {local_type_name<std::float32_t>(), "float32"s}, {local_type_name<std::float64_t>(), "float64"},                                                                                          //
-        {local_type_name<std::string>(), "string"s},                                                                                                                                              //
-        {local_type_name<std::complex<float>>(), "complex<float32>"s}, {local_type_name<std::complex<double>>(), "complex<float64>"s},                                                            //
-        {local_type_name<std::complex<std::float32_t>>(), "complex<float32>"s}, {local_type_name<std::complex<std::float64_t>>(), "complex<float64>"s},                                           //
+        {local_type_name<std::int8_t>(), "int8"s},
+        {local_type_name<std::int16_t>(), "int16"s},
+        {local_type_name<std::int32_t>(), "int32"s},
+        {local_type_name<std::int64_t>(), "int64"s}, //
+        {local_type_name<std::uint8_t>(), "uint8"s},
+        {local_type_name<std::uint16_t>(), "uint16"s},
+        {local_type_name<std::uint32_t>(), "uint32"s},
+        {local_type_name<std::uint64_t>(), "uint64"s}, //
+        {local_type_name<float>(), "float32"s},
+        {local_type_name<double>(), "float64"}, //                                                                                                                                                                                                                                                        //
+        {local_type_name<std::float32_t>(), "float32"s},
+        {local_type_name<std::float64_t>(), "float64"}, //
+        {local_type_name<std::string>(), "string"s},    //
+        {local_type_name<std::complex<float>>(), "complex<float32>"s},
+        {local_type_name<std::complex<double>>(), "complex<float64>"s}, //
+        {local_type_name<std::complex<std::float32_t>>(), "complex<float32>"s},
+        {local_type_name<std::complex<std::float64_t>>(), "complex<float64>"s}, //
     }};
 
     const auto it = std::ranges::find_if(typeMapping, [&](const auto& pair) { return pair.first == name; });

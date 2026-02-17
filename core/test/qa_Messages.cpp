@@ -614,8 +614,8 @@ const boost::ut::suite MessagesTests = [] {
         auto& process = flow.emplaceBlock<TestBlock<float>>({{"name", "UnitTestBlock"}});
         auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TestSink"}, {"log_samples", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect2(source, source.out, process, process.in)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect2(process, process.out, sink, sink.in)));
 
         gr::MsgPortOut                                toScheduler;
         gr::MsgPortIn                                 fromScheduler;
@@ -795,8 +795,8 @@ const boost::ut::suite MessagesTests = [] {
         auto& process = flow.emplaceBlock<TestBlock<float>>({{"name", "UnitTestBlock"}});
         auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TestSink"}, {"log_samples", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(process).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect2(source, source.out, process, process.in)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect2(process, process.out, sink, sink.in)));
 
         gr::MsgPortIn                                 fromScheduler;
         gr::MsgPortOut                                toScheduler;
@@ -849,8 +849,8 @@ const boost::ut::suite MessagesTests = [] {
         auto& testBlock = flow.emplaceBlock<TestBlock<float>>({{"factor", 42.f}, {"ui_constraints", gr::property_map{{"x", 42.f}, {"y", 6.f}}}});
         auto& sink      = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(testBlock)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(testBlock).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect2(source, source.out, testBlock, testBlock.in)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect2(testBlock, testBlock.out, sink, sink.in)));
 
         gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {

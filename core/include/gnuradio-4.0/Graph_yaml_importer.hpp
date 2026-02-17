@@ -251,6 +251,9 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
                 return result{block, {static_cast<std::size_t>(*index), static_cast<std::size_t>(*subIndex)}};
 
+            } else if (const auto portFieldString = portField.value_or(std::string_view{}); portFieldString.data()) {
+                return result{block, {std::string(portFieldString)}};
+
             } else {
                 const auto index = checked_access_ptr{portField.template get_if<std::int64_t>()};
                 if (index == nullptr) {
