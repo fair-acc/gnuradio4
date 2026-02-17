@@ -5,64 +5,65 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/BlockingSync.hpp>
 
-#include <numbers>
+#include <gnuradio-4.0/algorithm/signal/SignalGeneratorCore.hpp>
 
 namespace gr::basic {
 
 using namespace gr;
 
 namespace signal_generator {
-enum class Type : int { Const, Sin, Cos, Square, Saw, Triangle };
+using Type = gr::signal::SignalType; // same enum, reused from algorithm core
 using enum Type;
 constexpr auto                                 TypeList  = magic_enum::enum_values<Type>();
-inline static constexpr gr::meta::fixed_string TypeNames = "[Const, Sin, Cos, Square, Saw, Triangle]";
+inline static constexpr gr::meta::fixed_string TypeNames = "[Const, Sin, Cos, Square, Saw, Triangle, FastSin, FastCos, UniformNoise, TriangularNoise, GaussianNoise]";
 
 } // namespace signal_generator
 
-GR_REGISTER_BLOCK(gr::basic::SignalGenerator, [T], [ float, double ])
+GR_REGISTER_BLOCK(gr::basic::SignalGenerator, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
-template<std::floating_point T>
+template<typename T>
 struct SignalGenerator : Block<SignalGenerator<T>>, BlockingSync<SignalGenerator<T>> {
-    using Description = Doc<R""(@brief generates various signal waveforms (sine, cosine, square, saw, triangle, constant).
+    using Description = Doc<R""(@brief generates signal waveforms: sine, cosine, square, saw, triangle, constant, fast sine/cosine, and noise.
 
 Operating modes:
   clk_in connected: generates one sample per clock input sample
   clk_in disconnected: free-running mode synchronised to wall-clock time
 
-Signal equations (A = amplitude, f = frequency, P = phase, O = offset, t = time):
-  Sine:     s(t) = A * sin(2π * f * t + P) + O
-  Cosine:   s(t) = A * cos(2π * f * t + P) + O
-  Square:   s(t) = A + O if t < halfPeriod else -A + O
-  Constant: s(t) = A + O
-  Saw:      s(t) = 2 * A * (t * f - floor(t * f + 0.5)) + O
-  Triangle: s(t) = A * (4 * abs(t * f - floor(t * f + 0.75) + 0.25) - 1) + O
+Signal types (A = amplitude, f = frequency, P = phase, O = offset):
+  Sin/Cos:          A * sin/cos(2π·f·t + P) + O  (std::sin/cos, high precision)
+  FastSin/FastCos:  A * sin/cos(2π·f·t + P) + O  (recursive phasor, ~10x faster)
+  Constant:         A + O
+  Square/Saw/Triangle: standard periodic waveforms
+  UniformNoise:     uniform random in [-A, +A) + O
+  TriangularNoise:  triangular random in [-A, +A) + O
+  GaussianNoise:    Gaussian N(0, A²) + O
 )"">;
 
     PortIn<std::uint8_t, Optional> clk_in;
     PortOut<T>                     out;
 
-    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                                 sample_rate = 1000.f;
-    Annotated<gr::Size_t, "chunk_size", Visible, Doc<"samples per update in free-running mode">> chunk_size  = 100;
-    Annotated<signal_generator::Type, "signal_type", Visible, Doc<"see signal_generator::Type">> signal_type = signal_generator::Type::Sin;
-    Annotated<T, "frequency", Visible>                                                           frequency   = T(1.);
-    Annotated<T, "amplitude", Visible>                                                           amplitude   = T(1.);
-    Annotated<T, "offset", Visible>                                                              offset      = T(0.);
-    Annotated<T, "phase", Visible, Doc<"in rad">>                                                phase       = T(0.);
+    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                                                        sample_rate = 1000.f;
+    Annotated<gr::Size_t, "chunk_size", Visible, Doc<"samples per update in free-running mode">>                        chunk_size  = 100;
+    Annotated<signal_generator::Type, "signal_type", Visible, Doc<"see signal_generator::Type">>                        signal_type = signal_generator::Type::Sin;
+    Annotated<float, "frequency", Visible>                                                                              frequency   = 1.f;
+    Annotated<float, "amplitude", Visible>                                                                              amplitude   = 1.f;
+    Annotated<float, "offset", Visible>                                                                                 offset      = 0.f;
+    Annotated<float, "phase", Visible, Doc<"in rad">>                                                                   phase       = 0.f;
+    Annotated<std::uint64_t, "seed", Visible, Doc<"PRNG seed for noise types (0 = fixed default for reproducibility)">> seed        = 0ULL;
 
-    GR_MAKE_REFLECTABLE(SignalGenerator, clk_in, out, sample_rate, chunk_size, signal_type, frequency, amplitude, offset, phase);
+    GR_MAKE_REFLECTABLE(SignalGenerator, clk_in, out, sample_rate, chunk_size, signal_type, frequency, amplitude, offset, phase, seed);
 
-    T _currentTime = T(0.);
-    T _timeTick    = T(1.) / T(sample_rate);
+    gr::signal::SignalGeneratorCore<T> _core;
 
     void start() {
-        _currentTime = T(0.);
-        _timeTick    = T(1.) / T(sample_rate);
+        _core.configure(signal_type.value, frequency, sample_rate, phase, amplitude, offset, seed);
+        _core.reset();
         this->blockingSyncStart();
     }
 
     void stop() { this->blockingSyncStop(); }
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& /*new_settings*/) { _timeTick = T(1.) / T(sample_rate); }
+    void settingsChanged(const property_map& /*old_settings*/, const property_map& /*new_settings*/) { _core.configure(signal_type.value, frequency, sample_rate, phase, amplitude, offset, seed); }
 
     work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
         const auto nSamples = this->syncSamples(input, output);
@@ -73,7 +74,7 @@ Signal equations (A = amplitude, f = frequency, P = phase, O = offset, t = time)
         }
 
         for (std::size_t i = 0; i < nSamples; ++i) {
-            output[i] = generateSample();
+            output[i] = _core.generateSample();
         }
 
         std::ignore = input.consume(this->isFreeRunning() ? 0 : nSamples);
@@ -81,35 +82,7 @@ Signal equations (A = amplitude, f = frequency, P = phase, O = offset, t = time)
         return work::Status::OK;
     }
 
-    [[nodiscard]] constexpr T generateSample() noexcept {
-        using enum signal_generator::Type;
-
-        constexpr T pi2 = T(2.) * std::numbers::pi_v<T>;
-        T           value{};
-        T           phaseAdjustedTime = _currentTime + phase / (pi2 * frequency);
-
-        switch (signal_type) {
-        case Sin: value = amplitude * std::sin(pi2 * frequency * phaseAdjustedTime) + offset; break;
-        case Cos: value = amplitude * std::cos(pi2 * frequency * phaseAdjustedTime) + offset; break;
-        case Const: value = amplitude + offset; break;
-        case Square: {
-            T halfPeriod       = T(0.5) / frequency;
-            T timeWithinPeriod = std::fmod(phaseAdjustedTime, T(2.) * halfPeriod);
-            value              = (timeWithinPeriod < halfPeriod) ? amplitude + offset : -amplitude + offset;
-            break;
-        }
-        case Saw: value = amplitude * (T(2.) * (phaseAdjustedTime * frequency - std::floor(phaseAdjustedTime * frequency + T(0.5)))) + offset; break;
-        case Triangle: {
-            T tmp = phaseAdjustedTime * frequency;
-            value = amplitude * (T(4.0) * std::abs(tmp - std::floor(tmp + T(0.75)) + T(0.25)) - T(1.0)) + offset;
-            break;
-        }
-        default: value = T(0.);
-        }
-
-        _currentTime += _timeTick;
-        return value;
-    }
+    [[nodiscard]] T generateSample() noexcept { return _core.generateSample(); }
 };
 
 } // namespace gr::basic

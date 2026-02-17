@@ -6,6 +6,10 @@
 #include <gnuradio-4.0/BlockingSync.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
+#include <gnuradio-4.0/algorithm/signal/NoiseGenerator.hpp>
+#include <gnuradio-4.0/algorithm/signal/SignalGeneratorCore.hpp>
+#include <gnuradio-4.0/algorithm/signal/ToneGenerator.hpp>
+
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
 
@@ -14,12 +18,24 @@ namespace gr::basic {
 using namespace gr;
 
 namespace function_generator {
-enum class SignalType : int { Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse };
-enum class ParameterType : int { signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1 };
+enum class SignalType : int { Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse, UniformNoise, TriangularNoise, GaussianNoise, Sin, Cos, FastSin, FastCos };
+enum class ParameterType : int { signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, frequency, phase };
 
 using enum SignalType;
 using enum ParameterType;
 constexpr auto SignalTypeList = magic_enum::enum_values<SignalType>();
+
+constexpr bool isToneType(SignalType type) noexcept { return type == Sin || type == Cos || type == FastSin || type == FastCos; }
+
+constexpr gr::signal::ToneType toToneType(SignalType type) noexcept {
+    switch (type) {
+    case Sin: return gr::signal::ToneType::Sin;
+    case Cos: return gr::signal::ToneType::Cos;
+    case FastSin: return gr::signal::ToneType::FastSin;
+    case FastCos: return gr::signal::ToneType::FastCos;
+    default: std::unreachable();
+    }
+}
 
 template<typename T>
 requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
@@ -74,16 +90,57 @@ template<typename T>
     return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1)};
 }
 
-} // namespace function_generator
-
-GR_REGISTER_BLOCK(gr::basic::FunctionGenerator, [T], [ float, double ])
+template<typename T>
+[[nodiscard]] property_map createUniformNoisePropertyMap(std::string_view triggerName, T amplitude) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, UniformNoise), createPropertyMapEntry(start_value, amplitude)};
+}
 
 template<typename T>
-requires(std::floating_point<T>)
+[[nodiscard]] property_map createTriangularNoisePropertyMap(std::string_view triggerName, T amplitude) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, TriangularNoise), createPropertyMapEntry(start_value, amplitude)};
+}
+
+template<typename T>
+[[nodiscard]] property_map createGaussianNoisePropertyMap(std::string_view triggerName, T amplitude) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, GaussianNoise), createPropertyMapEntry(start_value, amplitude)};
+}
+
+template<typename T>
+[[nodiscard]] property_map createTonePropertyMap(std::string_view triggerName, SignalType toneType, T freq, T amplitude, T phase, T offset, T durationValue) {
+    return {createPropertyMapEntry(signal_trigger, std::string(triggerName)), createPropertyMapEntry(signal_type, toneType), createPropertyMapEntry(frequency, freq), createPropertyMapEntry(final_value, amplitude), createPropertyMapEntry(ParameterType::phase, phase), createPropertyMapEntry(start_value, offset), createPropertyMapEntry(duration, durationValue)};
+}
+
+template<typename T>
+[[nodiscard]] property_map createSinPropertyMap(std::string_view triggerName, T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
+    return createTonePropertyMap(triggerName, Sin, freq, amplitude, phase, offset, durationValue);
+}
+
+template<typename T>
+[[nodiscard]] property_map createCosPropertyMap(std::string_view triggerName, T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
+    return createTonePropertyMap(triggerName, Cos, freq, amplitude, phase, offset, durationValue);
+}
+
+template<typename T>
+[[nodiscard]] property_map createFastSinPropertyMap(std::string_view triggerName, T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
+    return createTonePropertyMap(triggerName, FastSin, freq, amplitude, phase, offset, durationValue);
+}
+
+template<typename T>
+[[nodiscard]] property_map createFastCosPropertyMap(std::string_view triggerName, T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
+    return createTonePropertyMap(triggerName, FastCos, freq, amplitude, phase, offset, durationValue);
+}
+
+} // namespace function_generator
+
+GR_REGISTER_BLOCK(gr::basic::FunctionGenerator, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
 struct FunctionGenerator : Block<FunctionGenerator<T>>, BlockingSync<FunctionGenerator<T>> {
     using Description = Doc<R""(@brief generates function waveforms and their combinations via tag-based sequencing.
 
-Supported functions: Constant, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse.
+Supported functions: Constant, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse,
+                     UniformNoise, TriangularNoise, GaussianNoise,
+                     Sin, Cos, FastSin, FastCos.
 
 Operating modes:
   clk_in connected: generates one sample per clock input sample
@@ -99,29 +156,36 @@ Operating modes:
     Annotated<std::string, "signal_trigger", Visible, Doc<"required trigger name (empty -> ignored)">>           signal_trigger;
     Annotated<function_generator::SignalType, "signal_type", Visible, Doc<"see function_generator::SignalType">> signal_type = function_generator::Const;
 
-    Annotated<T, "start_value">                                               start_value    = T(0.);
-    Annotated<T, "final_value">                                               final_value    = T(0.);
-    Annotated<T, "duration", Doc<"in sec">>                                   duration       = T(0.);
-    Annotated<T, "round_off_time", Doc<"specific to ParabolicRamp, in sec">>  round_off_time = T(0.);
-    Annotated<T, "impulse_time0", Doc<"specific to ImpulseResponse, in sec">> impulse_time0  = T(0.);
-    Annotated<T, "impulse_time1", Doc<"specific to ImpulseResponse, in sec">> impulse_time1  = T(0.);
+    Annotated<float, "start_value">                                               start_value    = 0.f;
+    Annotated<float, "final_value">                                               final_value    = 0.f;
+    Annotated<float, "duration", Doc<"in sec">>                                   duration       = 0.f;
+    Annotated<float, "round_off_time", Doc<"specific to ParabolicRamp, in sec">>  round_off_time = 0.f;
+    Annotated<float, "impulse_time0", Doc<"specific to ImpulseResponse, in sec">> impulse_time0  = 0.f;
+    Annotated<float, "impulse_time1", Doc<"specific to ImpulseResponse, in sec">> impulse_time1  = 0.f;
+    Annotated<float, "frequency", Visible, Doc<"in Hz">>                          frequency      = 0.f;
+    Annotated<float, "phase", Visible, Doc<"in rad">>                             phase          = 0.f;
 
-    Annotated<std::string, "trigger name">       trigger_name;
-    Annotated<std::uint64_t, "trigger time">     trigger_time;
-    Annotated<float, "trigger offset">           trigger_offset;
-    Annotated<std::string, "context name">       context;
-    Annotated<property_map, "trigger_meta_info"> trigger_meta_info{};
+    Annotated<std::string, "trigger name">                                                                              trigger_name;
+    Annotated<std::uint64_t, "trigger time">                                                                            trigger_time;
+    Annotated<float, "trigger offset">                                                                                  trigger_offset;
+    Annotated<std::string, "context name">                                                                              context;
+    Annotated<property_map, "trigger_meta_info">                                                                        trigger_meta_info{};
+    Annotated<std::uint64_t, "seed", Visible, Doc<"PRNG seed for noise types (0 = fixed default for reproducibility)">> seed = 0ULL;
 
     GR_MAKE_REFLECTABLE(FunctionGenerator, clk_in, out, sample_rate, chunk_size, signal_trigger, signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, //
-        trigger_name, trigger_time, trigger_offset, context, trigger_meta_info);
+        frequency, phase, trigger_name, trigger_time, trigger_offset, context, trigger_meta_info, seed);
 
-    T   _currentTime   = T(0.);
-    int _sampleCounter = 0;
-    T   _timeTick      = T(1.) / static_cast<T>(sample_rate);
+    double _currentTime   = 0.;
+    int    _sampleCounter = 0;
+    double _timeTick      = 1. / static_cast<double>(sample_rate);
+
+    gr::signal::NoiseGenerator<double> _noise;
+    gr::signal::ToneGenerator<double>  _tone;
 
     void start() {
-        _currentTime = T(0.);
-        _timeTick    = T(1.) / static_cast<T>(sample_rate);
+        _currentTime = 0.;
+        _timeTick    = 1. / static_cast<double>(sample_rate);
+        configureGeneratorsFromSettings();
         this->blockingSyncStart();
     }
 
@@ -130,11 +194,11 @@ Operating modes:
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
         if (newSettings.contains(convert_string_domain(function_generator::toString(function_generator::signal_type)))) {
             if (signal_trigger.value.empty()) {
-                _currentTime = T(0.);
+                _currentTime = 0.;
             } else if (newSettings.contains(gr::tag::TRIGGER_NAME.shortKey())) {
                 std::string newTrigger = newSettings.at(gr::tag::TRIGGER_NAME.shortKey()).value_or(std::string());
                 if (newTrigger == signal_trigger.value) {
-                    _currentTime = T(0.);
+                    _currentTime = 0.;
                 } else {
                     // trigger does not match required signal_trigger -- revert to previous
                     if (auto oldType = oldSettings.at("signal_type").value_or(std::string_view{}); oldType.data() != nullptr) {
@@ -142,16 +206,20 @@ Operating modes:
                             signal_type = parsed.value();
                         }
                     }
-                    start_value    = oldSettings.at("start_value").value_or(T{});
-                    final_value    = oldSettings.at("final_value").value_or(T{});
-                    duration       = oldSettings.at("duration").value_or(T{});
-                    round_off_time = oldSettings.at("round_off_time").value_or(T{});
-                    impulse_time0  = oldSettings.at("impulse_time0").value_or(T{});
-                    impulse_time1  = oldSettings.at("impulse_time1").value_or(T{});
+                    start_value    = oldSettings.at("start_value").value_or(0.f);
+                    final_value    = oldSettings.at("final_value").value_or(0.f);
+                    duration       = oldSettings.at("duration").value_or(0.f);
+                    round_off_time = oldSettings.at("round_off_time").value_or(0.f);
+                    impulse_time0  = oldSettings.at("impulse_time0").value_or(0.f);
+                    impulse_time1  = oldSettings.at("impulse_time1").value_or(0.f);
+                    frequency      = oldSettings.at("frequency").value_or(0.f);
+                    phase          = oldSettings.at("phase").value_or(0.f);
+                    seed           = oldSettings.at("seed").value_or(std::uint64_t(0));
                 }
             }
         }
-        _timeTick = T(1.) / static_cast<T>(sample_rate);
+        _timeTick = 1. / static_cast<double>(sample_rate);
+        configureGeneratorsFromSettings();
     }
 
     work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
@@ -171,50 +239,124 @@ Operating modes:
         return work::Status::OK;
     }
 
-    [[nodiscard]] constexpr T generateSample() noexcept {
+    [[nodiscard]] T generateSample() noexcept {
         _sampleCounter++;
         using enum function_generator::SignalType;
-        T value{};
 
+        if (signal_type == UniformNoise || signal_type == TriangularNoise || signal_type == GaussianNoise) {
+            _currentTime += _timeTick;
+            if constexpr (gr::signal::detail::is_complex_v<T>) {
+                using F           = typename T::value_type;
+                const auto sample = _noise.generateComplexSample();
+                return T(static_cast<F>(sample.real()), static_cast<F>(sample.imag()));
+            } else {
+                return toOutputType(_noise.generateSample());
+            }
+        }
+
+        if (function_generator::isToneType(signal_type)) {
+            const double sv      = static_cast<double>(start_value); // tone offset (start_value = offset for tone types)
+            const double dur     = static_cast<double>(duration);
+            const bool   expired = dur > 0. && _currentTime > dur;
+            _currentTime += _timeTick;
+            if (expired) {
+                if constexpr (gr::signal::detail::is_complex_v<T>) {
+                    using F = typename T::value_type;
+                    return T(static_cast<F>(sv), F(0));
+                } else {
+                    return toOutputType(sv);
+                }
+            }
+            if constexpr (gr::signal::detail::is_complex_v<T>) {
+                using F           = typename T::value_type;
+                const auto sample = _tone.generateComplexSample();
+                return T(static_cast<F>(sample.real()), static_cast<F>(sample.imag()));
+            } else {
+                return toOutputType(_tone.generateSample());
+            }
+        }
+
+        const double sv  = static_cast<double>(start_value);
+        const double fv  = static_cast<double>(final_value);
+        const double dur = static_cast<double>(duration);
+
+        double value{};
         switch (signal_type) {
-        case Const: value = start_value; break;
-        case LinearRamp: value = _currentTime > duration.value ? final_value.value : start_value + (final_value - start_value) * (_currentTime / duration); break;
+        case Const: value = sv; break;
+        case LinearRamp: value = _currentTime > dur ? fv : sv + (fv - sv) * (_currentTime / dur); break;
         case ParabolicRamp: value = calculateParabolicRamp(); break;
         case CubicSpline: {
-            const T normalizedTime  = _currentTime / duration;
-            const T normalizedTime2 = T(3.) * std::pow(normalizedTime, T(2.));
-            const T normalizedTime3 = T(2.) * std::pow(normalizedTime, T(3.));
-            const T tmpValue        = (normalizedTime3 - normalizedTime2 + 1) * start_value + (-normalizedTime3 + normalizedTime2) * final_value;
-            value                   = _currentTime > duration ? final_value.value : tmpValue;
+            const double t  = _currentTime / dur;
+            const double t2 = 3. * t * t;
+            const double t3 = 2. * t * t * t;
+            value           = _currentTime > dur ? fv : (t3 - t2 + 1.) * sv + (-t3 + t2) * fv;
             break;
         }
-        case ImpulseResponse: value = (_currentTime < impulse_time0 || _currentTime > impulse_time0 + impulse_time1) ? start_value.value : final_value.value; break;
-        default: value = T(0.);
+        case ImpulseResponse: {
+            const double it0 = static_cast<double>(impulse_time0);
+            const double it1 = static_cast<double>(impulse_time1);
+            value            = (_currentTime < it0 || _currentTime > it0 + it1) ? sv : fv;
+            break;
+        }
+        default: value = 0.;
         }
         _currentTime += _timeTick;
-        return value;
+
+        if constexpr (gr::signal::detail::is_complex_v<T>) {
+            using F = typename T::value_type;
+            return T(static_cast<F>(value), F(0));
+        } else {
+            return toOutputType(value);
+        }
     }
 
-    [[nodiscard]] constexpr T calculateParabolicRamp() {
-        const T roundOnTime  = round_off_time;
-        const T linearLength = duration - (roundOnTime + round_off_time);
-        const T a            = (final_value - start_value) / (T(2.) * roundOnTime * (linearLength + round_off_time));
-        const T ar2          = a * std::pow(round_off_time, T(2.));
-        const T slope        = (final_value - start_value - T(2.) * ar2) / linearLength;
+private:
+    [[nodiscard]] double calculateParabolicRamp() const noexcept {
+        const double sv  = static_cast<double>(start_value);
+        const double fv  = static_cast<double>(final_value);
+        const double dur = static_cast<double>(duration);
+        const double rot = static_cast<double>(round_off_time);
 
-        if (_currentTime > duration) {
-            return final_value;
+        const double linearLength = dur - 2. * rot;
+        const double a            = (fv - sv) / (2. * rot * (linearLength + rot));
+        const double ar2          = a * rot * rot;
+        const double slope        = (fv - sv - 2. * ar2) / linearLength;
+
+        if (_currentTime > dur) {
+            return fv;
         }
-        if (_currentTime < roundOnTime) {
-            return start_value + a * std::pow(_currentTime, T(2.));
+        if (_currentTime < rot) {
+            return sv + a * _currentTime * _currentTime;
         }
-        if (_currentTime < duration - round_off_time) {
-            const T transitPoint1 = start_value + ar2;
-            return transitPoint1 + slope * (_currentTime - round_off_time);
+        if (_currentTime < dur - rot) {
+            return sv + ar2 + slope * (_currentTime - rot);
         }
-        const T shiftedTime   = _currentTime - (duration - round_off_time);
-        const T transitPoint2 = final_value - ar2;
-        return transitPoint2 + slope * shiftedTime - a * std::pow(shiftedTime, T(2.));
+        const double shiftedTime = _currentTime - (dur - rot);
+        return fv - ar2 + slope * shiftedTime - a * shiftedTime * shiftedTime;
+    }
+
+    void configureGeneratorsFromSettings() noexcept {
+        using enum function_generator::SignalType;
+        if (signal_type == UniformNoise || signal_type == TriangularNoise || signal_type == GaussianNoise) {
+            const auto noiseType = static_cast<gr::signal::NoiseType>(static_cast<int>(signal_type.value) - static_cast<int>(UniformNoise));
+            _noise.configure(noiseType, static_cast<double>(start_value), 0., seed); // start_value = noise amplitude
+        } else if (function_generator::isToneType(signal_type)) {
+            // for tone types: final_value = amplitude, start_value = offset (reused from ramp semantics)
+            _tone.configure(function_generator::toToneType(signal_type), static_cast<double>(frequency), static_cast<double>(sample_rate), static_cast<double>(phase), static_cast<double>(final_value), static_cast<double>(start_value));
+            _tone.reset();
+        }
+    }
+
+    static constexpr T toOutputType(double value) noexcept {
+        if constexpr (std::same_as<T, double>) {
+            return value;
+        } else if constexpr (std::floating_point<T>) {
+            return static_cast<T>(value);
+        } else if constexpr (std::integral<T>) {
+            return gr::signal::detail::clampToInt<T>(value);
+        } else {
+            return T(0); // unreachable for supported types
+        }
     }
 };
 
