@@ -3,12 +3,15 @@
 ## Getting the source
 
 Get the source from the GitHub Repository:
+
 ```bash
 git clone git@github.com:fair-acc/gnuradio4.git
 ```
 
 ## Building
+
 ### Docker CLI
+
 To just compile GNURadio4 without installing any dependencies you can just use the Docker image which is also used by our CI builds. The snippet below uses `docker run` to start the container with the current directory mapped into the container with the correct user and group IDs.
 It then compiles the project and runs the testsuite.
 Note that while the binaries inside of `./build` can be accessed on the host system, they are linked against the libraries of the container and will most probably not run on the host system.
@@ -28,12 +31,16 @@ me@aba123ef$ cmake -S . -B build
 me@aba123ef$ cmake --build build
 me@aba123ef$ ctest --test-dir build
 ```
+
 ### Docker IDE
+
 Some IDEs provide a simple way to specify a docker container to use for building and executing a project. For example in JetBrains CLion you can set this up in `Settings->Build,Execution,Deployment->Toolchains->[+]->Docker`, leaving everything as the default except for setting `Image` to `ghcr.io/fair-acc/gr4-build-container`.
 By default this will use the gcc-14 compiler included in the image, by setting `CXX` to `clang++-18` you can also use clang.
 
 ### Native
+
 To be able to natively compile some prerequisites have to be installed:
+
 - gcc >= 13 and/or clang >= 17
 - cmake >= 3.25.0
 - ninja (or GNU make)
@@ -54,16 +61,23 @@ me@host$ ctest --test-dir build
 
 ### Win32 Development Environment - MSYS2
 
-The current development environment in Windows uses `MSYS2`, specifically `UCRT64` and `CLANG64` to allow for building gnuradio4.  While this is not the desired end development environment for Windows, it currently builds and runs the testsuite.  To setup the `MSYS2` environment, navigate to https://www.msys2.org and download the installer, currently `msys2-x86_64-20251213.exe`.  `MSYS2` is a rolling release, so I hope these instructions continue to work as the code gets updated.  Chances are new build packages will cause small breakages, but hopefully not insurmountable ones.
+The current development environment in Windows uses `MSYS2`, specifically `UCRT64` and `CLANG64` to allow for building gnuradio4.
+While this is not the desired end development environment for Windows, it currently builds and runs the testsuite.
+To set up the `MSYS2` environment, navigate to https://www.msys2.org and download the installer, currently `msys2-x86_64-20251213.exe`.
+`MSYS2` is a rolling release, so I hope these instructions continue to work as the code gets updated.
+Chances are new build packages will cause small breakages but hopefully not insurmountable ones.
 
-To install `msys2`, follow the instructions on https://www.msys2.org.  Once installed, open either the `UCRT64` or `CLANG64` environment and update the environment via the pacman package installer.
+To install `msys2`, follow the instructions on https://www.msys2.org.
+Once installed, open either the `UCRT64` or `CLANG64` environment and update the environment via the pacman package installer.
 
 ```bash
 me@host UCRT64
 $ pacman -Syu
 ```
 
-This will likely require the closing of the terminal and reopening it.  Once the terminal is reopened we should install the deveopment programs.  The minimal requirement would be the developement programs for `UCRT64` as follows.
+This will likely require the closing of the terminal and reopening it.
+Once the terminal is reopened, we should install the development programs.
+The minimal requirement would be the development programs for `UCRT64` as follows.
 
 ```bash
 me@host UCRT64
@@ -75,7 +89,6 @@ $ pacman -S git moreutils \
                     mingw-w64-ucrt-x86_64-ninja \
                     mingw-w64-ucrt-x86_64-clang-tools-extra \
                     mingw-w64-ucrt-x86_64-dlfcn \
-                    mingw-w64-ucrt-x86_64-neovim \
                     mingw-w64-ucrt-x86_64-nodejs \
                     mingw-w64-ucrt-x86_64-soapysdr
 ```
@@ -92,14 +105,55 @@ $ pacman -S git moreutils \
                     mingw-w64-clang-x86_64-ninja \
                     mingw-w64-clang-x86_64-clang-tools-extra \
                     mingw-w64-clang-x86_64-dlfcn \
-                    mingw-w64-clang-x86_64-neovim \
                     mingw-w64-clang-x86_64-nodejs \
                     mingw-w64-clang-x86_64-soapysdr
 ```
 
-And of course both can be run to install both environments.  Of note the `MINGW64` environment is not being used.  The only difference between it and `UCRT64` is the use of the `msvcrt` C library instead of `ucrt`.  None the less there were problems building for this environment, so instructions for it are not included in this document.
+And of course, both can be run to install both environments.
+Of note the `MINGW64` environment is not being used.
+The only difference between it and `UCRT64` is the use of the `msvcrt` C library instead of `ucrt`.
+Nonetheless, there were problems building for this environment, so instructions for it are not included in this document.
 
-To configure `nvim` to properly use `clangd` and format your work properly, some modifications must be made to your the end of your `.bashrc`.  Add the following code snippet.
+Initial build for ucrt64 and clang64 environments.
+We will need to set `-DWARNINGS_AS_ERRORS=OFF` as both `g++` and `clang++` generate warnings during the build.
+Also, we need to set `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` to be able to use the full features of the language server protocol of `nvim`.
+
+```bash
+me@host CLANG64
+$ cmake -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_VERBOSE_MAKEFILE=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DWARNINGS_AS_ERRORS=OFF \
+            -DCMAKE_INSTALL_PREFIX=/home/$USER/gr4 \
+            -S . -B build
+```
+
+Then follow the rest of the build steps outlined above.
+Build gnuradio4 by running the following:
+
+```bash
+me@host CLANG64
+$ cmake --build build
+```
+
+Once the system is built, run the testsuite:
+
+```bash
+me@host CLANG64
+$ ctest --timeout 120 --test-dir build
+```
+
+#### Neovim based Development Environment
+
+The following optional section describes a way to set up a development environment with code completion and formatting support based on neovim.
+
+```bash
+me@host CLANG64
+$ pacman -S mingw-w64-clang-x86_64-neovim
+```
+
+To configure `nvim` to properly use `clangd` and format your work properly, some modifications must be made to the end of your `.bashrc`.
+Add the following code snippet:
 
 ```bash
 export LANG=en_US.UTF-8
@@ -121,7 +175,12 @@ export XDG_STATE_HOME="$HOME/.local/state"
 export XDG_RUNTIME_DIR="/tmp/$USER-runtime-dir"
 ```
 
-Now close the terminal and reopen a new one to update the bash environment variables.  The next program to configure is `neovim` or `nvim`.  To configure it, make the directory `$HOME/.config/nvim` and put the following script into it as `init.lua`.  When `nvim` is launched after the script is put in place, it will download and setup `lazy.nvim`, `mason.nvim`, `mason-lspconfig`, `nvim-lspconfig`, and `nvim-cmp`.  These helper programs or scripts for `nvim` allow it to use `clangd`, perform autocompletion, and load headers or examine funcitons by making a pair of keystrokes (gd) over the header or function name in the file you're editing,  It also allows for formatting CMakeLists.txt files properly.
+Now close the terminal and reopen a new one to update the bash environment variables.
+The next program to configure is `neovim` or `nvim`.
+To configure it, make the directory `$HOME/.config/nvim` and put the following script into it as `init.lua`.
+When `nvim` is launched after the script is put in place, it will download and setup `lazy.nvim`, `mason.nvim`, `mason-lspconfig`, `nvim-lspconfig`, and `nvim-cmp`.
+These helper programs or scripts for `nvim` allow it to use `clangd`, perform autocompletion, and load headers or examine functions by making a pair of keystrokes (gd) over the header or function name in the file you're editing.
+It also allows for formatting CMakeLists.txt files properly.
 
 ```bash
 -- Bootstrap lazy.nvim
@@ -295,36 +354,9 @@ CtrlShiftShortcuts=no
 CursorType=block
 ```
 
-Initial build for ucrt64 and clang64 environments.  We will need to set `-DWARNINGS_AS_ERRORS=OFF` as both `g++` and `clang++` generate warnings during the build.  Also we need to set `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` to be able to use the full features of the language server protocol of `nvim`.
-
-```bash
-me@host CLANG64
-$ cmake -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_VERBOSE_MAKEFILE=ON \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DWARNINGS_AS_ERRORS=OFF \
-            -DCMAKE_INSTALL_PREFIX=/home/$USER/gr4 \
-            -S . -B build
-```
-
-Once the `compile_commands.json` is created copy it to the root gnuradio directory so it can be used by nvim.
+Once the `compile_commands.json` is created in the cmake configure step, copy it to the root gnuradio directory so it can be used by nvim.
 
 ```bash
 me@host CLANG64
 $ cp build/compile_commands.json .
 ```
-
-Then follow the rest of the build steps outlined above.  Build gnuradio4 by running the following.
-
-```bash
-me@host CLANG64
-$ cmake --build build
-```
-
-Once the system is built, run the testsuite.
-
-```bash
-me@host CLANG64
-$ ctest --timeout 120 --test-dir build
-```
-
