@@ -47,7 +47,6 @@ GR_REGISTER_BLOCK(gr::testing::SettingsChangeRecorder, [T], [ int32_t, float, do
 enum class TestEnum { TEST_STATE1, TEST_STATE2, TEST_STATE3 };
 
 template<typename T>
-// struct SettingsChangeRecorder : public Block<SettingsChangeRecorder<T>, BlockingIO<true>, SupportedTypes<float, double>> { // TODO: reenable BlockingIO
 struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
     using Description = Doc<R""(some test doc documentation)"">;
     PortIn<T>  in{};

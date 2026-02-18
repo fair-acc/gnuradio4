@@ -39,7 +39,7 @@ GR_REGISTER_BLOCK("gr::blocks::soapy::SoapySimpleSource", gr::blocks::soapy::Soa
 GR_REGISTER_BLOCK("gr::blocks::soapy::SoapyDualSimpleSource", gr::blocks::soapy::SoapySimpleSource, ([T], 2UZ), [ uint8_t, int16_t, std::complex<float> ])
 
 template<typename T, std::size_t nPorts = std::dynamic_extent>
-struct SoapyBlock : public Block<SoapyBlock<T, nPorts> /*, BlockingIO<false>*/> {
+struct SoapyBlock : public Block<SoapyBlock<T, nPorts>> {
     using Description = Doc<R""(A Soapy source block that interfaces with SDR hardware using the SoapySDR library.
 This block supports multiple output ports and was tested against the 'rtlsdr' and 'lime' device driver.
 )"">;

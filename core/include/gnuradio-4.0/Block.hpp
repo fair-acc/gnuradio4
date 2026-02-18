@@ -428,46 +428,6 @@ public:
 
 namespace work {
 
-class Counter {
-    std::atomic_uint64_t encodedCounter{static_cast<uint64_t>(std::numeric_limits<gr::Size_t>::max()) << 32};
-
-public:
-    void increment(std::size_t workRequestedInc, std::size_t workDoneInc) {
-        uint64_t oldCounter;
-        uint64_t newCounter;
-        do {
-            oldCounter         = encodedCounter;
-            auto workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
-            auto workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
-            if (workRequested != std::numeric_limits<gr::Size_t>::max()) {
-                workRequested = static_cast<uint32_t>(std::min(static_cast<std::uint64_t>(workRequested) + workRequestedInc, static_cast<std::uint64_t>(std::numeric_limits<gr::Size_t>::max())));
-            }
-            workDone += static_cast<gr::Size_t>(workDoneInc);
-            newCounter = (static_cast<uint64_t>(workRequested) << 32) | workDone;
-        } while (!encodedCounter.compare_exchange_weak(oldCounter, newCounter));
-    }
-
-    std::pair<std::size_t, std::size_t> getAndReset() {
-        uint64_t oldCounter    = encodedCounter.exchange(0);
-        auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
-        auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
-        if (workRequested == std::numeric_limits<gr::Size_t>::max()) {
-            return {std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone)};
-        }
-        return {static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone)};
-    }
-
-    std::pair<std::size_t, std::size_t> get() const {
-        uint64_t oldCounter    = std::atomic_load_explicit(&encodedCounter, std::memory_order_acquire);
-        auto     workRequested = static_cast<gr::Size_t>(oldCounter >> 32);
-        auto     workDone      = static_cast<gr::Size_t>(oldCounter & 0xFFFFFFFF);
-        if (workRequested == std::numeric_limits<std::uint32_t>::max()) {
-            return {std::numeric_limits<std::size_t>::max(), static_cast<std::size_t>(workDone)};
-        }
-        return {static_cast<std::size_t>(workRequested), static_cast<std::size_t>(workDone)};
-    }
-};
-
 enum class Status {
     ERROR                     = -100, /// error occurred in the work function
     INSUFFICIENT_OUTPUT_ITEMS = -3,   /// work requires a larger output buffer to produce output
@@ -756,7 +716,6 @@ public:
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
 
-    constexpr static bool blockingIO             = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>..., std::is_same<BlockingIO<false>, Arguments>...>;
     constexpr static bool noDefaultTagForwarding = std::disjunction_v<std::is_same<NoDefaultTagForwarding, Arguments>...>;
     constexpr static bool backwardTagForwarding  = std::disjunction_v<std::is_same<BackwardTagForwarding, Arguments>...>;
 
@@ -772,11 +731,7 @@ public:
         return std::get<T>(*this);
     }
 
-    alignas(hardware_destructive_interference_size) std::atomic<std::size_t> ioRequestedWork{std::numeric_limits<std::size_t>::max()};
-    alignas(hardware_destructive_interference_size) work::Counter ioWorkDone{};
-    alignas(hardware_destructive_interference_size) std::atomic<work::Status> ioLastWorkStatus{work::Status::OK};
     alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
-    alignas(hardware_destructive_interference_size) std::atomic<bool> ioThreadRunning{false};
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
     using ResamplingLimit = Limits<1UL, std::numeric_limits<ResamplingValue>::max()>;
@@ -946,9 +901,6 @@ public:
             // Only happens in artificial cases likes qa_Block test. In practice blocks stay in zombie list if active
             emitErrorMessageIfAny("~Block()", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
         }
-        if constexpr (blockingIO) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
 
         // wait for done
         for (auto actualState = this->state(); lifecycle::isActive(actualState); actualState = this->state()) {
@@ -996,7 +948,7 @@ public:
         emitErrorMessageIfAny("init(..) -> INITIALISED", this->changeStateTo(lifecycle::State::INITIALISED));
     }
 
-    [[nodiscard]] constexpr bool isBlocking() const noexcept { return blockingIO; }
+    [[nodiscard]] constexpr bool isBlocking() const noexcept { return false; }
 
     [[nodiscard]] constexpr bool inputTagsPresent() const noexcept { return !_mergedInputTag.map.empty(); };
 
@@ -1726,10 +1678,8 @@ protected:
 
         applyChangedSettings(); // apply settings even if the block is already stopped
 
-        if constexpr (!blockingIO) { // N.B. no other thread/constraint to consider before shutting down
-            if (this->state() == lifecycle::State::REQUESTED_STOP) {
-                emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-            }
+        if (this->state() == lifecycle::State::REQUESTED_STOP) {
+            emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
         }
 
         if constexpr (TOutputTypes::size.value > 0UZ) {
@@ -1930,9 +1880,6 @@ protected:
             if (performedWork > 0UZ) {
                 progress->incrementAndGet();
             }
-            if constexpr (blockingIO) {
-                progress->notify_all();
-            }
         }
         return {requestedWork, performedWork, userReturnStatus};
     } // end: work::Result workInternal(std::size_t requestedWork) { ... }
@@ -1946,84 +1893,12 @@ public:
      * @return { requested_work, performed_work, status}
      */
     template<typename = void>
-    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(!blockingIO) // regular non-blocking call
-    {
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
         if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
             return {requestedWork, 0UZ, gr::work::Status::OK};
         } else {
             return workInternal(requestedWork);
         }
-    }
-
-    work::Status invokeWork()
-    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock)
-    {
-        auto [work_requested, work_done, last_status] = workInternal(std::atomic_load_explicit(&ioRequestedWork, std::memory_order_acquire));
-        ioWorkDone.increment(work_requested, work_done);
-        ioLastWorkStatus.exchange(last_status, std::memory_order_relaxed);
-        return last_status;
-    }
-
-    /**
-     * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
-     *
-     * @param requested_work: usually the processed number of input samples, but could be any other metric as long as
-     * requested_work limit as an affine relation with the returned performed_work.
-     * @return { requested_work, performed_work, status}
-     */
-    template<typename = void>
-    work::Result work(std::size_t requested_work = std::numeric_limits<std::size_t>::max()) noexcept
-    requires(blockingIO && Derived::blockCategory == block::Category::NormalBlock) // regular blocking call (e.g. wating on HW, timer, blocking for any other reasons) -> this should be an exceptional use
-    {
-        constexpr bool useIoThread = std::disjunction_v<std::is_same<BlockingIO<true>, Arguments>...>;
-        std::atomic_store_explicit(&ioRequestedWork, requested_work, std::memory_order_release);
-
-        bool expectedThreadState = false;
-        if (lifecycle::isActive(this->state()) && this->ioThreadRunning.compare_exchange_strong(expectedThreadState, true, std::memory_order_acq_rel)) {
-            if constexpr (useIoThread) { // use graph-provided ioThreadPool
-                std::shared_ptr<thread_pool::TaskExecutor> executor = gr::thread_pool::Manager::instance().get(compute_domain);
-                if (!executor) {
-                    emitErrorMessage("work(..)", std::format("blockingIO with useIoThread - no ioThreadPool being set or '{}' is unknown", compute_domain));
-                    return {requested_work, 0UZ, work::Status::ERROR};
-                }
-
-                executor->execute([this]() {
-                    assert(lifecycle::isActive(this->state()));
-                    gr::thread_pool::thread::setThreadName(gr::meta::shorten_type_name(this->unique_name));
-
-                    lifecycle::State actualThreadState = this->state();
-                    while (lifecycle::isActive(actualThreadState)) {
-                        // execute ten times before testing actual state -- minimises overhead atomic load to work execution if the latter is a noop or very fast to execute
-                        for (std::size_t testState = 0UZ; testState < 10UZ; ++testState) {
-                            if (invokeWork() == work::Status::DONE) {
-                                actualThreadState = lifecycle::State::REQUESTED_STOP;
-                                emitErrorMessageIfAny("REQUESTED_STOP -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-                                break;
-                            }
-                        }
-                        actualThreadState = this->state();
-                    }
-                    emitErrorMessageIfAny("-> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-                    ioThreadRunning.store(false);
-                });
-            } else { // use user-provided ioThreadPool
-                // let user call 'work' explicitly and set both 'ioWorkDone' and 'ioLastWorkStatus'
-            }
-        }
-        if constexpr (!useIoThread) {
-            const bool blockIsActive = lifecycle::isActive(this->state());
-            if (!blockIsActive) {
-                ioLastWorkStatus.exchange(work::Status::DONE, std::memory_order_relaxed);
-            }
-        }
-
-        const auto& [accumulatedRequestedWork, performedWork] = ioWorkDone.getAndReset();
-        // TODO: this is just "working" solution for deadlock with emscripten, need to be investigated further
-#if defined(__EMSCRIPTEN__)
-        std::this_thread::sleep_for(std::chrono::nanoseconds(1));
-#endif
-        return {accumulatedRequestedWork, performedWork, ioLastWorkStatus.load()};
     }
 
     void processMessages([[maybe_unused]] const MsgPortInBuiltin& port, std::span<const Message> messages) {
@@ -2197,14 +2072,13 @@ namespace gr {
  */
 template<BlockLike TBlock>
 [[nodiscard]] /*constexpr*/ std::string blockDescription() noexcept {
-    using DerivedBlock         = typename TBlock::derived_t;
-    using ArgumentList         = typename TBlock::block_template_parameters;
-    using SupportedTypes       = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
-    constexpr bool kIsBlocking = ArgumentList::template contains<BlockingIO<true>> || ArgumentList::template contains<BlockingIO<false>>;
+    using DerivedBlock   = typename TBlock::derived_t;
+    using ArgumentList   = typename TBlock::block_template_parameters;
+    using SupportedTypes = typename ArgumentList::template find_or_default<is_supported_types, DefaultSupportedTypes>;
 
-    // re-enable once string and constexpr static is supported by all compilers
-    /*constexpr*/ std::string ret = std::format("# {}\n{}\n{}\n**supported data types:**", //
-        gr::meta::type_name<DerivedBlock>(), TBlock::description, kIsBlocking ? "**BlockingIO**\n_i.e. potentially non-deterministic/non-real-time behaviour_\n" : "");
+    // re-enable once all compilers support string and constexpr static
+    /*constexpr*/ std::string ret = std::format("# {}\n{}\n**supported data types:**", //
+        gr::meta::type_name<DerivedBlock>(), TBlock::description);
     gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto&& t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
         ret += std::format("{}:{} ", index, type_name);

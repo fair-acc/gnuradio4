@@ -1121,54 +1121,6 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
     };
 };
 
-const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
-    using namespace boost::ut;
-    using namespace gr;
-    using namespace gr::testing;
-    using namespace std::chrono_literals;
-    using namespace gr::basic;
-
-    "Test BlockingIO"_test = [] {
-        // This test demonstrates how to properly verify that a BlockingIO block has finished execution.
-        // The main issue is that BlockingIO blocks run in a separate thread and may continue executing for some time after join().
-        // Standard detection mechanisms might not always accurately determine the block's completion status.
-        // Therefore, we need to implement additional checks to ensure that the BlockingIO block has fully stopped.
-
-        gr::Graph flow;
-        // ClockSource has a BlockingIO attribute
-        auto&                                               source = flow.emplaceBlock<ClockSource<float>>({{gr::tag::SAMPLE_RATE.shortKey(), 10.f}, {"n_samples_max", gr::Size_t(0)}});
-        TagMonitor<float, ProcessFunction::USE_PROCESS_ONE> d(gr::property_map{});
-        auto&                                               monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
-        auto&                                               sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
-
-        gr::scheduler::Simple scheduler;
-        if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        auto client = gr::test::thread_pool::execute("qa_Block::Client", [&scheduler] {
-            const auto startTime = std::chrono::steady_clock::now();
-            auto       isExpired = [&startTime] { return std::chrono::steady_clock::now() - startTime > 3s; };
-            bool       expired   = false;
-            while (!expired) {
-                expired = isExpired();
-                std::this_thread::sleep_for(100ms);
-            }
-            scheduler.requestStop();
-        });
-
-        auto schedulerThread = gr::test::thread_pool::executeScheduler("qa_Block::Sched", scheduler);
-        client.wait();
-
-        // Additional check to be sure that ClockSource is in STOPPED state.
-        while (source.state() != lifecycle::State::STOPPED) {
-            std::this_thread::sleep_for(10ms);
-        }
-        schedulerThread.wait();
-    };
-};
-
 const boost::ut::suite<"reflFirstTypeName Tests"> _reflFirstTypeNameTests = [] {
     using namespace boost::ut;
     using namespace gr::detail;

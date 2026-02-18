@@ -63,14 +63,6 @@ static_assert(!Documentation<EmptyUnit>);
 struct Visible {};
 
 /**
- * @brief Annotates block, indicating to calling schedulers that it may block due IO.
- */
-template<bool UseIoThread = true> // TODO: replace bool by an enum or tag type: 'BlockingIO<false>' is very misleading
-struct BlockingIO {
-    [[maybe_unused]] constexpr static bool useIoThread = UseIoThread;
-};
-
-/**
  * @brief Disable default tag forwarding.
  *
  * There are two types of tag forwarding: (1) default All-To-All, and (2) user-implemented.
