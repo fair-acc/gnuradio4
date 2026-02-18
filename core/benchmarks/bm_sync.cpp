@@ -54,13 +54,13 @@ void runTest() {
             const std::uint64_t time  = iT * 100;
             sources[i]->_tags.push_back(genSyncTag(index, time));
         }
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(*sources[i], "out"s, perfBlock, "inputs#"s + std::to_string(i)));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, perfBlock, "inputs#"s + std::to_string(i)));
     }
 
     for (std::size_t i = 0; i < nPorts; i++) {
         property_map sinkParams = {{"log_samples", false}, {"log_tags", false}, {"verbose_console", false}, {"disconnect_on_done", false}};
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(perfBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(perfBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
     }
 
     gr::scheduler::Simple sched;
@@ -93,8 +93,8 @@ void runTestPureCopy() {
         property_map sinkParams = {{"log_samples", false}, {"log_tags", false}, {"verbose_console", false}, {"disconnect_on_done", false}};
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
 
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(*sources[i], "out"s, *copies[i], "in"s));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(*copies[i], "out"s, *sinks[i], "in"s));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, *copies[i], "in"s));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*copies[i], "out"s, *sinks[i], "in"s));
     }
 
     gr::scheduler::Simple sched;

@@ -453,9 +453,9 @@ public:
         return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
-    ConnectionResult connect2(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
-        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,             //
-        EdgeParameters                        parameters = {},                                    //
+    ConnectionResult connect(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
+        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,            //
+        EdgeParameters                        parameters = {},                                   //
         [[maybe_unused]] std::source_location location   = std::source_location::current()) {
 
         const bool isArithmeticLike = sourceBlock->dynamicOutputPort(sourcePort).portInfo().isValueTypeArithmeticLike;
@@ -469,9 +469,9 @@ public:
     }
 
     template<gr::BlockLike SourceBlock, gr::BlockLike DestinationBlock>
-    ConnectionResult connect2(SourceBlock& sourceBlock, PortDefinition sourcePort, //
-        DestinationBlock& destinationBlock, PortDefinition destinationPort,        //
-        EdgeParameters       parameters = {},                                      //
+    ConnectionResult connect(SourceBlock& sourceBlock, PortDefinition sourcePort, //
+        DestinationBlock& destinationBlock, PortDefinition destinationPort,       //
+        EdgeParameters       parameters = {},                                     //
         std::source_location location   = std::source_location::current()) {
 
         std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
@@ -482,13 +482,13 @@ public:
             return ConnectionResult::FAILED;
         }
 
-        return connect2(*sourceBlockModel, std::move(sourcePort), *destinationBlockModel, std::move(destinationPort), std::move(parameters), location);
+        return connect(*sourceBlockModel, std::move(sourcePort), *destinationBlockModel, std::move(destinationPort), std::move(parameters), location);
     }
 
     template<gr::BlockLike SourceBlock, gr::PortLike SourcePort, gr::BlockLike DestinationBlock, gr::PortLike DestinationPort>
-    ConnectionResult connect2(SourceBlock& sourceBlock, SourcePort& sourcePort, //
-        DestinationBlock& destinationBlock, DestinationPort& destinationPort,   //
-        EdgeParameters       parameters = {},                                   //
+    ConnectionResult connect(SourceBlock& sourceBlock, SourcePort& sourcePort, //
+        DestinationBlock& destinationBlock, DestinationPort& destinationPort,  //
+        EdgeParameters       parameters = {},                                  //
         std::source_location location   = std::source_location::current()) {
 
         std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);

@@ -47,8 +47,8 @@ const boost::ut::suite TagTests = [] {
         };
         auto& sink1 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink1"}});
         auto& sink2 = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink2"}});
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(src, src.out, sink1, sink1.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(src, src.out, sink2, sink2.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, sink1, sink1.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, sink2, sink2.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -182,8 +182,8 @@ const boost::ut::suite TagTests = [] {
         auto&                signalGen = testGraph.emplaceBlock<SignalGenerator<float>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"name", "SignalGenerator"}});
         auto&                sink      = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"verbose_console", true}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(clockSrc, clockSrc.out, signalGen, signalGen.clk_in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(signalGen, signalGen.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(clockSrc, clockSrc.out, signalGen, signalGen.clk_in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(signalGen, signalGen.out, sink, sink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -265,8 +265,8 @@ const boost::ut::suite TagTests = [] {
 
         auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(clockSrc, clockSrc.out, funcGen, funcGen.clk_in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(funcGen, funcGen.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(clockSrc, clockSrc.out, funcGen, funcGen.clk_in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(funcGen, funcGen.out, sink, sink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -333,8 +333,8 @@ const boost::ut::suite TagTests = [] {
         expect(eq(funcGen.settings().getNStoredParameters(), 9UZ)); // +1 for default
         auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(clockSrc, clockSrc.out, funcGen, funcGen.clk_in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(funcGen, funcGen.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(clockSrc, clockSrc.out, funcGen, funcGen.clk_in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(funcGen, funcGen.out, sink, sink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -498,8 +498,8 @@ const boost::ut::suite TagTests = [] {
         expect(funcGen.settings().set(createConstPropertyMap("", 1.f), SettingsCtx{now, "3"}).empty());
 
         auto& sink = testGraph.emplaceBlock<gr::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(clockSrc, clockSrc.out, funcGen, funcGen.clk_in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(funcGen, funcGen.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(clockSrc, clockSrc.out, funcGen, funcGen.clk_in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(funcGen, funcGen.out, sink, sink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
