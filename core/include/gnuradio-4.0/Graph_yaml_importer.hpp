@@ -270,7 +270,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         auto dst = parseBlockPort(connection[2], connection[3]);
 
         if (connection.size() == 4) {
-            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, undefined_size, graph::defaultWeight, graph::defaultEdgeName, location);
+            resultGraph.connect2(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = undefined_size, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location);
         } else {
             std::size_t minBufferSize{};
             pmt::ValueVisitor([&minBufferSize]<typename TValue>(const TValue& value) {
@@ -283,7 +283,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 }
             }).visit(connection[4]);
 
-            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, minBufferSize, graph::defaultWeight, graph::defaultEdgeName, location);
+            resultGraph.connect2(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = minBufferSize, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location);
         }
     } // for connections
 }

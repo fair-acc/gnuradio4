@@ -60,18 +60,18 @@ void execute_selector_test(TestParams params, std::source_location location = st
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", params.nSamples}, {"values", params.inValues[i]}, {"disconnect_on_done", false}})));
         expect(sources[i]->settings().applyStagedParameters().forwardParameters.empty());
         sources[i]->_tags = params.inTags[i];
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, *selector, "inputs#"s + std::to_string(i)));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect2(*sources[i], "out"s, *selector, "inputs#"s + std::to_string(i)));
     }
 
     for (gr::Size_t i = 0; i < nSinks; ++i) {
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", false}})));
         expect(sinks[i]->settings().applyStagedParameters().forwardParameters.empty());
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect2(*selector, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
     }
 
     TagSink<double, ProcessFunction::USE_PROCESS_ONE>* monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", false}}));
     expect(monitorSink->settings().applyStagedParameters().forwardParameters.empty());
-    expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
+    expect(gr::ConnectionResult::SUCCESS == graph.connect2(*selector, "monitor"s, *monitorSink, "in"s));
 
     gr::scheduler::Simple sched;
     if (auto ret = sched.exchange(std::move(graph)); !ret) {

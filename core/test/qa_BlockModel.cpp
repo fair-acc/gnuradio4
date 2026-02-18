@@ -278,7 +278,7 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
 
         // FIXME: discuss how to connect from/to blocks in different (sub-)graphs
         skip / "connect source (in root graph) with sink (in nested graph)"_test = [&rootGraph, &sourceBlock, &sinkBlock, &wrappedRootGraph] {
-            expect(eq(rootGraph->connect<"out">(sourceBlock).to<"in">(sinkBlock), ConnectionResult::SUCCESS));
+            expect(eq(rootGraph->connect2(sourceBlock, sourceBlock.out, sinkBlock, sinkBlock.in), ConnectionResult::SUCCESS));
             rootGraph->connectPendingEdges();
             expect(!wrappedRootGraph->blocks().empty());
             expect(eq(wrappedRootGraph->edges().size(), 1UZ));

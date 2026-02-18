@@ -271,8 +271,8 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         auto&     source    = flow.emplaceBlock<CountingSource<T>>({{"n_samples_max", 10 * decimationFactor}});
         auto&     decimator = flow.emplaceBlock<gr::filter::Decimator<T>>({{"decim", decimationFactor}});
         auto&     sink      = flow.emplaceBlock<CountingSink<T>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(decimator)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect2(source, source.out, decimator, decimator.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect2(decimator, decimator.out, sink, sink.in)));
 
         gr::scheduler::Simple<> sched;
         ;

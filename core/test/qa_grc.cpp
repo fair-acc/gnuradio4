@@ -548,10 +548,10 @@ connections:
         auto&     vectorSource0 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource0"}});
         auto&     vectorSource1 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource1"}});
 
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource0, "outA#0", vectorSink, "inB#1")));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource0, "outB#0", vectorSink, "inA#0")));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource1, "outA#1", vectorSink, "inB#0")));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource1, "outB#1", vectorSink, "inA#1")));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource0, "outA#0"s, vectorSink, "inB#1"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource0, "outB#0"s, vectorSink, "inA#0"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource1, "outA#1"s, vectorSink, "inB#0"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource1, "outB#1"s, vectorSink, "inA#1"s)));
 
         expect(graph1.reconnectAllEdges());
 

@@ -36,7 +36,7 @@ const boost::ut::suite PluginSchedulerTests = [] {
         auto& source = testGraph.emplaceBlock("good::fixed_source<float64>", {});
         auto& sink   = testGraph.emplaceBlock("good::cout_sink<float64>", {});
 
-        auto connection = testGraph.connect(source, 0, sink, 0);
+        auto connection = testGraph.connect2(source, 0, sink, 0);
         expect(connection == gr::ConnectionResult::SUCCESS);
 
         auto scheduler = context->loader.instantiateScheduler("good::GoodMathScheduler");

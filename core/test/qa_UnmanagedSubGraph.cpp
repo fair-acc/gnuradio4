@@ -49,7 +49,7 @@ DemoSubGraphResult<T> createDemoSubGraph() {
     gr::Graph             graph;
     result.pass1 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.pass2 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
-    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, PortDefinition("out"), *result.pass2, PortDefinition("in"))));
+    expect(eq(ConnectionResult::SUCCESS, graph.connect2(*result.pass1, "out", *result.pass2, "in")));
     result.setGraph(std::move(graph));
     return result;
 }
@@ -61,7 +61,7 @@ DemoSubGraphResult<T> createDemoSubGraphWithSettings() {
     result.pass1            = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.pass2            = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.settingsRecorder = std::addressof(graph.template emplaceBlock<gr::testing::SettingsChangeRecorder<T>>());
-    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, PortDefinition("out"), *result.pass2, PortDefinition("in"))));
+    expect(eq(ConnectionResult::SUCCESS, graph.connect2(*result.pass1, "out", *result.pass2, "in")));
     result.setGraph(std::move(graph));
     return result;
 }
@@ -190,8 +190,10 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         expect(demo.graph->exportPort(true, demo.pass1->unique_name, PortDirection::INPUT, "in", "inExp").has_value());
         expect(demo.graph->exportPort(true, demo.pass2->unique_name, PortDirection::OUTPUT, "out", "outExp").has_value());
 
-        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(source, PortDefinition("out"), demo.graph, PortDefinition("inExp"))));
-        expect(eq(ConnectionResult::SUCCESS, initGraph.connect(demo.graph, PortDefinition("outExp"), sink, PortDefinition("in"))));
+        auto sourceBlock = gr::graph::findBlock(initGraph, source).value();
+        auto sinkBlock   = gr::graph::findBlock(initGraph, sink).value();
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect2(sourceBlock, "out", demo.graph, "inExp")));
+        expect(eq(ConnectionResult::SUCCESS, initGraph.connect2(demo.graph, "outExp", sinkBlock, "in")));
         expect(eq(initGraph.edges().size(), 2UZ));
         expect(eq(demo.graph->edges().size(), 1UZ));
 
