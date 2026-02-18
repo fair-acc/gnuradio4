@@ -67,8 +67,6 @@ const boost::ut::suite TagTests = [] {
 
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
 
-        // connect UI sink -- doesn't strictly need to be part of the graph due to BlockingIO<false> definition
-        // but the present 'connect' API assumes it to be part of the Graph
         auto& uiSink = testGraph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "BasicImChartSink"}});
         expect(uiSink.meta_information.value.contains("Drawable")) << "drawable";
 
