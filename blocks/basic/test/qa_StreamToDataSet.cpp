@@ -71,21 +71,21 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 
         auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
         auto& uiSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "ImChartSinkFull"}});
-        expect(eq(ConnectionResult::SUCCESS, graph.connect2(clockSrc, clockSrc.out, funcGen, funcGen.clk_in))) << "connect clockSrc->funcGen";
-        expect(eq(ConnectionResult::SUCCESS, graph.connect2(funcGen, funcGen.out, sink, sink.in))) << "connect funcGen->sink";
-        expect(eq(ConnectionResult::SUCCESS, graph.connect2(funcGen, funcGen.out, uiSink, uiSink.in))) << "connect funcGen->uiSink";
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(clockSrc, clockSrc.out, funcGen, funcGen.clk_in))) << "connect clockSrc->funcGen";
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(funcGen, funcGen.out, sink, sink.in))) << "connect funcGen->sink";
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(funcGen, funcGen.out, uiSink, uiSink.in))) << "connect funcGen->uiSink";
 
         const property_map blockSettings = {{"name", "StreamToDataSet"}, {"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};
         //
         auto& streamFilter  = graph.emplaceBlock<StreamFilter<float>>(blockSettings);
         auto& dataSetFilter = graph.emplaceBlock<StreamToDataSet<float>>(blockSettings);
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect2(funcGen, funcGen.out, streamFilter, streamFilter.in))) << "connect funcGen->streamFilter";
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect2(funcGen, funcGen.out, dataSetFilter, dataSetFilter.in))) << "connect funcGen->dataSetFilter";
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(funcGen, funcGen.out, streamFilter, streamFilter.in))) << "connect funcGen->streamFilter";
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(funcGen, funcGen.out, dataSetFilter, dataSetFilter.in))) << "connect funcGen->dataSetFilter";
 
         auto& uiFilteredStreamSink = graph.emplaceBlock<testing::ImChartMonitor<float>>({{"name", "ImChartFilteredStream"}});
-        expect(eq(ConnectionResult::SUCCESS, graph.connect2(streamFilter, streamFilter.out, uiFilteredStreamSink, uiFilteredStreamSink.in))) << "connect funcGen->uiFilteredStreamSink";
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(streamFilter, streamFilter.out, uiFilteredStreamSink, uiFilteredStreamSink.in))) << "connect funcGen->uiFilteredStreamSink";
         auto& uiDataSetSink = graph.emplaceBlock<testing::ImChartMonitor<DataSet<float>>>({{"name", "ImChartDataSet"}});
-        expect(eq(ConnectionResult::SUCCESS, graph.connect2(dataSetFilter, dataSetFilter.out, uiDataSetSink, uiDataSetSink.in))) << "connect funcGen->uiDataSetSink";
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(dataSetFilter, dataSetFilter.out, uiDataSetSink, uiDataSetSink.in))) << "connect funcGen->uiDataSetSink";
 
         std::thread uiLoop([&uiSink, &uiFilteredStreamSink, &uiDataSetSink]() {
             bool drawUI = true;
@@ -156,8 +156,8 @@ const boost::ut::suite<"StreamToStream test"> streamToStreamTest = [] {
         const property_map blockSettings        = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}};
         auto&              filterStreamToStream = graph.emplaceBlock<StreamFilter<float>>(blockSettings);
         auto&              streamSink           = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "streamSink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect2(tagSrc, tagSrc.out, filterStreamToStream, filterStreamToStream.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect2(filterStreamToStream, filterStreamToStream.out, streamSink, streamSink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(tagSrc, tagSrc.out, filterStreamToStream, filterStreamToStream.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(filterStreamToStream, filterStreamToStream.out, streamSink, streamSink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -230,8 +230,8 @@ const boost::ut::suite<"StreamToDataSet test"> streamToDataSetTest = [] {
         const property_map blockSettings         = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};
         auto&              filterStreamToDataSet = graph.emplaceBlock<StreamToDataSet<float>>(blockSettings);
         auto&              dataSetSink           = graph.emplaceBlock<TagSink<DataSet<float>, ProcessFunction::USE_PROCESS_BULK>>({{"name", "dataSetSink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect2(tagSrc, tagSrc.out, filterStreamToDataSet, filterStreamToDataSet.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect2(filterStreamToDataSet, filterStreamToDataSet.out, dataSetSink, dataSetSink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(tagSrc, tagSrc.out, filterStreamToDataSet, filterStreamToDataSet.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(filterStreamToDataSet, filterStreamToDataSet.out, dataSetSink, dataSetSink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {

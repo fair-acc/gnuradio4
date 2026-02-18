@@ -89,11 +89,11 @@ int main(int argc, char* argv[]) {
     auto& sinkRate = testGraph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkRate"}, {"log_samples", false}, {"log_tags", false}});
 
     // src -> monitorBulk -> monitorOne -> monitorPerformance
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(src, src.out, monitorBulk, monitorBulk.in)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(monitorBulk, monitorBulk.out, monitorOne, monitorOne.in)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(monitorOne, monitorOne.out, monitorPerformance, monitorPerformance.in)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(monitorPerformance, monitorPerformance.outRes, sinkRes, sinkRes.in)));
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect2(monitorPerformance, monitorPerformance.outRate, sinkRate, sinkRate.in)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, monitorBulk, monitorBulk.in)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorBulk, monitorBulk.out, monitorOne, monitorOne.in)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorOne, monitorOne.out, monitorPerformance, monitorPerformance.in)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorPerformance, monitorPerformance.outRes, sinkRes, sinkRes.in)));
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorPerformance, monitorPerformance.outRate, sinkRate, sinkRate.in)));
 
     gr::scheduler::Simple<> sched;
     if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

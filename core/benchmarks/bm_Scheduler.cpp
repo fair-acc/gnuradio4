@@ -38,13 +38,13 @@ void create_cascade(gr::Graph& testGraph, Sink& src, Source& sink, std::size_t d
 
     for (std::size_t i = 0; i < mult1.size(); i++) {
         if (i == 0) {
-            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect2(src, "out"s, *mult1[i], "in"s, {.minBufferSize = N_BUFFER_SIZE})));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, "out"s, *mult1[i], "in"s, {.minBufferSize = N_BUFFER_SIZE})));
         } else {
-            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect2(*mult2[i - 1], "out"s, *mult1[i], "in"s, {.minBufferSize = N_BUFFER_SIZE})));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(*mult2[i - 1], "out"s, *mult1[i], "in"s, {.minBufferSize = N_BUFFER_SIZE})));
         }
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect2(*mult1[i], "out"s, *mult2[i], "in"s, {.minBufferSize = N_BUFFER_SIZE})));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(*mult1[i], "out"s, *mult2[i], "in"s, {.minBufferSize = N_BUFFER_SIZE})));
     }
-    expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect2(*mult2[mult2.size() - 1], "out"s, sink, "in"s, {.minBufferSize = N_BUFFER_SIZE})));
+    expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(*mult2[mult2.size() - 1], "out"s, sink, "in"s, {.minBufferSize = N_BUFFER_SIZE})));
 }
 
 template<typename T>
@@ -240,73 +240,73 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
             std::string blockName = std::format("sim{}", depth - i);
             auto&       simBlock  = graph.emplaceBlock<SimCompute<T>>({{"name", blockName}});
             if (i == 0UZ) {
-                expect(eq(graph.connect2(simBlock, "out"s, sink, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+                expect(eq(graph.connect(simBlock, "out"s, sink, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
             } else {
-                expect(eq(graph.connect2(simBlock, "out"s, *lastBlock, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+                expect(eq(graph.connect(simBlock, "out"s, *lastBlock, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
             }
             lastBlock = &simBlock;
         }
         auto& src = createSource<T>(graph);
-        expect(eq(graph.connect2(src, "out"s, *lastBlock, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(src, "out"s, *lastBlock, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
     } break;
     case GraphTopology::FORKED: { // deliberately 4 sim blocks to mimic the total time of the linear test-case
         auto& src = createSource<T>(graph);
         // branch #1
         auto& simBlock1 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim1"}});
-        expect(eq(graph.connect2(src, "out"s, simBlock1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(src, "out"s, simBlock1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         // branch #2
         auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim2"}});
-        expect(eq(graph.connect2(src, "out"s, simBlock2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(src, "out"s, simBlock2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim3"}});
-        expect(eq(graph.connect2(simBlock2, "out"s, simBlock3, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock2, "out"s, simBlock3, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         // merge branch #1 & #2
         auto& adder = graph.emplaceBlock<gr::blocks::math::Add<T>>({{"name", "adder"}, {"n_inputs", 2U}});
-        expect(eq(graph.connect2(simBlock1, "out"s, adder, "in#0"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
-        expect(eq(graph.connect2(simBlock3, "out"s, adder, "in#1"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock1, "out"s, adder, "in#0"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock3, "out"s, adder, "in#1"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
 
         auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}});
-        expect(eq(graph.connect2(adder, "out"s, simBlock4, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(adder, "out"s, simBlock4, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
 
         // final sink
         auto& sink = createSink<T>(graph);
-        expect(eq(graph.connect2(simBlock4, "out"s, sink, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock4, "out"s, sink, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
     } break;
     case GraphTopology::SPLIT: { // deliberately 4 sim blocks to mimic the total time of the linear test-case
         auto& src       = createSource<T>(graph);
         auto& simBlock1 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim1"}});
-        expect(eq(graph.connect2(src, "out"s, simBlock1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(src, "out"s, simBlock1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim2"}});
-        expect(eq(graph.connect2(simBlock1, "out"s, simBlock2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock1, "out"s, simBlock2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim3"}});
-        expect(eq(graph.connect2(simBlock2, "out"s, simBlock3, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock2, "out"s, simBlock3, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}});
-        expect(eq(graph.connect2(simBlock3, "out"s, simBlock4, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock3, "out"s, simBlock4, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
 
         auto& sink1 = createSink<T>(graph, 0UZ, false);
-        expect(eq(graph.connect2(simBlock2, "out"s, sink1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock2, "out"s, sink1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& sink2 = createSink<T>(graph, 1UZ, true);
-        expect(eq(graph.connect2(simBlock4, "out"s, sink2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock4, "out"s, sink2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
     } break;
     case GraphTopology::FEEDBACK: {              // graph with feedback edge
         constexpr float targetThroughput = 10e9; // 10 GS/s disables CPU rate limit for testing until further improved
         auto&           src              = createSource<T>(graph);
         auto&           simBlock1        = graph.emplaceBlock<SimCompute<T>>({{"name", "sim1"}, {"target_throughput", targetThroughput}});
-        expect(eq(graph.connect2(src, "out"s, simBlock1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(src, "out"s, simBlock1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         gr::property_map prop_auto{{"layout_pref", "auto"}};
         auto&            adder = graph.emplaceBlock<gr::blocks::math::Add<T>>({{"name", "Σ"}, {"n_inputs", 2U}, {"ui_constraints", prop_auto}});
-        expect(eq(graph.connect2(simBlock1, "out"s, adder, "in#0"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock1, "out"s, adder, "in#0"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& simBlock2 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim2"}, {"target_throughput", targetThroughput}});
-        expect(eq(graph.connect2(adder, "out"s, simBlock2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(adder, "out"s, simBlock2, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& simBlock3 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim3"}, {"target_throughput", targetThroughput}});
-        expect(eq(graph.connect2(simBlock2, "out"s, simBlock3, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock2, "out"s, simBlock3, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
         auto& simBlock4 = graph.emplaceBlock<SimCompute<T>>({{"name", "sim4"}, {"target_throughput", targetThroughput}});
-        expect(eq(graph.connect2(simBlock3, "out"s, simBlock4, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock3, "out"s, simBlock4, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
 
         // feedback edge
-        expect(eq(graph.connect2(simBlock4, "out"s, adder, "in#1"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock4, "out"s, adder, "in#1"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
 
         auto& sink1 = createSink<T>(graph, gr::meta::invalid_index, false);
-        expect(eq(graph.connect2(simBlock3, "out"s, sink1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(simBlock3, "out"s, sink1, "in"s, {.minBufferSize = N_BUFFER_SIZE}), gr::ConnectionResult::SUCCESS));
     } break;
     default: {
         create_cascade<T>(graph, createSource<T>(graph), createSink<T>(graph, 0UZ), 3UZ);

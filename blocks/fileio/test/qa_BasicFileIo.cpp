@@ -49,7 +49,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
 
         auto& source   = flow.emplaceBlock<ConstantSource<DataType>>({{"n_samples_max", nSamples}});
         auto& fileSink = flow.emplaceBlock<BasicFileSink<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"max_bytes_per_file", maxFileSize}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect2(source, source.out, fileSink, fileSink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(source, source.out, fileSink, fileSink.in)));
 
         scheduler sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -90,7 +90,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         auto&       fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}});
         auto&       sink       = flow.emplaceBlock<CountingSink<DataType>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect2(fileSource, fileSource.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(fileSource, fileSource.out, sink, sink.in)));
 
         scheduler schedRead;
         if (auto ret = schedRead.exchange(std::move(flow)); !ret) {
@@ -116,7 +116,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         auto&                fileSource = flow.emplaceBlock<BasicFileSource<DataType>>({{"file_name", fileName}, {"mode", modeName}, {"offset", offsetSamples}, {"length", lengthSamples}});
         auto&                sink       = flow.emplaceBlock<CountingSink<DataType>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect2(fileSource, fileSource.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(fileSource, fileSource.out, sink, sink.in)));
 
         scheduler schedRead;
         if (auto ret = schedRead.exchange(std::move(flow)); !ret) {

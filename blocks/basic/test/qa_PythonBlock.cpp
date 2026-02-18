@@ -189,8 +189,8 @@ def process_bulk(ins, outs):
         auto& block = graph.emplaceBlock<PythonBlock<int32_t>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
         auto& sink  = graph.emplaceBlock<TagSink<int32_t, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(src, "out", block, "inputs#0"));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(block, "outputs#0", sink, "in"));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(src, "out", block, "inputs#0"));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(block, "outputs#0", sink, "in"));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -254,8 +254,8 @@ def process_bulk(ins, outs):
         auto& block = graph.emplaceBlock<PythonBlock<float>>({{"n_inputs", 1U}, {"n_outputs", 1U}, {"pythonScript", pythonScript}});
         auto& sink  = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_expected", 5U}, {"verbose_console", true}});
 
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(src, "out", block, "inputs#0"));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect2(block, "outputs#0", sink, "in"));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(src, "out", block, "inputs#0"));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(block, "outputs#0", sink, "in"));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {

@@ -521,10 +521,10 @@ connections:
         auto&     arraySource0 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource0"}});
         auto&     arraySource1 = graph1.emplaceBlock<gr::testing::ArraySource<double>>({{"name", "ArraySource1"}});
 
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(arraySource0, "outA#0"s, arraySink, "inB#1"s)));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(arraySource1, "outA#1"s, arraySink, "inB#0"s)));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(arraySource0, "outB#0"s, arraySink, "inA#0"s)));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(arraySource1, "outB#1"s, arraySink, "inA#1"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource0, "outA#0"s, arraySink, "inB#1"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource1, "outA#1"s, arraySink, "inB#0"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource0, "outB#0"s, arraySink, "inA#0"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(arraySource1, "outB#1"s, arraySink, "inA#1"s)));
 
         expect(graph1.reconnectAllEdges());
 
@@ -548,10 +548,10 @@ connections:
         auto&     vectorSource0 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource0"}});
         auto&     vectorSource1 = graph1.emplaceBlock<gr::testing::VectorSource<double>>({{"name", "VectorSource1"}});
 
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource0, "outA#0"s, vectorSink, "inB#1"s)));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource0, "outB#0"s, vectorSink, "inA#0"s)));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource1, "outA#1"s, vectorSink, "inB#0"s)));
-        expect(eq(ConnectionResult::SUCCESS, graph1.connect2(vectorSource1, "outB#1"s, vectorSink, "inA#1"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, "outA#0"s, vectorSink, "inB#1"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource0, "outB#0"s, vectorSink, "inA#0"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource1, "outA#1"s, vectorSink, "inB#0"s)));
+        expect(eq(ConnectionResult::SUCCESS, graph1.connect(vectorSource1, "outB#1"s, vectorSink, "inA#1"s)));
 
         expect(graph1.reconnectAllEdges());
 
