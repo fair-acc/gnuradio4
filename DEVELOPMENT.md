@@ -352,7 +352,7 @@ me@host CLANG64
 $ cp build/compile_commands.json .
 ```
 
-To improve the fonts in the `mintty` edit `$HOME/.minttyrc` and add the following to it.  This step is cosmetic and not strictly necessary.
+To improve the fonts in the `mintty` edit `$HOME/.minttyrc` and add the following to it. This step is cosmetic and not strictly necessary.
 
 ```bash
 FontHeight=9
