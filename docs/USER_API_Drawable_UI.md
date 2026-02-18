@@ -419,9 +419,9 @@ void runApplication() {
     auto& chart  = graph.emplaceBlock<ChartMonitor<float>>();
     auto& slider = graph.emplaceBlock<ParameterSlider<float>>({{"target_key", "gain"}});
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(source).to<"in">(filter)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filter).to<"in">(chart)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(slider).to<"settings">(filter)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(source, source.out, filter, filter.in)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(filter, filter.out, chart, chart.in)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(slider, slider.out, filter, filter.settings)));
 
     gr::scheduler::Simple sched;
     if (auto ret = sched.exchange(std::move(graph)); !ret) {

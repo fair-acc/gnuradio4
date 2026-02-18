@@ -307,7 +307,7 @@ should strive for the same.
 
 ### Graphs & Scheduling
 
-- Build graphs with `gr::Graph`; connect with `graph.connect<"out">(src).to<"in">(sink)`.
+- Build graphs with `gr::Graph`; connect with `graph.connect(src, src.out, sink, sink.in)`.
 - Use `gr::scheduler::Simple` unless a custom scheduler is justified.
 
 ### Type-Erased Values
