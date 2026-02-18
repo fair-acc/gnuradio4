@@ -90,7 +90,8 @@ $ pacman -S git moreutils \
                     mingw-w64-ucrt-x86_64-clang-tools-extra \
                     mingw-w64-ucrt-x86_64-dlfcn \
                     mingw-w64-ucrt-x86_64-nodejs \
-                    mingw-w64-ucrt-x86_64-soapysdr
+                    mingw-w64-ucrt-x86_64-soapysdr \
+                    mingw-w64-ucrt-x86_64-soapyrtlsdr
 ```
 
 If one wants to use `CLANG64` to build instead of `UCRT64`, you can use the comamnd that follows.
@@ -106,7 +107,8 @@ $ pacman -S git moreutils \
                     mingw-w64-clang-x86_64-clang-tools-extra \
                     mingw-w64-clang-x86_64-dlfcn \
                     mingw-w64-clang-x86_64-nodejs \
-                    mingw-w64-clang-x86_64-soapysdr
+                    mingw-w64-clang-x86_64-soapysdr \
+                    mingw-w64-clang-x86_64-soapyrtlsdr
 ```
 
 And of course, both can be run to install both environments.
@@ -343,7 +345,14 @@ vim.api.nvim_create_autocmd("BufWritePost", {
 })
 ```
 
-To use the text fonts for gnuradio4, edit `$HOME/.minttyrc` and add the following to it.
+Once the `compile_commands.json` is created in the cmake configure step, copy it to the root gnuradio directory so it can be used by nvim.
+
+```bash
+me@host CLANG64
+$ cp build/compile_commands.json .
+```
+
+To improve the fonts in the `mintty` edit `$HOME/.minttyrc` and add the following to it.  This step is cosmetic and not strictly necessary.
 
 ```bash
 FontHeight=9
@@ -352,11 +361,4 @@ Locale=en_US
 Charset=UTF-8
 CtrlShiftShortcuts=no
 CursorType=block
-```
-
-Once the `compile_commands.json` is created in the cmake configure step, copy it to the root gnuradio directory so it can be used by nvim.
-
-```bash
-me@host CLANG64
-$ cp build/compile_commands.json .
 ```
