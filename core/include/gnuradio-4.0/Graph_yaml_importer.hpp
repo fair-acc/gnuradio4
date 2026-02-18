@@ -119,11 +119,14 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                         throw gr::exception(std::format("Required Block {} not found in:\n{}", requiredBlockName, gr::graph::format(graph)), location);
                     }
 
-                    graphWrapper->exportPort(true,                                                     //
-                        blockUniqueName,                                                               //
-                        portDirectionString == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT, //
-                        internalPortName,                                                              //
-                        exportedPortName);
+                    if (auto result = graphWrapper->exportPort(true,                                       //
+                            blockUniqueName,                                                               //
+                            portDirectionString == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT, //
+                            internalPortName,                                                              //
+                            exportedPortName);
+                        !result.has_value()) {
+                        throw result.error();
+                    }
                 }
             };
 

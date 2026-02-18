@@ -185,7 +185,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         "Remove an unknown block"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveBlock, //
-                {{"uniqueName", "this_block_is_unknown"}}, ReplyChecker{.expectedEndpoint = scheduler::property::kRemoveBlock, .expectedHasData = false});
+                {{"uniqueName", "this_block_is_unknown"}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved, .expectedHasData = false});
 
             expect(eq(testGraph.blocks().size(), 3UZ));
         };

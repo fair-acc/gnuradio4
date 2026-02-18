@@ -524,7 +524,7 @@ public:
     [[nodiscard]] virtual gr::property_map exportedInputPorts()  = 0;
     [[nodiscard]] virtual gr::property_map exportedOutputPorts() = 0;
 
-    virtual void exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) = 0;
+    [[nodiscard]] virtual std::expected<void, Error> exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) = 0;
 };
 
 namespace serialization_fields {
@@ -912,10 +912,10 @@ public:
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 
     // Common interface between managed and unmanaged graphs
-    [[nodiscard]] gr::Graph*       graph() override { return nullptr; }
-    [[nodiscard]] gr::property_map exportedInputPorts() override { return {}; }
-    [[nodiscard]] gr::property_map exportedOutputPorts() override { return {}; }
-    void                           exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override {}
+    [[nodiscard]] gr::Graph*                 graph() override { return nullptr; }
+    [[nodiscard]] gr::property_map           exportedInputPorts() override { return {}; }
+    [[nodiscard]] gr::property_map           exportedOutputPorts() override { return {}; }
+    [[nodiscard]] std::expected<void, Error> exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override { return {}; }
 };
 
 namespace detail {

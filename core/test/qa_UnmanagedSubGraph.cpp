@@ -187,8 +187,8 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
         auto demo = createDemoSubGraph<float>();
         initGraph.addBlock(demo.graph);
 
-        demo.graph->exportPort(true, demo.pass1->unique_name, PortDirection::INPUT, "in", "inExp");
-        demo.graph->exportPort(true, demo.pass2->unique_name, PortDirection::OUTPUT, "out", "outExp");
+        expect(demo.graph->exportPort(true, demo.pass1->unique_name, PortDirection::INPUT, "in", "inExp").has_value());
+        expect(demo.graph->exportPort(true, demo.pass2->unique_name, PortDirection::OUTPUT, "out", "outExp").has_value());
 
         expect(eq(ConnectionResult::SUCCESS, initGraph.connect(source, PortDefinition("out"), demo.graph, PortDefinition("inExp"))));
         expect(eq(ConnectionResult::SUCCESS, initGraph.connect(demo.graph, PortDefinition("outExp"), sink, PortDefinition("in"))));
