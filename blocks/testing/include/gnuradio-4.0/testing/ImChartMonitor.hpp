@@ -3,6 +3,7 @@
 
 #include "gnuradio-4.0/BlockRegistry.hpp"
 #include <algorithm>
+#include <mutex>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/HistoryBuffer.hpp>
@@ -19,7 +20,7 @@ GR_REGISTER_BLOCK("ConsoleDebugSink", gr::testing::ImChartMonitor, ([T], false),
 
 template<typename T, bool drawAsynchronously = true>
 requires(std::is_arithmetic_v<T> || gr::DataSetLike<T>)
-struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::conditional_t<drawAsynchronously, BlockingIO<false>, void>, std::conditional_t<drawAsynchronously, Drawable<UICategory::Content, "console">, void>> {
+struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::conditional_t<drawAsynchronously, Drawable<UICategory::Content, "console">, void>> {
     using ClockSourceType               = std::chrono::system_clock;
     using TimePoint                     = ClockSourceType::time_point;
     constexpr static bool isDataSetLike = gr::DataSetLike<T>;
@@ -65,6 +66,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
     std::source_location _location   = std::source_location::current();
     TimePoint            _lastUpdate = ClockSourceType::now();
+    std::mutex           _drawMutex;
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings) {
         if (newSettings.contains("n_history")) {
@@ -76,76 +78,104 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
         if (newSettings.contains("n_tag_history")) {
             _historyTags.resize(static_cast<std::size_t>(n_tag_history));
         }
+
+        if constexpr (drawAsynchronously && std::is_arithmetic_v<T>) {
+            if (newSettings.contains("sample_rate") || newSettings.contains("timeout_ms")) {
+                in.max_samples = std::max(1UZ, static_cast<std::size_t>(2.f * sample_rate * static_cast<float>(timeout_ms) / 1000.f));
+            }
+        }
     }
 
     void start() {
         std::println("started sink {} aka. '{}'", this->unique_name, this->name);
-        in.max_samples = 10UZ;
+        if constexpr (drawAsynchronously && std::is_arithmetic_v<T>) {
+            in.max_samples = std::max(1UZ, static_cast<std::size_t>(2.f * sample_rate * static_cast<float>(timeout_ms) / 1000.f));
+        }
     }
 
     void stop() { std::println("stopped sink {} aka. '{}'", this->unique_name, this->name); }
 
-    constexpr void processOne(const T& input) {
-        TimePoint nowStamp = ClockSourceType::now();
-
-        _n_samples_total++;
-
-        if constexpr (std::is_arithmetic_v<T>) {
-            if constexpr (drawAsynchronously) {
-                in.max_samples = static_cast<std::size_t>(2.f * sample_rate * static_cast<float>(timeout_ms) / 1000.f);
-            }
-            const T Ts = T(1.0f) / T(sample_rate);
-            _historyBufferX.push_back(static_cast<T>(_n_samples_total) * static_cast<T>(Ts));
+    [[nodiscard]] work::Status processBulk(InputSpanLike auto& inData) noexcept {
+        if (inData.empty()) {
+            return work::Status::OK;
         }
-        _historyBufferY.push_back(input);
 
-        if (this->inputTagsPresent()) { // received tag
-            _historyBufferTags.push_back(_historyBufferY.back());
+        { // guarded write to local storage section
+            const std::lock_guard lock(_drawMutex);
+            const TimePoint       nowStamp = ClockSourceType::now();
 
-            if (plot_merged_tags) {
+            // collect per-sample tag positions from the input span
+            auto spanTags  = inData.tags();
+            using TagEntry = std::pair<std::size_t, property_map>;
+            std::vector<TagEntry> localTags;
+            for (const auto& [relIndex, tagMapRef] : spanTags) {
+                if (relIndex >= 0 && static_cast<std::size_t>(relIndex) < inData.size()) {
+                    localTags.emplace_back(static_cast<std::size_t>(relIndex), tagMapRef.get());
+                }
+            }
+
+            std::size_t tagCursor = 0;
+            for (std::size_t i = 0; i < inData.size(); ++i) {
+                _n_samples_total++;
+
+                if constexpr (std::is_arithmetic_v<T>) {
+                    const T Ts = T(1.0f) / T(sample_rate);
+                    _historyBufferX.push_back(static_cast<T>(_n_samples_total) * Ts);
+                }
+                _historyBufferY.push_back(inData[i]);
+
+                if (tagCursor < localTags.size() && localTags[tagCursor].first == i) {
+                    if constexpr (std::is_arithmetic_v<T>) {
+                        _historyBufferTags.push_back(inData[i]);
+                    }
+                    _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = localTags[tagCursor].second, .index = _tagIndex++});
+                    ++tagCursor;
+                } else {
+                    if constexpr (std::is_floating_point_v<T>) {
+                        _historyBufferTags.push_back(std::numeric_limits<T>::quiet_NaN());
+                    } else if constexpr (std::is_arithmetic_v<T>) {
+                        _historyBufferTags.push_back(std::numeric_limits<T>::lowest());
+                    }
+                }
+            }
+
+            if (plot_merged_tags && this->inputTagsPresent()) {
                 _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = this->_mergedInputTag.map, .index = _tagIndex++, .relIndex = 0, .merged = true});
+                this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
             }
-            auto tags = in.tagReader().get();
-            for (const auto& [relIndex, tagMap] : tags) {
-                _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = tagMap, .index = relIndex});
-            }
+        } // end lifetime of '_drawMutex' write lock-guard
 
-            this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
-        } else {
-            if constexpr (std::is_floating_point_v<T>) {
-                _historyBufferTags.push_back(std::numeric_limits<T>::quiet_NaN());
-            } else {
-                _historyBufferTags.push_back(std::numeric_limits<T>::lowest());
-            }
+        if constexpr (!drawAsynchronously) {
+            draw();
         }
+
+        return work::Status::OK;
+    }
+
+    work::Status draw(const property_map& config = {}, std::source_location location = std::source_location::current()) noexcept {
+        const std::lock_guard lock(_drawMutex);
+        _location = location;
 
         if (timeout_ms > 0U) {
+            const TimePoint nowStamp = ClockSourceType::now();
             if (nowStamp < (_lastUpdate + std::chrono::milliseconds(timeout_ms))) {
-                return;
+                return lifecycle::isActive(this->state()) ? work::Status::OK : work::Status::DONE;
             }
             _lastUpdate = nowStamp;
         }
 
+        const bool shouldResetView = config.contains("reset_view");
         if (plot_graph) {
-            plotGraph();
+            plotGraph(shouldResetView);
         }
-
         if (plot_timing) {
             plotTiming();
         }
+
+        return lifecycle::isActive(this->state()) ? work::Status::OK : work::Status::DONE;
     }
 
-    work::Status draw(const property_map& config = {}, std::source_location location = std::source_location::current()) noexcept {
-        reset_view                           = config.contains("reset_view");
-        _location                            = location;
-        [[maybe_unused]] work::Status status = work::Status::OK;
-        if constexpr (drawAsynchronously) {
-            status = this->invokeWork(); // calls work(...) -> processOne(...) (all in the same thread as this 'draw()'
-        }
-        return status;
-    }
-
-    void plotGraph() {
+    void plotGraph(bool shouldResetView) {
         if constexpr (std::is_arithmetic_v<T>) {
             const auto [xMin, xMax] = std::ranges::minmax_element(_historyBufferX);
             const auto [yMin, yMax] = std::ranges::minmax_element(_historyBufferY);
@@ -153,7 +183,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
                 return; // buffer or axes' ranges are empty -> skip drawing
             }
 
-            if (reset_view) {
+            if (shouldResetView) {
                 gr::graphs::resetView();
             }
             std::println("\nPlot Graph for '{}' - #samples total: {}", signal_name, _n_samples_total);
@@ -179,7 +209,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
             if (mountain_range && (hasMultiSignals || _historyBufferY.size() > 1UZ)) {
                 // mountain range mode
-                dataset::MountainRangeConfig mrConfig{.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .x_offset_chars = static_cast<std::size_t>(mountain_x_offset), .y_offset_chars = static_cast<std::size_t>(mountain_y_offset), .color_index = static_cast<std::size_t>(mountain_color_index), .reset_view = reset_view ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP};
+                dataset::MountainRangeConfig mrConfig{.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .x_offset_chars = static_cast<std::size_t>(mountain_x_offset), .y_offset_chars = static_cast<std::size_t>(mountain_y_offset), .color_index = static_cast<std::size_t>(mountain_color_index), .reset_view = shouldResetView ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP};
 
                 if (hasMultiSignals) {
                     // multi-signal DataSet: use signals as traces (replace on each update)
@@ -196,7 +226,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
             } else {
                 // regular single-plot mode
                 std::size_t signalIdx = signal_index < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(signal_index);
-                gr::dataset::draw(latestDataSet, {.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .reset_view = reset_view ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP}, signalIdx, _location);
+                gr::dataset::draw(latestDataSet, {.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .reset_view = shouldResetView ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP}, signalIdx, _location);
             }
         }
     }

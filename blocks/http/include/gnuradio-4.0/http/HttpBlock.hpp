@@ -6,7 +6,6 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
-#include <queue>
 #include <semaphore>
 
 #ifdef __GNUC__
@@ -44,7 +43,7 @@ enum class RequestType : char {
 GR_REGISTER_BLOCK(gr::http::HttpBlock, [T], [ float, double ])
 
 template<typename T>
-struct HttpBlock : Block<HttpBlock<T>, BlockingIO<false>> {
+struct HttpBlock : Block<HttpBlock<T>> {
     using Description = Doc<R""(
 The HttpBlock allows to use the responses from HTTP APIs (e.g. REST APIs) as the value for this block's output port.
 The block can be used either on-demand to do single requests, or can use long polling to subscribe to an event stream.
@@ -54,48 +53,53 @@ The result is provided on a single output port as a map with the following keys:
 - mime-type: The mime-type of the response
 )"">;
 
-    using Block<HttpBlock<T>, BlockingIO<false>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
-
     PortOut<pmt::Value::Map> out;
 
-    std::string           url;
-    std::string           endpoint = "/";
-    gr::http::RequestType type     = gr::http::RequestType::GET;
-    std::string           parameters; // x-www-form-urlencoded encoded POST parameters
+    gr::Annotated<std::string, "URI">                                                                  url;
+    gr::Annotated<std::string, "endpoint">                                                             endpoint = "/";
+    gr::Annotated<gr::http::RequestType, "type", gr::Doc<"GET, SUBSCRIBE, POST">>                      type     = gr::http::RequestType::GET;
+    gr::Annotated<std::string, "parameters", gr::Doc<"x-www-form-urlencoded encoded POST parameters">> parameters;
 
     GR_MAKE_REFLECTABLE(HttpBlock, out, url, endpoint, type, parameters);
 
-    // used for queuing GET responses for the consumer
-    std::queue<pmt::Value::Map> _backlog;
-    std::mutex                  _backlog_mutex;
-
-    std::shared_ptr<std::thread> _thread;
-    std::atomic_size_t           _pendingRequests = 0;
-    std::atomic_bool             _shutdownThread  = false;
-    std::binary_semaphore        _ready{0};
+    std::atomic_size_t    _pendingRequests = 0UZ;
+    std::atomic_bool      _shutdownThread  = false;
+    std::binary_semaphore _ready{0};
+    std::atomic_size_t    _samplesProduced = 0UZ;
+    std::future<void>     _taskCompletion;
 
 #ifndef __EMSCRIPTEN__
     std::unique_ptr<httplib::Client> _client;
 #endif
 
+    struct StopGuard { // must be last member — destroyed first, ensuring cleanup before other members
+        HttpBlock* _owner = nullptr;
+        ~StopGuard() {
+            if (_owner) {
+                _owner->stopThread();
+            }
+        }
+    };
+    StopGuard _stopGuard{this};
+
 #ifdef __EMSCRIPTEN__
-    void queueWorkEmscripten(emscripten_fetch_t* fetch) {
+    void publishEmscriptenResult(emscripten_fetch_t* fetch) {
         pmt::Value::Map result;
         result["mime-type"] = "text/plain";
         result["status"]    = static_cast<int>(fetch->status);
         result["raw-data"]  = std::string(fetch->data, static_cast<std::size_t>(fetch->numBytes));
 
-        queueWork(result);
+        publishResult(std::move(result));
     }
 
     void onSuccess(emscripten_fetch_t* fetch) {
-        queueWorkEmscripten(fetch);
+        publishEmscriptenResult(fetch);
         emscripten_fetch_close(fetch);
     }
 
     void onError(emscripten_fetch_t* fetch) {
         // we still want to queue the response, the statusCode will just not be 200
-        queueWorkEmscripten(fetch);
+        publishEmscriptenResult(fetch);
         emscripten_fetch_close(fetch);
     }
 
@@ -104,9 +108,9 @@ The result is provided on a single output port as a map with the following keys:
         emscripten_fetch_attr_init(&attr);
         if (type == RequestType::POST) {
             strcpy(attr.requestMethod, "POST");
-            if (!parameters.empty()) {
-                attr.requestData     = parameters.c_str();
-                attr.requestDataSize = parameters.size();
+            if (!parameters.value.empty()) {
+                attr.requestData     = parameters.value.c_str();
+                attr.requestDataSize = parameters.value.size();
             }
         } else {
             strcpy(attr.requestMethod, "GET");
@@ -124,7 +128,7 @@ The result is provided on a single output port as a map with the following keys:
             auto src = static_cast<HttpBlock<T>*>(fetch->userData);
             src->onError(fetch);
         };
-        const auto target = url + endpoint;
+        const auto target = url.value + endpoint.value;
         std::ignore       = emscripten_fetch(&attr, target.c_str());
     }
 
@@ -148,20 +152,19 @@ The result is provided on a single output port as a map with the following keys:
     }
 #else
     void runThreadNative() {
-        _client = std::make_unique<httplib::Client>(url);
+        _client = std::make_unique<httplib::Client>(url.value);
         _client->set_follow_location(true);
         if (type == RequestType::SUBSCRIBE) {
-            // it's long polling, be generous with timeouts
             _client->set_read_timeout(1h);
-            _client->Get(endpoint, [&](const char* data, size_t len) {
+            _client->Get(endpoint.value, [&](const char* data, size_t len) {
                 pmt::Value::Map result;
                 result["mime-type"] = "text/plain";
                 result["status"]    = 200;
                 result["raw-data"]  = std::string(data, len);
 
-                queueWork(result);
+                publishResult(std::move(result));
 
-                return !_shutdownThread;
+                return !_shutdownThread.load();
             });
         } else {
             while (!_shutdownThread) {
@@ -169,16 +172,16 @@ The result is provided on a single output port as a map with the following keys:
                     _pendingRequests--;
                     httplib::Result resp;
                     if (type == RequestType::POST) {
-                        resp = parameters.empty() ? _client->Post(endpoint) : _client->Post(endpoint, parameters, "application/x-www-form-urlencoded");
+                        resp = parameters.value.empty() ? _client->Post(endpoint.value) : _client->Post(endpoint.value, parameters.value, "application/x-www-form-urlencoded");
                     } else {
-                        resp = _client->Get(endpoint);
+                        resp = _client->Get(endpoint.value);
                     }
-                    pmt::Value::Map result;
                     if (resp) {
+                        pmt::Value::Map result;
                         result["mime-type"] = "text/plain";
                         result["status"]    = resp->status;
                         result["raw-data"]  = resp->body;
-                        queueWork(result);
+                        publishResult(std::move(result));
                     }
                 }
 
@@ -188,60 +191,55 @@ The result is provided on a single output port as a map with the following keys:
     }
 #endif
 
-    void queueWork(const pmt::Value::Map& item) {
-        {
-            std::lock_guard lg{_backlog_mutex};
-            _backlog.push(item);
+    void publishResult(pmt::Value::Map result) {
+        while (!_shutdownThread.load(std::memory_order_relaxed)) {
+            auto span = out.streamWriter().template tryReserve<SpanReleasePolicy::ProcessNone>(1UZ);
+            if (!span.empty()) {
+                span[0] = std::move(result);
+                span.publish(1UZ);
+                _samplesProduced.fetch_add(1UZ, std::memory_order_relaxed);
+                this->progress->incrementAndGet();
+                this->progress->notify_all();
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        const auto work = this->invokeWork();
-        if (work == work::Status::DONE) {
-            this->requestStop();
-        }
-        this->ioLastWorkStatus.exchange(work, std::memory_order_relaxed);
     }
 
     void startThread() {
-        if (_thread) {
-            _thread.reset();
-        }
-        _thread = std::shared_ptr<std::thread>(new std::thread([this]() {
-            gr::thread_pool::thread::setThreadName(std::format("uT:{}", gr::meta::shorten_type_name(this->unique_name)));
+        stopThread();
+        _shutdownThread = false;
+        auto done       = std::make_shared<std::promise<void>>();
+        _taskCompletion = done->get_future();
+        thread_pool::Manager::defaultIoPool()->execute([this, done = std::move(done)]() mutable {
+            thread_pool::thread::setThreadName(std::format("uT:{}", gr::meta::shorten_type_name(this->unique_name)));
 #ifdef __EMSCRIPTEN__
             runThreadEmscripten();
 #else
-                                                   runThreadNative();
+            runThreadNative();
 #endif
-        }),
-            [this](std::thread* t) {
-                if (auto ret = this->changeStateTo(gr::lifecycle::State::REQUESTED_STOP); !ret) {
-                    throw std::invalid_argument(std::format("{}::startThread() could not change state to REQUESTED_STOP", this->name));
-                }
-                _shutdownThread = true;
-                _ready.release();
-#ifndef __EMSCRIPTEN__
-                if (_client) {
-                    _client->stop();
-                }
-#endif
-                if (t->joinable()) {
-                    t->join();
-                }
-                _shutdownThread = false;
-                delete t;
-                if (auto ret = this->changeStateTo(gr::lifecycle::State::STOPPED); !ret) {
-                    throw std::invalid_argument(std::format("{}::startThread() could not change state to STOPPED", this->name));
-                }
-            });
+            done->set_value();
+        });
     }
 
-    void stopThread() { _thread.reset(); }
-
-    ~HttpBlock() { stopThread(); }
+    void stopThread() {
+        if (!_taskCompletion.valid()) {
+            return;
+        }
+        _shutdownThread = true;
+        _ready.release();
+#ifndef __EMSCRIPTEN__
+        if (_client) {
+            _client->stop();
+        }
+#endif
+        _taskCompletion.wait();
+        _taskCompletion = {};
+    }
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings) {
         if (newSettings.contains("url") || newSettings.contains("type")) {
-            // other setting changes are hot-swappable without restarting the Client
-            if (_thread) {
+            if (_taskCompletion.valid()) {
                 stopThread();
                 startThread();
             }
@@ -252,14 +250,20 @@ The result is provided on a single output port as a map with the following keys:
 
     void stop() { stopThread(); }
 
-    [[nodiscard]] constexpr auto processOne() noexcept {
-        pmt::Value::Map result;
-        std::lock_guard lg{_backlog_mutex};
-        if (!_backlog.empty()) {
-            result = _backlog.front();
-            _backlog.pop();
+    [[nodiscard]] constexpr auto processOne() noexcept { return pmt::Value::Map{}; }
+
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+        this->applyChangedSettings();
+
+        if (this->state() == lifecycle::State::REQUESTED_STOP) {
+            this->emitErrorMessageIfAny("work(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
         }
-        return result;
+        if (!lifecycle::isActive(this->state())) {
+            return {requestedWork, 0UZ, work::Status::DONE};
+        }
+
+        const auto produced = _samplesProduced.exchange(0UZ, std::memory_order_relaxed);
+        return {requestedWork, produced, work::Status::OK};
     }
 
     void trigger() {
@@ -268,14 +272,14 @@ The result is provided on a single output port as a map with the following keys:
     }
 
     void processMessages(gr::MsgPortInBuiltin& port, std::span<const gr::Message> message) {
-        gr::Block<HttpBlock<T>, BlockingIO<false>>::processMessages(port, message);
+        gr::Block<HttpBlock<T>>::processMessages(port, message);
 
         std::ranges::for_each(message, [this](auto& m) {
             if (type == RequestType::SUBSCRIBE) {
                 if (m.data.has_value() && m.data.value().contains("active")) {
                     // for long polling, the subscription should stay active, if and only if the messages' "active" member is true
                     if (m.data.value().at("active").value_or(false)) {
-                        if (!_thread) {
+                        if (!_taskCompletion.valid()) {
                             startThread();
                         }
                     } else {
