@@ -12,6 +12,7 @@ set(public_headers
     include/gnuradio-4.0/annotated.hpp
     include/gnuradio-4.0/AtomicBitset.hpp
     include/gnuradio-4.0/Block.hpp
+    include/gnuradio-4.0/BlockingEventSync.hpp
     include/gnuradio-4.0/BlockModel.hpp
     include/gnuradio-4.0/BlockTraits.hpp
     include/gnuradio-4.0/Buffer.hpp
