@@ -20,8 +20,15 @@ namespace gr {
  * allowing either newest-at-[0] (`push_back`) or oldest-at-[0] (`push_front`) usage.
  *
  * ### Storage
- * - Dynamic (`N == std::dynamic_extent`): uses `std::vector<T>` (size = 2 * capacity).
+ * - Dynamic (`N == std::dynamic_extent`): `std::vector<T>` sized `2 * bit_ceil(capacity)`.
+ *   The ring size is rounded up to a power of two so index wrapping is a single AND.
  * - Fixed (`N != std::dynamic_extent`): uses `std::array<T, N * 2>`.
+ *
+ * The second half mirrors the first, giving `get_span()` and iterators contiguous access
+ * across the wrap boundary. The mirror is updated lazily: `push_front` writes only to the
+ * primary half; the mirror is synced (via `std::copy_n`) before any span/iterator access.
+ * `push_back` writes to both halves and decrements the dirty count as old elements are
+ * discarded, so no bulk sync is needed on the push_back path.
  *
  * ### Key Operations
  * - `push_front(const T&)`: Add new item, drop oldest if full, index `[0]` is newest.
@@ -60,28 +67,47 @@ class HistoryBuffer {
     using signed_index_type = std::make_signed_t<std::size_t>;
     using buffer_type       = typename std::conditional_t<N == std::dynamic_extent, std::vector<T, Allocator>, std::array<T, N * 2>>;
 
-    buffer_type _buffer{};
-    std::size_t _capacity = N;
-    std::size_t _write_position{0UZ};
-    std::size_t _size{0UZ};
+    alignas(64) mutable buffer_type _buffer{};
+    std::size_t         _capacity = N;
+    std::size_t         _write_position{0UZ};
+    std::size_t         _size{0UZ};
+    std::size_t         _ringMask{(N != std::dynamic_extent) ? (N - 1UZ) : 0UZ};
+    mutable std::size_t _mirrorDirtyCount{0UZ};
+
+    [[nodiscard]] constexpr std::size_t ringCapacity() const noexcept {
+        if constexpr (N == std::dynamic_extent) {
+            return _ringMask + 1UZ;
+        } else {
+            return N;
+        }
+    }
 
     /**
      * @brief maps the logical index to the physical index in the buffer.
      */
-    [[nodiscard]] constexpr inline std::size_t map_index(std::size_t index) const noexcept {
-        if constexpr (N == std::dynamic_extent) { // runtime checks
-            if (std::has_single_bit(_capacity)) { // _capacity is a power of two
-                return (_write_position + index) & (_capacity - 1UZ);
-            } else { // fallback
-                return (_write_position + index) % _capacity;
-            }
-        } else {                                    // compile-time checks
-            if constexpr (std::has_single_bit(N)) { // N is a power of two
-                return (_write_position + index) & (N - 1UZ);
-            } else { // fallback to modulo operation if not a power of two
-                return (_write_position + index) % N;
-            }
+    [[nodiscard]] constexpr std::size_t map_index(std::size_t index) const noexcept {
+        if constexpr (N == std::dynamic_extent) {
+            return (_write_position + index) & _ringMask;
+        } else if constexpr (std::has_single_bit(N)) {
+            return (_write_position + index) & (N - 1UZ);
+        } else {
+            return (_write_position + index) % N;
         }
+    }
+
+    constexpr void syncMirror() const noexcept {
+        if (_mirrorDirtyCount == 0UZ) {
+            return;
+        }
+        const std::size_t rc         = ringCapacity();
+        const std::size_t contiguous = rc - _write_position;
+        if (_mirrorDirtyCount <= contiguous) {
+            std::copy_n(_buffer.data() + _write_position, _mirrorDirtyCount, _buffer.data() + _write_position + rc);
+        } else {
+            std::copy_n(_buffer.data() + _write_position, contiguous, _buffer.data() + _write_position + rc);
+            std::copy_n(_buffer.data(), _mirrorDirtyCount - contiguous, _buffer.data() + rc);
+        }
+        _mirrorDirtyCount = 0UZ;
     }
 
 public:
@@ -89,7 +115,7 @@ public:
 
     constexpr explicit HistoryBuffer() noexcept { static_assert(N != std::dynamic_extent, "need to specify capacity"); }
 
-    constexpr explicit HistoryBuffer(std::size_t capacity) : _buffer(capacity * 2), _capacity(capacity) {
+    constexpr explicit HistoryBuffer(std::size_t capacity) : _buffer(std::bit_ceil(capacity) * 2), _capacity(capacity), _ringMask(std::bit_ceil(capacity) - 1UZ) {
         if (capacity == 0) {
             throw std::out_of_range("capacity is zero");
         }
@@ -103,12 +129,11 @@ public:
         if (_size < _capacity) [[unlikely]] {
             ++_size;
         }
-        if (_write_position == 0) [[unlikely]] {
-            _write_position = _capacity;
+        _write_position          = map_index(ringCapacity() - 1UZ);
+        _buffer[_write_position] = value; // write only to primary half (lazy mirror)
+        if (_mirrorDirtyCount < ringCapacity()) {
+            ++_mirrorDirtyCount;
         }
-        --_write_position;
-        _buffer[_write_position]             = value;
-        _buffer[_write_position + _capacity] = value;
     }
 
     /**
@@ -135,21 +160,20 @@ public:
      * @brief Adds an element to the front expiring the oldest element beyond the buffer's capacities.
      */
     constexpr void push_back(const T& value) noexcept {
+        const std::size_t rc = ringCapacity();
+
         if (_size == _capacity) {
-            if (++_write_position == _capacity) {
-                _write_position = 0U;
+            _write_position = map_index(1UZ);
+            if (_mirrorDirtyCount > 0UZ) {
+                --_mirrorDirtyCount; // discarded element is rewritten in both halves below
             }
         } else {
             ++_size;
         }
 
-        std::size_t insertPos = _write_position + (_size - 1);
-        if (insertPos >= _capacity) {
-            insertPos -= _capacity;
-        }
-
-        _buffer[insertPos]             = value;
-        _buffer[insertPos + _capacity] = value;
+        const std::size_t insertPos = map_index(_size - 1UZ);
+        _buffer[insertPos]          = value;
+        _buffer[insertPos + rc]     = value;
     }
 
     /**
@@ -158,7 +182,8 @@ public:
      */
     template<std::input_iterator Iter>
     constexpr void push_back(Iter first, Iter last) noexcept {
-        std::size_t n = static_cast<std::size_t>(std::distance(first, last));
+        const std::size_t rc = ringCapacity();
+        std::size_t       n  = static_cast<std::size_t>(std::distance(first, last));
         if (n == 0) {
             return;
         }
@@ -173,28 +198,24 @@ public:
             std::size_t discardCount = needed - _capacity;
             _size -= discardCount;
 
-            std::size_t newPos = _write_position + discardCount;
-            if (newPos >= _capacity) {
-                newPos -= _capacity; // single-step wrap-around
+            _write_position = map_index(discardCount);
+            if (_mirrorDirtyCount > 0UZ) {
+                _mirrorDirtyCount -= std::min(_mirrorDirtyCount, discardCount); // discarded elements leave the buffer
             }
-            _write_position = newPos;
         }
 
         _size += n;
 
-        std::size_t startPos = _write_position + (_size - n);
-        if (startPos >= _capacity) {
-            startPos -= _capacity; // single-step wrap-around
-        }
+        const std::size_t startPos = map_index(_size - n);
 
-        const std::ptrdiff_t chunk1 = static_cast<std::ptrdiff_t>(std::min(n, _capacity - startPos));
+        const std::ptrdiff_t chunk1 = static_cast<std::ptrdiff_t>(std::min(n, rc - startPos));
         std::copy(first, first + chunk1, _buffer.data() + startPos);
-        std::copy(first, first + chunk1, _buffer.data() + startPos + _capacity);
+        std::copy(first, first + chunk1, _buffer.data() + startPos + rc);
 
         const std::ptrdiff_t chunk2 = static_cast<std::ptrdiff_t>(n) - chunk1;
         if (chunk2 > 0) { // copy the remainder (if needed)
             std::copy(first + chunk1, last, _buffer.data());
-            std::copy(first + chunk1, last, _buffer.data() + _capacity);
+            std::copy(first + chunk1, last, _buffer.data() + rc);
         }
     }
 
@@ -221,18 +242,11 @@ public:
         if (empty()) {
             throw std::out_of_range("pop_front() called on empty HistoryBuffer");
         }
-        if constexpr (N == std::dynamic_extent) {
-            if (++_write_position == _capacity) {
-                _write_position = 0U;
-            }
-        } else {
-            if (_write_position == N - 1U) {
-                _write_position = 0U;
-            } else {
-                ++_write_position;
-            }
-        }
+        _write_position = map_index(1UZ);
         --_size;
+        if (_mirrorDirtyCount > 0UZ) {
+            --_mirrorDirtyCount;
+        }
     }
 
     /**
@@ -260,18 +274,23 @@ public:
             throw std::out_of_range("new capacity is zero");
         }
 
-        std::vector<T, Allocator> newBuf(newCapacity * 2);
+        syncMirror();
+        const std::size_t newRingCap = std::bit_ceil(newCapacity);
+
+        std::vector<T, Allocator> newBuf(newRingCap * 2);
 
         const std::size_t copyCount = std::min(_size, newCapacity);
         const auto        oldFirst  = cbegin();
-        std::copy(oldFirst, oldFirst + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin());                                                        // copy first half
-        std::copy(newBuf.begin(), newBuf.begin() + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin() + static_cast<std::ptrdiff_t>(newCapacity)); // mirror second half
+        std::copy(oldFirst, oldFirst + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin());                                                       // copy first half
+        std::copy(newBuf.begin(), newBuf.begin() + static_cast<std::ptrdiff_t>(copyCount), newBuf.begin() + static_cast<std::ptrdiff_t>(newRingCap)); // mirror second half
 
         // update members
         std::swap(_buffer, newBuf);
-        _capacity       = newCapacity;
-        _size           = copyCount;
-        _write_position = 0UZ; // implementation choice
+        _capacity         = newCapacity;
+        _ringMask         = newRingCap - 1UZ;
+        _size             = copyCount;
+        _write_position   = 0UZ; // implementation choice
+        _mirrorDirtyCount = 0UZ;
     }
 
     /**
@@ -317,35 +336,49 @@ public:
      * @brief Returns a span of elements with given (optional) length with the last element being the newest
      */
     [[nodiscard]] constexpr std::span<const T> get_span(std::size_t index, std::size_t length = std::dynamic_extent) const {
+        syncMirror();
         length = std::clamp(length, 0UZ, std::min(_size - index, length));
         return std::span<const T>(&_buffer[map_index(index)], length);
     }
 
-    [[nodiscard]] auto begin() noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position)); }
+    [[nodiscard]] constexpr auto begin() noexcept {
+        syncMirror();
+        return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position));
+    }
 
     constexpr void reset(T defaultValue = T()) {
-        _size           = 0UZ;
-        _write_position = 0UZ;
+        _size             = 0UZ;
+        _write_position   = 0UZ;
+        _mirrorDirtyCount = 0UZ;
         std::fill(_buffer.begin(), _buffer.end(), defaultValue);
     }
 
-    [[nodiscard]] constexpr auto begin() const noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position)); }
+    [[nodiscard]] constexpr auto begin() const noexcept {
+        syncMirror();
+        return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position));
+    }
 
-    [[nodiscard]] constexpr auto cbegin() const noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position)); }
+    [[nodiscard]] constexpr auto cbegin() const noexcept { return begin(); }
 
-    [[nodiscard]] auto end() noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position + _size)); }
+    [[nodiscard]] constexpr auto end() noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position + _size)); }
 
     [[nodiscard]] constexpr auto end() const noexcept { return std::next(_buffer.begin(), static_cast<signed_index_type>(_write_position + _size)); }
 
     [[nodiscard]] constexpr auto cend() const noexcept { return end(); }
 
-    [[nodiscard]] auto rbegin() noexcept { return std::make_reverse_iterator(end()); }
+    [[nodiscard]] constexpr auto rbegin() noexcept {
+        syncMirror();
+        return std::make_reverse_iterator(end());
+    }
 
-    [[nodiscard]] constexpr auto rbegin() const noexcept { return std::make_reverse_iterator(cend()); }
+    [[nodiscard]] constexpr auto rbegin() const noexcept {
+        syncMirror();
+        return std::make_reverse_iterator(cend());
+    }
 
     [[nodiscard]] constexpr auto crbegin() const noexcept { return rbegin(); }
 
-    [[nodiscard]] auto rend() noexcept { return std::make_reverse_iterator(begin()); }
+    [[nodiscard]] constexpr auto rend() noexcept { return std::make_reverse_iterator(begin()); }
 
     [[nodiscard]] constexpr auto rend() const noexcept { return std::make_reverse_iterator(cbegin()); }
 

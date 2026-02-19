@@ -775,6 +775,65 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(equal(std::vector(hb.crbegin(), hb.crend()), std::vector(hb.rbegin(), hb.rend()))) << "const non-const iterator equivalency";
     };
 
+    "HistoryBuffer - push_front then iterate (lazy mirror)"_test = [] {
+        auto equal = [](const auto& range1, const auto& range2) { return std::equal(range1.begin(), range1.end(), range2.begin(), range2.end()); };
+
+        HistoryBuffer<int> hb(5);
+        for (int i = 1; i <= 7; ++i) {
+            hb.push_front(i); // only writes to primary half
+        }
+        // logical: [7,6,5,4,3]
+
+        // get_span triggers mirror sync
+        auto span = hb.get_span(0);
+        expect(eq(span.size(), 5UZ));
+        expect(eq(span[0], 7));
+        expect(eq(span[4], 3));
+
+        // forward iteration via begin/end triggers mirror sync
+        std::vector<int> forward(hb.begin(), hb.end());
+        expect(equal(forward, std::vector{7, 6, 5, 4, 3}));
+
+        // reverse iteration via rbegin/rend triggers mirror sync
+        std::vector<int> reverse(hb.rbegin(), hb.rend());
+        expect(equal(reverse, std::vector{3, 4, 5, 6, 7}));
+
+        // const iterators
+        const auto&      chb = hb;
+        std::vector<int> cforward(chb.begin(), chb.end());
+        expect(equal(cforward, std::vector{7, 6, 5, 4, 3}));
+    };
+
+    "HistoryBuffer - interleaved push_front and push_back"_test = [] {
+        auto equal = [](const auto& range1, const auto& range2) { return std::equal(range1.begin(), range1.end(), range2.begin(), range2.end()); };
+
+        HistoryBuffer<int> hb(5);
+
+        // push_front writes lazily, push_back syncs mirror eagerly
+        hb.push_front(1); // [1]
+        hb.push_front(2); // [2, 1]
+        hb.push_back(10); // triggers syncMirror, appends => [2, 1, 10]
+
+        expect(eq(hb.size(), 3UZ));
+        expect(eq(hb[0], 2));
+        expect(eq(hb[1], 1));
+        expect(eq(hb[2], 10));
+
+        // verify span and iterator access after interleaving
+        expect(equal(hb.get_span(0), std::vector{2, 1, 10}));
+        expect(equal(std::vector(hb.begin(), hb.end()), std::vector{2, 1, 10}));
+
+        // fill to capacity and overflow
+        hb.push_front(3); // [3, 2, 1, 10]
+        hb.push_front(4); // [4, 3, 2, 1, 10]
+        hb.push_back(20); // syncs mirror, discards oldest front => [3, 2, 1, 10, 20]
+
+        expect(eq(hb.size(), 5UZ));
+        expect(eq(hb[0], 3));
+        expect(eq(hb[4], 20));
+        expect(equal(std::vector(hb.begin(), hb.end()), std::vector{3, 2, 1, 10, 20}));
+    };
+
     "HistoryBuffer<T> constexpr sized"_test = [] {
         HistoryBuffer<int, 5UZ> buffer5;
         HistoryBuffer<int, 8UZ> buffer8;
@@ -906,6 +965,54 @@ const boost::ut::suite HistoryBufferTest = [] {
         expect(eq(hb.size(), 3UZ));
         // we keep the "most recent" 3 => new index[0] should be 10 still, if it fits
         expect(eq(hb[0], 10));
+    };
+
+    "HistoryBuffer - resize with dirty mirror"_test = [] {
+        auto equal = [](const auto& range1, const auto& range2) { return std::equal(range1.begin(), range1.end(), range2.begin(), range2.end()); };
+
+        HistoryBuffer<int> hb(5);
+        for (int i = 1; i <= 5; ++i) {
+            hb.push_front(i); // lazy mirror: primary half only
+        }
+        // [5,4,3,2,1] — mirror is dirty
+
+        // resize must sync mirror before copying
+        hb.resize(8);
+        expect(eq(hb.capacity(), 8UZ));
+        expect(eq(hb.size(), 5UZ));
+
+        // verify data survived the resize via iteration (which reads from mirror)
+        expect(equal(std::vector(hb.begin(), hb.end()), std::vector{5, 4, 3, 2, 1}));
+
+        // verify push_front still works after resize
+        hb.push_front(6);
+        expect(eq(hb[0], 6));
+        expect(equal(std::vector(hb.begin(), hb.end()), std::vector{6, 5, 4, 3, 2, 1}));
+    };
+
+    "HistoryBuffer - dynamic non-power-of-two capacity"_test = [] {
+        // bit_ceil(5) = 8, but user-visible capacity must remain 5
+        HistoryBuffer<int> hb(5);
+        expect(eq(hb.capacity(), 5UZ));
+
+        for (int i = 1; i <= 7; ++i) {
+            hb.push_front(i);
+        }
+        expect(eq(hb.size(), 5UZ));
+        expect(eq(hb.capacity(), 5UZ)); // still 5, not 8
+        expect(eq(hb[0], 7));
+        expect(eq(hb[4], 3));
+
+        // same for push_back
+        HistoryBuffer<int> hb2(3);
+        expect(eq(hb2.capacity(), 3UZ));
+        for (int i = 1; i <= 5; ++i) {
+            hb2.push_back(i);
+        }
+        expect(eq(hb2.size(), 3UZ));
+        expect(eq(hb2.capacity(), 3UZ)); // still 3, not 4
+        expect(eq(hb2[0], 3));
+        expect(eq(hb2[2], 5));
     };
 
     "HistoryBuffer - front/back test"_test = [] {
