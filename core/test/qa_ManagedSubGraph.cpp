@@ -54,7 +54,7 @@ DemoSubSchedulerResult<T> createDemoSubScheduler() {
     gr::Graph                 graph;
     result.pass1 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.pass2 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
-    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, PortDefinition("out"), *result.pass2, PortDefinition("in"))));
+    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, "out", *result.pass2, "in")));
     result.setGraph(std::move(graph));
     return result;
 }
@@ -66,7 +66,7 @@ DemoSubSchedulerResult<T> createDemoSubSchedulerWithSettings() {
     result.pass1            = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.pass2            = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.settingsRecorder = std::addressof(graph.template emplaceBlock<gr::testing::SettingsChangeRecorder<T>>());
-    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, PortDefinition("out"), *result.pass2, PortDefinition("in"))));
+    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, "out", *result.pass2, "in")));
     result.setGraph(std::move(graph));
     return result;
 }

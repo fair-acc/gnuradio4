@@ -31,7 +31,12 @@ struct PortDefinition {
     std::variant<IndexBased, StringBased> definition;
 
     constexpr PortDefinition(std::size_t _topLevel, std::size_t _subIndex = meta::invalid_index) : definition(IndexBased{_topLevel, _subIndex}) {}
+
     constexpr PortDefinition(std::string name) : definition(StringBased(std::move(name))) {}
+
+    template<std::convertible_to<std::string_view> StringLike>
+    constexpr PortDefinition(const StringLike& name) : definition(StringBased(std::string(name))) {}
+
     bool operator==(const PortDefinition& other) const { return (definition == other.definition); }
 };
 } // namespace gr
@@ -54,6 +59,12 @@ struct hash<gr::PortDefinition> {
 } // namespace std
 
 namespace gr {
+
+struct EdgeParameters {
+    std::size_t  minBufferSize = undefined_size;
+    std::int32_t weight        = 0;
+    std::string  name          = "unnamed edge";
+};
 
 struct Edge {
     enum class EdgeState { WaitingToBeConnected, Connected, Overridden, ErrorConnecting, PortNotFound, IncompatiblePorts, Unknown };
@@ -84,6 +95,13 @@ struct Edge {
         : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock),                                     //
           _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), //
           _minBufferSize(minBufferSize), _weight(weight), _name(std::move(name)) {}
+
+    explicit Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition,               //
+        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPortDefinition,               //
+        EdgeParameters parameters) noexcept                                                                   //
+        : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock),                                     //
+          _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), //
+          _minBufferSize(parameters.minBufferSize), _weight(parameters.weight), _name(std::move(parameters.name)) {}
 
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& sourceBlock() const noexcept { return _sourceBlock; }
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& destinationBlock() const noexcept { return _destinationBlock; }
@@ -243,7 +261,7 @@ protected:
 
         if (auto* collection = std::get_if<NamedPortCollection>(&entry)) {
             if (subIndex == meta::invalid_index) {
-                throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - Need to specify the index in the port collection for {}", which, topIndex, subIndex, collection->name), loc);
+                throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - Need to specify the index in the port collection for {} in {}", which, topIndex, subIndex, collection->name, uniqueName()), loc);
             }
             if (subIndex >= collection->ports.size()) {
                 throw gr::exception(std::format("out_of_range: dynamic{}Port(index: {}, subIndex: {}) - sub-index out of range for {} (size={})", which, topIndex, subIndex, collection->name, collection->ports.size()), loc);
@@ -294,22 +312,20 @@ public:
         return _dynamicOutputPorts;
     }
 
-    [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::string_view name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicInputPorts, name, location); }
-    [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::string_view name, std::source_location location = std::source_location::current()) { return dynamicPortFromName(_dynamicOutputPorts, name, location); }
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::INPUT>(_dynamicInputPorts, index, subIndex, std::move(loc)); }
     [[nodiscard]] gr::DynamicPort& dynamicOutputPort(std::size_t index, std::size_t subIndex = meta::invalid_index, std::source_location loc = std::source_location::current()) { return dynamicPortByIndexImpl<PortDirection::OUTPUT>(_dynamicOutputPorts, index, subIndex, std::move(loc)); }
 
     [[nodiscard]] gr::DynamicPort& dynamicInputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
-        return std::visit(meta::overloaded(                                                                                                                                                        //
-                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex, location); }, //
-                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicInputPort(std::string_view(_definition.name), location); }),       //
+        return std::visit(meta::overloaded(                                                                                                                                                                         //
+                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicInputPort(_definition.topLevel, _definition.subIndex, location); },                  //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicPortFromName(_dynamicInputPorts, std::string_view(_definition.name), location); }), //
             definition.definition);
     }
 
     [[nodiscard]] gr::DynamicPort& dynamicOutputPort(PortDefinition definition, std::source_location location = std::source_location::current()) {
-        return std::visit(meta::overloaded(                                                                                                                                                         //
-                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex, location); }, //
-                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicOutputPort(std::string_view(_definition.name), location); }),       //
+        return std::visit(meta::overloaded(                                                                                                                                                                          //
+                              [this, &location](const PortDefinition::IndexBased& _definition) -> DynamicPort& { return dynamicOutputPort(_definition.topLevel, _definition.subIndex, location); },                  //
+                              [this, &location](const PortDefinition::StringBased& _definition) -> DynamicPort& { return dynamicPortFromName(_dynamicOutputPorts, std::string_view(_definition.name), location); }), //
             definition.definition);
     }
 
@@ -508,7 +524,7 @@ public:
     [[nodiscard]] virtual gr::property_map exportedInputPorts()  = 0;
     [[nodiscard]] virtual gr::property_map exportedOutputPorts() = 0;
 
-    virtual void exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) = 0;
+    [[nodiscard]] virtual std::expected<void, Error> exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) = 0;
 };
 
 namespace serialization_fields {
@@ -896,10 +912,10 @@ public:
     [[nodiscard]] void*                      raw() override { return std::addressof(blockRef()); }
 
     // Common interface between managed and unmanaged graphs
-    [[nodiscard]] gr::Graph*       graph() override { return nullptr; }
-    [[nodiscard]] gr::property_map exportedInputPorts() override { return {}; }
-    [[nodiscard]] gr::property_map exportedOutputPorts() override { return {}; }
-    void                           exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override {}
+    [[nodiscard]] gr::Graph*                 graph() override { return nullptr; }
+    [[nodiscard]] gr::property_map           exportedInputPorts() override { return {}; }
+    [[nodiscard]] gr::property_map           exportedOutputPorts() override { return {}; }
+    [[nodiscard]] std::expected<void, Error> exportPort(bool, std::string_view, PortDirection, std::string_view, std::string_view, std::source_location = std::source_location::current()) override { return {}; }
 };
 
 namespace detail {

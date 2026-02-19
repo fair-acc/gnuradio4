@@ -40,6 +40,24 @@ struct MultiPortTestSource : public gr::Block<MultiPortTestSource<T, nPorts>> {
     }
 };
 
+const boost::ut::suite<"New connection API tests"> connection_api_tests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "Graph connection buffer size test - default"_test = [] {
+        Graph graph;
+        auto& src  = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink, sink.in)));
+        graph.connectPendingEdges();
+
+        expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize(true)));
+        expect(eq(sink.in.bufferSize(), graph::defaultMinBufferSize(true)));
+    };
+};
+
 const boost::ut::suite<"GraphTests"> _1 = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -50,7 +68,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink, sink.in, {.minBufferSize = undefined_size})));
         graph.connectPendingEdges();
 
         expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize(true)));
@@ -62,10 +80,9 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 8000UZ).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink, sink.in, {.minBufferSize = 8000UZ})));
         graph.connectPendingEdges();
 
-        // Note: the actual size is always power of 2 and aligned with page size, see std::bit_ceil
         expect(ge(src.out.bufferSize(), 8000UZ));
         expect(ge(sink.in.bufferSize(), 8000UZ));
     };
@@ -77,9 +94,9 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& sink2 = graph.emplaceBlock<NullSink<float>>();
         auto& sink3 = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 2000UZ).to<"in">(sink1)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 10000UZ).to<"in">(sink2)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 8000UZ).to<"in">(sink3)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink1, sink1.in, {.minBufferSize = 2000UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink2, sink2.in, {.minBufferSize = 10000UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink3, sink3.in, {.minBufferSize = 8000UZ})));
 
         graph.connectPendingEdges();
 
@@ -102,7 +119,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto&              sink1            = graph.emplaceBlock<NullSink<float>>();
 
         // only the first port is connected
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", 0>(src, customBufferSize).to<"in">(sink1)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, "out#0", sink1, "in", {.minBufferSize = customBufferSize})));
 
         scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -186,7 +203,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         Graph              graph;
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
-        expect(eq(graph.connect<"out">(src).to<"in">(snk), ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(src, src.out, snk, snk.in), ConnectionResult::SUCCESS));
 
         expect(graph.containsEdge(graph.edges().front()));
         graph.connectPendingEdges();
@@ -197,7 +214,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         Graph              graph;
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
-        expect(eq(graph.connect<"out">(src).to<"in">(snk), ConnectionResult::SUCCESS));
+        expect(eq(graph.connect(src, src.out, snk, snk.in), ConnectionResult::SUCCESS));
         graph.connectPendingEdges();
 
         const auto edge = graph.edges().front();
@@ -227,7 +244,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(snk)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, snk, snk.in, {.minBufferSize = undefined_size})));
         graph.connectPendingEdges();
 
         int count = 0;

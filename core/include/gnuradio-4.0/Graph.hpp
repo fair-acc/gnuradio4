@@ -152,9 +152,13 @@ protected:
                 message.data = std::unexpected(Error{std::format("Invalid definition for exportName in the kSubgraphExportPort message {}", message)});
                 return message;
             }
-            wrapper->exportPort(*exportFlag, uniqueBlockName, portDirection, portName, exportedName);
+            if (auto result = wrapper->exportPort(*exportFlag, uniqueBlockName, portDirection, portName, exportedName); !result.has_value()) {
+                message.data = std::unexpected(result.error());
+            }
         } else {
-            wrapper->exportPort(*exportFlag, uniqueBlockName, portDirection, portName, {});
+            if (auto result = wrapper->exportPort(*exportFlag, uniqueBlockName, portDirection, portName, {}); !result.has_value()) {
+                message.data = std::unexpected(result.error());
+            }
         }
 
         message.endpoint = graph::property::kSubgraphExportedPort;
@@ -178,18 +182,22 @@ public:
 
     GraphWrapper(TSubGraph&& original) : BlockWrapper<TSelf>(std::move(original)) { initExportPorts(); }
 
-    void exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) override {
+    [[nodiscard]] std::expected<void, Error> exportPort(bool exportFlag, std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::string_view exportedName, std::source_location location = std::source_location::current()) override {
         auto [infoIt, infoFound] = findExportedPortInfo(uniqueBlockName, portDirection, portName);
         if (infoFound == exportFlag) {
-            throw Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag));
+            return std::unexpected(Error(std::format("Port {} in block {} export status already as desired {}", portName, uniqueBlockName, exportFlag)));
         }
 
-        auto& port                  = findPortInBlock(uniqueBlockName, portDirection, portName, location);
+        auto port = findPortInBlock(uniqueBlockName, portDirection, portName, location);
+        if (!port.has_value()) {
+            return std::unexpected(port.error());
+        }
+
         auto& bookkeepingCollection = portDirection == PortDirection::INPUT ? _exportedInputPortsForBlock : _exportedOutputPortsForBlock;
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
         if (exportFlag) {
             bookkeepingCollection.emplace(uniqueBlockName, PortNameMapper{std::string(portName), std::string(exportedName)});
-            auto& createdDynamicPort                           = portCollection.emplace_back(gr::DynamicPort(port.weakRef()));
+            auto& createdDynamicPort                           = portCollection.emplace_back(gr::DynamicPort(port->get().weakRef()));
             std::get<gr::DynamicPort>(createdDynamicPort).name = exportedName;
         } else {
             auto exportedPortName = infoIt->second.exportedName;
@@ -198,11 +206,12 @@ public:
             if (portIt != portCollection.end()) {
                 portCollection.erase(portIt);
             } else {
-                throw gr::exception("Port was not exported, while it is registered as such");
+                return std::unexpected(Error("Port was not exported, while it is registered as such"));
             }
         }
 
         updateMetaInformation();
+        return {};
     }
 
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept override { return this->blockRef().blocks(); }
@@ -246,7 +255,7 @@ public:
     [[nodiscard]] gr::property_map exportedOutputPorts() final { return exportedPortsFor(_exportedOutputPortsForBlock); }
 
 private:
-    DynamicPort& findPortInBlock(std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::source_location location = std::source_location::current()) {
+    std::expected<std::reference_wrapper<DynamicPort>, Error> findPortInBlock(std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::source_location location = std::source_location::current()) {
         const auto& asGraph = [this] -> const auto& {
             if constexpr (requires { this->blockRef().graph(); }) {
                 return this->blockRef().graph();
@@ -256,14 +265,10 @@ private:
         }();
         std::expected<std::shared_ptr<BlockModel>, Error> block = graph::findBlock(asGraph, uniqueBlockName, location);
         if (!block.has_value()) {
-            throw gr::exception(block.error().message, location);
+            return std::unexpected(Error(block.error().message, location));
         }
 
-        if (portDirection == PortDirection::INPUT) {
-            return block.value()->dynamicInputPort(portName);
-        } else {
-            return block.value()->dynamicOutputPort(portName);
-        }
+        return std::ref(portDirection == PortDirection::INPUT ? block.value()->dynamicInputPort(portName) : block.value()->dynamicOutputPort(portName));
     }
 
     auto findExportedPortInfo(std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName) const {
@@ -293,111 +298,6 @@ struct Graph : Block<Graph> {
     gr::PluginLoader* _pluginLoader = nullptr;
 
     // _subgraphExportHandler and _subgraphExportContext are on BlockBase
-
-    // Just a dummy class that stores the graph and the source block and port
-    // to be able to split the connection into two separate calls
-    // connect(source) and .to(destination)
-    template<typename Source, typename SourcePort, std::size_t sourcePortIndex = 1UZ, std::size_t sourcePortSubIndex = meta::invalid_index>
-    struct SourceConnector {
-        Graph&      self;
-        Source&     sourceBlockRaw;
-        SourcePort& sourcePortOrCollectionRaw;
-
-        std::size_t  minBufferSize = undefined_size;
-        std::int32_t weight        = graph::defaultWeight;
-        std::string  edgeName      = graph::defaultEdgeName;
-
-        SourceConnector(Graph& _self, Source& _source, SourcePort& _port, std::size_t _minBufferSize, std::int32_t _weight, std::string _edgeName) //
-            : self(_self), sourceBlockRaw(_source), sourcePortOrCollectionRaw(_port), minBufferSize(_minBufferSize), weight(_weight), edgeName(_edgeName) {}
-
-        SourceConnector(const SourceConnector&)            = delete;
-        SourceConnector(SourceConnector&&)                 = delete;
-        SourceConnector& operator=(const SourceConnector&) = delete;
-        SourceConnector& operator=(SourceConnector&&)      = delete;
-
-        static_assert(std::is_same_v<SourcePort, gr::Message> || traits::port::is_port_v<SourcePort> || (sourcePortSubIndex != meta::invalid_index), "When we have a collection of ports, we need to have an index to access the desired port in the collection");
-
-    private:
-        template<typename Destination, typename DestinationPort, std::size_t destinationPortIndex = meta::invalid_index, std::size_t destinationPortSubIndex = meta::invalid_index>
-        [[nodiscard]] constexpr ConnectionResult to(Destination& destinationBlockRaw, DestinationPort& destinationPortOrCollectionRaw, std::source_location location = std::source_location::current()) {
-            std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = graph::findBlock(self, sourceBlockRaw, location);
-            std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = graph::findBlock(self, destinationBlockRaw, location);
-
-            if (!sourceBlock.has_value() || !destinationBlock.has_value()) {
-                std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlockRaw.name, destinationBlockRaw.name, location);
-                return ConnectionResult::FAILED;
-            }
-
-            auto* sourcePort = [&] {
-                if constexpr (traits::port::is_port_v<SourcePort>) {
-                    return &sourcePortOrCollectionRaw;
-                } else {
-                    return &sourcePortOrCollectionRaw[sourcePortSubIndex];
-                }
-            }();
-
-            auto* destinationPort = [&] {
-                if constexpr (traits::port::is_port_v<DestinationPort>) {
-                    return &destinationPortOrCollectionRaw;
-                } else {
-                    return &destinationPortOrCollectionRaw[destinationPortSubIndex];
-                }
-            }();
-
-            if constexpr (!std::is_same_v<typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>) {
-                meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename std::remove_pointer_t<decltype(destinationPort)>::value_type, typename std::remove_pointer_t<decltype(sourcePort)>::value_type>{};
-            }
-
-            const bool        isArithmeticLike       = sourcePort->kIsArithmeticLikeValueType;
-            const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-            self._edges.emplace_back(sourceBlock.value(), PortDefinition{sourcePortIndex, sourcePortSubIndex}, //
-                destinationBlock.value(), PortDefinition{destinationPortIndex, destinationPortSubIndex},       //
-                sanitizedMinBufferSize, weight, std::move(edgeName));
-
-            return ConnectionResult::SUCCESS;
-        }
-
-    public:
-        // connect using the port index
-
-        template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard]] auto to_internal(Destination& destination) {
-            auto& destinationPort = inputPort<destinationPortIndex, PortType::ANY>(&destination);
-            return to<Destination, std::remove_cvref_t<decltype(destinationPort)>, destinationPortIndex, destinationPortSubIndex>(destination, destinationPort);
-        }
-
-        template<std::size_t destinationPortIndex, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard, deprecated("For internal use only, the one with the port name should be used")]] auto to(Destination& destination) {
-            return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
-        }
-
-        template<std::size_t destinationPortIndex, typename Destination>
-        [[nodiscard]] auto to(Destination& destination) {
-            if constexpr (destinationPortIndex == gr::meta::default_message_port_index) {
-                return to<Destination, decltype(destination.msgIn)>(destination, destination.msgIn);
-
-            } else {
-                return to<destinationPortIndex, meta::invalid_index, Destination>(destination);
-            }
-        }
-
-        // connect using the port name
-
-        template<fixed_string destinationPortName, std::size_t destinationPortSubIndex, typename Destination>
-        [[nodiscard]] constexpr auto to(Destination& destination) {
-            using destination_input_ports              = typename traits::block::all_input_ports<Destination>;
-            constexpr std::size_t destinationPortIndex = meta::indexForName<destinationPortName, destination_input_ports>();
-            if constexpr (destinationPortIndex == meta::invalid_index) {
-                meta::print_types<meta::message_type<"There is no input port with the specified name in this destination block">, Destination, meta::message_type<destinationPortName>, meta::message_type<"These are the known names:">, traits::block::all_input_port_names<Destination>, meta::message_type<"Full ports info:">, destination_input_ports> port_not_found_error{};
-            }
-            return to_internal<destinationPortIndex, destinationPortSubIndex, Destination>(destination);
-        }
-
-        template<fixed_string destinationPortName, typename Destination>
-        [[nodiscard]] constexpr auto to(Destination& destination) {
-            return to<destinationPortName, meta::invalid_index, Destination>(destination);
-        }
-    };
 
 public:
     GR_MAKE_REFLECTABLE(Graph);
@@ -459,11 +359,11 @@ public:
 
     template<typename T>
     requires std::same_as<std::remove_cvref_t<T>, Edge>
-    [[maybe_unused]] Edge& addEdge(T&& edge, std::source_location location = std::source_location::current()) {
+    [[nodiscard]] std::expected<std::reference_wrapper<Edge>, Error> addEdge(T&& edge, std::source_location location = std::source_location::current()) {
         if (containsEdge(edge)) {
-            throw gr::exception(std::format("Edge already exists in graph:\n{}", edge), location);
+            return std::unexpected(Error(std::format("Edge already exists in graph:\n{}", edge), location));
         }
-        return _edges.emplace_back(std::forward<T>(edge));
+        return std::ref(_edges.emplace_back(std::forward<T>(edge)));
     }
 
     [[maybe_unused]] bool removeEdge(const Edge& edge) {
@@ -472,11 +372,11 @@ public:
 
     std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message);
 
-    std::shared_ptr<BlockModel> removeBlockByName(std::string_view uniqueName) {
+    std::expected<std::shared_ptr<BlockModel>, Error> removeBlockByName(std::string_view uniqueName) {
         auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
 
         if (it == _blocks.end()) {
-            throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
+            return std::unexpected(Error(std::format("Block {} was not found in {}", uniqueName, this->unique_name)));
         }
 
         std::erase_if(_edges, [&it](const Edge& edge) { //
@@ -491,47 +391,50 @@ public:
 
     std::pair<std::shared_ptr<BlockModel>, std::shared_ptr<BlockModel>> replaceBlock(std::string_view uniqueName, std::string_view type, const property_map& properties);
 
-    void emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
+    [[nodiscard]] std::expected<void, Error> emplaceEdge(std::string_view sourceBlock, std::string sourcePort, std::string_view destinationBlock, //
         std::string destinationPort, [[maybe_unused]] const std::size_t minBufferSize, [[maybe_unused]] const std::int32_t weight, std::string_view edgeName) {
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
-            throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+            return std::unexpected(Error(std::format("Block {} was not found in {}", sourceBlock, this->unique_name)));
         }
 
         auto destinationBlockIt = std::ranges::find_if(_blocks, [&destinationBlock](const auto& block) { return block->uniqueName() == destinationBlock; });
         if (destinationBlockIt == _blocks.end()) {
-            throw gr::exception(std::format("Block {} was not found in {}", destinationBlock, this->unique_name));
+            return std::unexpected(Error(std::format("Block {} was not found in {}", destinationBlock, this->unique_name)));
         }
 
         auto& sourcePortRef      = (*sourceBlockIt)->dynamicOutputPort(std::string_view(sourcePort));
         auto& destinationPortRef = (*destinationBlockIt)->dynamicInputPort(std::string_view(destinationPort));
 
         if (sourcePortRef.typeName() != destinationPortRef.typeName()) {
-            throw gr::exception(std::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort));
+            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort)));
         }
 
         auto connectionResult = sourcePortRef.connect(destinationPortRef);
 
         if (connectionResult != ConnectionResult::SUCCESS) {
-            throw gr::exception(std::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
+            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort)));
         }
 
         const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
         _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
+        return {};
     }
 
-    void removeEdgeBySourcePort(std::string_view sourceBlock, std::string_view sourcePort) {
+    std::expected<void, Error> removeEdgeBySourcePort(std::string_view sourceBlock, std::string_view sourcePort) {
         auto sourceBlockIt = std::ranges::find_if(_blocks, [&sourceBlock](const auto& block) { return block->uniqueName() == sourceBlock; });
         if (sourceBlockIt == _blocks.end()) {
-            throw gr::exception(std::format("Block {} was not found in {}", sourceBlock, this->unique_name));
+            return std::unexpected(Error(std::format("Block {} was not found in {}", sourceBlock, this->unique_name)));
         }
 
         auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
 
         if (sourcePortRef.disconnect() == ConnectionResult::FAILED) {
-            throw gr::exception(std::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name));
+            return std::unexpected(Error(std::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name)));
         }
+
+        return {};
     }
 
     std::optional<Message> propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message);
@@ -550,48 +453,114 @@ public:
         return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
     }
 
-    template<std::size_t sourcePortIndex, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, [[maybe_unused]] std::source_location location = std::source_location::current()) {
-        if constexpr (sourcePortIndex == meta::default_message_port_index) {
-            return SourceConnector<Source, decltype(source.msgOut), meta::invalid_index, meta::invalid_index>(*this, source, source.msgOut, minBufferSize, weight, edgeName);
-        } else {
-            return connect<sourcePortIndex, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName, location);
-        }
+    ConnectionResult connect(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
+        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,            //
+        EdgeParameters                        parameters = {},                                   //
+        [[maybe_unused]] std::source_location location   = std::source_location::current()) {
+
+        const bool isArithmeticLike = sourceBlock->dynamicOutputPort(sourcePort).portInfo().isValueTypeArithmeticLike;
+        parameters.minBufferSize    = parameters.minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : parameters.minBufferSize;
+
+        _edges.emplace_back(sourceBlock, std::move(sourcePort), //
+            destinationBlock, std::move(destinationPort),       //
+            std::move(parameters));
+
+        return ConnectionResult::SUCCESS;
     }
 
-    // connect using the port name
+    template<gr::BlockLike SourceBlock, gr::BlockLike DestinationBlock>
+    ConnectionResult connect(SourceBlock& sourceBlock, PortDefinition sourcePort, //
+        DestinationBlock& destinationBlock, PortDefinition destinationPort,       //
+        EdgeParameters       parameters = {},                                     //
+        std::source_location location   = std::source_location::current()) {
 
-    template<fixed_string sourcePortName, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
-        using source_output_ports             = typename traits::block::all_output_ports<Source>;
-        constexpr std::size_t sourcePortIndex = meta::indexForName<sourcePortName, source_output_ports>();
-        if constexpr (sourcePortIndex == meta::invalid_index) {
-            meta::print_types<meta::message_type<"There is no output port with the specified name in this source block">, Source, meta::message_type<sourcePortName>, meta::message_type<"These are the known names:">, traits::block::all_output_port_names<Source>, meta::message_type<"Full ports info:">, source_output_ports> port_not_found_error{};
-        }
-        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
-    }
+        std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
+        std::expected<std::shared_ptr<BlockModel>, Error> destinationBlockModel = graph::findBlock(*this, destinationBlock, location);
 
-    template<fixed_string sourcePortName, typename Source>
-    [[nodiscard]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
-        return connect<sourcePortName, meta::invalid_index, Source>(source, minBufferSize, weight, edgeName, location);
-    }
-
-    // dynamic/runtime connections
-
-    template<typename Source, typename Destination>
-    requires(!std::is_pointer_v<std::remove_cvref_t<Source>> && !std::is_pointer_v<std::remove_cvref_t<Destination>>)
-    ConnectionResult connect(Source& sourceBlockRaw, PortDefinition sourcePortDefinition, Destination& destinationBlockRaw, PortDefinition destinationPortDefinition, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
-        std::expected<std::shared_ptr<BlockModel>, Error> sourceBlock      = gr::graph::findBlock(*this, sourceBlockRaw, location);
-        std::expected<std::shared_ptr<BlockModel>, Error> destinationBlock = gr::graph::findBlock(*this, destinationBlockRaw, location);
-
-        if (!sourceBlock.has_value() || !destinationBlock.has_value()) {
+        if (!sourceBlockModel.has_value() || !destinationBlockModel.has_value()) {
+            std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlock.name, destinationBlock.name, location);
             return ConnectionResult::FAILED;
         }
 
-        const auto&       sourcePort             = sourceBlock.value()->dynamicOutputPort(sourcePortDefinition, location);
-        const bool        isArithmeticLike       = sourcePort.portInfo().isValueTypeArithmeticLike;
-        const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
-        _edges.emplace_back(sourceBlock.value(), sourcePortDefinition, destinationBlock.value(), destinationPortDefinition, sanitizedMinBufferSize, weight, std::move(edgeName));
+        return connect(*sourceBlockModel, std::move(sourcePort), *destinationBlockModel, std::move(destinationPort), std::move(parameters), location);
+    }
+
+    template<gr::BlockLike SourceBlock, gr::PortLike SourcePort, gr::BlockLike DestinationBlock, gr::PortLike DestinationPort>
+    ConnectionResult connect(SourceBlock& sourceBlock, SourcePort& sourcePort, //
+        DestinationBlock& destinationBlock, DestinationPort& destinationPort,  //
+        EdgeParameters       parameters = {},                                  //
+        std::source_location location   = std::source_location::current()) {
+
+        std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
+        std::expected<std::shared_ptr<BlockModel>, Error> destinationBlockModel = graph::findBlock(*this, destinationBlock, location);
+
+        if (!sourceBlockModel.has_value() || !destinationBlockModel.has_value()) {
+            std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlock.name, destinationBlock.name, location);
+            return ConnectionResult::FAILED;
+        }
+
+        if constexpr (!std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>) {
+            meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename DestinationPort::value_type, typename SourcePort::value_type>{};
+        }
+
+        auto getPortDefinition = [&](const auto& ports, const auto& searchingForPort) -> std::optional<PortDefinition> {
+            std::size_t currentIndex  = 0UZ;
+            std::size_t foundIndex    = meta::invalid_index;
+            std::size_t foundSubindex = meta::invalid_index;
+            gr::meta::tuple_for_each(
+                [&]<typename PortOrCollection>(const PortOrCollection& portOrCollection) {
+                    if constexpr (traits::port::is_port_v<PortOrCollection>) {
+                        if (std::addressof(searchingForPort) == std::addressof(portOrCollection)) {
+                            foundIndex = currentIndex;
+                        }
+                    } else if constexpr (traits::block::detail::array_traits<PortOrCollection>::is_array) {
+                        std::size_t currentSubindex = 0UZ;
+                        for (const auto& port : portOrCollection) {
+                            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(searchingForPort)>, std::remove_cvref_t<decltype(port)>>) {
+                                if (std::addressof(searchingForPort) == std::addressof(port)) {
+                                    foundIndex    = currentIndex;
+                                    foundSubindex = currentSubindex;
+                                    break;
+                                }
+                            }
+
+                            currentSubindex++;
+                        }
+
+                    } else if constexpr (meta::is_instantiation_of<PortOrCollection, std::vector>) {
+                        meta::print_types<meta::message_type<"Vector size is not known at compile-time, you need to use the dynamic connect function variant">, PortOrCollection>{};
+
+                    } else {
+                        meta::print_types<meta::message_type<"This is not a port or a collection of ports">, PortOrCollection>{};
+                    }
+                    currentIndex++;
+                },
+                ports);
+
+            if (foundIndex != meta::invalid_index) {
+                return PortDefinition(foundIndex, foundSubindex);
+            } else {
+                return {};
+            }
+        };
+
+        const auto sourcePortDefinition      = getPortDefinition(outputPorts<PortType::ANY>(&sourceBlock), sourcePort);
+        const auto destinationPortDefinition = getPortDefinition(inputPorts<PortType::ANY>(&destinationBlock), destinationPort);
+
+        if (!sourcePortDefinition) {
+            return ConnectionResult::FAILED;
+        }
+        if (!destinationPortDefinition) {
+            return ConnectionResult::FAILED;
+        }
+
+        const bool        isArithmeticLike       = sourcePort.kIsArithmeticLikeValueType;
+        const std::size_t sanitizedMinBufferSize = parameters.minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : parameters.minBufferSize;
+
+        _edges.emplace_back(sourceBlockModel.value(), *sourcePortDefinition, //
+            destinationBlockModel.value(), *destinationPortDefinition,       //
+            EdgeParameters{sanitizedMinBufferSize, parameters.weight, std::move(parameters.name)});
+
         return ConnectionResult::SUCCESS;
     }
 
@@ -775,10 +744,10 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
 
     gr::Graph flattenedGraph;
     gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
-    std::ranges::for_each(root.edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); // add edges from root graph
+    std::ranges::for_each(root.edges(), [&](const Edge& edge) { std::ignore = flattenedGraph.addEdge(edge, location); }); // add edges from root graph
 
     // add edges related to blocks in flattened Graph
-    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { std::ranges::for_each(block->edges(), [&](const Edge& edge) { flattenedGraph.addEdge(edge, location); }); });
+    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { std::ranges::for_each(block->edges(), [&](const Edge& edge) { std::ignore = flattenedGraph.addEdge(edge, location); }); });
 
     return flattenedGraph;
 }
@@ -883,7 +852,7 @@ std::vector<gr::Graph> weaklyConnectedComponents(const GraphLike auto& graph) {
         const auto cidD = compId[itD->second];
         if (cidS >= 0 && cidS == cidD) {
             const auto rank = compRank[static_cast<std::size_t>(cidS)];
-            result[rank].addEdge(e); // shallow edge copy: same blocks/ports
+            std::ignore     = result[rank].addEdge(e); // shallow edge copy: same blocks/ports
         }
     }
 

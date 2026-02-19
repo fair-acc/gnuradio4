@@ -899,8 +899,11 @@ protected:
         }
 
         messageData["_targetGraph"] = targetGraph->unique_name.value();
-        auto removedBlock           = targetGraph->removeBlockByName(uniqueName);
-        makeZombie(std::move(removedBlock));
+        if (auto removedBlock = targetGraph->removeBlockByName(uniqueName); removedBlock.has_value()) {
+            makeZombie(std::move(*removedBlock));
+        } else {
+            message.data = std::unexpected(removedBlock.error());
+        }
 
         return {message};
     }
@@ -928,7 +931,9 @@ protected:
         messageData["_targetGraph"] = targetGraph->unique_name.value();
         {
             WorkQuiescenceGuard quiescence(this);
-            targetGraph->removeEdgeBySourcePort(sourceBlock, sourcePort);
+            if (auto result = targetGraph->removeEdgeBySourcePort(sourceBlock, sourcePort); !result.has_value()) {
+                message.data = std::unexpected(result.error());
+            }
         }
 
         return message;
@@ -963,7 +968,9 @@ protected:
         messageData["_targetGraph"] = targetGraph->unique_name.value();
         {
             WorkQuiescenceGuard quiescence(this);
-            targetGraph->emplaceEdge(sourceBlock, std::string(sourcePort), destinationBlock, std::string(destinationPort), *minBufferSize, *weight, edgeName);
+            if (auto result = targetGraph->emplaceEdge(sourceBlock, std::string(sourcePort), destinationBlock, std::string(destinationPort), *minBufferSize, *weight, edgeName); !result.has_value()) {
+                message.data = std::unexpected(result.error());
+            }
         }
 
         return message;

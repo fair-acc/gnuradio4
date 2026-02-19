@@ -71,7 +71,7 @@ void execute_selector_test(TestParams params, std::source_location location = st
 
     TagSink<double, ProcessFunction::USE_PROCESS_ONE>* monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", false}}));
     expect(monitorSink->settings().applyStagedParameters().forwardParameters.empty());
-    expect(gr::ConnectionResult::SUCCESS == graph.connect<"monitor">(*selector).to<"in">(*monitorSink));
+    expect(gr::ConnectionResult::SUCCESS == graph.connect(*selector, "monitor"s, *monitorSink, "in"s));
 
     gr::scheduler::Simple sched;
     if (auto ret = sched.exchange(std::move(graph)); !ret) {

@@ -226,8 +226,8 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
         auto  middleBlockPtr = graph::findBlock(processingGraph, middleBlock).value();
         auto  sinkBlockPtr   = graph::findBlock(processingGraph, sinkBlock).value();
 
-        expect(processingGraph.connect<"out">(sourceBlock).to<"in">(middleBlock) == ConnectionResult::SUCCESS);
-        expect(processingGraph.connect<"out">(middleBlock).to<"in">(sinkBlock) == ConnectionResult::SUCCESS);
+        expect(processingGraph.connect(sourceBlock, sourceBlock.out, middleBlock, middleBlock.in) == ConnectionResult::SUCCESS);
+        expect(processingGraph.connect(middleBlock, middleBlock.out, sinkBlock, sinkBlock.in) == ConnectionResult::SUCCESS);
         expect(!processingGraph.blocks().empty());
 
         // Prime data into middle block input before any scheduler run
@@ -278,7 +278,7 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
 
         // FIXME: discuss how to connect from/to blocks in different (sub-)graphs
         skip / "connect source (in root graph) with sink (in nested graph)"_test = [&rootGraph, &sourceBlock, &sinkBlock, &wrappedRootGraph] {
-            expect(eq(rootGraph->connect<"out">(sourceBlock).to<"in">(sinkBlock), ConnectionResult::SUCCESS));
+            expect(eq(rootGraph->connect(sourceBlock, sourceBlock.out, sinkBlock, sinkBlock.in), ConnectionResult::SUCCESS));
             rootGraph->connectPendingEdges();
             expect(!wrappedRootGraph->blocks().empty());
             expect(eq(wrappedRootGraph->edges().size(), 1UZ));
@@ -290,11 +290,11 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
             // sub-graph#1
             auto& s1 = graph.emplaceBlock<gr::testing::NullSource<float>>();
             auto& m1 = graph.emplaceBlock<gr::testing::NullSink<float>>();
-            expect(graph.connect<"out">(s1).to<"in">(m1) == gr::ConnectionResult::SUCCESS);
+            expect(graph.connect(s1, s1.out, m1, m1.in) == gr::ConnectionResult::SUCCESS);
             // sub-graph#2
             auto& s2 = graph.emplaceBlock<gr::testing::NullSource<float>>();
             auto& m2 = graph.emplaceBlock<gr::testing::NullSink<float>>();
-            expect(graph.connect<"out">(s2).to<"in">(m2) == gr::ConnectionResult::SUCCESS);
+            expect(graph.connect(s2, s2.out, m2, m2.in) == gr::ConnectionResult::SUCCESS);
             // sub-graph#3 -- only one block, no connections
             std::ignore = graph.emplaceBlock<gr::testing::NullSource<float>>();
 

@@ -195,9 +195,9 @@ const boost::ut::suite SettingsTests = [] {
         block1.settings().updateActiveParameters();
 
         // src -> block1 -> block2 -> sink
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, block1, block1.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(block1, block1.out, block2, block2.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(block2, block2.out, sink, sink.in)));
 
         expect(!src.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "manual setting disable auto-update";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
@@ -411,9 +411,9 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block2.input_chunk_size, std::size_t(5)));
 
         // src -> block1 -> block2 -> sink
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(block1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block1).to<"in">(block2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(block2).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, block1, block1.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(block1, block1.out, block2, block2.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(block2, block2.out, sink, sink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -834,10 +834,10 @@ const boost::ut::suite CtxSettingsTests = [] {
 
         //                                  -> sinkOne
         // src -> monitorBulk -> monitorOne -> sinkBulk
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(monitorBulk)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorBulk).to<"in">(monitorOne)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkBulk)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(monitorOne).to<"in">(sinkOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, monitorBulk, monitorBulk.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorBulk, monitorBulk.out, monitorOne, monitorOne.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorOne, monitorOne.out, sinkBulk, sinkBulk.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorOne, monitorOne.out, sinkOne, sinkOne.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

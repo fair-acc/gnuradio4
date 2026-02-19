@@ -124,7 +124,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         gr::Graph flow1;
         auto&     source1  = flow1.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
         auto&     fftBlock = flow1.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect<"out">(source1).to<"in">(fftBlock)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow1.connect(source1, source1.out, fftBlock, fftBlock.in)));
         Scheduler sched1;
         ;
         if (auto ret = sched1.exchange(std::move(flow1)); !ret) {
@@ -136,7 +136,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             gr::Graph flow2;
             auto&     source2 = flow2.emplaceBlock<gr::testing::TagSource<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(1024)}, {"mark_tag", false}});
             auto&     fft2    = flow2.emplaceBlock<FFT<float>>({{"fftSize", static_cast<gr::Size_t>(16)}});
-            expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect<"out">(source2).to<"in">(fft2)));
+            expect(eq(gr::ConnectionResult::SUCCESS, flow2.connect(source2, source2.out, fft2, fft2.in)));
             Scheduler sched2;
             ;
             if (auto ret = sched2.exchange(std::move(flow2)); !ret) {

@@ -554,8 +554,8 @@ void interpolation_decimation_test(const IntDecTestData& data) {
     auto&     source        = flow.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
     auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(source, source.out, int_dec_block, int_dec_block.in)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(int_dec_block, int_dec_block.out, sink, sink.in)));
     if (data.out_port_max >= 0) {
         int_dec_block.out.max_samples = static_cast<size_t>(data.out_port_max);
     }
@@ -585,8 +585,8 @@ void stride_test(const StrideTestData& data) {
     auto&     source        = flow.emplaceBlock<TagSource<int>>({{"n_samples_max", data.n_samples}, {"mark_tag", false}});
     auto&     int_dec_block = flow.emplaceBlock<Resampler<int>>({{"output_chunk_size", data.output_chunk_size}, {"input_chunk_size", data.input_chunk_size}, {"stride", data.stride}});
     auto&     sink          = flow.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(int_dec_block)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(int_dec_block).to<"in">(sink)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(source, source.out, int_dec_block, int_dec_block.in)));
+    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(int_dec_block, int_dec_block.out, sink, sink.in)));
     int_dec_block.write_to_vector = write_to_vector;
     if (data.in_port_max >= 0) {
         int_dec_block.in.max_samples = static_cast<size_t>(data.in_port_max);
@@ -628,8 +628,8 @@ void syncOrAsyncTest() {
     expect(asyncBlock.in.kIsSynch == !isInputAsync) << testInfo;
     expect(asyncBlock.out.kIsSynch == !isOutputAsync) << testInfo;
 
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(tagSrc).to<"in">(asyncBlock))) << testInfo;
-    expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(asyncBlock).template to<"in">(sink))) << testInfo;
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect(tagSrc, tagSrc.out, asyncBlock, asyncBlock.in))) << testInfo;
+    expect(eq(ConnectionResult::SUCCESS, testGraph.connect(asyncBlock, asyncBlock.out, sink, sink.in))) << testInfo;
 
     gr::scheduler::Simple sched;
     if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -786,8 +786,8 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
 
         auto& intDecBlock = testGraph.emplaceBlock<Resampler<int>>({{"output_chunk_size", gr::Size_t(10)}, {"input_chunk_size", gr::Size_t(10)}});
         auto& sink        = testGraph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_ONE>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(source).to<"in">(intDecBlock)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(intDecBlock).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(source, source.out, intDecBlock, intDecBlock.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(intDecBlock, intDecBlock.out, sink, sink.in)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -831,10 +831,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input", 0>(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input", 1>(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input", 2>(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input", 3>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[0], "out"s, testNode, "input#0"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[1], "out"s, testNode, "input#1"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[2], "out"s, testNode, "input#2"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[3], "out"s, testNode, "input#3"s)));
 
         // test also different connect API
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#0"s, *sinks[0], "in"s)));
@@ -879,10 +879,10 @@ const boost::ut::suite<"Stride Tests"> _stride_tests = [] {
         sinks[2] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
         sinks[3] = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>());
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[0]).to<"input", 0>(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[1]).to<"input", 1>(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[2]).to<"input", 2>(testNode)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(*sources[3]).to<"input", 3>(testNode)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[0], "out"s, testNode, "input#0"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[1], "out"s, testNode, "input#1"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[2], "out"s, testNode, "input#2"s)));
+        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(*sources[3], "out"s, testNode, "input#3"s)));
 
         // test also different connect API
         expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(testNode, "output#0"s, *sinks[0], "in"s)));
@@ -1013,10 +1013,10 @@ const boost::ut::suite<"PortMetaInfo Tests"> _portMetaInfoTests = [] {
 
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src1).to<"in1">(manyPortsBlock)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src2).to<"in2", 0>(manyPortsBlock)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(src3).to<"in2", 1>(manyPortsBlock)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(manyPortsBlock).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src1, "out"s, manyPortsBlock, "in1"s)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src2, "out"s, manyPortsBlock, "in2#0"s)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src3, "out"s, manyPortsBlock, "in2#1"s)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(manyPortsBlock, manyPortsBlock.out, sink, sink.in)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -1078,8 +1078,8 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
         auto&     testBlock = graph.emplaceBlock<Resampler<float>>({{"disconnect_on_done", false}});
         auto&     sink      = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"disconnect_on_done", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(testBlock)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(testBlock).template to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, testBlock, testBlock.in)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect(testBlock, testBlock.out, sink, sink.in)));
 
         graph.reconnectAllEdges();
         auto blockInit = [](auto& blockToInit) {
@@ -1140,8 +1140,8 @@ const boost::ut::suite<"BlockingIO Tests"> _blockingIOTests = [] {
         TagMonitor<float, ProcessFunction::USE_PROCESS_ONE> d(gr::property_map{});
         auto&                                               monitor = flow.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
         auto&                                               sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect(source, source.out, monitor, monitor.in)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect(monitor, monitor.out, sink, sink.in)));
 
         gr::scheduler::Simple scheduler;
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {

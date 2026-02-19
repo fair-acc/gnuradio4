@@ -57,7 +57,7 @@ void runTest(const TestParams& par) {
 
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
         sources[i]->_tags = par.inTags[i];
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out"s, syncBlock, "inputs#"s + std::to_string(i)));
+        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out", syncBlock, "inputs#"s + std::to_string(i)));
     }
 
     for (std::size_t i = 0; i < nPorts; i++) {

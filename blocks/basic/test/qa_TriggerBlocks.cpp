@@ -67,16 +67,16 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             auto& tagSink        = graph.emplaceBlock<TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"log_tags", true}, {"log_samples", false}, {"verbose_console", false}});
 
             // connect non-UI blocks
-            expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(clockSrc).to<"clk_in">(funcGen))) << "connect clockSrc->funcGen";
-            expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(schmittTrigger))) << "connect funcGen->schmittTrigger";
-            expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(tagSink))) << "connect schmittTrigger->tagSink";
+            expect(eq(ConnectionResult::SUCCESS, graph.connect(clockSrc, clockSrc.out, funcGen, funcGen.clk_in))) << "connect clockSrc->funcGen";
+            expect(eq(ConnectionResult::SUCCESS, graph.connect(funcGen, funcGen.out, schmittTrigger, schmittTrigger.in))) << "connect funcGen->schmittTrigger";
+            expect(eq(ConnectionResult::SUCCESS, graph.connect(schmittTrigger, schmittTrigger.out, tagSink, tagSink.in))) << "connect schmittTrigger->tagSink";
             std::thread uiLoop;
             if (enableVisualTests) {
                 auto& uiSink1 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink1"}});
                 auto& uiSink2 = graph.emplaceBlock<ImChartMonitor<float>>({{"name", "ImChartSink2"}});
                 // connect UI blocks
-                expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(funcGen).to<"in">(uiSink1))) << "connect funcGen->uiSink1";
-                expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(schmittTrigger).template to<"in">(uiSink2))) << "connect schmittTrigger->uiSink2";
+                expect(eq(ConnectionResult::SUCCESS, graph.connect(funcGen, funcGen.out, uiSink1, uiSink1.in))) << "connect funcGen->uiSink1";
+                expect(eq(ConnectionResult::SUCCESS, graph.connect(schmittTrigger, schmittTrigger.out, uiSink2, uiSink2.in))) << "connect schmittTrigger->uiSink2";
                 uiLoop = std::thread([&uiSink1, &uiSink2]() {
                     gr::thread_pool::thread::setThreadName("uiLoop");
                     bool drawUI = true;

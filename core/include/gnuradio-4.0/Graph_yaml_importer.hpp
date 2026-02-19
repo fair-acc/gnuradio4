@@ -119,11 +119,14 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                         throw gr::exception(std::format("Required Block {} not found in:\n{}", requiredBlockName, gr::graph::format(graph)), location);
                     }
 
-                    graphWrapper->exportPort(true,                                                     //
-                        blockUniqueName,                                                               //
-                        portDirectionString == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT, //
-                        internalPortName,                                                              //
-                        exportedPortName);
+                    if (auto result = graphWrapper->exportPort(true,                                       //
+                            blockUniqueName,                                                               //
+                            portDirectionString == "INPUT" ? PortDirection::INPUT : PortDirection::OUTPUT, //
+                            internalPortName,                                                              //
+                            exportedPortName);
+                        !result.has_value()) {
+                        throw result.error();
+                    }
                 }
             };
 
@@ -251,6 +254,9 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
                 return result{block, {static_cast<std::size_t>(*index), static_cast<std::size_t>(*subIndex)}};
 
+            } else if (const auto portFieldString = portField.value_or(std::string_view{}); portFieldString.data()) {
+                return result{block, {std::string(portFieldString)}};
+
             } else {
                 const auto index = checked_access_ptr{portField.template get_if<std::int64_t>()};
                 if (index == nullptr) {
@@ -264,7 +270,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         auto dst = parseBlockPort(connection[2], connection[3]);
 
         if (connection.size() == 4) {
-            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, undefined_size, graph::defaultWeight, graph::defaultEdgeName, location);
+            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = undefined_size, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location);
         } else {
             std::size_t minBufferSize{};
             pmt::ValueVisitor([&minBufferSize]<typename TValue>(const TValue& value) {
@@ -277,7 +283,7 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 }
             }).visit(connection[4]);
 
-            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, minBufferSize, graph::defaultWeight, graph::defaultEdgeName, location);
+            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = minBufferSize, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location);
         }
     } // for connections
 }
