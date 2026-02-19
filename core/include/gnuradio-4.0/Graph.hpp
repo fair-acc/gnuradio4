@@ -454,8 +454,8 @@ public:
     }
 
     ConnectionResult connect(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
-        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,             //
-        EdgeParameters                        parameters = {},                                    //
+        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,            //
+        EdgeParameters                        parameters = {},                                   //
         [[maybe_unused]] std::source_location location   = std::source_location::current()) {
 
         const bool isArithmeticLike = sourceBlock->dynamicOutputPort(sourcePort).portInfo().isValueTypeArithmeticLike;
@@ -470,8 +470,8 @@ public:
 
     template<gr::BlockLike SourceBlock, gr::BlockLike DestinationBlock>
     ConnectionResult connect(SourceBlock& sourceBlock, PortDefinition sourcePort, //
-        DestinationBlock& destinationBlock, PortDefinition destinationPort,        //
-        EdgeParameters       parameters = {},                                      //
+        DestinationBlock& destinationBlock, PortDefinition destinationPort,       //
+        EdgeParameters       parameters = {},                                     //
         std::source_location location   = std::source_location::current()) {
 
         std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
@@ -487,8 +487,8 @@ public:
 
     template<gr::BlockLike SourceBlock, gr::PortLike SourcePort, gr::BlockLike DestinationBlock, gr::PortLike DestinationPort>
     ConnectionResult connect(SourceBlock& sourceBlock, SourcePort& sourcePort, //
-        DestinationBlock& destinationBlock, DestinationPort& destinationPort,   //
-        EdgeParameters       parameters = {},                                   //
+        DestinationBlock& destinationBlock, DestinationPort& destinationPort,  //
+        EdgeParameters       parameters = {},                                  //
         std::source_location location   = std::source_location::current()) {
 
         std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
