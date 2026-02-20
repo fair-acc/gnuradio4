@@ -171,18 +171,6 @@ static_assert(is_port_domain<CPU>::value);
 static_assert(is_port_domain<GPU>::value);
 static_assert(!is_port_domain<int>::value);
 
-struct PortInfo { // maybe/should be replaced by gr::port::BitMask
-    PortType         portType                  = PortType::ANY;
-    PortDirection    portDirection             = PortDirection::INPUT;
-    std::string_view portDomain                = "unknown";
-    ConnectionResult portConnectionResult      = ConnectionResult::FAILED;
-    std::string      valueTypeName             = "uninitialised type";
-    bool             isValueTypeArithmeticLike = false;
-    std::size_t      valueTypeSize             = 0UZ;
-    std::size_t      bufferSize                = 0UZ;
-    std::size_t      availableBufferSize       = 0UZ;
-};
-
 struct PortMetaInfo {
     using description = Doc<R"*(@brief Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
 
@@ -1088,10 +1076,10 @@ private:
         [[nodiscard]] virtual std::string_view portName() noexcept       = 0; // TODO: rename to 'name()' and eliminate local 'name' field (moved to metaInfo()), and use string&
         [[nodiscard]] virtual std::string_view portName() const noexcept = 0;
 
-        [[nodiscard]] virtual PortInfo            portInfo() const              = 0; // TODO: rename to type() and remove existing type(), direction(), domain(), ... API
-        [[nodiscard]] virtual PortMetaInfo const& portMetaInfo() const noexcept = 0;
-        [[nodiscard]] virtual PortMetaInfo&       portMetaInfo() noexcept       = 0;
-        [[nodiscard]] virtual port::BitMask       portMaskInfo() const noexcept = 0;
+        [[nodiscard]] virtual PortMetaInfo const& portMetaInfo() const noexcept              = 0;
+        [[nodiscard]] virtual PortMetaInfo&       portMetaInfo() noexcept                    = 0;
+        [[nodiscard]] virtual port::BitMask       portMaskInfo() const noexcept              = 0;
+        [[nodiscard]] virtual bool                isValueTypeArithmeticLike() const noexcept = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1191,22 +1179,10 @@ private:
         [[nodiscard]] std::string_view portName() noexcept override { return _value.name; } // TODO: '_value.name' -> '_value.metaInfo.name' and use string&
         [[nodiscard]] std::string_view portName() const noexcept override { return _value.name; }
 
-        [[nodiscard]] PortInfo portInfo() const override {
-            return {// snapshot
-                .portType                  = T::kPortType,
-                .portDirection             = T::kDirection,
-                .portDomain                = T::Domain::Name,
-                .portConnectionResult      = _value.isConnected() ? ConnectionResult::SUCCESS : ConnectionResult::FAILED,
-                .valueTypeName             = meta::type_name<typename T::value_type>(),
-                .isValueTypeArithmeticLike = T::kIsArithmeticLikeValueType,
-                .valueTypeSize             = sizeof(typename T::value_type),
-                .bufferSize                = _value.bufferSize(),
-                .availableBufferSize       = _value.available()};
-        }
-
         [[nodiscard]] PortMetaInfo const& portMetaInfo() const noexcept override { return _value.metaInfo; }
         [[nodiscard]] PortMetaInfo&       portMetaInfo() noexcept override { return _value.metaInfo; }
         [[nodiscard]] port::BitMask       portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
+        [[nodiscard]] bool                isValueTypeArithmeticLike() const noexcept override { return T::kIsArithmeticLikeValueType; }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -1260,9 +1236,9 @@ public:
     [[nodiscard]] std::string      typeName() const noexcept { return _accessor->typeName(); }
     [[nodiscard]] std::string_view portName() noexcept { return _accessor->portName(); }
     [[nodiscard]] std::string_view portName() const noexcept { return _accessor->portName(); }
-    [[nodiscard]] PortInfo         portInfo() const noexcept { return _accessor->portInfo(); }
     [[nodiscard]] PortMetaInfo     portMetaInfo() const noexcept { return _accessor->portMetaInfo(); }
     [[nodiscard]] port::BitMask    portMaskInfo() const noexcept { return _accessor->portMaskInfo(); }
+    [[nodiscard]] bool             isArithmeticLikeValueType() const noexcept { return _accessor->isValueTypeArithmeticLike(); }
 
     [[nodiscard]] bool isSynchronous() noexcept { return _accessor->isSynchronous(); }
 
