@@ -18,7 +18,7 @@ ENV JAVA_HOME=/opt/java/openjdk \
     LC_ALL=en_US.UTF-8 \
     CMAKE_MAKE_PROGRAM=ninja \
     EMSDK_HOME=/opt/emsdk \
-    EMSDK_VERSION=4.0.8
+    EMSDK_VERSION=5.0.1
 
 # Install compilers, package managers and build-tools
 # As we are using the the ubuntu prerelease llvm and cmake are fresh enough, readd these if the version is not sufficient anymore
@@ -64,6 +64,7 @@ RUN apt-get update -y \
     && ./emsdk install $EMSDK_VERSION \
     && ./emsdk activate $EMSDK_VERSION \
     && npm install --ignore-scripts -g xhr2 \
+    && ./upstream/emscripten/embuilder build sdl3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && chown -R root:users $EMSDK_HOME && chmod -R 777 $EMSDK_HOME
