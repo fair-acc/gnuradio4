@@ -159,7 +159,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
         if (timeout_ms > 0U) {
             const TimePoint nowStamp = ClockSourceType::now();
             if (nowStamp < (_lastUpdate + std::chrono::milliseconds(timeout_ms))) {
-                return lifecycle::isActive(this->state()) ? work::Status::OK : work::Status::DONE;
+                return lifecycle::isShuttingDown(this->state()) ? work::Status::DONE : work::Status::OK;
             }
             _lastUpdate = nowStamp;
         }
@@ -172,7 +172,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
             plotTiming();
         }
 
-        return lifecycle::isActive(this->state()) ? work::Status::OK : work::Status::DONE;
+        return lifecycle::isShuttingDown(this->state()) ? work::Status::DONE : work::Status::OK;
     }
 
     void plotGraph(bool shouldResetView) {
