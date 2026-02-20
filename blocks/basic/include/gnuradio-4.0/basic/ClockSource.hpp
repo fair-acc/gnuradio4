@@ -119,7 +119,9 @@ Terminates when n_samples_max is reached (0 = unlimited).)"">;
                 _nextTimeTag                       = 0;
             }
             if (_nextTimeTag < tag_times.value.size()) {
-                samplesToNextTimeTag = std::max(0U, static_cast<gr::Size_t>(std::lround(static_cast<double>(tag_times.value[_nextTimeTag]) / 1.e9 * static_cast<double>(sample_rate))) - n_samples_produced);
+                const auto tagOffsetNs       = std::chrono::duration_cast<std::chrono::nanoseconds>(_beginSequenceTimePoint - this->blockingSyncStartTime()).count() + static_cast<std::int64_t>(tag_times.value[_nextTimeTag]);
+                const auto absoluteTagSample = static_cast<gr::Size_t>(std::max(0L, std::lround(static_cast<double>(tagOffsetNs) / 1.e9 * static_cast<double>(sample_rate))));
+                samplesToNextTimeTag         = (absoluteTagSample >= n_samples_produced) ? (absoluteTagSample - n_samples_produced) : 0U;
             }
         }
 

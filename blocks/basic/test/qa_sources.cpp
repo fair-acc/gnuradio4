@@ -358,6 +358,55 @@ const boost::ut::suite TagTests = [] {
         chart.draw(xValues, yValues, "Signal");
         chart.draw();
     };
+
+    "ClockSource repeat_period emits tags across cycles"_test = [] {
+        constexpr std::uint64_t ms          = 1'000'000; // ns
+        constexpr float         sample_rate = 1'000.f;
+        constexpr std::uint64_t repeatNs    = 500 * ms; // 500ms = 500 samples per cycle
+        constexpr gr::Size_t    nCycles     = 3;
+        constexpr gr::Size_t    N           = nCycles * 500; // 1500 samples
+
+        Graph testGraph;
+        auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.shortKey(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+
+        auto addTimeTagEntry = []<typename T>(ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
+            clockSource.tag_times.value.push_back(timeInNanoseconds);
+            clockSource.tag_values.value.push_back(value);
+        };
+        addTimeTagEntry(clockSrc, 10 * ms, "CMD_BP_START/ctx1");
+        addTimeTagEntry(clockSrc, 100 * ms, "CMD_BP_START/ctx2");
+        addTimeTagEntry(clockSrc, 200 * ms, "CMD_BP_START/ctx3");
+        addTimeTagEntry(clockSrc, 400 * ms, "CMD_BP_START/ctx4");
+        clockSrc.repeat_period = repeatNs;
+
+        auto& sink = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out">(clockSrc).to<"in">(sink)));
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+        expect(eq(N, static_cast<gr::Size_t>(sink._nSamplesProduced))) << "sample count mismatch";
+
+        constexpr std::size_t tagsPerCycle = 4;
+        expect(ge(sink._tags.size(), nCycles * tagsPerCycle)) << [&]() {
+            std::string ret = std::format("expected >= {} tags ({}x{}), got {}:\n", nCycles * tagsPerCycle, nCycles, tagsPerCycle, sink._tags.size());
+            for (const auto& tag : sink._tags) {
+                ret += std::format("  tag.index: {} .map: {}\n", tag.index, tag.map);
+            }
+            return ret;
+        }();
+
+        // verify tags appear in each cycle (each cycle = 500 samples)
+        for (gr::Size_t cycle = 0; cycle < nCycles; ++cycle) {
+            const auto cycleStart   = cycle * 500UZ;
+            const auto cycleEnd     = cycleStart + 500UZ;
+            const auto nTagsInCycle = static_cast<std::size_t>(std::ranges::count_if(sink._tags, [&](const auto& tag) { return tag.index >= cycleStart && tag.index < cycleEnd; }));
+            expect(ge(nTagsInCycle, tagsPerCycle)) << std::format("cycle {}: expected >= {} tags in [{}, {}), got {}", cycle, tagsPerCycle, cycleStart, cycleEnd, nTagsInCycle);
+        }
+    };
+
     "FunctionGenerator tone types produce correct waveform"_test = [] {
         using namespace function_generator;
         constexpr float sampleRate = 1000.f;
