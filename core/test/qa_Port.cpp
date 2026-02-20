@@ -535,7 +535,7 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         const DynamicPort dynSrc(src, DynamicPort::non_owned_reference_tag{});
         const DynamicPort wearReference = dynSrc.weakRef();
         expect(dynSrc == wearReference);
-        expect(dynSrc.direction() == PortDirection::OUTPUT);
+        expect(port::decodeDirection(dynSrc.portMaskInfo()) == PortDirection::OUTPUT);
         expect(dynSrc.type() == PortType::STREAM);
         expect(dynSrc.typeName() == std::string("int32"));
     };
@@ -572,7 +572,7 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         PortOut<float>    src;
         const DynamicPort dynSrc(src, DynamicPort::non_owned_reference_tag{});
         expect(dynSrc.type() == PortType::STREAM);
-        expect(dynSrc.direction() == PortDirection::OUTPUT);
+        expect(port::decodeDirection(dynSrc.portMaskInfo()) == PortDirection::OUTPUT);
         expect(dynSrc.isArithmeticLikeValueType());
         port::BitMask mask = dynSrc.portMaskInfo();
         expect(gr::port::decodeDirection(mask) == PortDirection::OUTPUT);

@@ -274,7 +274,6 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any& newD
     { t.max_samples } -> std::convertible_to<std::size_t>;
     { t.metaInfo } -> std::convertible_to<gr::PortMetaInfo>;
     { t.type() } -> std::same_as<PortType>;
-    { t.direction() } -> std::same_as<PortDirection>;
     { t.domain() } -> std::same_as<std::string_view>;
     { t.resizeBuffer(n_items) } -> std::same_as<ConnectionResult>;
     { t.isConnected() } -> std::same_as<bool>;
@@ -1054,7 +1053,6 @@ private:
         [[nodiscard]] virtual std::any         defaultValue() const noexcept                 = 0;
         [[nodiscard]] virtual bool             setDefaultValue(const std::any& val) noexcept = 0;
         [[nodiscard]] virtual PortType         type() const noexcept                         = 0;
-        [[nodiscard]] virtual PortDirection    direction() const noexcept                    = 0;
         [[nodiscard]] virtual std::string_view domain() const noexcept                       = 0;
         [[nodiscard]] virtual bool             isSynchronous() noexcept                      = 0;
         [[nodiscard]] virtual bool             isOptional() noexcept                         = 0;
@@ -1135,7 +1133,6 @@ private:
         [[nodiscard]] bool     setDefaultValue(const std::any& val) noexcept override { return _value.setDefaultValue(val); }
 
         [[nodiscard]] constexpr PortType         type() const noexcept override { return _value.type(); }
-        [[nodiscard]] constexpr PortDirection    direction() const noexcept override { return _value.direction(); }
         [[nodiscard]] constexpr std::string_view domain() const noexcept override { return _value.domain(); }
         [[nodiscard]] bool                       isSynchronous() noexcept override { return _value.isSynchronous(); }
         [[nodiscard]] bool                       isOptional() noexcept override { return _value.isOptional(); }
@@ -1231,7 +1228,6 @@ public:
 
     [[nodiscard]] bool             setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
     [[nodiscard]] PortType         type() const noexcept { return _accessor->type(); }
-    [[nodiscard]] PortDirection    direction() const noexcept { return _accessor->direction(); }
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
     [[nodiscard]] std::string      typeName() const noexcept { return _accessor->typeName(); }
     [[nodiscard]] std::string_view portName() noexcept { return _accessor->portName(); }
@@ -1245,7 +1241,7 @@ public:
     [[nodiscard]] bool isOptional() noexcept { return _accessor->isOptional(); }
 
     [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) {
-        if (direction() == PortDirection::OUTPUT) {
+        if (port::decodeDirection(portMaskInfo()) == PortDirection::OUTPUT) {
             return _accessor->resizeBuffer(min_size);
         }
         return ConnectionResult::FAILED;
