@@ -620,7 +620,7 @@ public:
                 const bool connectionResult = sourcePort.connect(destinationPort) == ConnectionResult::SUCCESS;
                 edge._state                 = connectionResult && resizeResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
                 edge._actualBufferSize      = sourcePort.bufferSize();
-                edge._edgeType              = sourcePort.type();
+                edge._edgeType              = port::decodePortType(sourcePort.portMaskInfo());
                 edge._sourcePort            = std::addressof(sourcePort);
                 edge._destinationPort       = std::addressof(destinationPort);
             }
