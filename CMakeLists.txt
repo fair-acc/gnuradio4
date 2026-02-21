@@ -17,7 +17,7 @@ endif()
 # default explicit compiler and linker flag optimisation per build type
 if(NOT MSVC)
   # optional:  -fno-inline-functions -fvar-tracking-assignments
-  set(CMAKE_CXX_FLAGS_DEBUG "-Og -g1 -DDEBUG -fno-omit-frame-pointer -ffunction-sections -fdata-sections")
+  set(CMAKE_CXX_FLAGS_DEBUG "-Og -g1 -gz -DDEBUG -fno-omit-frame-pointer -ffunction-sections -fdata-sections")
   set(CMAKE_CXX_FLAGS_RELEASE "-O2 -g0 -DNDEBUG -ffunction-sections -fdata-sections")
   set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g1 -gz -DNDEBUG -ffunction-sections -fdata-sections")
   set(CMAKE_CXX_FLAGS_RELWITHASSERT "-O2 -DASSERT_ENABLED -ffunction-sections -fdata-sections")
@@ -25,9 +25,11 @@ if(NOT MSVC)
   # console printouts, etc.)
   set(CMAKE_CXX_FLAGS_MINSIZEREL "-Os -g0 -DNDEBUG -DEMBEDDED -ffunction-sections -fdata-sections")
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
     set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -s")
   endif()
+
+  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> crT <TARGET> <LINK_FLAGS> <OBJECTS>")
+  set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> rT <TARGET> <LINK_FLAGS> <OBJECTS>")
 
   set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
 
