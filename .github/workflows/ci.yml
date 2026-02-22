@@ -33,7 +33,7 @@ jobs:
       - name: Set up Docker Label
         id: docker-label
         run: |
-          if [ ${{ steps.changes.outputs.docker == 'true' && github.event_name != 'push' }} = "true" ]; then
+          if [ "${{ steps.changes.outputs.docker == 'true' && github.event_name != 'push' }}" = "true" ]; then
             echo "label=ghcr.io/fair-acc/gr4-build-container:${GITHUB_HEAD_REF/\//-}" >> "$GITHUB_OUTPUT"
           else
             echo "label=ghcr.io/fair-acc/gr4-build-container:latest" >> "$GITHUB_OUTPUT"
@@ -50,7 +50,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v6
         if: steps.changes.outputs.docker == 'true'
         with:
           context: "{{defaultContext}}:docker"
@@ -68,7 +68,8 @@ jobs:
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
     env:
-      CCACHE_DIR: /home/runner/work/ccache
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +100,7 @@ jobs:
       - name: Cache ccache
         uses: actions/cache@v4
         with:
-          path: /home/runner/work/ccache
+          path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ github.sha }}
           restore-keys: |
             ccache-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
@@ -107,6 +108,12 @@ jobs:
       - name: Configure ccache
         run: |
           ccache --max-size=3G
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=depend_mode=true
+          ccache --set-config=hash_dir=false
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
           ccache --show-stats
 
       - name: Cache fetchContent
@@ -115,10 +122,10 @@ jobs:
           cache-name: cache-fetchContent-cache
         with:
           path: ${{runner.workspace}}/build/_deps
-          key: fetchContent-${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
+          key: fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: |
-            fetchContent-${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.cmake-build-type }}
-            fetchContent-${{ runner.os }}-${{ matrix.compiler }}
+            fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}-${{ matrix.cmake-build-type }}
+            fetchContent-${{ runner.os }}-${{ matrix.compiler.label || matrix.compiler.cc }}
 
       - name: Configure
         if: matrix.compiler.cmake_wrapper == null && matrix.compiler.cxx != 'acpp'
@@ -128,7 +135,7 @@ jobs:
           CXX: "${{ matrix.compiler.cxx }}"
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
         run: |
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=On -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
 
       - name: Configure AdaptiveCpp
         if: matrix.compiler.cxx == 'acpp'
@@ -141,7 +148,7 @@ jobs:
         run: |
           which acpp
           acpp --version
-          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=On -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
+          cmake -S . -B ../build -DCMAKE_COLOR_DIAGNOSTICS=ON -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON -DCMAKE_BUILD_TYPE=${{ matrix.cmake-build-type }} -DUSE_CCACHE=ON -DENABLE_COVERAGE=OFF ${{ matrix.compiler.cmake_flags }}
 
       - name: Configure CMake Emscripten
         if: matrix.compiler.cmake_wrapper == 'emcmake'
@@ -184,8 +191,17 @@ jobs:
         shell: bash
         run: node ./core/src/main.js
 
-      - name: Show final ccache stats
-        run: ccache --show-stats
+      - name: Show final ccache and build directory stats
+        if: always()
+        continue-on-error: true
+        run: |
+          ccache --show-stats
+          echo "--- Build directory ---"
+          du -sh ../build
+          echo "--- Object files (.o) ---"
+          find ../build -name "*.o" -exec du -ch {} + | tail -1
+          echo "--- Archives (.a) ---"
+          find ../build -name "*.a" -exec du -ch {} + | tail -1
 
   coverage:
     name: "GCC-14 Coverage"
@@ -194,7 +210,8 @@ jobs:
     container:
       image: "${{ needs.buildAndPublishDocker.outputs.container }}"
     env:
-      CCACHE_DIR: /home/runner/work/ccache
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -203,7 +220,7 @@ jobs:
       - name: Cache ccache
         uses: actions/cache@v4
         with:
-          path: /home/runner/work/ccache
+          path: ${{ github.workspace }}/.ccache
           key: ccache-coverage-gcc14-debug-${{ github.sha }}
           restore-keys: |
             ccache-coverage-gcc14-debug
@@ -211,6 +228,12 @@ jobs:
       - name: Configure ccache
         run: |
           ccache --max-size=3G
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=depend_mode=true
+          ccache --set-config=hash_dir=false
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
           ccache --show-stats
 
       - name: Configure (coverage)
@@ -251,5 +274,14 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: sonar-scanner
 
-      - name: Show final ccache stats
-        run: ccache --show-stats
+      - name: Show final ccache and build directory stats
+        if: always()
+        continue-on-error: true
+        run: |
+          ccache --show-stats
+          echo "--- Build directory ---"
+          du -sh ../build
+          echo "--- Object files (.o) ---"
+          find ../build -name "*.o" -exec du -ch {} + | tail -1
+          echo "--- Archives (.a) ---"
+          find ../build -name "*.a" -exec du -ch {} + | tail -1
