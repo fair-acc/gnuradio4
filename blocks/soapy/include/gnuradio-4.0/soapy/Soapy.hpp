@@ -58,7 +58,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     A<std::string, "add. device parameter", Visible>                                                     device_parameter;
     A<float, "sample rate", Unit<"samples/s">, Doc<"sampling rate in samples per second (Hz)">, Visible> sample_rate = 1'000'000.f;
     A<Tensor<gr::Size_t>, "RX channel ID mapping vector", Visible>                                       rx_channels = initDefaultValues<true>(gr::Size_t(0U));
-    A<Tensor<pmt::Value>, "RX channel antenna mapping", Visible>                                         rx_antennae;
+    A<std::vector<std::string>, "RX channel antenna mapping", Visible>                                   rx_antennae;
     A<Tensor<double>, "RX center frequency", Unit<"Hz">, Doc<"RX-RF center frequency">, Visible>         rx_center_frequency = initDefaultValues(107'000'000.);
     A<Tensor<double>, "RX bandwidth", Unit<"Hz">, Doc<"RX-RF bandwidth">, Visible>                       rx_bandwdith        = initDefaultValues(double(sample_rate / 2));
     A<Tensor<double>, "Rx gain", Unit<"dB">, Doc<"RX channel gain">, Visible>                            rx_gains            = initDefaultValues(10.);
@@ -200,7 +200,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         std::size_t nChannels  = rx_channels->size();
         std::size_t nAntaennae = rx_antennae->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            std::string antenna = rx_antennae->at(std::min(i, nAntaennae - 1UZ)).value_or(std::string());
+            const std::string& antenna = rx_antennae->at(std::min(i, nAntaennae - 1UZ));
             if (!antenna.empty()) {
                 _device.setAntenna(SOAPY_SDR_RX, rx_channels->at(i), antenna);
             }

@@ -33,8 +33,10 @@ namespace settings {
 
 template<typename T>
 constexpr bool isSupportedVectorOrTensorType() {
-    if constexpr (gr::meta::vector_type<T> || is_tensor<T>) {
+    if constexpr (gr::meta::vector_type<T> || gr::meta::array_type<T> || is_tensor<T>) {
         using ValueType = typename T::value_type;
+        // TODO(follow-up PR): remove pmt::Value as collection element — it bypasses C++ type safety and breaks settings introspection
+        // return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType>;
         return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, pmt::Value>;
     } else {
         return false;
@@ -53,6 +55,8 @@ constexpr bool isReadableMember() {
             return false;
         }
     };
+    // TODO(follow-up PR): remove pmt::Value as settings type — it erases type information, prevents validation, and complicates GRC YAML serialisation
+    // return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || isReadableImmutable();
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
            || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, pmt::Value> || isReadableImmutable();
 }
@@ -293,28 +297,27 @@ template<typename T>
                 return std::unexpected(std::format("value {} for key '{}' has wrong type {} {}, needs {}", value, key, value.value_type(), value.container_type(), std::string(meta::type_name<T>())));
             }
 
-        } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
-            const auto* tensorValue = value.get_if<Tensor<pmt::Value>>();
-            if (!tensorValue) {
-                return std::unexpected(std::format("Value {} is not a tensor of Value", value));
-
-            } else {
-                std::vector<std::string> converted(tensorValue->size());
-                std::ranges::transform(*tensorValue, converted.begin(), [](const pmt::Value& in) { return in.value_or(std::string()); });
-                return converted;
-            }
-
-        } else if constexpr (meta::is_instantiation_of<T, std::vector>) {
+        } else if constexpr (meta::array_or_vector_type<T>) {
             using TValue            = typename T::value_type;
-            const auto* tensorValue = value.get_if<Tensor<TValue>>();
+            using TTensorElem       = std::conditional_t<std::is_same_v<TValue, std::string>, pmt::Value, TValue>;
+            const auto* tensorValue = value.get_if<Tensor<TTensorElem>>();
             if (!tensorValue) {
-                return std::unexpected(std::format("Value {} is not a tensor of {}", value, meta::type_name<TValue>()));
-
-            } else {
-                std::vector<TValue> converted(tensorValue->size());
-                std::ranges::copy(*tensorValue, converted.begin());
-                return converted;
+                return std::unexpected(std::format("Value {} is not a tensor of {}", value, meta::type_name<TTensorElem>()));
             }
+            T converted;
+            if constexpr (meta::array_type<T>) {
+                if (tensorValue->size() != std::tuple_size_v<T>) {
+                    return std::unexpected(std::format("tensor size {} does not match array size {}", tensorValue->size(), std::tuple_size_v<T>));
+                }
+            } else {
+                converted.resize(tensorValue->size());
+            }
+            if constexpr (std::is_same_v<TValue, std::string>) {
+                std::ranges::transform(*tensorValue, converted.begin(), [](const pmt::Value& in) { return in.value_or(std::string()); });
+            } else {
+                std::ranges::copy(*tensorValue, converted.begin());
+            }
+            return converted;
 
         } else {
             constexpr bool strictChecks = false;
@@ -609,7 +612,7 @@ private:
             const auto keyStr = std::pmr::string(key);
             if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
                 newParameters.insert_or_assign(keyStr, detail::enumToString(convertedValue.value()));
-            } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+            } else if constexpr (meta::array_or_vector_type<Type>) {
                 newParameters.insert_or_assign(keyStr, pmt::Value(detail::collectionToTensor(*convertedValue)));
             } else {
                 newParameters.insert_or_assign(keyStr, detail::castToGrSizeIfNeeded(convertedValue.value()));
@@ -640,18 +643,12 @@ private:
                 return true;
             }
 #endif
-        } else if constexpr (std::is_same_v<Type, std::vector<std::string>>) {
-            using TValue = std::pmr::string;
-            if (value.holds<Tensor<TValue>>()) {
-                auto vectorValue = pmt::convertTo<Tensor<TValue>>(value);
-                stagedParameters.insert_or_assign(keyPmr, std::move(vectorValue.value()));
-                return true;
-            }
-        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
-            using TValue = typename Type::value_type;
-            if (value.holds<Tensor<TValue>>()) {
-                auto vectorValue = pmt::convertTo<Tensor<TValue>>(value);
-                stagedParameters.insert_or_assign(keyPmr, std::move(vectorValue.value()));
+        } else if constexpr (meta::array_or_vector_type<Type>) {
+            using TValue      = typename Type::value_type;
+            using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string>, std::pmr::string, TValue>;
+            if (value.holds<Tensor<TTensorElem>>()) {
+                auto converted = pmt::convertTo<Tensor<TTensorElem>>(value);
+                stagedParameters.insert_or_assign(keyPmr, std::move(converted.value()));
                 return true;
             }
         } else {
@@ -679,7 +676,7 @@ private:
             } else {
                 maybe_value = std::unexpected("Unexpected type in stagedValue");
             }
-        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+        } else if constexpr (meta::array_or_vector_type<Type>) {
             using TValue       = typename Type::value_type;
             using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
             auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
@@ -741,7 +738,7 @@ private:
         const auto& member = refl::data_member<kIdx>(*block);
         if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
             parameters.insert_or_assign(key, detail::enumToString(member));
-        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+        } else if constexpr (meta::array_or_vector_type<Type>) {
             const auto& from = detail::unwrap_decorated_value(member);
             parameters.insert_or_assign(key, detail::collectionToTensor(from));
         } else {
@@ -756,7 +753,7 @@ private:
         const auto& member = refl::data_member<kIdx>(*block);
         if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
             activeParameters.insert_or_assign(convert_string_domain(key), detail::enumToString(member));
-        } else if constexpr (meta::is_instantiation_of<Type, std::vector>) {
+        } else if constexpr (meta::array_or_vector_type<Type>) {
             const auto& from = detail::unwrap_decorated_reference(member);
             activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::collectionToTensor(from)));
         } else {

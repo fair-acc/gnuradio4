@@ -581,13 +581,13 @@ const boost::ut::suite SettingsTests = [] {
             const auto expectedString       = std::string("abc");
             const bool expectedBool         = true;
             const auto expectedComplex      = std::complex<double>(1., 1.);
-            const auto expectedStringVector = Tensor<pmt::Value>{"a", "b", "c"};
-            const auto expectedBoolVector   = Tensor<bool>(gr::data_from, {true, false, true});
-            const auto expectedDoubleVector = Tensor<double>{1., 2., 3.};
-            const auto expectedInt16Vector  = Tensor<std::int16_t>(gr::data_from, {1, 2, 3});
+            const auto expectedStringVector = std::vector<std::string>{"a", "b", "c"};
+            const auto expectedBoolVector   = std::vector<bool>{true, false, true};
+            const auto expectedDoubleVector = std::vector{1., 2., 3.};
+            const auto expectedInt16Vector  = std::vector<std::int16_t>{1, 2, 3};
 
             using cd                         = std::complex<double>;
-            const auto expectedComplexVector = Tensor<std::complex<double>>{cd{1., 1.}, cd{2., 2.}, cd{3., 3.}};
+            const auto expectedComplexVector = std::vector<std::complex<double>>{cd{1., 1.}, cd{2., 2.}, cd{3., 3.}};
 
             std::ignore = graph1.emplaceBlock<gr::testing::ArraySink<double>>({{"bool_setting", bool(expectedBool)}, {"string_setting", expectedString}, {"complex_setting", expectedComplex}, //
                 {"bool_vector", expectedBoolVector}, {"string_vector", expectedStringVector}, {"double_vector", expectedDoubleVector}, {"int16_vector", expectedInt16Vector}, {"complex_vector", expectedComplexVector}});

@@ -179,6 +179,20 @@ private:
     void copy_from(const Value& other);
     void destroy() noexcept;
 
+    void initStringTensor(std::ranges::sized_range auto& strings) {
+        Tensor<Value> tensor({std::ranges::size(strings)});
+        std::ranges::transform(strings, tensor.begin(), [this](auto& str) { return Value(std::move(str), _resource); });
+        set_types(get_value_type<Value>(), ContainerType::Tensor);
+        void* mem    = _resource->allocate(sizeof(Tensor<Value>), alignof(Tensor<Value>));
+        _storage.ptr = new (mem) Tensor<Value>(std::move(tensor));
+    }
+
+    Value& assignStringTensor(std::ranges::sized_range auto& strings) {
+        destroy();
+        initStringTensor(strings);
+        return *this;
+    }
+
     template<typename T>
     static constexpr ValueType get_value_type() {
         if constexpr (std::same_as<T, bool>) {
@@ -323,6 +337,43 @@ public:
         void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));
         _storage.ptr = new (mem) Tensor<T>(std::move(tensor));
         return *this;
+    }
+
+    // converting constructors for std::vector<T> / std::array<T, N> → Value (numeric → Tensor<T>, string → Tensor<Value>)
+    template<detail::ValueScalarType T, typename Alloc>
+    Value(std::vector<T, Alloc> vec, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : Value(Tensor<T>(std::pmr::vector<T>(vec.begin(), vec.end(), resource)), resource) {}
+
+    template<detail::ValueScalarType T, typename Alloc>
+    Value& operator=(std::vector<T, Alloc> vec) {
+        return *this = Tensor<T>(std::pmr::vector<T>(vec.begin(), vec.end(), _resource));
+    }
+
+    template<detail::ValueScalarType T, std::size_t N>
+    Value(std::array<T, N> arr, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : Value(Tensor<T>(std::pmr::vector<T>(arr.begin(), arr.end(), resource)), resource) {}
+
+    template<detail::ValueScalarType T, std::size_t N>
+    Value& operator=(std::array<T, N> arr) {
+        return *this = Tensor<T>(std::pmr::vector<T>(arr.begin(), arr.end(), _resource));
+    }
+
+    template<typename Alloc>
+    Value(std::vector<std::string, Alloc> strings, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : _resource(ensure_resource(resource)) {
+        initStringTensor(strings);
+    }
+
+    template<typename Alloc>
+    Value& operator=(std::vector<std::string, Alloc> strings) {
+        return assignStringTensor(strings);
+    }
+
+    template<std::size_t N>
+    Value(std::array<std::string, N> strings, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : _resource(ensure_resource(resource)) {
+        initStringTensor(strings);
+    }
+
+    template<std::size_t N>
+    Value& operator=(std::array<std::string, N> strings) {
+        return assignStringTensor(strings);
     }
 
     Value(Map map, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
