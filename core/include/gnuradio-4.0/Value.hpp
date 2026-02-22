@@ -49,12 +49,19 @@ inline constexpr bool is_string_view_v = std::same_as<std::remove_cvref_t<T>, st
 template<typename T>
 inline constexpr bool is_string_convertible_v = is_std_string_v<T> || is_string_view_v<T>;
 
+template<typename T, typename... Ts>
+concept IsAnyOf = (std::same_as<T, Ts> || ...);
+
+// clang-format off
 template<typename T>
-concept ValueScalarType = std::same_as<std::remove_cvref_t<T>, bool>                                                                                                                                                                                 //
-                          || std::same_as<std::remove_cvref_t<T>, std::int8_t> || std::same_as<std::remove_cvref_t<T>, std::int16_t> || std::same_as<std::remove_cvref_t<T>, std::int32_t> || std::same_as<std::remove_cvref_t<T>, std::int64_t>     //
-                          || std::same_as<std::remove_cvref_t<T>, std::uint8_t> || std::same_as<std::remove_cvref_t<T>, std::uint16_t> || std::same_as<std::remove_cvref_t<T>, std::uint32_t> || std::same_as<std::remove_cvref_t<T>, std::uint64_t> //
-                          || std::same_as<std::remove_cvref_t<T>, float> || std::same_as<std::remove_cvref_t<T>, double>                                                                                                                             //
-                          || std::same_as<std::remove_cvref_t<T>, std::complex<float>> || std::same_as<std::remove_cvref_t<T>, std::complex<double>>;                                                                                                //
+concept ValueScalarType = IsAnyOf<std::remove_cvref_t<T>,
+    bool,
+    std::int8_t, std::int16_t, std::int32_t, std::int64_t,
+    std::uint8_t, std::uint16_t, std::uint32_t, std::uint64_t,
+    signed long, signed long long,       // platform-dependent aliasing: may differ from intN_t
+    unsigned long, unsigned long long,   // platform-dependent aliasing: may differ from uintN_t
+    float, double, std::complex<float>, std::complex<double>>;
+// clang-format on
 
 template<typename T>
 concept ValueConvertible = std::same_as<std::remove_cvref_t<T>, Value> || ValueScalarType<T> || std::convertible_to<T, std::string_view>;
@@ -203,7 +210,7 @@ private:
             return ValueType::Int16;
         } else if constexpr (std::same_as<T, std::int32_t>) {
             return ValueType::Int32;
-        } else if constexpr (std::same_as<T, std::int64_t>) {
+        } else if constexpr (std::same_as<T, std::int64_t> || std::same_as<T, signed long> || std::same_as<T, signed long long>) {
             return ValueType::Int64;
         } else if constexpr (std::same_as<T, std::uint8_t>) {
             return ValueType::UInt8;
@@ -211,7 +218,7 @@ private:
             return ValueType::UInt16;
         } else if constexpr (std::same_as<T, std::uint32_t>) {
             return ValueType::UInt32;
-        } else if constexpr (std::same_as<T, std::uint64_t> || std::same_as<T, std::size_t>) {
+        } else if constexpr (std::same_as<T, std::uint64_t> || std::same_as<T, std::size_t> || std::same_as<T, unsigned long> || std::same_as<T, unsigned long long>) {
             return ValueType::UInt64;
         } else if constexpr (std::same_as<T, float>) {
             return ValueType::Float32;
@@ -283,6 +290,9 @@ public:
     Value(uint16_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     Value(uint32_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     Value(uint64_t v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+#if defined(__APPLE__) && defined(__aarch64__) // unsigned long != uint64_t on Apple Silicon
+    Value(unsigned long v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
+#endif
     Value(float v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     Value(double v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     Value(std::complex<float> v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
@@ -813,6 +823,11 @@ extern template bool Value::holds<std::string_view>() const noexcept;
 template<>
 bool               Value::holds<std::size_t>() const noexcept = delete;
 #endif
+
+// platform-dependent aliasing: unsigned long may differ from uint64_t (e.g. Apple ARM64)
+extern template bool                 Value::holds<unsigned long>() const noexcept;
+extern template unsigned long*       Value::get_if<unsigned long>() noexcept;
+extern template const unsigned long* Value::get_if<unsigned long>() const noexcept;
 
 // clang-format on
 

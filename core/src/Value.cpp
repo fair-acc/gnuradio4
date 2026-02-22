@@ -57,6 +57,12 @@ T* Value::get_if() noexcept {
         return &_storage.u32;
     } else if constexpr (std::same_as<T, std::uint64_t>) {
         return &_storage.u64;
+    } else if constexpr (std::same_as<T, unsigned long> || std::same_as<T, unsigned long long>) {
+        static_assert(sizeof(T) == sizeof(std::uint64_t) && alignof(T) == alignof(std::uint64_t));
+        return reinterpret_cast<T*>(&_storage.u64);
+    } else if constexpr (std::same_as<T, signed long> || std::same_as<T, signed long long>) {
+        static_assert(sizeof(T) == sizeof(std::int64_t) && alignof(T) == alignof(std::int64_t));
+        return reinterpret_cast<T*>(&_storage.i64);
     } else if constexpr (std::same_as<T, float>) {
         return &_storage.f32;
     } else if constexpr (std::same_as<T, double>) {
@@ -278,6 +284,13 @@ Value::Value(uint64_t v, std::pmr::memory_resource* resource) : _resource(ensure
     set_types(ValueType::UInt64, ContainerType::Scalar);
     _storage.u64 = v;
 }
+
+#if defined(__APPLE__) && defined(__aarch64__)
+Value::Value(unsigned long v, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
+    set_types(ValueType::UInt64, ContainerType::Scalar);
+    _storage.u64 = v;
+}
+#endif
 
 Value::Value(float v, std::pmr::memory_resource* resource) : _resource(ensure_resource(resource)) {
     set_types(ValueType::Float32, ContainerType::Scalar);
@@ -631,6 +644,13 @@ GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
 GR_PMT_VALUE_SCALAR_TYPES
 #undef X
 // clang-format on
+
+// platform-dependent aliasing: unsigned long may differ from uint64_t (e.g. Apple ARM64)
+#if defined(__APPLE__) && defined(__aarch64__)
+template bool                 Value::holds<unsigned long>() const noexcept;
+template unsigned long*       Value::get_if<unsigned long>() noexcept;
+template const unsigned long* Value::get_if<unsigned long>() const noexcept;
+#endif
 
 // string type specializations (convertible from pmr::string)
 template bool              Value::holds<Value::Map>() const noexcept;

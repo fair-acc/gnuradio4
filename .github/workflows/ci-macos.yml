@@ -1,0 +1,125 @@
+name: macOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: "macOS | ${{ matrix.compiler.label }} | Debug"
+    runs-on: macos-26
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ matrix.compiler.label }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - label: Clang 20
+            cc: /opt/homebrew/opt/llvm@20/bin/clang
+            cxx: /opt/homebrew/opt/llvm@20/bin/clang++
+            libcxx: /opt/homebrew/opt/llvm@20/lib/c++
+            cache_key: clang20
+    env:
+      CC: ${{ matrix.compiler.cc }}
+      CXX: ${{ matrix.compiler.cxx }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve macOS SDK
+        run: |
+          sdk_path="$(xcrun --show-sdk-path)"
+          echo "SDKROOT=${sdk_path}" >> "$GITHUB_ENV"
+          echo "SDK path: ${sdk_path}"
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+
+      - name: Install ccache
+        run: brew install ccache
+
+      - name: Restore ccache
+        id: restore-ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-macos-${{ matrix.compiler.cache_key }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-${{ matrix.compiler.cache_key }}
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=2G
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=depend_mode=true
+          ccache --set-config=hash_dir=false
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
+          ccache --show-stats
+
+      - name: Restore FetchContent
+        id: restore-fetchcontent
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/build/_deps
+          key: fetchContent-macos-${{ matrix.compiler.cache_key }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchContent-macos-${{ matrix.compiler.cache_key }}
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_COLOR_DIAGNOSTICS=ON \
+            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DUSE_CCACHE=ON \
+            -DENABLE_COVERAGE=OFF \
+            -DCMAKE_OSX_SYSROOT="$SDKROOT" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L${{ matrix.compiler.libcxx }} -Wl,-rpath,${{ matrix.compiler.libcxx }}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-L${{ matrix.compiler.libcxx }} -Wl,-rpath,${{ matrix.compiler.libcxx }}"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Execute tests
+        working-directory: ${{ github.workspace }}/build
+        run: ctest --output-on-failure --timeout 120
+
+      - name: Execute main binary
+        working-directory: ${{ github.workspace }}/build
+        run: ./core/src/main
+
+      - name: Show final ccache and build directory stats
+        if: always()
+        continue-on-error: true
+        run: |
+          ccache --show-stats
+          echo "--- Build directory ---"
+          du -sh build
+          echo "--- Object files (.o) ---"
+          find build -name "*.o" -exec du -ch {} + | tail -1
+          echo "--- Archives (.a) ---"
+          find build -name "*.a" -exec du -ch {} + | tail -1
+
+      - name: Save ccache
+        if: always() && steps.restore-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ steps.restore-ccache.outputs.cache-primary-key }}
+
+      - name: Save FetchContent
+        if: always() && steps.restore-fetchcontent.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/build/_deps
+          key: ${{ steps.restore-fetchcontent.outputs.cache-primary-key }}

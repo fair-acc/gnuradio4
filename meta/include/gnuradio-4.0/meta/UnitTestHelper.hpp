@@ -154,11 +154,19 @@ auto execute(std::string threadName, Func&& f) -> std::future<std::invoke_result
     return future;
 }
 
-/// Runs the Scheduler's runAndWait() in a thread and returns a future you can join on
+/// Runs the Scheduler's runAndWait() in a thread and returns a future you can join on.
+/// Dispatched to the IO pool so that CPU pool threads remain available for scheduler
+/// pool workers (runAndWait blocks in waitDone, it does not consume CPU).
 template<typename TScheduler>
 std::future<std::expected<void, gr::Error>> executeScheduler(std::string threadName, TScheduler& sched) {
-    auto f = [&sched] -> std::expected<void, Error> { return sched.runAndWait(); };
-    return execute(threadName, std::move(f));
+    using ResultType = std::expected<void, gr::Error>;
+    std::promise<ResultType> promise;
+    auto                     future = promise.get_future();
+    gr::thread_pool::Manager::defaultIoPool()->execute([&sched, promise = std::move(promise), threadName] mutable {
+        gr::thread_pool::thread::setThreadName(threadName);
+        promise.set_value(sched.runAndWait());
+    });
+    return future;
 }
 
 } // namespace thread_pool

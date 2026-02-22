@@ -105,7 +105,7 @@ struct ApplyStagedParametersResult {
 
 namespace detail {
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && defined(__aarch64__))
 template<typename TValue>
 auto castToGrSizeIfNeeded(const TValue& value) {
     if constexpr (std::is_same_v<TValue, std::size_t>) {
