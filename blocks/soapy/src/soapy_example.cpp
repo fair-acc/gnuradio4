@@ -22,13 +22,13 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
     using TDataType = std::complex<float>;
 
     auto& source = flow.emplaceBlock<SoapyBlock<TDataType, 2UZ>>({
-        {"device", "lime"},                                                            //
-        {"sample_rate", sampleRate},                                                   //
-        {"rx_channels", Tensor<gr::Size_t>(data_from, {0U, 1U})},                      //
-        {"rx_antennae", Tensor<pmt::Value>{pmt::Value("LNAW"), pmt::Value("LNAW")}},   //
-        {"rx_center_frequency", Tensor<double>{rxCenterFrequency, rxCenterFrequency}}, //
-        {"rx_bandwdith", Tensor<double>{bandwidth, bandwidth}},                        //
-        {"rx_gains", Tensor<double>{rxGains, rxGains}},
+        {"device", "lime"},                                                         //
+        {"sample_rate", sampleRate},                                                //
+        {"rx_channels", std::vector<gr::Size_t>{0U, 1U}},                           //
+        {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}},                  //
+        {"rx_center_frequency", std::vector{rxCenterFrequency, rxCenterFrequency}}, //
+        {"rx_bandwdith", std::vector{bandwidth, bandwidth}},                        //
+        {"rx_gains", std::vector{rxGains, rxGains}},
     });
     std::println("set parameter:\n   sample_rate: {} SP/s\n   rx_center_frequency: {} Hz\n   rx_bandwdith: {} Hz\n   rx_gains: {} [dB]", //
         sampleRate, rxCenterFrequency, bandwidth, rxGains);

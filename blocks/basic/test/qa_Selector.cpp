@@ -122,7 +122,7 @@ const boost::ut::suite SelectorTest = [] {
     "basic Selector<T>"_test = [] {
         using T = double;
         const Tensor<uint32_t> outputMap{data_from, {1U, 0U}};
-        Selector<T>            block({{"n_inputs", 3U}, {"n_outputs", 2U}, {"map_in", Tensor<gr::Size_t>(data_from, {0U, 1U})}, {"map_out", outputMap}}); // N.B. 3rd input is unconnected
+        Selector<T>            block({{"n_inputs", 3U}, {"n_outputs", 2U}, {"map_in", std::vector<gr::Size_t>{0U, 1U}}, {"map_out", outputMap}}); // N.B. 3rd input is unconnected
         block.init(block.progress);
         expect(eq(block._internalMappingInOut.size(), 2U));
 

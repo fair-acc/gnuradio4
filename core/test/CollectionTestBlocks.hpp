@@ -35,7 +35,7 @@ struct VectorSinkImpl : gr::Block<VectorSinkImpl<T, SomeFlag, SomeInt>> {
     gr::Annotated<std::string, "String setting">                                    string_setting;
     gr::Annotated<std::complex<double>, "std::complex settings">                    complex_setting;
     gr::Annotated<std::vector<bool>, "Bool vector setting">                         bool_vector;
-    gr::Annotated<std::vector<pmt::Value>, "String vector setting">                 string_vector;
+    gr::Annotated<std::vector<std::string>, "String vector setting">                string_vector;
     gr::Annotated<std::vector<double>, "Double vector setting">                     double_vector;
     gr::Annotated<std::vector<int16_t>, "int16_t vector setting">                   int16_vector;
     gr::Annotated<std::vector<std::complex<double>>, "std::complex vector setting"> complex_vector;
@@ -78,7 +78,7 @@ struct ArraySinkImpl : gr::Block<ArraySinkImpl<T, SomeFlag, SomeInt>> {
     gr::Annotated<std::string, "String setting">                               string_setting;
     gr::Annotated<std::complex<double>, "std::complex settings">               complex_setting;
     gr::Annotated<Tensor<bool>, "Bool vector setting">                         bool_vector;
-    gr::Annotated<Tensor<pmt::Value>, "String vector setting">                 string_vector;
+    gr::Annotated<std::vector<std::string>, "String vector setting">           string_vector;
     gr::Annotated<Tensor<double>, "Double vector setting">                     double_vector;
     gr::Annotated<Tensor<int16_t>, "int16_t vector setting">                   int16_vector;
     gr::Annotated<Tensor<std::complex<double>>, "std::complex vector setting"> complex_vector;

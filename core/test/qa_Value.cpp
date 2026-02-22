@@ -340,6 +340,135 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
     };
 };
 
+const boost::ut::suite<"Value - container converting constructors"> _container_conversion_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::Tensor;
+
+    "std::vector<float> → Value"_test = [] {
+        Value v{std::vector{1.f, 2.f, 3.f}};
+        expect(v.is_tensor());
+        expect(eq(v.value_type(), Value::ValueType::Float32));
+        auto* t = v.get_if<Tensor<float>>();
+        expect(t != nullptr);
+        expect(eq(t->size(), 3UZ));
+        expect(eq((*t)[0], 1.f));
+        expect(eq((*t)[2], 3.f));
+    };
+
+    "std::vector<double> → Value"_test = [] {
+        Value v{std::vector{1., 2., 3.}};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<double>>();
+        expect(t != nullptr);
+        expect(eq((*t)[1], 2.));
+    };
+
+    "std::vector<int32_t> → Value"_test = [] {
+        Value v{std::vector<std::int32_t>{10, 20, 30}};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<std::int32_t>>();
+        expect(t != nullptr);
+        expect(eq(t->size(), 3UZ));
+        expect(eq((*t)[0], 10));
+    };
+
+    "std::vector<std::string> → Value"_test = [] {
+        Value v{std::vector<std::string>{"hello", "world", "!"}};
+        expect(v.is_tensor());
+        expect(eq(v.value_type(), Value::ValueType::Value));
+        auto* t = v.get_if<Tensor<Value>>();
+        expect(t != nullptr);
+        expect(eq(t->size(), 3UZ));
+        expect(eq((*t)[0].value_or(std::string{}), std::string("hello")));
+        expect(eq((*t)[1].value_or(std::string{}), std::string("world")));
+        expect(eq((*t)[2].value_or(std::string{}), std::string("!")));
+    };
+
+    "std::vector<std::string> empty → Value"_test = [] {
+        Value v{std::vector<std::string>{}};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<Value>>();
+        expect(t != nullptr);
+        expect(eq(t->size(), 0UZ));
+    };
+
+    "std::array<float, 3> → Value"_test = [] {
+        Value v{std::array{1.f, 2.f, 3.f}};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<float>>();
+        expect(t != nullptr);
+        expect(eq(t->size(), 3UZ));
+        expect(eq((*t)[0], 1.f));
+    };
+
+    "std::array<std::string, 2> → Value"_test = [] {
+        Value v{std::array<std::string, 2>{"X", "Y"}};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<Value>>();
+        expect(t != nullptr);
+        expect(eq(t->size(), 2UZ));
+        expect(eq((*t)[0].value_or(std::string{}), std::string("X")));
+        expect(eq((*t)[1].value_or(std::string{}), std::string("Y")));
+    };
+
+    "Value assignment from std::vector<float>"_test = [] {
+        Value v;
+        v = std::vector{4.f, 5.f};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<float>>();
+        expect(t != nullptr);
+        expect(eq(t->size(), 2UZ));
+        expect(eq((*t)[0], 4.f));
+    };
+
+    "Value assignment from std::vector<std::string>"_test = [] {
+        Value v;
+        v = std::vector<std::string>{"a", "b"};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<Value>>();
+        expect(t != nullptr);
+        expect(eq((*t)[0].value_or(std::string{}), std::string("a")));
+    };
+
+    "Value assignment from std::array<double, 2>"_test = [] {
+        Value v;
+        v = std::array{1., 2.};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<double>>();
+        expect(t != nullptr);
+        expect(eq((*t)[1], 2.));
+    };
+
+    "Value assignment from std::array<std::string, 1>"_test = [] {
+        Value v;
+        v = std::array<std::string, 1>{"only"};
+        expect(v.is_tensor());
+        auto* t = v.get_if<Tensor<Value>>();
+        expect(t != nullptr);
+        expect(eq((*t)[0].value_or(std::string{}), std::string("only")));
+    };
+
+    "std::vector/array in Value::Map"_test = [] {
+        Value::Map pm;
+        pm.emplace("floats", std::vector{1.f, 2.f, 3.f});
+        pm.emplace("strings", std::vector<std::string>{"a", "b"});
+        pm.emplace("ints", std::array<std::int32_t, 2>{10, 20});
+
+        auto* ft = pm.at("floats").get_if<Tensor<float>>();
+        expect(ft != nullptr);
+        expect(eq(ft->size(), 3UZ));
+
+        auto* st = pm.at("strings").get_if<Tensor<Value>>();
+        expect(st != nullptr);
+        expect(eq(st->size(), 2UZ));
+
+        auto* it = pm.at("ints").get_if<Tensor<std::int32_t>>();
+        expect(it != nullptr);
+        expect(eq(it->size(), 2UZ));
+    };
+};
+
 const boost::ut::suite<"Value - String Conversion"> _string_conversion_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;

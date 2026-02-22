@@ -32,16 +32,16 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             // create blocks
             auto& clockSrc = graph.emplaceBlock<gr::basic::ClockSource<std::uint8_t>>({//
                 {"sample_rate", sample_rate}, {"n_samples_max", 1000U}, {"name", "ClockSource"},
-                {"tag_times", Tensor<std::uint64_t>(data_from,
-                                  {
-                                      0U,           // 0 ms - start - 50ms of bottom plateau
-                                      100'000'000U, // 100 ms - start - ramp-up
-                                      400'000'000U, // 300 ms - 50ms of top ceiling
-                                      500'000'000U, // 500 ms - start ramp-down
-                                      800'000'000U  // 700 ms - 100ms of bottom plateau
-                                  })},
+                {"tag_times",
+                    std::vector<std::uint64_t>{
+                        0U,           // 0 ms - start - 50ms of bottom plateau
+                        100'000'000U, // 100 ms - start - ramp-up
+                        400'000'000U, // 300 ms - 50ms of top ceiling
+                        500'000'000U, // 500 ms - start ramp-down
+                        800'000'000U  // 700 ms - 100ms of bottom plateau
+                    }},
                 {"tag_values",
-                    Tensor<pmt::Value>{
+                    std::vector<std::string>{
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=0", //
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=1", //
                         "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=2", //

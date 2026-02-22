@@ -171,29 +171,39 @@ auto get_value_or_fail(const gr::pmt::Value& value, std::source_location sourceL
             return std::string(str);
         }
 
-    } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
-        auto tensor = value.get_if<Tensor<pmt::Value>>();
-        if (tensor != nullptr) {
-            return *tensor | std::views::transform([](const gr::pmt::Value& _value) { return _value.value_or(std::string()); }) | std::ranges::to<T>();
-        }
+    } else if constexpr (meta::array_or_vector_type<T>) {
+        using TValue       = typename T::value_type;
+        using TTensorElem  = std::conditional_t<std::is_same_v<TValue, std::string>, pmt::Value, TValue>;
+        const auto* tensor = value.get_if<Tensor<TTensorElem>>();
 
-    } else if constexpr (meta::is_instantiation_of<T, std::vector>) {
-        using TValue = typename T::value_type;
-        auto tensor  = value.get_if<Tensor<TValue>>();
-        if (tensor != nullptr) {
+        auto sizeOk = [&] {
+            if (tensor == nullptr) {
+                return false;
+            }
+            if constexpr (meta::array_type<T>) {
+                return tensor->size() == std::tuple_size_v<T>;
+            } else {
+                return true;
+            }
+        };
+
+        if (sizeOk()) {
             T result;
-            if (auto conversionResult = pmt::assignTo(result, *tensor); conversionResult) {
+            if constexpr (std::is_same_v<TValue, std::string>) {
+                if constexpr (!meta::array_type<T>) {
+                    result.resize(tensor->size());
+                }
+                std::ranges::transform(*tensor, result.begin(), [](const pmt::Value& v) { return v.value_or(std::string()); });
                 return result;
+            } else {
+                if (auto conversionResult = pmt::assignTo(result, *tensor); conversionResult) {
+                    return result;
+                }
             }
         }
 
     } else {
-        auto ptr = value.get_if<T>();
-        if (ptr == nullptr) {
-            std::println("ptr == nullptr calling get_value_or_fail from {}:{}", sourceLocation.file_name(), sourceLocation.line());
-            assert(ptr != nullptr);
-        }
-        if (ptr != nullptr) {
+        if (auto ptr = value.get_if<T>(); ptr != nullptr) {
             return *ptr;
         }
     }
