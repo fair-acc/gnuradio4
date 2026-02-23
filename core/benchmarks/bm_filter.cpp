@@ -86,7 +86,7 @@ inline const boost::ut::suite _constexpr_bm = [] {
         auto&     src  = testGraph.emplaceBlock<::test::source<float>>(N_SAMPLES);
         auto&     sink = testGraph.emplaceBlock<::test::sink<float>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, src.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, sink)));
 
         gr::scheduler::simple sched{std::move(testGraph)};
 
@@ -99,8 +99,8 @@ inline const boost::ut::suite _constexpr_bm = [] {
         auto&     sink   = testGraph.emplaceBlock<::test::sink<float>>();
         auto&     filter = testGraph.emplaceBlock<fir_filter<float>>({{"b", fir_coeffs}});
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, src.out, filter, filter.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(filter, filter.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, filter)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(filter, sink)));
 
         gr::scheduler::simple sched{std::move(testGraph)};
 
@@ -113,8 +113,8 @@ inline const boost::ut::suite _constexpr_bm = [] {
         auto&     sink   = testGraph.emplaceBlock<::test::sink<float>>();
         auto&     filter = testGraph.emplaceBlock<iir_filter<float, IIRForm::DF_I>>({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}});
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, src.out, filter, filter.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(filter, filter.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, filter)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(filter, sink)));
 
         gr::scheduler::simple sched{std::move(testGraph)};
 
@@ -127,8 +127,8 @@ inline const boost::ut::suite _constexpr_bm = [] {
         auto&     sink   = testGraph.emplaceBlock<::test::sink<float>>();
         auto&     filter = testGraph.emplaceBlock<iir_filter<float, IIRForm::DF_II>>({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}});
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(src, src.out, filter, filter.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(filter, filter.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, filter)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(filter, sink)));
 
         gr::scheduler::simple sched{std::move(testGraph)};
 

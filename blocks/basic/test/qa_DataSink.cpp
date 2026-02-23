@@ -280,8 +280,8 @@ const boost::ut::suite DataSinkTests = [] {
         auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test source"}});
         src._tags  = srcTags;
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         std::atomic<std::size_t> samplesSeen1 = 0;
         std::atomic<std::size_t> chunksSeen1  = 0;
@@ -386,8 +386,8 @@ const boost::ut::suite DataSinkTests = [] {
         delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
         auto& sink = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         auto runner1 = std::async([] {
             std::shared_ptr<StreamingPoller<float>> poller;
@@ -478,8 +478,8 @@ const boost::ut::suite DataSinkTests = [] {
         auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}, {"signal_unit", "none"}, {"signal_min", -2.0f}, {"signal_max", 2.0f}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         auto polling = std::async([] {
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
@@ -545,8 +545,8 @@ const boost::ut::suite DataSinkTests = [] {
         auto& delay     = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink      = testGraph.emplaceBlock<DataSink<int32_t>>({{"signal_name", "test signal"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         auto polling = std::async([] {
             std::vector<int32_t>                                 receivedData;
@@ -609,8 +609,8 @@ const boost::ut::suite DataSinkTests = [] {
         auto& delay   = testGraph.emplaceBlock<testing::Delay<int32_t>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink    = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         constexpr auto kDelay = std::chrono::milliseconds{500}; // sample rate 10000 -> 5000 samples
 
@@ -686,8 +686,8 @@ const boost::ut::suite DataSinkTests = [] {
         delay.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
         auto& sink = testGraph.emplaceBlock<DataSink<int32_t>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         {
             const auto t = std::span(tags);
@@ -787,8 +787,8 @@ const boost::ut::suite DataSinkTests = [] {
         auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         auto polling = std::async([] {
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
@@ -852,8 +852,8 @@ const boost::ut::suite DataSinkTests = [] {
         auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto& sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         auto isTrigger = [](std::string_view /* filterSpec */, const Tag&, const property_map& /* filter state */) { return trigger::MatchResult::Matching; };
 
@@ -893,8 +893,8 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto&     sink  = testGraph.emplaceBlock<DataSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, delay, delay.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, delay)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, sink)));
 
         auto invalid_type_poller = globalDataSinkRegistry().getStreamingPoller<double>(DataSinkQuery::sinkName("test_sink"));
         expect(eq(invalid_type_poller, nullptr));
@@ -936,9 +936,9 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
         auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(source, source.out, delay, delay.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, streamToDataSet, streamToDataSet.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(streamToDataSet, streamToDataSet.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(source, delay)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, streamToDataSet)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(streamToDataSet, sink)));
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
             return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //
@@ -995,9 +995,9 @@ const boost::ut::suite DataSinkTests = [] {
         auto&     delay           = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", kProcessingDelayMs}});
         auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(100)}, {"n_post", static_cast<gr::Size_t>(200)}});
         auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "test_sink"}, {"signal_name", "test signal"}});
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(source, source.out, delay, delay.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(delay, delay.out, streamToDataSet, streamToDataSet.in)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect(streamToDataSet, streamToDataSet.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(source, delay)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(delay, streamToDataSet)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(streamToDataSet, sink)));
 
         auto genTrigger = [](std::size_t index, std::string triggerName, std::string triggerCtx = {}) {
             return Tag{index, {{gr::tag::TRIGGER_NAME.shortKey(), triggerName}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, //

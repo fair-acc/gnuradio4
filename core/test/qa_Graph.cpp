@@ -50,7 +50,7 @@ const boost::ut::suite<"New connection API tests"> connection_api_tests = [] {
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(src, sink)));
         graph.connectPendingEdges();
 
         expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize(true)));
@@ -68,7 +68,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink, sink.in, {.minBufferSize = undefined_size})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(src, sink, {.minBufferSize = undefined_size})));
         graph.connectPendingEdges();
 
         expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize(true)));
@@ -80,7 +80,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink, sink.in, {.minBufferSize = 8000UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(src, sink, {.minBufferSize = 8000UZ})));
         graph.connectPendingEdges();
 
         expect(ge(src.out.bufferSize(), 8000UZ));
@@ -94,9 +94,9 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& sink2 = graph.emplaceBlock<NullSink<float>>();
         auto& sink3 = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink1, sink1.in, {.minBufferSize = 2000UZ})));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink2, sink2.in, {.minBufferSize = 10000UZ})));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, sink3, sink3.in, {.minBufferSize = 8000UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(src, sink1, {.minBufferSize = 2000UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(src, sink2, {.minBufferSize = 10000UZ})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(src, sink3, {.minBufferSize = 8000UZ})));
 
         graph.connectPendingEdges();
 
@@ -203,7 +203,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         Graph              graph;
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
-        expect(eq(graph.connect(src, src.out, snk, snk.in), ConnectionResult::SUCCESS));
+        expect(eq(graph.connect<"out", "in">(src, snk), ConnectionResult::SUCCESS));
 
         expect(graph.containsEdge(graph.edges().front()));
         graph.connectPendingEdges();
@@ -214,7 +214,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         Graph              graph;
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
-        expect(eq(graph.connect(src, src.out, snk, snk.in), ConnectionResult::SUCCESS));
+        expect(eq(graph.connect<"out", "in">(src, snk), ConnectionResult::SUCCESS));
         graph.connectPendingEdges();
 
         const auto edge = graph.edges().front();
@@ -244,7 +244,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(src, src.out, snk, snk.in, {.minBufferSize = undefined_size})));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(src, snk, {.minBufferSize = undefined_size})));
         graph.connectPendingEdges();
 
         int count = 0;

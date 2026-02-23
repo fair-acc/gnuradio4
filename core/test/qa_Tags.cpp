@@ -252,9 +252,9 @@ const boost::ut::suite TagPropagation = [] {
         auto& monitor          = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagMonitor"}});
         auto& sink             = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, autoForwardBlock, autoForwardBlock.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(autoForwardBlock, autoForwardBlock.out, monitor, monitor.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitor, monitor.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, autoForwardBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(autoForwardBlock, monitor)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitor, sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -323,12 +323,12 @@ const boost::ut::suite TagPropagation = [] {
         // - autoForwardBlock then receives the 'autoForward' Tags and performs applyStagedSettings and republish applied/forward settings, `not_auto_forward_parameter` is not changed
         // src -> monitorOne -> monitorBulk1 -> autoForwardBlock -> monitorBulk2 ┬─> sinkOne
         //                                                                       └─> sinkOne
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, monitorOne, monitorOne.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorOne, monitorOne.out, monitorBulk1, monitorBulk1.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorBulk1, monitorBulk1.out, autoForwardBlock, autoForwardBlock.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(autoForwardBlock, autoForwardBlock.out, monitorBulk2, monitorBulk2.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorBulk2, monitorBulk2.out, sinkOne, sinkOne.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorBulk2, monitorBulk2.out, sinkBulk, sinkBulk.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorOne, monitorBulk1)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorBulk1, autoForwardBlock)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(autoForwardBlock, monitorBulk2)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorBulk2, sinkOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorBulk2, sinkBulk)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -407,8 +407,8 @@ const boost::ut::suite TagPropagation = [] {
         auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSinkN"}, {"n_samples_expected", n_samples}, {"verbose_console", true}});
 
         // [ TagSource ] -> [ tag realign block ] -> [ TagSink ]
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, realign, realign.inPort)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(realign, realign.outPort, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "inPort">(src, realign)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"outPort", "in">(realign, sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -442,8 +442,8 @@ const boost::ut::suite TagPropagation = [] {
         decimator.settings().autoForwardParameters().insert(customAutoForwardKeys.begin(), customAutoForwardKeys.end());
         auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", true}});
 
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, decimator, decimator.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(decimator, decimator.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, decimator)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(decimator, sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -499,8 +499,8 @@ const boost::ut::suite RepeatedTags = [] {
         auto& sinkOne    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSinkOne"}, {"n_samples_expected", n_samples}, {"verbose_console", false && verbose}});
 
         // src -> monitorOne -> sinkOne
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(src, src.out, monitorOne, monitorOne.in)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect(monitorOne, monitorOne.out, sinkOne, sinkOne.in)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, monitorOne)));
+        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorOne, sinkOne)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

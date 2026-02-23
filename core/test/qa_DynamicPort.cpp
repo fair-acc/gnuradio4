@@ -186,11 +186,11 @@ const boost::ut::suite PortApiTests = [] {
         auto& added  = flow.emplaceBlock<adder<int>>();
         auto& out    = flow.emplaceBlock<cout_sink<int>>();
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect(number, number.value, scaled, scaled.original)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect(scaled, scaled.scaled, added, added.addend0)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect(answer, answer.value, added, added.addend1)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value", "original">(number, scaled)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"scaled", "addend0">(scaled, added)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value", "addend1">(answer, added)));
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect(added, added.sum, out, out.sink)));
+        expect(eq(ConnectionResult::SUCCESS, flow.connect<"sum", "sink">(added, out)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {

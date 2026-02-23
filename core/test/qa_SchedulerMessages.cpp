@@ -126,7 +126,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         Graph flow(context->loader);
         auto& source = flow.emplaceBlock<NullSource<float>>();
         auto& sink   = flow.emplaceBlock<NullSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect(source, source.out, sink, sink.in)));
+        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", "in">(source, sink)));
 
         TestScheduler scheduler(std::move(flow));
 
@@ -477,7 +477,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     gr::Graph graph(context->loader);
     auto&     source = graph.emplaceBlock<SlowSource<float>>();
     auto&     sink   = graph.emplaceBlock<CountingSink<float>>();
-    expect(eq(ConnectionResult::SUCCESS, graph.connect(source, source.out, sink, sink.in)));
+    expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(source, sink)));
     expect(eq(graph.edges().size(), 1UZ)) << "edge registered with connect";
 
     TestScheduler scheduler(std::move(graph), /*addTestSourceAndSink=*/false);

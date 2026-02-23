@@ -81,7 +81,7 @@ const boost::ut::suite HttpBlocktests = [] {
         auto& sink = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(httpBlock, httpBlock.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -115,7 +115,7 @@ const boost::ut::suite HttpBlocktests = [] {
         auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(httpBlock, httpBlock.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -147,7 +147,7 @@ const boost::ut::suite HttpBlocktests = [] {
         auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(httpBlock, httpBlock.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -192,7 +192,7 @@ const boost::ut::suite HttpBlocktests = [] {
         auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
         expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect(httpBlock, httpBlock.out, sink, sink.in)));
+        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {

@@ -55,6 +55,34 @@ inline const char* kSubgraphExportPort   = "SubgraphExportPort";
 inline const char* kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
 
+namespace detail {
+struct PortNameIndexPair {
+    std::string_view portName;
+    std::size_t      portIndex = 0;
+};
+
+constexpr PortNameIndexPair parsePort(std::string_view portString) {
+    std::size_t pos = portString.find("#");
+    if (pos == std::string_view::npos) {
+        return {portString, meta::invalid_index};
+    }
+
+    std::string_view name = portString.substr(0, pos);
+    std::string_view tail = portString.substr(pos + 1);
+
+    std::size_t num = 0UZ;
+
+    for (char c : tail) {
+        if (c >= '0' && c <= '9') {
+            num = num * 10 + static_cast<std::size_t>(c - '0');
+        } else {
+            break;
+        }
+    }
+    return {name, num};
+}
+} // namespace detail
+
 namespace graph {
 inline static constexpr std::size_t  defaultMinBufferSize(bool isArithmeticLike) { return isArithmeticLike ? 65536UZ : 64UZ; }
 inline static constexpr std::int32_t defaultWeight   = 0;
@@ -441,18 +469,6 @@ public:
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message);
     std::optional<Message> propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message);
 
-    // connect using the port index
-    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard]] auto connectInternal(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, [[maybe_unused]] std::source_location location = std::source_location::current()) {
-        auto& port_or_collection = outputPort<sourcePortIndex, PortType::ANY>(&source);
-        return SourceConnector<Source, std::remove_cvref_t<decltype(port_or_collection)>, sourcePortIndex, sourcePortSubIndex>(*this, source, port_or_collection, minBufferSize, weight, edgeName);
-    }
-
-    template<std::size_t sourcePortIndex, std::size_t sourcePortSubIndex, typename Source>
-    [[nodiscard, deprecated("The connect with the port name should be used")]] auto connect(Source& source, std::size_t minBufferSize = undefined_size, std::int32_t weight = graph::defaultWeight, std::string edgeName = graph::defaultEdgeName, std::source_location location = std::source_location::current()) {
-        return connectInternal<sourcePortIndex, sourcePortSubIndex, Source>(source, minBufferSize, weight, edgeName, location);
-    }
-
     ConnectionResult connect(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
         std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,            //
         EdgeParameters                        parameters = {},                                   //
@@ -485,11 +501,11 @@ public:
         return connect(*sourceBlockModel, std::move(sourcePort), *destinationBlockModel, std::move(destinationPort), std::move(parameters), location);
     }
 
-    template<gr::BlockLike SourceBlock, gr::PortLike SourcePort, gr::BlockLike DestinationBlock, gr::PortLike DestinationPort>
-    ConnectionResult connect(SourceBlock& sourceBlock, SourcePort& sourcePort, //
-        DestinationBlock& destinationBlock, DestinationPort& destinationPort,  //
-        EdgeParameters       parameters = {},                                  //
-        std::source_location location   = std::source_location::current()) {
+    template<fixed_string SourcePort, fixed_string DestinationPort, gr::BlockLike SourceBlock, gr::BlockLike DestinationBlock>
+    ConnectionResult connect(SourceBlock& sourceBlock,      //
+        DestinationBlock&                 destinationBlock, //
+        EdgeParameters                    parameters = {},  //
+        std::source_location              location   = std::source_location::current()) {
 
         std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
         std::expected<std::shared_ptr<BlockModel>, Error> destinationBlockModel = graph::findBlock(*this, destinationBlock, location);
@@ -499,32 +515,45 @@ public:
             return ConnectionResult::FAILED;
         }
 
-        if constexpr (!std::is_same_v<typename SourcePort::value_type, typename DestinationPort::value_type>) {
-            meta::print_types<meta::message_type<"The source port type needs to match the sink port type">, typename DestinationPort::value_type, typename SourcePort::value_type>{};
-        }
+        struct Result {
+            PortDefinition definition;
+            bool           isArithmeticLike;
+        };
 
-        auto getPortDefinition = [&](const auto& ports, const auto& searchingForPort) -> std::optional<PortDefinition> {
-            std::size_t currentIndex  = 0UZ;
-            std::size_t foundIndex    = meta::invalid_index;
-            std::size_t foundSubindex = meta::invalid_index;
+        auto getPortDefinition = [&](const auto& ports, std::string_view portString) -> std::expected<Result, Error> {
+            auto info = detail::parsePort(portString);
+
+            std::size_t                  currentIndex = 0UZ;
+            std::expected<Result, Error> result       = std::unexpected(Error("Not found"));
+
             gr::meta::tuple_for_each(
                 [&]<typename PortOrCollection>(const PortOrCollection& portOrCollection) {
                     if constexpr (traits::port::is_port_v<PortOrCollection>) {
-                        if (std::addressof(searchingForPort) == std::addressof(portOrCollection)) {
-                            foundIndex = currentIndex;
+                        if (portOrCollection.name == info.portName) {
+                            if (info.portIndex != meta::invalid_index) {
+                                result = std::unexpected(Error("This is a port, not a collection of ports"));
+
+                            } else {
+                                result = Result{
+                                    PortDefinition(currentIndex, meta::invalid_index), //
+                                    portOrCollection.kIsArithmeticLikeValueType,       //
+                                };
+                            }
                         }
                     } else if constexpr (traits::block::detail::array_traits<PortOrCollection>::is_array) {
-                        std::size_t currentSubindex = 0UZ;
-                        for (const auto& port : portOrCollection) {
-                            if constexpr (std::is_same_v<std::remove_cvref_t<decltype(searchingForPort)>, std::remove_cvref_t<decltype(port)>>) {
-                                if (std::addressof(searchingForPort) == std::addressof(port)) {
-                                    foundIndex    = currentIndex;
-                                    foundSubindex = currentSubindex;
-                                    break;
+                        constexpr std::size_t arraySize = traits::block::detail::array_traits<PortOrCollection>::size;
+                        if constexpr (arraySize > 0) {
+                            assert(!portOrCollection[0].name.empty());
+                            if (portOrCollection[0].name == info.portName) {
+                                if (info.portIndex < arraySize) {
+                                    result = Result{
+                                        PortDefinition(currentIndex, info.portIndex),   //
+                                        portOrCollection[0].kIsArithmeticLikeValueType, //
+                                    };
+                                } else {
+                                    result = std::unexpected(Error("Index out of range"));
                                 }
                             }
-
-                            currentSubindex++;
                         }
 
                     } else if constexpr (meta::is_instantiation_of<PortOrCollection, std::vector>) {
@@ -537,15 +566,11 @@ public:
                 },
                 ports);
 
-            if (foundIndex != meta::invalid_index) {
-                return PortDefinition(foundIndex, foundSubindex);
-            } else {
-                return {};
-            }
+            return result;
         };
 
-        const auto sourcePortDefinition      = getPortDefinition(outputPorts<PortType::ANY>(&sourceBlock), sourcePort);
-        const auto destinationPortDefinition = getPortDefinition(inputPorts<PortType::ANY>(&destinationBlock), destinationPort);
+        const auto sourcePortDefinition      = getPortDefinition(outputPorts<PortType::ANY>(&sourceBlock), SourcePort);
+        const auto destinationPortDefinition = getPortDefinition(inputPorts<PortType::ANY>(&destinationBlock), DestinationPort);
 
         if (!sourcePortDefinition) {
             return ConnectionResult::FAILED;
@@ -554,11 +579,11 @@ public:
             return ConnectionResult::FAILED;
         }
 
-        const bool        isArithmeticLike       = sourcePort.kIsArithmeticLikeValueType;
+        const bool        isArithmeticLike       = sourcePortDefinition->isArithmeticLike;
         const std::size_t sanitizedMinBufferSize = parameters.minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : parameters.minBufferSize;
 
-        _edges.emplace_back(sourceBlockModel.value(), *sourcePortDefinition, //
-            destinationBlockModel.value(), *destinationPortDefinition,       //
+        _edges.emplace_back(sourceBlockModel.value(), sourcePortDefinition->definition, //
+            destinationBlockModel.value(), destinationPortDefinition->definition,       //
             EdgeParameters{sanitizedMinBufferSize, parameters.weight, std::move(parameters.name)});
 
         return ConnectionResult::SUCCESS;
