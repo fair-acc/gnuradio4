@@ -81,6 +81,22 @@ constexpr PortNameIndexPair parsePort(std::string_view portString) {
     }
     return {name, num};
 }
+
+template<fixed_string Name>
+struct for_name {
+    static constexpr std::string_view name   = Name;
+    static constexpr std::size_t      endPos = name.find('#');
+    static constexpr std::size_t      size   = endPos == std::string_view::npos ? name.size() : endPos;
+
+    template<typename TPort>
+    static consteval bool matcherImpl() {
+        return typename TPort::NameT{} == std::string_view(Name.data(), size);
+    }
+
+    template<typename TPort>
+    struct matches : std::bool_constant<matcherImpl<TPort>()> {};
+};
+
 } // namespace detail
 
 namespace graph {
@@ -514,6 +530,13 @@ public:
             std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlock.name, destinationBlock.name, location);
             return ConnectionResult::FAILED;
         }
+
+        using SourcePortDescriptor      = typename traits::block::all_output_ports<SourceBlock>::template find_or_default<detail::for_name<SourcePort>::template matches, void>;
+        using DestinationPortDescriptor = typename traits::block::all_input_ports<DestinationBlock>::template find_or_default<detail::for_name<DestinationPort>::template matches, void>;
+
+        static_assert(!std::is_same_v<void, SourcePortDescriptor>);
+        static_assert(!std::is_same_v<void, DestinationPortDescriptor>);
+        static_assert(std::is_same_v<typename SourcePortDescriptor::inner_value_type, typename DestinationPortDescriptor::inner_value_type>);
 
         struct Result {
             PortDefinition definition;

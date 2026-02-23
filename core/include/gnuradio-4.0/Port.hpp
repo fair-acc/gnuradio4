@@ -482,6 +482,7 @@ struct PortDescriptor {
         std::conditional_t<kIsDynamicCollection, std::vector<T>,                  //
             std::conditional_t<kIsStaticCollection, std::array<T, KindExtraData>, //
                 T>>;
+    using inner_value_type = T;
 
     template<typename TBlock>
     requires std::same_as<std::remove_cvref_t<TBlock>, typename std::remove_cvref_t<TBlock>::derived_t>
