@@ -241,7 +241,7 @@ const boost::ut::suite TagPropagation = [] {
             {TRIGGER_TIME.shortKey(), std::uint64_t(42)},                                     //
             {TRIGGER_OFFSET.shortKey(), 42.f},                                                //
             {TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}, //
-            {CONTEXT.shortKey(), "CONTEXT_42"},                                               //
+            {gr::tag::CONTEXT.shortKey(), "CONTEXT_42"},                                               //
             {CONTEXT_TIME.shortKey(), std::uint64_t(42)}};
 
         property_map srcParameter = srcParametersOnlyAutoForward;
@@ -303,7 +303,7 @@ const boost::ut::suite TagPropagation = [] {
             gr::Tag(9UZ, {{TRIGGER_TIME.shortKey(), std::uint64_t(42)}}),                                      //
             gr::Tag(10UZ, {{TRIGGER_OFFSET.shortKey(), 42.f}}),                                                //
             gr::Tag(11UZ, {{TRIGGER_META_INFO.shortKey(), property_map{{"TRIGGER_META_INFO_KEY_42", 42.f}}}}), //
-            gr::Tag(12UZ, {{CONTEXT.shortKey(), "CONTEXT_42"}}),                                               //
+            gr::Tag(12UZ, {{gr::tag::CONTEXT.shortKey(), "CONTEXT_42"}}),                                               //
             gr::Tag(13UZ, {{CONTEXT_TIME.shortKey(), std::uint64_t(42)}})};
 
         std::vector<Tag> tags = tagsOnlyAutoForward;

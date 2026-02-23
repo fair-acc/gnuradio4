@@ -2,15 +2,60 @@
 
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
+class SafeCounter {
+    std::atomic<int>                _value{0};
+    mutable std::mutex              _mutex;
+    mutable std::condition_variable _cv;
+
+public:
+    void increment() {
+        _value.fetch_add(1, std::memory_order_release);
+        _cv.notify_all();
+    }
+
+    void wait(int old_value) {
+        std::unique_lock<std::mutex> lock(_mutex);
+        _cv.wait(lock, [&] { return _value.load(std::memory_order_acquire) > old_value; });
+    }
+
+    int load() const { return _value.load(std::memory_order_acquire); }
+};
+
 const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
     using namespace boost::ut;
+
+    "WIN32 ThreadPool tests"_test = [] {
+        for (int i = 0; i < 10; ++i) {
+            {
+                gr::thread_pool::BasicThreadPool pool("test", gr::thread_pool::CPU_BOUND, 2, 4);
+                pool.execute([i] { std::println("Task {}", i); });
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            std::println("Pool {} destroyed successfully", i);
+        }
+
+        gr::thread_pool::BasicThreadPool pool("persistent", gr::thread_pool::CPU_BOUND, 2, 4);
+        for (int i = 0; i < 10; ++i) {
+            pool.execute([i] { std::println("Task {}", i); });
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (i % 3 == 0) {
+                pool.requestShutdown();
+            }
+        }
+    };
 
     "Basic ThreadPool tests"_test = [] {
         expect(nothrow([] { gr::thread_pool::BasicThreadPool("test", gr::thread_pool::IO_BOUND, 4UL); }));
         expect(nothrow([] { gr::thread_pool::BasicThreadPool("test2", gr::thread_pool::CPU_BOUND, 4UL); }));
 
-        std::atomic<int>                 enqueueCount{0};
-        std::atomic<int>                 executeCount{0};
+#ifdef _WIN32
+        SafeCounter enqueueCount;
+        SafeCounter executeCount;
+
+#else
+        std::atomic<int> enqueueCount{0};
+        std::atomic<int> executeCount{0};
+#endif
         gr::thread_pool::BasicThreadPool pool("TestPool", gr::thread_pool::IO_BOUND, 1, 2);
         expect(nothrow([&] { pool.sleepDuration = std::chrono::milliseconds(1); }));
         expect(nothrow([&] { pool.keepAliveDuration = std::chrono::seconds(10); }));
@@ -24,16 +69,24 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
         expect(pool.numTasksRunning() == 0U);
         expect(pool.numTasksQueued() == 0U);
         expect(pool.numTasksRecycled() == 0U);
+#ifdef _WIN32
+        pool.execute([&enqueueCount] { enqueueCount.increment(); });
+#else
         pool.execute([&enqueueCount] {
             ++enqueueCount;
             enqueueCount.notify_all();
         });
+#endif
         enqueueCount.wait(0);
         expect(pool.numThreads() == 1U);
+#ifdef _WIN32
+        pool.execute([&executeCount] { executeCount.increment(); });
+#else
         pool.execute([&executeCount] {
             ++executeCount;
             executeCount.notify_all();
         });
+#endif
         executeCount.wait(0);
         expect(pool.numThreads() >= 1U);
         expect(enqueueCount.load() == 1);
@@ -54,22 +107,40 @@ const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {
     };
 
     "contention tests"_test = [] {
-        std::atomic<std::size_t>         counter{0UZ};
+#ifdef _WIN32
+        SafeCounter counter;
+#else
+        std::atomic<std::size_t> counter{0UZ};
+#endif
         gr::thread_pool::BasicThreadPool pool("contention", gr::thread_pool::IO_BOUND, 1, 4);
         pool.waitUntilInitialised();
         expect(that % pool.isInitialised());
         expect(pool.numThreads() == 1U);
+#ifdef _WIN32
+        pool.execute([&counter] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            counter.increment();
+        });
+#else
         pool.execute([&counter] {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             std::atomic_fetch_add(&counter, 1UZ);
             counter.notify_all();
         });
+#endif
         expect(pool.numThreads() == 1U);
+#ifdef _WIN32
+        pool.execute([&counter] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            counter.increment();
+        });
+#else
         pool.execute([&counter] {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             std::atomic_fetch_add(&counter, 1UZ);
             counter.notify_all();
         });
+#endif
         expect(pool.numThreads() >= 1UZ);
         counter.wait(0UZ);
         counter.wait(1UZ);

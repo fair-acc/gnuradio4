@@ -22,6 +22,15 @@
 
 #include <gnuradio-4.0/meta/formatter.hpp>
 
+#ifdef _WIN32
+// clang-format off
+#include <windows.h>
+#include <tlhelp32.h>
+// clang-format on
+// this macro causes a build error if not removed
+#undef OPTIONAL
+#endif
+
 namespace gr::thread_pool {
 namespace detail {
 
@@ -335,6 +344,10 @@ class BasicThreadPool {
 
     std::atomic_bool _initialised = ATOMIC_FLAG_INIT;
     std::atomic_bool _shutdown    = false;
+#ifdef _WIN32
+    mutable std::mutex              _initialiseMutex;
+    mutable std::condition_variable _initialiseCV;
+#endif
 
     std::condition_variable _condition;
     std::atomic_size_t      _numTaskedQueued = 0U; // cache for _taskQueue.size()
@@ -345,6 +358,10 @@ class BasicThreadPool {
     std::mutex             _threadListMutex;
     std::atomic_size_t     _numThreads = 0U;
     std::list<std::thread> _threads;
+#ifdef _WIN32
+    mutable std::mutex              _threadCountMutex; // TODO implement counter for _numThreads
+    mutable std::condition_variable _threadCountCV;
+#endif
 
     std::vector<bool> _affinityMask;
     thread::Policy    _schedulingPolicy   = thread::Policy::OTHER;
@@ -372,7 +389,9 @@ public:
         _shutdown = true;
         _condition.notify_all();
         for (auto& t : _threads) {
-            t.join();
+            if (t.joinable()) {
+                t.join();
+            }
         }
     }
 
@@ -390,7 +409,14 @@ public:
     [[nodiscard]] std::size_t      numTasksQueued() const { return std::atomic_load_explicit(&_numTaskedQueued, std::memory_order_acquire); }
     [[nodiscard]] std::size_t      numTasksRecycled() const { return _recycledTasks.size(); }
     [[nodiscard]] bool             isInitialised() const { return _initialised.load(std::memory_order::acquire); }
-    void                           waitUntilInitialised() const { _initialised.wait(false); }
+    void                           waitUntilInitialised() const {
+#ifdef _WIN32
+        std::unique_lock<std::mutex> lock(_initialiseMutex);
+        _initialiseCV.wait(lock, [this] { return _initialised.load(std::memory_order_acquire); });
+#else
+        _initialised.wait(false);
+#endif
+    }
 
     void setThreadBounds(uint32_t minThreads, uint32_t maxThreads) {
         if (minThreads == 0 || maxThreads == 0) {
@@ -409,7 +435,9 @@ public:
         _shutdown = true;
         _condition.notify_all();
         for (auto& t : _threads) {
-            t.join();
+            if (t.joinable()) {
+                t.join();
+            }
         }
     }
 
@@ -552,7 +580,11 @@ private:
         }
         if (numThreads() >= minThreads()) {
             std::atomic_store_explicit(&_initialised, true, std::memory_order_release);
+#ifdef _WIN32
+            _initialiseCV.notify_all();
+#else
             _initialised.notify_all();
+#endif
         }
     }
 
@@ -639,7 +671,11 @@ private:
             if (isShutdown()) {
                 auto nThread = _numThreads.fetch_sub(1);
                 _globalThreadCount.fetch_sub(1UZ);
+#ifdef _WIN32
+                _threadCountCV.notify_all();
+#else
                 _numThreads.notify_all();
+#endif
                 if (nThread == 1) { // cleanup last thread
                     _recycledTasks.clear();
                     _taskQueue.clear();
@@ -650,7 +686,11 @@ private:
                 while (nThreads > minThreads()) { // compare and swap loop
                     if (_numThreads.compare_exchange_weak(nThreads, nThreads - 1, std::memory_order_acq_rel)) {
                         _globalThreadCount.fetch_sub(1UZ);
+#ifdef _WIN32
+                        _threadCountCV.notify_all();
+#else
                         _numThreads.notify_all();
+#endif
                         if (nThreads == 1) { // cleanup last thread
                             _recycledTasks.clear();
                             _taskQueue.clear();
@@ -704,8 +744,30 @@ inline std::size_t getTotalThreadCount() {
     }
     throw std::runtime_error("could not get total thread count");
     return 0UZ;
+#elif defined(_WIN32)
+    HANDLE        hThreadList = INVALID_HANDLE_VALUE;
+    THREADENTRY32 threadEntry;
+    std::size_t   threadCount    = 0UZ;
+    DWORD         ownerProcessId = GetCurrentProcessId();
+    hThreadList                  = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (hThreadList == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("could not get thread handle. cannot get thread count");
+        return 0UZ;
+    }
+    threadEntry.dwSize = sizeof(THREADENTRY32);
+    if (!Thread32First(hThreadList, &threadEntry)) {
+        throw std::runtime_error("could not get information about the first thread, cannot get thread count");
+        return 0UZ;
+    }
+    do {
+        if (threadEntry.th32OwnerProcessID == ownerProcessId) {
+            ++threadCount;
+        }
+    } while (Thread32Next(hThreadList, &threadEntry));
+    CloseHandle(hThreadList);
+    return threadCount;
 #else
-    // TODO Implement this function for Windows, Apple and other platforms
+    // TODO Implement this function for Apple and other platforms
     throw std::runtime_error("could not get total thread count, platform not supported yet");
     return 0UZ;
 #endif
@@ -840,7 +902,7 @@ inline ThreadSplit computeDefaultThreadSplit(std::size_t threadLimit = gr::threa
  * <h3>Thread safety and lifetime</h3>
  * <ul>
  *  <li> Internally, the registry uses <code>std::shared_ptr</code> to allow safe concurrent access and reference counting
- *  <li> The manager’s <code>get()</code> returns a shared reference; pools remain valid while in use
+ *  <li> The manager's <code>get()</code> returns a shared reference; pools remain valid while in use
  *  <li> Registration and replacement are synchronised via <code>std::mutex</code>
  * </ul>
  *
