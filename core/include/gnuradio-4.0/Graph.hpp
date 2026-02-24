@@ -189,12 +189,12 @@ public:
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
         if (exportFlag) {
             bookkeepingCollection.emplace(uniqueBlockName, PortNameMapper{std::string(portName), std::string(exportedName)});
-            auto& createdDynamicPort                           = portCollection.emplace_back(gr::DynamicPort(port.weakRef()));
-            std::get<gr::DynamicPort>(createdDynamicPort).name = exportedName;
+            auto& createdDynamicPort                                    = portCollection.emplace_back(gr::DynamicPort(port.weakRef()));
+            std::get<gr::DynamicPort>(createdDynamicPort).metaInfo.name = exportedName;
         } else {
             auto exportedPortName = infoIt->second.exportedName;
             bookkeepingCollection.erase(infoIt);
-            auto portIt = std::ranges::find_if(portCollection, [&exportedPortName](const auto& portOrCollection) { return std::visit([&](auto& in) { return in.name == exportedPortName; }, portOrCollection); });
+            auto portIt = std::ranges::find_if(portCollection, [&exportedPortName](const auto& portOrCollection) { return BlockModel::portName(portOrCollection) == exportedPortName; });
             if (portIt != portCollection.end()) {
                 portCollection.erase(portIt);
             } else {

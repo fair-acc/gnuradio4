@@ -268,7 +268,6 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any& newD
     typename T::value_type;
     { t.defaultValue() } -> std::same_as<std::any>;
     { t.setDefaultValue(newDefault) } -> std::same_as<bool>;
-    { t.name } -> std::convertible_to<std::string_view>;
     { t.priority } -> std::convertible_to<std::int32_t>;
     { t.min_samples } -> std::convertible_to<std::size_t>;
     { t.max_samples } -> std::convertible_to<std::size_t>;
@@ -1036,7 +1035,6 @@ static_assert(std::is_default_constructible_v<PortOut<float>>);
  */
 class DynamicPort {
 public:
-    std::string  name;
     std::int16_t priority; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     std::size_t  min_samples;
     std::size_t  max_samples;
@@ -1068,9 +1066,6 @@ private:
         [[nodiscard]] virtual std::size_t bufferSize() const = 0;
 
         [[nodiscard]] virtual std::string typeName() const = 0;
-
-        [[nodiscard]] virtual std::string_view portName() noexcept       = 0; // TODO: rename to 'name()' and eliminate local 'name' field (moved to metaInfo()), and use string&
-        [[nodiscard]] virtual std::string_view portName() const noexcept = 0;
 
         [[nodiscard]] virtual PortMetaInfo const& portMetaInfo() const noexcept              = 0;
         [[nodiscard]] virtual PortMetaInfo&       portMetaInfo() noexcept                    = 0;
@@ -1147,13 +1142,13 @@ private:
             port::BitMask other    = dst_port.portMaskInfo();
             if (port::decodePortType(thisMask) != port::decodePortType(other)) {
 #ifdef DEBUG
-                throw std::runtime_error(std::format("port type mismatch: {}::{} != {}::{}", portName(), port::decodePortType(thisMask), dst_port.portName(), port::decodePortType(other)));
+                throw std::runtime_error(std::format("port type mismatch: {}::{} != {}::{}", portMetaInfo().name, port::decodePortType(thisMask), dst_port.metaInfo.name, port::decodePortType(other)));
 #endif
                 return FAILED;
             }
             if (portMetaInfo().data_type != dst_port.portMetaInfo().data_type) {
 #ifdef DEBUG
-                throw std::runtime_error(std::format("port data type mismatch: {}::{} != {}::{}", portName(), _value.metaInfo.data_type, dst_port.portName(), dst_port.metaInfo.data_type));
+                throw std::runtime_error(std::format("port data type mismatch: {}::{} != {}::{}", portMetaInfo().name, _value.metaInfo.data_type, dst_port.metaInfo.name, dst_port.metaInfo.data_type));
 #endif
                 return FAILED;
             }
@@ -1169,9 +1164,6 @@ private:
         }
 
         [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
-
-        [[nodiscard]] std::string_view portName() noexcept override { return _value.name; } // TODO: '_value.name' -> '_value.metaInfo.name' and use string&
-        [[nodiscard]] std::string_view portName() const noexcept override { return _value.name; }
 
         [[nodiscard]] PortMetaInfo const& portMetaInfo() const noexcept override { return _value.metaInfo; }
         [[nodiscard]] PortMetaInfo&       portMetaInfo() noexcept override { return _value.metaInfo; }
@@ -1193,11 +1185,11 @@ public:
     DynamicPort(const DynamicPort& arg)            = delete;
     DynamicPort& operator=(const DynamicPort& arg) = delete;
 
-    DynamicPort(DynamicPort&& other) noexcept : name(other.name), priority(other.priority), min_samples(other.min_samples), max_samples(other.max_samples), _accessor(std::move(other._accessor)) {}
+    DynamicPort(DynamicPort&& other) noexcept : priority(other.priority), min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(other.metaInfo), _accessor(std::move(other._accessor)) {}
     auto& operator=(DynamicPort&& other) noexcept {
         auto tmp = std::move(other);
         std::swap(_accessor, tmp._accessor);
-        std::swap(name, tmp.name);
+        std::swap(metaInfo, tmp.metaInfo);
         std::swap(priority, tmp.priority);
         std::swap(min_samples, tmp.min_samples);
         std::swap(max_samples, tmp.max_samples);
@@ -1205,20 +1197,20 @@ public:
     }
 
     template<class T>
-    explicit constexpr DynamicPort(const T& arg, non_owned_reference_tag) noexcept                            // TODO: remove const-cast (super dangerous, and only a temporary fix) -> Ivan volunteerd to fix in follor-up PR
-    requires PortLike<std::remove_const_t<T>>                                                                 //
-        : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), //
-          _accessor{std::make_unique<PortWrapper<std::remove_const_t<T>, false>>(const_cast<std::remove_const_t<T>&>(arg))} {}
+    explicit constexpr DynamicPort(const T& arg, non_owned_reference_tag) noexcept            // TODO: remove const-cast (super dangerous, and only a temporary fix) -> Ivan volunteerd to fix in follor-up PR
+    requires PortLike<std::remove_const_t<T>>                                                 //
+        : priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), //
+          metaInfo(arg.metaInfo), _accessor{std::make_unique<PortWrapper<std::remove_const_t<T>, false>>(const_cast<std::remove_const_t<T>&>(arg))} {}
 
     bool operator==(const DynamicPort& other) const noexcept { return _accessor->internalId() == other._accessor->internalId(); }
     bool operator!=(const DynamicPort& other) const noexcept { return _accessor->internalId() != other._accessor->internalId(); }
 
     // TODO: The lifetime of ports is a problem here, if we keep a reference to the port in DynamicPort, the port object/ can not be reallocated
     template<PortLike T>
-    explicit constexpr DynamicPort(T& arg, non_owned_reference_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, false>>(arg)} {}
+    explicit constexpr DynamicPort(T& arg, non_owned_reference_tag) noexcept : priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), metaInfo(arg.metaInfo), _accessor{std::make_unique<PortWrapper<T, false>>(arg)} {}
 
     template<PortLike T>
-    explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : name(arg.name), priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), _accessor{std::make_unique<PortWrapper<T, true>>(std::forward<T>(arg))} {}
+    explicit constexpr DynamicPort(T&& arg, owned_value_tag) noexcept : priority(arg.priority), min_samples(arg.min_samples), max_samples(arg.max_samples), metaInfo(arg.metaInfo), _accessor{std::make_unique<PortWrapper<T, true>>(std::forward<T>(arg))} {}
 
     [[nodiscard]] DynamicPort weakRef() const noexcept { return _accessor->weakRef(); }
     [[nodiscard]] std::any    defaultValue() const noexcept { return _accessor->defaultValue(); }
@@ -1226,8 +1218,6 @@ public:
     [[nodiscard]] bool             setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
     [[nodiscard]] std::string      typeName() const noexcept { return _accessor->typeName(); }
-    [[nodiscard]] std::string_view portName() noexcept { return _accessor->portName(); }
-    [[nodiscard]] std::string_view portName() const noexcept { return _accessor->portName(); }
     [[nodiscard]] PortMetaInfo     portMetaInfo() const noexcept { return _accessor->portMetaInfo(); }
     [[nodiscard]] port::BitMask    portMaskInfo() const noexcept { return _accessor->portMaskInfo(); }
     [[nodiscard]] bool             isArithmeticLikeValueType() const noexcept { return _accessor->isValueTypeArithmeticLike(); }

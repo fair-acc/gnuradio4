@@ -194,7 +194,7 @@ protected:
         if (auto separatorIt = std::ranges::find(name, '#'); separatorIt == name.end()) {
             auto it = std::ranges::find_if(what, [name](const DynamicPortOrCollection& portOrCollection) {
                 const auto* port = std::get_if<gr::DynamicPort>(&portOrCollection);
-                return port && port->name == name;
+                return port && port->metaInfo.name == name;
             });
 
             if (it == what.end()) {
@@ -257,7 +257,7 @@ protected:
         }
 
         if (subIndex != meta::invalid_index) {
-            throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - specified sub-index for a normal port {}", which, topIndex, subIndex, single->name), loc);
+            throw gr::exception(std::format("invalid_argument: dynamic{}Port(index: {}, subIndex: {}) - specified sub-index for a normal port {}", which, topIndex, subIndex, single->metaInfo.name), loc);
         }
         return *single;
     }
@@ -274,8 +274,8 @@ public:
     MsgPortOutBuiltin* msgOut;
 
     static std::string portName(const DynamicPortOrCollection& portOrCollection) {
-        return std::visit(meta::overloaded{                                          //
-                              [](const gr::DynamicPort& port) { return port.name; }, //
+        return std::visit(meta::overloaded{                                                         //
+                              [](const gr::DynamicPort& port) { return port.metaInfo.name.value; }, //
                               [](const NamedPortCollection& namedCollection) { return std::string(namedCollection.name); }},
             portOrCollection);
     }
@@ -347,7 +347,7 @@ public:
                     return i;
                 }
             } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicInputPorts.at(i))) {
-                if (port->name == name) {
+                if (port->metaInfo.name == name) {
                     return i;
                 }
             }
@@ -364,7 +364,7 @@ public:
                     return i;
                 }
             } else if (auto* port = std::get_if<gr::DynamicPort>(&_dynamicOutputPorts.at(i))) {
-                if (port->name == name) {
+                if (port->metaInfo.name == name) {
                     return i;
                 }
             }
@@ -670,8 +670,8 @@ inline property_map serializeBlock(PluginLoader& pluginLoader, const std::shared
                                   [](const gr::DynamicPort& port) {
                                       return property_map{
                                           //
-                                          {"name", std::string(port.name)}, //
-                                          {"type", port.typeName()}         //
+                                          {"name", std::string(port.metaInfo.name)}, //
+                                          {"type", port.typeName()}                  //
                                       };
                                   },
                                   [](const BlockModel::NamedPortCollection& namedCollection) {
@@ -751,12 +751,14 @@ protected:
                     NamedPortCollection result;
                     result.name = CurrentPortType::Name;
                     for (auto& port : collection) {
+                        port.metaInfo.name = CurrentPortType::Name;
                         processPort(result.ports, port);
                     }
                     where.push_back(std::move(result));
                 } else {
                     auto& port = CurrentPortType::getPortObject(blockRef());
                     port.name  = CurrentPortType::Name;
+                    port.metaInfo.name = CurrentPortType::Name;
                     processPort(where, port);
                 }
             };
@@ -993,7 +995,7 @@ template<gr::PortDirection direction>
 
     if (const auto idx = std::get_if<gr::PortDefinition::StringBased>(&portDefinition.definition); idx) {                                                                     // portDefinition is StringBased, e.g. "in#1";
         const auto& port                  = isInput ? block->dynamicInputPort(std::string_view(idx->name), loc) : block->dynamicOutputPort(std::string_view(idx->name), loc); // N.B. can throw if name not present
-        const auto [baseName, portOffset] = detail::portBaseNameAndOffset(port.portName(), portDefinition);
+        const auto [baseName, portOffset] = detail::portBaseNameAndOffset(port.metaInfo.name, portDefinition);
         const std::size_t baseIdx         = isInput ? block->dynamicInputPortIndex(std::string(baseName), loc) : block->dynamicOutputPortIndex(std::string(baseName), loc);
         if (baseIdx == gr::meta::invalid_index) {
             return gr::meta::invalid_index;
