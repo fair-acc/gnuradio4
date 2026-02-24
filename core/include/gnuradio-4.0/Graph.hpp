@@ -1430,6 +1430,124 @@ constexpr auto merge(A&& a, B&& b) {
 /**************************** end of SIMD-Merged Graph Implementation **********************************/
 /*******************************************************************************************************/
 
+/*******************************************************************************************************/
+/**************************** begin of FeedbackMerge Implementation ************************************/
+/*******************************************************************************************************/
+
+/**
+ * Feedback merge for blocks that feed data previously generated
+ * to one of the ports.
+ *
+ * FeedbackMerge<Adder, "out", Scale<0.2f>, "out", "in2">;
+ *
+ *           Forward
+ *           adder          *------------------> out of FeedbackMerge
+ *           +----+        /
+ * ------in1-|    |       /     Feedback
+ *           |    |-out--*      scale
+ *     *-in2-|    |       \     +----+
+ *    /      +----+        *-in-|    |-out--*
+ *    |                         +----+       \
+ *    \______________________________________/
+ *
+ */
+template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
+    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
+    std::size_t ForwardFeedbackInputPortIndex>
+class FeedbackMerge : public Block<FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
+    static std::atomic_size_t _unique_id_counter;
+
+public:
+    GR_MAKE_REFLECTABLE(FeedbackMerge);
+
+    static_assert(traits::block::stream_input_port_types<Feedback>::size == 1, "Feedback block needs to have only one input port");
+    static_assert(traits::block::stream_input_port_types<Forward>::size >= 2, "Forward block must have at least 2 input ports");
+
+    using MergeConnectionForwardOutputType = typename traits::block::stream_output_port_types<Forward>::template at<ForwardOutputPortIndex>;
+    using MergeConnectionFeedbackInputType = typename traits::block::stream_input_port_types<Feedback>::template at<0>;
+    static_assert(std::is_same_v<MergeConnectionForwardOutputType, MergeConnectionFeedbackInputType>, "The chosen output port of Forward block needs to have the same type as the Feedback input port type");
+
+    using FeedbackConnectionFeedbackOutputType = typename traits::block::stream_output_port_types<Feedback>::template at<FeedbackOutputPortIndex>;
+    using FeedbackConnectionForwardInputType   = typename traits::block::stream_input_port_types<Forward>::template at<ForwardFeedbackInputPortIndex>;
+    static_assert(std::is_same_v<FeedbackConnectionFeedbackOutputType, FeedbackConnectionForwardInputType>, "The chosen output port of Feedback block needs to have the same type as the chosen Forward input port type");
+
+    // The type of port connected inside of the feedback merge
+    using MergeConnectionPortType    = MergeConnectionForwardOutputType;
+    using FeedbackConnectionPortType = FeedbackConnectionFeedbackOutputType;
+
+    using SelfInputPortDescriptors  = meta::remove_at<ForwardFeedbackInputPortIndex, typename traits::block::stream_input_ports<Forward>>;
+    using SelfOutputPortDescriptors = typename traits::block::stream_output_ports<Forward>;
+    using AllPorts                  = meta::concat<SelfInputPortDescriptors, SelfOutputPortDescriptors>;
+
+    using SelfInputPortTypes  = meta::remove_at<ForwardFeedbackInputPortIndex, typename traits::block::stream_input_port_types<Forward>>;
+    using SelfOutputPortTypes = typename traits::block::stream_output_port_types<Forward>;
+    using ReturnType          = typename SelfOutputPortTypes::tuple_or_type;
+
+    const std::size_t unique_id   = _unique_id_counter++;
+    const std::string unique_name = std::format("FeedbackMerge<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
+
+    FeedbackMerge(const FeedbackMerge&)            = delete;
+    FeedbackMerge& operator=(const FeedbackMerge&) = delete;
+    FeedbackMerge& operator=(FeedbackMerge&&)      = delete;
+
+    FeedbackMerge(FeedbackMerge&& other) : forward(std::move(other.forward)), feedback(std::move(other.feedback)), _state(std::move(other._state)) {}
+
+    constexpr FeedbackMerge(Forward&& fwd, Feedback&& fbk) : forward(std::move(fwd)), feedback(std::move(fbk)) {}
+
+    template<typename... Ts>
+    requires(SelfInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
+    constexpr ReturnType processOne(Ts&&... inputs) {
+        auto forwardInputTuple = std::forward_as_tuple(std::forward<Ts>(inputs)...);
+
+        auto output = [&]<std::size_t... BeforeIdx, std::size_t... AfterIdx>(std::index_sequence<BeforeIdx...>, std::index_sequence<AfterIdx...>) {
+            constexpr std::size_t afterOffset = ForwardFeedbackInputPortIndex + 1;
+            return forward.processOne(std::get<BeforeIdx>(forwardInputTuple)..., _state, std::get<afterOffset + AfterIdx - 1>(forwardInputTuple)...);
+        }(std::make_index_sequence<ForwardFeedbackInputPortIndex>(), std::make_index_sequence<sizeof...(Ts) - ForwardFeedbackInputPortIndex>());
+
+        _state = feedback.processOne(output);
+        return output;
+    }
+
+private:
+    Forward                    forward;
+    Feedback                   feedback;
+    FeedbackConnectionPortType _state{};
+};
+
+template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
+    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
+    std::size_t ForwardFeedbackInputPortIndex>
+inline std::atomic_size_t FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::_unique_id_counter{0UZ};
+
+template<std::size_t ForwardOutputPortIndex,        //
+    std::size_t      FeedbackOutputPortIndex,       //
+    std::size_t      ForwardFeedbackInputPortIndex, //
+    BlockLike Forward, BlockLike Feedback>
+constexpr auto feedbackMergeByIndex(Forward&& forward, Feedback&& feedback) {
+    return FeedbackMerge<std::remove_cvref_t<Forward>, ForwardOutputPortIndex, //
+        std::remove_cvref_t<Feedback>, FeedbackOutputPortIndex,                //
+        ForwardFeedbackInputPortIndex>{std::forward<Forward>(forward), std::forward<Feedback>(feedback)};
+}
+
+template<fixed_string ForwardOutputPortName,  //
+    fixed_string      FeedbackOutputPortName, //
+    fixed_string      ForwardFeedbackInputPortName, typename Forward, typename Feedback>
+constexpr auto feedbackMerge(Forward&& forward, Feedback&& feedback) {
+    constexpr auto ForwardOutputPortIndex        = meta::indexForName<ForwardOutputPortName, typename traits::block::stream_output_ports<Forward>>();
+    constexpr auto FeedbackOutputPortIndex       = meta::indexForName<FeedbackOutputPortName, typename traits::block::stream_output_ports<Feedback>>();
+    constexpr auto ForwardFeedbackInputPortIndex = meta::indexForName<ForwardFeedbackInputPortName, typename traits::block::stream_input_ports<Forward>>();
+    static_assert(ForwardOutputPortIndex != meta::invalid_index);
+    static_assert(FeedbackOutputPortIndex != meta::invalid_index);
+    static_assert(ForwardFeedbackInputPortIndex != meta::invalid_index);
+    return FeedbackMerge<std::remove_cvref_t<Forward>, static_cast<std::size_t>(ForwardOutputPortIndex), //
+        std::remove_cvref_t<Feedback>, static_cast<std::size_t>(FeedbackOutputPortIndex),                //
+        static_cast<std::size_t>(ForwardFeedbackInputPortIndex)>{std::forward<Forward>(forward), std::forward<Feedback>(feedback)};
+}
+
+/*******************************************************************************************************/
+/**************************** end of FeedbackMerge Implementation **************************************/
+/*******************************************************************************************************/
+
 // TODO: add nicer enum formatter
 inline std::ostream& operator<<(std::ostream& os, const ConnectionResult& value) { return os << static_cast<int>(value); }
 

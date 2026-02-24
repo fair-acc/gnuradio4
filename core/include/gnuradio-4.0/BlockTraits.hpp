@@ -23,6 +23,11 @@ namespace gr {
 template<typename Left, typename Right, std::size_t OutId, std::size_t InId>
 class MergedGraph;
 
+template<typename Forward, std::size_t ForwardOutputPortIndex,  //
+    typename Feedback, std::size_t     FeedbackOutputPortIndex, //
+    std::size_t ForwardFeedbackInputPortIndex>
+class FeedbackMerge;
+
 template<typename T>
 concept PortReflectable = refl::reflectable<T> and std::same_as<std::remove_const_t<T>, typename T::derived_t>;
 } // namespace gr
@@ -79,6 +84,15 @@ struct all_port_descriptors_impl {
 template<refl::reflectable Left, refl::reflectable Right, size_t OutId, size_t InId>
 struct all_port_descriptors_impl<gr::MergedGraph<Left, Right, OutId, InId>> {
     using type = gr::MergedGraph<Left, Right, OutId, InId>::AllPorts;
+};
+
+// This partial specialization could be generalized into a customization point. But we probably want to think of a
+// better name than 'AllPorts' for triggering that customization.
+template<refl::reflectable Forward, std::size_t ForwardOutputPortIndex, //
+    refl::reflectable Feedback, std::size_t FeedbackOutputPortIndex,    //
+    std::size_t ForwardFeedbackInputPortIndex>
+struct all_port_descriptors_impl<gr::FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
+    using type = gr::FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::AllPorts;
 };
 } // namespace detail
 
