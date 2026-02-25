@@ -756,8 +756,7 @@ protected:
                     }
                     where.push_back(std::move(result));
                 } else {
-                    auto& port = CurrentPortType::getPortObject(blockRef());
-                    port.name  = CurrentPortType::Name;
+                    auto& port         = CurrentPortType::getPortObject(blockRef());
                     port.metaInfo.name = CurrentPortType::Name;
                     processPort(where, port);
                 }

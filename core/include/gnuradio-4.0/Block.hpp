@@ -349,7 +349,7 @@ public:
             }
 
             if (!port.isConnected()) {
-                result = std::unexpected(gr::Error(std::format("primePort({}, {}) - port {} ({}) is not connected", portIdx, nSamples, portIdx, port.name), loc));
+                result = std::unexpected(gr::Error(std::format("primePort({}, {}) - port {} ({}) is not connected", portIdx, nSamples, portIdx, port.metaInfo.name), loc));
                 return;
             }
 
@@ -922,10 +922,10 @@ public:
             auto& port        = Description::getPortObject(self());
             if constexpr (Description::kIsDynamicCollection || Description::kIsStaticCollection) {
                 for (auto& actualPort : port) {
-                    actualPort.name = Description::Name;
+                    actualPort.metaInfo.name = Description::Name;
                 }
             } else {
-                port.name = Description::Name;
+                port.metaInfo.name = Description::Name;
             }
         };
         traits::block::all_input_ports<Derived>::for_each(setPortName);

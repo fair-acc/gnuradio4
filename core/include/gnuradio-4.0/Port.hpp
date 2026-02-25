@@ -563,8 +563,6 @@ struct Port {
     constexpr static bool kIsSynch    = !std::disjunction_v<std::is_same<Async, Attributes>...>;
     constexpr static bool kIsOptional = std::disjunction_v<std::is_same<Optional, Attributes>...>; // port may be left unconnected
 
-    std::string_view name;
-
     std::int16_t priority      = 0; // → dependents of a higher-prio port should be scheduled first (Q: make this by order of ports?)
     T            default_value = T{};
 
@@ -575,7 +573,7 @@ struct Port {
     // Port meta-information for increased type and physical-unit safety. Uses ISO 80000-1:2022 conventions.
     PortMetaInfo metaInfo{std::string_view(gr::meta::type_name<T>())};
 
-    GR_MAKE_REFLECTABLE(Port, kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, name, priority, min_samples, max_samples, metaInfo);
+    GR_MAKE_REFLECTABLE(Port, kDirection, kPortType, kIsInput, kIsOutput, kIsSynch, kIsOptional, priority, min_samples, max_samples, metaInfo);
 
     template<SpanReleasePolicy spanReleasePolicy>
     using ReaderSpanType = decltype(std::declval<ReaderType>().template get<spanReleasePolicy>());
@@ -740,7 +738,7 @@ private:
 public:
     constexpr Port() noexcept = default;
     explicit Port(std::int16_t priority_, std::size_t min_samples_ = 0UZ, std::size_t max_samples_ = SIZE_MAX) noexcept : priority{priority_}, min_samples(min_samples_), max_samples(max_samples_), _ioHandler{newIoHandler()}, _tagIoHandler{newTagIoHandler()} {}
-    constexpr Port(Port&& other) noexcept : name(other.name), priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
+    constexpr Port(Port&& other) noexcept : priority{other.priority}, min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(std::move(other.metaInfo)), _ioHandler(std::move(other._ioHandler)), _tagIoHandler(std::move(other._tagIoHandler)) {}
     Port(const Port&)                                = delete;
     auto            operator=(const Port&)           = delete;
     constexpr Port& operator=(Port&& other) noexcept = delete;
