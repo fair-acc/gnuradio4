@@ -274,8 +274,8 @@ public:
     MsgPortOutBuiltin* msgOut;
 
     static std::string portName(const DynamicPortOrCollection& portOrCollection) {
-        return std::visit(meta::overloaded{                                                         //
-                              [](const gr::DynamicPort& port) { return port.metaInfo.name.value; }, //
+        return std::visit(meta::overloaded{                                                                //
+                              [](const gr::DynamicPort& port) { return std::string(port.metaInfo.name); }, //
                               [](const NamedPortCollection& namedCollection) { return std::string(namedCollection.name); }},
             portOrCollection);
     }
