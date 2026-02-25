@@ -397,7 +397,11 @@ FetchContent_Declare(
 
 set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
-if(NOT GR_ENABLE_HTTP STREQUAL "OFF" AND NOT EMSCRIPTEN)
+if(NOT
+   GR_ENABLE_HTTP
+   STREQUAL
+   "OFF"
+   AND NOT EMSCRIPTEN)
   set(GR_HTTP_ENABLED FALSE)
 
   find_package(CURL QUIET)
