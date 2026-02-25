@@ -172,6 +172,16 @@
       "contributions": [
         "tool"
       ]
+    },
+    {
+      "login": "gretel",
+      "name": "Tom Hensel",
+      "avatar_url": "https://avatars.githubusercontent.com/u/80815?v=4",
+      "profile": "https://github.com/gretel",
+      "contributions": [
+        "tool",
+        "platform"
+      ]
     }
   ],
   "commitType": "docs",
