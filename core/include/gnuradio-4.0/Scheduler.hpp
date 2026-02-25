@@ -841,9 +841,9 @@ protected:
 
         if (lifecycle::isActive(this->state())) {
             // Block is being added while scheduler is running. Will be adopted by a thread.
-            const auto nBatches = _adoptionBlocks.size();
+            std::lock_guard guard(_adoptionBlocksMutex);
+            const auto      nBatches = _adoptionBlocks.size();
             if (nBatches > 0) {
-                std::lock_guard guard(_adoptionBlocksMutex);
                 // pseudo-randomize which thread gets it
                 auto blockAddress = reinterpret_cast<std::uintptr_t>(&newBlock);
                 auto runnerIndex  = (blockAddress / sizeof(void*)) % nBatches;
@@ -1050,7 +1050,9 @@ protected:
     void adoptBlocks(std::size_t runnerID, std::vector<std::shared_ptr<BlockModel>>& localBlockList) {
         std::lock_guard guard(_adoptionBlocksMutex);
 
-        assert(_adoptionBlocks.size() > runnerID);
+        if (runnerID >= _adoptionBlocks.size()) {
+            return; // scheduler was reinitialized with fewer batches; this runner has no pending blocks
+        }
         auto& newBlocks = _adoptionBlocks[runnerID];
 
         localBlockList.reserve(localBlockList.size() + newBlocks.size());

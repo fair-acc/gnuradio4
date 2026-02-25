@@ -21,7 +21,11 @@ namespace gr {
 #define forceinline inline __attribute__((always_inline))
 #endif
 
-#ifdef __cpp_lib_hardware_interference_size
+#if defined(__APPLE__) && defined(__aarch64__)
+// Apple Silicon (M1–M4) uses 128-byte L2 cache lines
+inline constexpr std::size_t hardware_destructive_interference_size  = 128;
+inline constexpr std::size_t hardware_constructive_interference_size = 128;
+#elif defined(__cpp_lib_hardware_interference_size)
 using std::hardware_constructive_interference_size;
 using std::hardware_destructive_interference_size;
 #else

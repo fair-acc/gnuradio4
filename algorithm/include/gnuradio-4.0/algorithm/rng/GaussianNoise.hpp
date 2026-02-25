@@ -84,12 +84,11 @@ struct GaussianNoise {
     }
 
     void fillComplex(std::span<std::complex<F>> out, F amplitude = F(1), F offset = F(0)) noexcept {
-        constexpr F scale     = F(1) / std::numbers::sqrt2_v<F>;
-        const F     scaledAmp = amplitude * scale;
+        constexpr F scale = F(1) / std::numbers::sqrt2_v<F>;
         auto        s0 = _rng._state[0], s1 = _rng._state[1], s2 = _rng._state[2], s3 = _rng._state[3];
         for (auto& sample : out) {
             const auto [g1, g2] = polarPair(s0, s1, s2, s3);
-            sample              = {scaledAmp * g1 + offset, scaledAmp * g2};
+            sample              = {amplitude * (g1 * scale) + offset, amplitude * (g2 * scale)};
         }
         _rng._state[0] = s0;
         _rng._state[1] = s1;

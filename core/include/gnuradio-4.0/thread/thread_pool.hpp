@@ -17,6 +17,10 @@
 #include <type_traits>
 #include <utility>
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
 #include "../WaitStrategy.hpp"
 #include "thread_affinity.hpp"
 
@@ -632,7 +636,23 @@ private:
                 noop_counter = noop_counter / 2;
                 cleanupFinishedThreads();
 
+#if defined(__APPLE__)
+                // macOS + Homebrew libc++ workaround: condition_variable::wait_for() with per-thread
+                // mutexes triggers EINVAL (POSIX requires same mutex for all concurrent waiters on
+                // the same condvar, and macOS enforces this unlike Linux).
+                // Use a short-sleep polling loop with 10μs granularity instead.
+                {
+                    auto deadline = std::chrono::steady_clock::now() + keepAliveDuration;
+                    while (!(numTasksQueued() > 0 || isShutdown())) {
+                        if (std::chrono::steady_clock::now() >= deadline) {
+                            break;
+                        }
+                        std::this_thread::sleep_for(std::chrono::microseconds(10));
+                    }
+                }
+#else
                 _condition.wait_for(lock, keepAliveDuration, [this] { return numTasksQueued() > 0 || isShutdown(); });
+#endif
             }
             // check if this thread is to be kept
             timeDiffSinceLastUsed = std::chrono::steady_clock::now() - lastUsed;
@@ -704,10 +724,16 @@ inline std::size_t getTotalThreadCount() {
     }
     throw std::runtime_error("could not get total thread count");
     return 0UZ;
+#elif defined(__APPLE__)
+    mach_msg_type_number_t threadCount;
+    thread_act_array_t     threadList;
+    if (task_threads(mach_task_self(), &threadList, &threadCount) == KERN_SUCCESS) {
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threadList), threadCount * sizeof(thread_act_t));
+        return static_cast<std::size_t>(threadCount);
+    }
+    return BasicThreadPool::_globalThreadCount.load(std::memory_order_relaxed);
 #else
-    // TODO Implement this function for Windows, Apple and other platforms
-    throw std::runtime_error("could not get total thread count, platform not supported yet");
-    return 0UZ;
+    return BasicThreadPool::_globalThreadCount.load(std::memory_order_relaxed);
 #endif
 }
 

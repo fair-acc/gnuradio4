@@ -247,7 +247,7 @@ class SpinWait {
     }
 
 static inline void yieldProcessor() noexcept {
-#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
+#if defined(__EMSCRIPTEN__)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #elif defined(__aarch64__) || defined(__arm__) || defined(_M_ARM) || defined(_M_ARM64)
     asm volatile("yield" ::: "memory");      // ARM/AArch64

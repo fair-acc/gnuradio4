@@ -156,6 +156,8 @@ public:
             for (const auto& file : std::filesystem::directory_iterator{directory}) {
 #if defined(_WIN32)
                 if (file.is_regular_file() && file.path().extension() == ".dll") {
+#elif defined(__APPLE__)
+                if (file.is_regular_file() && (file.path().extension() == ".so" || file.path().extension() == ".dylib")) {
 #else
                 if (file.is_regular_file() && file.path().extension() == ".so") {
 #endif

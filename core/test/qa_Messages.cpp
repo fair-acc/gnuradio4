@@ -863,7 +863,12 @@ const boost::ut::suite MessagesTests = [] {
         expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
         sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
 
-        auto client = gr::test::thread_pool::execute("qa_Mess::Client", [&fromScheduler, &toScheduler, &testBlock, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name] {
+        // dispatch client to IO pool: the client polls with sleep_for (IO-bound),
+        // and the CPU pool is occupied by scheduler workers in multiThreaded mode
+        std::promise<void> clientPromise;
+        auto               client = clientPromise.get_future();
+        gr::thread_pool::Manager::defaultIoPool()->execute([&fromScheduler, &toScheduler, &testBlock, blockName = testBlock.unique_name, schedulerName = scheduler.unique_name, clientPromise = std::move(clientPromise)] mutable {
+            gr::thread_pool::thread::setThreadName("qa_Mess::Client");
             sendMessage<Command::Set>(toScheduler, blockName, block::property::kStagedSetting,
                 {{"factor", 43.0f},           //
                     {"name", "My New Name"s}, //
@@ -906,6 +911,7 @@ const boost::ut::suite MessagesTests = [] {
             }
             expect(seenUpdate);
             sendMessage<Command::Set>(toScheduler, schedulerName, block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(lifecycle::State::REQUESTED_STOP))}});
+            clientPromise.set_value();
         });
 
         auto threadHandle = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
