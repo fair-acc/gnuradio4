@@ -1065,10 +1065,8 @@ private:
 
         [[nodiscard]] virtual std::string typeName() const = 0;
 
-        [[nodiscard]] virtual PortMetaInfo const& portMetaInfo() const noexcept              = 0;
-        [[nodiscard]] virtual PortMetaInfo&       portMetaInfo() noexcept                    = 0;
-        [[nodiscard]] virtual port::BitMask       portMaskInfo() const noexcept              = 0;
-        [[nodiscard]] virtual bool                isValueTypeArithmeticLike() const noexcept = 0;
+        [[nodiscard]] virtual port::BitMask portMaskInfo() const noexcept              = 0;
+        [[nodiscard]] virtual bool          isValueTypeArithmeticLike() const noexcept = 0;
     };
 
     std::unique_ptr<model> _accessor;
@@ -1140,13 +1138,13 @@ private:
             port::BitMask other    = dst_port.portMaskInfo();
             if (port::decodePortType(thisMask) != port::decodePortType(other)) {
 #ifdef DEBUG
-                throw std::runtime_error(std::format("port type mismatch: {}::{} != {}::{}", portMetaInfo().name, port::decodePortType(thisMask), dst_port.metaInfo.name, port::decodePortType(other)));
+                throw std::runtime_error(std::format("port type mismatch: {}::{} != {}::{}", _value.metaInfo.name, port::decodePortType(thisMask), dst_port.metaInfo.name, port::decodePortType(other)));
 #endif
                 return FAILED;
             }
-            if (portMetaInfo().data_type != dst_port.portMetaInfo().data_type) {
+            if (_value.metaInfo.data_type != dst_port.metaInfo.data_type) {
 #ifdef DEBUG
-                throw std::runtime_error(std::format("port data type mismatch: {}::{} != {}::{}", portMetaInfo().name, _value.metaInfo.data_type, dst_port.metaInfo.name, dst_port.metaInfo.data_type));
+                throw std::runtime_error(std::format("port data type mismatch: {}::{} != {}::{}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name, dst_port.metaInfo.data_type));
 #endif
                 return FAILED;
             }
@@ -1163,10 +1161,8 @@ private:
 
         [[nodiscard]] std::string typeName() const override { return meta::type_name<typename T::value_type>(); }
 
-        [[nodiscard]] PortMetaInfo const& portMetaInfo() const noexcept override { return _value.metaInfo; }
-        [[nodiscard]] PortMetaInfo&       portMetaInfo() noexcept override { return _value.metaInfo; }
-        [[nodiscard]] port::BitMask       portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
-        [[nodiscard]] bool                isValueTypeArithmeticLike() const noexcept override { return T::kIsArithmeticLikeValueType; }
+        [[nodiscard]] port::BitMask portMaskInfo() const noexcept override { return port::encodeMask(T::kDirection, T::kPortType, T::kIsSynch, T::kIsOptional, _value.isConnected()); }
+        [[nodiscard]] bool          isValueTypeArithmeticLike() const noexcept override { return T::kIsArithmeticLikeValueType; }
     };
 
     bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept { return _accessor->updateReaderInternal(buffer_other); }
@@ -1216,7 +1212,6 @@ public:
     [[nodiscard]] bool             setDefaultValue(const std::any& val) noexcept { return _accessor->setDefaultValue(val); }
     [[nodiscard]] std::string_view domain() const noexcept { return _accessor->domain(); }
     [[nodiscard]] std::string      typeName() const noexcept { return _accessor->typeName(); }
-    [[nodiscard]] PortMetaInfo     portMetaInfo() const noexcept { return _accessor->portMetaInfo(); }
     [[nodiscard]] port::BitMask    portMaskInfo() const noexcept { return _accessor->portMaskInfo(); }
     [[nodiscard]] bool             isArithmeticLikeValueType() const noexcept { return _accessor->isValueTypeArithmeticLike(); }
 

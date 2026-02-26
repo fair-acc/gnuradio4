@@ -577,7 +577,7 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         port::BitMask mask = dynSrc.portMaskInfo();
         expect(gr::port::decodeDirection(mask) == PortDirection::OUTPUT);
         expect(!gr::port::isConnected(mask));
-        PortMetaInfo metaInfo = dynSrc.portMetaInfo();
+        PortMetaInfo metaInfo = dynSrc.metaInfo;
         expect(eq(metaInfo.data_type.value, std::string("float32")));
     };
 };
