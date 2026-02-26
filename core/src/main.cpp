@@ -111,8 +111,8 @@ void reflectBlock(const TBlock& obj) {
 }
 
 int main() {
-    using gr::merge;
-    using gr::mergeByIndex;
+    using gr::Merge;
+    using gr::MergeByIndex;
 
     std::print("Project compiler: '{}' - version '{}'\n", CXX_COMPILER_ID, CXX_COMPILER_VERSION);
     std::print("Project compiler path: '{}' - arg1 '{}'\n", CXX_COMPILER_PATH, CXX_COMPILER_ARG1);
@@ -120,7 +120,8 @@ int main() {
 
     {
         // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
-        auto merged = mergeByIndex<0, 0>(scale<int, -1>(), mergeByIndex<0, 0>(scale<int, 2>(), adder<int>()));
+        auto merged = MergeByIndex<scale<int, -1>, 0, //
+            MergeByIndex<scale<int, 2>, 0, adder<int>, 0>, 0>();
         reflectBlock(merged);
 
         // execute graph
@@ -145,7 +146,7 @@ int main() {
     }
 
     {
-        auto merged = mergeByIndex<0, 0>(duplicate<int>(), scale<int, 2>());
+        auto merged = MergeByIndex<duplicate<int>, 0, scale<int, 2>, 0>();
         static_assert(std::same_as<decltype(merged)::ReturnType, std::tuple<int, int>>);
         reflectBlock(merged);
 
@@ -162,7 +163,7 @@ int main() {
     }
 
     {
-        auto merged = merge<"scaled", "addend1">(scale<int, 2>(), adder<int>());
+        auto merged = Merge<scale<int, 2>, "scaled", adder<int>, "addend1">();
         reflectBlock(merged);
 
         // execute graph
@@ -180,7 +181,9 @@ int main() {
     }
 
     {
-        auto merged = merge<"out1", "original">(merge<"out0", "original">(duplicate<int>(), scale<int, 2>()), scale<int, 2>());
+        auto merged = Merge<                                          //
+            Merge<duplicate<int>, "out0", scale<int, 2>, "original">, //
+            "out1", scale<int, 2>, "original">();
         reflectBlock(merged);
 
         // execute graph
@@ -193,19 +196,17 @@ int main() {
         }
     }
 
-    { auto delayed = delay<int, 2>{}; }
+    {
+        auto delayed = delay<int, 2>{};
+    }
 
     {
-        auto random = CountSource<int>{};
-
-        auto merged = mergeByIndex<0, 0>(std::move(random), ExpectSink<int>());
+        auto merged = MergeByIndex<CountSource<int>, 0, ExpectSink<int>, 0>();
         merged.processOne();
     }
 
     {
-        auto random = CountSource<int>{};
-
-        auto merged = merge<"random", "original">(std::move(random), scale<int, 2>());
+        auto merged = Merge<CountSource<int>, "random", scale<int, 2>, "original">();
         std::print("{}\n", merged.processOne());
     }
 }

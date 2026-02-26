@@ -483,45 +483,6 @@ struct Result {
 };
 } // namespace work
 
-template<typename T>
-concept HasWork = requires(T t, std::size_t requested_work) {
-    { t.work(requested_work) } -> std::same_as<work::Result>;
-};
-
-template<typename T>
-concept BlockLike = requires(T t, std::size_t requested_work) {
-    { t.unique_name } -> std::convertible_to<const std::string&>;
-    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
-    { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
-    { t.description } noexcept -> std::same_as<const std::string_view&>;
-
-    { t.isBlocking() } noexcept -> std::same_as<bool>;
-
-    { t.settings() } -> std::same_as<SettingsBase&>;
-
-    // N.B. TODO discuss these requirements
-    requires !std::is_copy_constructible_v<T>;
-    requires !std::is_copy_assignable_v<T>;
-} && HasWork<T>;
-
-template<typename Derived>
-concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
-
-template<typename Derived>
-concept HasConstProcessOneFunction = traits::block::can_processOne_const<Derived>;
-
-template<typename Derived>
-concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>;
-
-template<typename Derived>
-concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
-
-template<typename Derived>
-concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processBulk)>;
-
-template<typename Derived>
-concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
-
 template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
 inline void checkBlockContracts();
 
@@ -1189,7 +1150,7 @@ public:
         for_each_reader_span(
             [this, untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual](auto& in) {
                 if (in.isSync && in.isConnected) {
-                    auto inTags = in.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+                    auto inTags = in.tags(untilLocalIndexAdjusted) | ranges::PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
                     for (const auto& [_, tagMap] : inTags) {
                         for (const auto& [key, value] : tagMap.get()) {
                             _mergedInputTag.map.insert_or_assign(key, value);
@@ -1215,8 +1176,8 @@ public:
             },
             inputSpans);
 
-        auto mergedPairsLazy        = allPairViews | Merge{[](const PairRelIndexMapRef& lhs, const PairRelIndexMapRef& rhs) { return lhs.first < rhs.first; }};
-        auto nonDuplicatedInputTags = mergedPairsLazy | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+        auto mergedPairsLazy        = allPairViews | ranges::Merge{[](const PairRelIndexMapRef& lhs, const PairRelIndexMapRef& rhs) { return lhs.first < rhs.first; }};
+        auto nonDuplicatedInputTags = mergedPairsLazy | ranges::PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
 
         if (inputTagsPresent()) {
             for (const auto& tag : nonDuplicatedInputTags) {
@@ -1228,7 +1189,7 @@ public:
         // update PortMetaInfo
         for_each_port_and_reader_span(
             [this, &untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
-                auto inTags = span.tags(untilLocalIndexAdjusted) | PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
+                auto inTags = span.tags(untilLocalIndexAdjusted) | ranges::PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
                 for (const auto& [_, tagMap] : inTags) {
                     emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
                 }
@@ -1538,7 +1499,7 @@ protected:
         } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0UZ     // allow blocks that have neither input nor output ports
                              && traits::block::stream_output_port_types<Derived>::size == 0UZ // (by merging source to sink block) -> use internal buffer size
                              && requires { Derived::merged_work_chunk_size(); }) {            //
-            constexpr gr::Size_t chunkSize = Derived::merged_work_chunk_size();
+            constexpr gr::Size_t chunkSize = static_cast<gr::Size_t>(Derived::merged_work_chunk_size());
             static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
                                                                              "friend function `available_samples(const BlockType&)` must be defined.");
             return chunkSize;

@@ -20,16 +20,44 @@ enum class Status;
 }
 
 namespace gr {
-template<typename Left, typename Right, std::size_t OutId, std::size_t InId>
-class MergedGraph;
-
-template<typename Forward, std::size_t ForwardOutputPortIndex,  //
-    typename Feedback, std::size_t     FeedbackOutputPortIndex, //
-    std::size_t ForwardFeedbackInputPortIndex>
-class FeedbackMerge;
-
 template<typename T>
 concept PortReflectable = refl::reflectable<T> and std::same_as<std::remove_const_t<T>, typename T::derived_t>;
+
+namespace work {
+enum class Status;
+struct Result;
+} // namespace work
+struct SettingsBase;
+
+template<typename T>
+concept HasWork = requires(T t, std::size_t requested_work) {
+    { t.work(requested_work) } -> std::same_as<work::Result>;
+};
+
+template<typename T>
+concept BlockLike = requires(T t, std::size_t requested_work) {
+    { t.unique_name } -> std::convertible_to<const std::string&>;
+    { unwrap_if_wrapped_t<decltype(t.name)>{} } -> std::same_as<std::string>;
+    { unwrap_if_wrapped_t<decltype(t.meta_information)>{} } -> std::same_as<property_map>;
+    { t.description } noexcept -> std::same_as<const std::string_view&>;
+
+    { t.isBlocking() } noexcept -> std::same_as<bool>;
+
+    { t.settings() } -> std::same_as<SettingsBase&>;
+
+    // N.B. TODO discuss these requirements
+    requires !std::is_copy_constructible_v<T>;
+    requires !std::is_copy_assignable_v<T>;
+} && HasWork<T>;
+
+template<BlockLike Left, std::size_t OutId, BlockLike Right, std::size_t InId>
+class MergeByIndex;
+
+template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
+    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
+    std::size_t ForwardFeedbackInputPortIndex>
+class FeedbackMergeByIndex;
+
 } // namespace gr
 
 namespace gr::traits::block {
@@ -50,7 +78,7 @@ struct array_traits<std::array<T, Size>> {
     static constexpr std::size_t size     = Size;
 };
 
-// see also MergedGraph partial specialization below
+// see also MergeByIndex partial specialization below
 template<PortReflectable TBlock>
 struct all_port_descriptors_impl {
     using type = refl::make_typelist_from_index_sequence<std::make_index_sequence<refl::data_member_count<TBlock>>, //
@@ -82,8 +110,8 @@ struct all_port_descriptors_impl {
 // This partial specialization could be generalized into a customization point. But we probably want to think of a
 // better name than 'AllPorts' for triggering that customization.
 template<refl::reflectable Left, refl::reflectable Right, size_t OutId, size_t InId>
-struct all_port_descriptors_impl<gr::MergedGraph<Left, Right, OutId, InId>> {
-    using type = gr::MergedGraph<Left, Right, OutId, InId>::AllPorts;
+struct all_port_descriptors_impl<gr::MergeByIndex<Left, OutId, Right, InId>> {
+    using type = gr::MergeByIndex<Left, OutId, Right, InId>::AllPorts;
 };
 
 // This partial specialization could be generalized into a customization point. But we probably want to think of a
@@ -91,8 +119,8 @@ struct all_port_descriptors_impl<gr::MergedGraph<Left, Right, OutId, InId>> {
 template<refl::reflectable Forward, std::size_t ForwardOutputPortIndex, //
     refl::reflectable Feedback, std::size_t FeedbackOutputPortIndex,    //
     std::size_t ForwardFeedbackInputPortIndex>
-struct all_port_descriptors_impl<gr::FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
-    using type = gr::FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::AllPorts;
+struct all_port_descriptors_impl<gr::FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
+    using type = gr::FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::AllPorts;
 };
 } // namespace detail
 
@@ -362,5 +390,26 @@ concept processBulk_requires_ith_output_as_span = can_processBulk<TDerived> && (
 };
 
 } // namespace gr::traits::block
+
+namespace gr {
+template<typename Derived>
+concept HasProcessOneFunction = traits::block::can_processOne<Derived>;
+
+template<typename Derived>
+concept HasConstProcessOneFunction = traits::block::can_processOne_const<Derived>;
+
+template<typename Derived>
+concept HasNoexceptProcessOneFunction = HasProcessOneFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processOne)>;
+
+template<typename Derived>
+concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
+
+template<typename Derived>
+concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processBulk)>;
+
+template<typename Derived>
+concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
+
+} // namespace gr
 
 #endif // include guard

@@ -1130,16 +1130,6 @@ namespace gr {
 /**************************** begin of SIMD-Merged Graph Implementation ********************************/
 /*******************************************************************************************************/
 
-template<typename TBlock>
-concept SourceBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_output_port_types<TBlock>::size > 0;
-
-static_assert(not SourceBlockLike<int>);
-
-template<typename TBlock>
-concept SinkBlockLike = traits::block::can_processOne<TBlock> and traits::block::template stream_input_port_types<TBlock>::size > 0;
-
-static_assert(not SinkBlockLike<int>);
-
 template<typename TDesc>
 struct to_left_descriptor : TDesc {
     template<typename TBlock>
@@ -1168,20 +1158,14 @@ struct to_right_descriptor : TDesc {
  *  - `SinkBlockLike`: Represents a sink block with processing capability and at least one input port.
  *
  * Key Features:
- *  - `MergedGraph` class: Combines a source and sink block into a new unit, connecting them via specified
+ *  - `Merge` class: Combines a source and sink block into a new unit, connecting them via specified
+ *    output and input port names.
+ *  - `MergeByIndex` class: Combines a source and sink block into a new unit, connecting them via specified
  *    output and input port indices.
- *  - The merged block can be efficiently optimized at compile-time.
- *  - Each `MergedGraph` instance has a unique ID and name, aiding in debugging and identification.
+ *  - The merged blocks can be efficiently optimized at compile-time.
+ *  - Each `Merge` instance has a unique ID and name, aiding in debugging and identification.
  *  - The merging works seamlessly for blocks that have single or multiple output ports.
  *  - It allows for SIMD optimizations if the constituent blocks support it.
- *
- * Utility Functions:
- *  - `mergeByIndex()`: A utility function to merge two blocks based on specified port indices.
- *    It checks if the output port of the source block and the input port of the sink block have matching types.
- *
- * Examples:
- *  This enables you to create a flow-graph where you merge blocks to create optimized processing paths.
- *  Example usage can be found in the documentation of `mergeByIndex()`.
  *
  * Dependencies:
  *  - Relies on various traits and meta-programming utilities for type introspection and compile-time checks.
@@ -1194,8 +1178,35 @@ struct to_right_descriptor : TDesc {
  *  - Currently, SIMD support for multiple output ports is not implemented.
  */
 
-template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-class MergedGraph<Left, Right, OutId, InId> : public Block<MergedGraph<Left, Right, OutId, InId>> {
+/**
+ * This type constructor can merge simple blocks that are defined via
+ * a single `auto processOne(..)` to produce a new `merged` node,
+ * bypassing the dynamic run-time buffers.
+ *
+ * Since the merged node can be highly optimised during compile-time, it's
+ * execution performance is usually orders of magnitude more efficient than
+ * executing a cascade of the same constituent blocks. See the benchmarks for
+ * details.
+ *
+ * Example:
+ * @code
+ * // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
+ * auto merged = MergeByIndex<scale<int, -1>, 0, MergeByIndex<scale<int, 2>, 0, adder<int>, 0>, 0>();
+ *
+ * // execute graph
+ * std::array<int, 4> a = { 1, 2, 3, 4 };
+ * std::array<int, 4> b = { 10, 10, 10, 10 };
+ *
+ * int                r = 0;
+ * for (std::size_t i = 0; i < 4; ++i) {
+ *     r += merged.processOne(a[i], b[i]);
+ * }
+ * @endcode
+ */
+
+template<BlockLike Left, std::size_t OutId, //
+    BlockLike Right, std::size_t InId>
+class MergeByIndex : public Block<MergeByIndex<Left, OutId, Right, InId>> {
     // FIXME: How do we refuse connection to a vector<Port>?
     static std::atomic_size_t _unique_id_counter;
 
@@ -1216,23 +1227,23 @@ public:
 
     using ReturnType = typename AllPorts::template filter<traits::port::is_output_port, traits::port::is_stream_port>::template transform<traits::port::type>::tuple_or_type;
 
-    GR_MAKE_REFLECTABLE(MergedGraph);
+    GR_MAKE_REFLECTABLE(MergeByIndex);
 
     // TODO: Add a comment why a unique ID is necessary for merged blocks but not for all other blocks. (I.e. unique_id
     // already is a member of the Block base class, this is shadowing that member with a different value. No other block
     // does this.)
     const std::size_t unique_id   = _unique_id_counter++;
-    const std::string unique_name = std::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
+    const std::string unique_name = std::format("MergeByIndex<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
 
-    MergedGraph(const MergedGraph<Left, Right, OutId, InId>& other)       = delete;
-    MergedGraph& operator=(MergedGraph<Left, Right, OutId, InId>& other)  = delete;
-    MergedGraph& operator=(MergedGraph<Left, Right, OutId, InId>&& other) = delete;
+    MergeByIndex(const MergeByIndex& other)       = delete;
+    MergeByIndex& operator=(MergeByIndex& other)  = delete;
+    MergeByIndex& operator=(MergeByIndex&& other) = delete;
 
-    MergedGraph(MergedGraph<Left, Right, OutId, InId>&& other) : left(std::move(other.left)), right(std::move(other.right)) {}
+    MergeByIndex(MergeByIndex&& other) : left(std::move(other.left)), right(std::move(other.right)) {}
 
 private:
     // copy-paste from above, keep in sync
-    using base = Block<MergedGraph<Left, Right, OutId, InId>>;
+    using base = Block<MergeByIndex<Left, OutId, Right, InId>>;
 
     Left  left;
     Right right;
@@ -1240,8 +1251,8 @@ private:
     // merged_work_chunk_size, that's what friends are for
     friend base;
 
-    template<typename, typename, std::size_t, std::size_t>
-    friend class MergedGraph;
+    template<BlockLike, std::size_t, BlockLike, std::size_t>
+    friend class MergeByIndex;
 
     // returns the minimum of all internal max_samples port template parameters
     static constexpr std::size_t merged_work_chunk_size() noexcept {
@@ -1282,10 +1293,11 @@ private:
     }
 
 public:
-    constexpr MergedGraph(Left&& l, Right&& r) : left(std::move(l)), right(std::move(r)) {}
+    constexpr MergeByIndex(Left&& l, Right&& r) : left(std::move(l)), right(std::move(r)) {}
+    explicit constexpr MergeByIndex(gr::property_map init = {}) : left(init), right(init) {}
 
     // if the left block (source) implements available_samples (a customization point), then pass the call through
-    friend constexpr std::size_t available_samples(const MergedGraph& self) noexcept
+    friend constexpr std::size_t available_samples(const MergeByIndex& self) noexcept
     requires requires(const Left& l) {
         { available_samples(l) } -> std::same_as<std::size_t>;
     }
@@ -1355,45 +1367,21 @@ public:
     // }
 };
 
-template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_counter{0UZ};
+template<BlockLike Left, std::size_t OutId, BlockLike Right, std::size_t InId>
+inline std::atomic_size_t MergeByIndex<Left, OutId, Right, InId>::_unique_id_counter{0UZ};
 
-/**
- * This methods can merge simple blocks that are defined via a single `auto processOne(..)` producing a
- * new `merged` node, bypassing the dynamic run-time buffers.
- * Since the merged node can be highly optimised during compile-time, it's execution performance is usually orders
- * of magnitude more efficient than executing a cascade of the same constituent blocks. See the benchmarks for details.
- * This function uses the connect-by-port-ID API.
- *
- * Example:
- * @code
- * // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
- * auto merged = merge_by_index<0, 0>(scale<int, -1>(), merge_by_index<0, 0>(scale<int, 2>(), adder<int>()));
- *
- * // execute graph
- * std::array<int, 4> a = { 1, 2, 3, 4 };
- * std::array<int, 4> b = { 10, 10, 10, 10 };
- *
- * int                r = 0;
- * for (std::size_t i = 0; i < 4; ++i) {
- *     r += merged.processOne(a[i], b[i]);
- * }
- * @endcode
- */
-template<std::size_t OutId, std::size_t InId, SourceBlockLike A, SinkBlockLike B>
-constexpr auto mergeByIndex(A&& a, B&& b) {
-    if constexpr (!std::is_same_v<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>) {
-        gr::meta::print_types<                                                                                                                                                                                          //
-            gr::meta::message_type<"OUTPUT_PORTS_ARE:">,                                                                                                                                                                //
-            typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, OutId>, typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, //
-            gr::meta::message_type<"INPUT_PORTS_ARE:">,                                                                                                                                                                 //
-            typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>, std::integral_constant<int, InId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<A>>::template at<InId>>{};
-    }
-    return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>(std::forward<A>(a), std::forward<B>(b));
+namespace detail {
+template<meta::fixed_string PortName, typename PortsTypeList>
+consteval std::size_t checkedIndexForName() {
+    constexpr std::size_t Id = meta::indexForName<PortName, PortsTypeList>();
+    static_assert(Id != -1UZ);
+    return Id;
 }
 
+} // namespace detail
+
 /**
- * This methods can merge simple blocks that are defined via a single `auto processOne(..)` producing a
+ * This type constructor can merge simple blocks that are defined via a single `auto processOne(..)` producing a
  * new `merged` node, bypassing the dynamic run-time buffers.
  * Since the merged node can be highly optimised during compile-time, it's execution performance is usually orders
  * of magnitude more efficient than executing a cascade of the same constituent blocks. See the benchmarks for details.
@@ -1402,7 +1390,7 @@ constexpr auto mergeByIndex(A&& a, B&& b) {
  * Example:
  * @code
  * // declare flow-graph: 2 x in -> adder -> scale-by-2 -> output
- * auto merged = merge<"scaled", "addend1">(scale<int, 2>(), adder<int>());
+ * auto merged = merge<scale<int, 2>, "scaled", adder<int>, "addend">();
  *
  * // execute graph
  * std::array<int, 4> a = { 1, 2, 3, 4 };
@@ -1414,17 +1402,9 @@ constexpr auto mergeByIndex(A&& a, B&& b) {
  * }
  * @endcode
  */
-template<meta::fixed_string OutName, meta::fixed_string InName, SourceBlockLike A, SinkBlockLike B>
-constexpr auto merge(A&& a, B&& b) {
-    constexpr int OutIdUnchecked = meta::indexForName<OutName, typename traits::block::stream_output_ports<A>>();
-    constexpr int InIdUnchecked  = meta::indexForName<InName, typename traits::block::stream_input_ports<B>>();
-    static_assert(OutIdUnchecked != -1);
-    static_assert(InIdUnchecked != -1);
-    constexpr auto OutId = static_cast<std::size_t>(OutIdUnchecked);
-    constexpr auto InId  = static_cast<std::size_t>(InIdUnchecked);
-    static_assert(std::same_as<typename traits::block::stream_output_port_types<std::remove_cvref_t<A>>::template at<OutId>, typename traits::block::stream_input_port_types<std::remove_cvref_t<B>>::template at<InId>>, "Port types do not match");
-    return MergedGraph<std::remove_cvref_t<A>, std::remove_cvref_t<B>, OutId, InId>{std::forward<A>(a), std::forward<B>(b)};
-}
+template<BlockLike Left, meta::fixed_string OutName, BlockLike Right, meta::fixed_string InName>
+using Merge = MergeByIndex<Left, detail::checkedIndexForName<OutName, typename traits::block::stream_output_ports<Left>>(), //
+    Right, detail::checkedIndexForName<OutName, typename traits::block::stream_output_ports<Left>>()>;
 
 /*******************************************************************************************************/
 /**************************** end of SIMD-Merged Graph Implementation **********************************/
@@ -1454,11 +1434,11 @@ constexpr auto merge(A&& a, B&& b) {
 template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
     BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
     std::size_t ForwardFeedbackInputPortIndex>
-class FeedbackMerge : public Block<FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
+class FeedbackMergeByIndex : public Block<FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
     static std::atomic_size_t _unique_id_counter;
 
 public:
-    GR_MAKE_REFLECTABLE(FeedbackMerge);
+    GR_MAKE_REFLECTABLE(FeedbackMergeByIndex);
 
     static_assert(traits::block::stream_input_port_types<Feedback>::size == 1, "Feedback block needs to have only one input port");
     static_assert(traits::block::stream_input_port_types<Forward>::size >= 2, "Forward block must have at least 2 input ports");
@@ -1484,15 +1464,17 @@ public:
     using ReturnType          = typename SelfOutputPortTypes::tuple_or_type;
 
     const std::size_t unique_id   = _unique_id_counter++;
-    const std::string unique_name = std::format("FeedbackMerge<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
+    const std::string unique_name = std::format("FeedbackMergeByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
 
-    FeedbackMerge(const FeedbackMerge&)            = delete;
-    FeedbackMerge& operator=(const FeedbackMerge&) = delete;
-    FeedbackMerge& operator=(FeedbackMerge&&)      = delete;
+    FeedbackMergeByIndex(const FeedbackMergeByIndex&)            = delete;
+    FeedbackMergeByIndex& operator=(const FeedbackMergeByIndex&) = delete;
+    FeedbackMergeByIndex& operator=(FeedbackMergeByIndex&&)      = delete;
 
-    FeedbackMerge(FeedbackMerge&& other) : forward(std::move(other.forward)), feedback(std::move(other.feedback)), _state(std::move(other._state)) {}
+    FeedbackMergeByIndex(FeedbackMergeByIndex&& other) : forward(std::move(other.forward)), feedback(std::move(other.feedback)), _state(std::move(other._state)) {}
 
-    constexpr FeedbackMerge(Forward&& fwd, Feedback&& fbk) : forward(std::move(fwd)), feedback(std::move(fbk)) {}
+    constexpr FeedbackMergeByIndex(Forward&& fwd, Feedback&& fbk) : forward(std::move(fwd)), feedback(std::move(fbk)) {}
+
+    FeedbackMergeByIndex(gr::property_map init = {}) : forward(init), feedback(init) {}
 
     template<typename... Ts>
     requires(SelfInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
@@ -1517,32 +1499,15 @@ private:
 template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
     BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
     std::size_t ForwardFeedbackInputPortIndex>
-inline std::atomic_size_t FeedbackMerge<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::_unique_id_counter{0UZ};
+inline std::atomic_size_t FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::_unique_id_counter{0UZ};
 
-template<std::size_t ForwardOutputPortIndex,        //
-    std::size_t      FeedbackOutputPortIndex,       //
-    std::size_t      ForwardFeedbackInputPortIndex, //
-    BlockLike Forward, BlockLike Feedback>
-constexpr auto feedbackMergeByIndex(Forward&& forward, Feedback&& feedback) {
-    return FeedbackMerge<std::remove_cvref_t<Forward>, ForwardOutputPortIndex, //
-        std::remove_cvref_t<Feedback>, FeedbackOutputPortIndex,                //
-        ForwardFeedbackInputPortIndex>{std::forward<Forward>(forward), std::forward<Feedback>(feedback)};
-}
-
-template<fixed_string ForwardOutputPortName,  //
-    fixed_string      FeedbackOutputPortName, //
-    fixed_string      ForwardFeedbackInputPortName, typename Forward, typename Feedback>
-constexpr auto feedbackMerge(Forward&& forward, Feedback&& feedback) {
-    constexpr auto ForwardOutputPortIndex        = meta::indexForName<ForwardOutputPortName, typename traits::block::stream_output_ports<Forward>>();
-    constexpr auto FeedbackOutputPortIndex       = meta::indexForName<FeedbackOutputPortName, typename traits::block::stream_output_ports<Feedback>>();
-    constexpr auto ForwardFeedbackInputPortIndex = meta::indexForName<ForwardFeedbackInputPortName, typename traits::block::stream_input_ports<Forward>>();
-    static_assert(ForwardOutputPortIndex != meta::invalid_index);
-    static_assert(FeedbackOutputPortIndex != meta::invalid_index);
-    static_assert(ForwardFeedbackInputPortIndex != meta::invalid_index);
-    return FeedbackMerge<std::remove_cvref_t<Forward>, static_cast<std::size_t>(ForwardOutputPortIndex), //
-        std::remove_cvref_t<Feedback>, static_cast<std::size_t>(FeedbackOutputPortIndex),                //
-        static_cast<std::size_t>(ForwardFeedbackInputPortIndex)>{std::forward<Forward>(forward), std::forward<Feedback>(feedback)};
-}
+template<BlockLike Forward, meta::fixed_string ForwardOutputPortName, //
+    BlockLike Feedback, meta::fixed_string FeedbackOutputPortName,    //
+    meta::fixed_string ForwardFeedbackInputPortName>
+using FeedbackMerge = FeedbackMergeByIndex<                                                                                 //
+    Forward, detail::checkedIndexForName<ForwardOutputPortName, typename traits::block::stream_output_ports<Forward>>(),    //
+    Feedback, detail::checkedIndexForName<FeedbackOutputPortName, typename traits::block::stream_output_ports<Feedback>>(), //
+    detail::checkedIndexForName<ForwardFeedbackInputPortName, typename traits::block::stream_input_ports<Forward>>()>;
 
 /*******************************************************************************************************/
 /**************************** end of FeedbackMerge Implementation **************************************/

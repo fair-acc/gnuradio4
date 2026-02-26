@@ -94,10 +94,7 @@ const boost::ut::suite<"FeedbackMerge"> feedbackMergeTests = [] {
     using namespace boost::ut;
 
     "delayed sum using FeedbackMerge"_test = [] {
-        Adder         adder;
-        Delay<kDelay> delayed;
-
-        auto delayedSumMerged = feedbackMerge<"out", "out", "in2">(std::move(adder), std::move(delayed));
+        auto delayedSumMerged = FeedbackMerge<Adder, "out", Delay<kDelay>, "out", "in2">();
 
         expect(checkBlock(delayedSumMerged, {"in1"s}, {"out"s}));
 
@@ -118,10 +115,7 @@ const boost::ut::suite<"FeedbackMerge"> feedbackMergeTests = [] {
     };
 
     "FeedbackMerge zero initialization"_test = [] {
-        Adder         adder;
-        Delay<kDelay> delayed;
-
-        auto delayedSumMerged = feedbackMerge<"out", "out", "in2">(std::move(adder), std::move(delayed));
+        auto delayedSumMerged = FeedbackMerge<Adder, "out", Delay<kDelay>, "out", "in2">();
 
         expect(checkBlock(delayedSumMerged, {"in1"s}, {"out"s}));
 
@@ -136,10 +130,7 @@ const boost::ut::suite<"FeedbackMerge"> feedbackMergeTests = [] {
     };
 
     "FeedbackMerge step response in2"_test = [] {
-        Adder         adder{};
-        Delay<kDelay> delayed{};
-
-        auto delayedSumMerged = feedbackMerge<"out", "out", "in2">(std::move(adder), std::move(delayed));
+        auto delayedSumMerged = FeedbackMerge<Adder, "out", Delay<kDelay>, "out", "in2">();
 
         expect(checkBlock(delayedSumMerged, {"in1"s}, {"out"s}));
 
@@ -157,10 +148,7 @@ const boost::ut::suite<"FeedbackMerge"> feedbackMergeTests = [] {
     };
 
     "FeedbackMerge step response in1"_test = [] {
-        Adder         adder;
-        Delay<kDelay> delayed;
-
-        auto delayedSumMerged = feedbackMerge<"out", "out", "in1">(std::move(adder), std::move(delayed));
+        auto delayedSumMerged = FeedbackMerge<Adder, "out", Delay<kDelay>, "out", "in1">();
 
         expect(checkBlock(delayedSumMerged, {"in2"s}, {"out"s}));
 

@@ -352,8 +352,8 @@ const boost::ut::suite SettingsTests = [] {
         expect(not eq(block1.unique_id, block2.unique_id)) << "unique per-type block id (size_t)";
         expect(not eq(block1.unique_name, block2.unique_name)) << "unique per-type block id (string)";
 
-        auto merged1 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
-        auto merged2 = merge<"out", "in">(SettingsChangeRecorder<float>(), SettingsChangeRecorder<float>());
+        auto merged1 = Merge<SettingsChangeRecorder<float>, "out", SettingsChangeRecorder<float>, "in">();
+        auto merged2 = Merge<SettingsChangeRecorder<float>, "out", SettingsChangeRecorder<float>, "in">();
         expect(not eq(merged1.unique_id, merged2.unique_id)) << "unique per-type block id (size_t) ";
         expect(not eq(merged1.unique_name, merged2.unique_name)) << "unique per-type block id (string) ";
     };
