@@ -92,7 +92,7 @@ void reflectPort(auto idx, const TPort& obj) {
     std::print("  {}.       name: {} / {}\n"
                "           type: {} / {}\n"
                "     descriptor: {}\n",
-        idx.value, TDescr::Name.view(), obj.name, gr::refl::type_name<typename TDescr::value_type>.view(), gr::refl::type_name<typename TPort::value_type>.view(), gr::refl::type_name<TDescr>.view());
+        idx.value, TDescr::Name.view(), obj.metaInfo.name, gr::refl::type_name<typename TDescr::value_type>.view(), gr::refl::type_name<typename TPort::value_type>.view(), gr::refl::type_name<TDescr>.view());
 }
 
 template<gr::refl::reflectable TBlock>

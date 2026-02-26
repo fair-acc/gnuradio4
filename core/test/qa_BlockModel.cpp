@@ -118,15 +118,15 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
         expect(eq(dynBlock.dynamicOutputPortsSize(0), rawBlockRef->n_ports));
 
         const DynamicPort& inputPort1ByString = dynBlock.dynamicInputPort("vin#1");
-        expect(eq(inputPort1ByString.name, "vin"s)); // user would probably expect 'vin#1'
+        expect(eq(inputPort1ByString.metaInfo.name, "vin"s)); // user would probably expect 'vin#1'
 
         const DynamicPort& outputPort2ByIndex = dynBlock.dynamicOutputPort(0, 2);
-        expect(eq(outputPort2ByIndex.name, "vout"s)); // user would probably expect 'vout#2'
+        expect(eq(outputPort2ByIndex.metaInfo.name, "vout"s)); // user would probably expect 'vout#2'
 
         PortDefinition outputDefIdx{0UZ, 0UZ};
         PortDefinition outputDefStr{"vout#0"};
-        expect(eq(dynBlock.dynamicOutputPort(outputDefIdx).portName(), "vout"s)); // user would probably expect 'vout#0'
-        expect(eq(dynBlock.dynamicOutputPort(outputDefStr).portName(), "vout"s)); // user would probably expect 'vout#0'
+        expect(eq(dynBlock.dynamicOutputPort(outputDefIdx).metaInfo.name, "vout"s)); // user would probably expect 'vout#0'
+        expect(eq(dynBlock.dynamicOutputPort(outputDefStr).metaInfo.name, "vout"s)); // user would probably expect 'vout#0'
 
         const std::size_t outIndex = dynBlock.dynamicOutputPortIndex("vout");
         expect(eq(outIndex, 0UZ));

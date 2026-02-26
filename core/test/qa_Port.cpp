@@ -535,8 +535,8 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         const DynamicPort dynSrc(src, DynamicPort::non_owned_reference_tag{});
         const DynamicPort wearReference = dynSrc.weakRef();
         expect(dynSrc == wearReference);
-        expect(dynSrc.direction() == PortDirection::OUTPUT);
-        expect(dynSrc.type() == PortType::STREAM);
+        expect(port::decodeDirection(dynSrc.portMaskInfo()) == PortDirection::OUTPUT);
+        expect(port::decodePortType(dynSrc.portMaskInfo()) == PortType::STREAM);
         expect(dynSrc.typeName() == std::string("int32"));
     };
 
@@ -571,14 +571,13 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
     "portInfo/mask/meta snapshot"_test = [] {
         PortOut<float>    src;
         const DynamicPort dynSrc(src, DynamicPort::non_owned_reference_tag{});
-        const PortInfo    info = dynSrc.portInfo();
-        expect(info.portType == PortType::STREAM);
-        expect(info.portDirection == PortDirection::OUTPUT);
-        expect(info.isValueTypeArithmeticLike);
+        expect(port::decodePortType(dynSrc.portMaskInfo()) == PortType::STREAM);
+        expect(port::decodeDirection(dynSrc.portMaskInfo()) == PortDirection::OUTPUT);
+        expect(dynSrc.isArithmeticLikeValueType());
         port::BitMask mask = dynSrc.portMaskInfo();
         expect(gr::port::decodeDirection(mask) == PortDirection::OUTPUT);
         expect(!gr::port::isConnected(mask));
-        PortMetaInfo metaInfo = dynSrc.portMetaInfo();
+        PortMetaInfo metaInfo = dynSrc.metaInfo;
         expect(eq(metaInfo.data_type.value, std::string("float32")));
     };
 };
@@ -646,10 +645,10 @@ const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N
     "owned_value_tag move semantics"_test = [] {
         PortOut<int> src;
         DynamicPort  dynPort1(std::move(src), DynamicPort::owned_value_tag{});
-        std::size_t  id_before = dynPort1.portInfo().bufferSize;
+        std::size_t  id_before = dynPort1.bufferSize();
 
         DynamicPort dynPort2(std::move(dynPort1));
-        expect(dynPort2.portInfo().bufferSize == id_before);
+        expect(dynPort2.bufferSize() == id_before);
         // d1 is moved-from; no neat way to inspect, but at least ensure d2 still works:
         expect(!dynPort2.isConnected());
     };

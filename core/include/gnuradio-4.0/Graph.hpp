@@ -189,12 +189,12 @@ public:
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
         if (exportFlag) {
             bookkeepingCollection.emplace(uniqueBlockName, PortNameMapper{std::string(portName), std::string(exportedName)});
-            auto& createdDynamicPort                           = portCollection.emplace_back(gr::DynamicPort(port.weakRef()));
-            std::get<gr::DynamicPort>(createdDynamicPort).name = exportedName;
+            auto& createdDynamicPort                                    = portCollection.emplace_back(gr::DynamicPort(port.weakRef()));
+            std::get<gr::DynamicPort>(createdDynamicPort).metaInfo.name = exportedName;
         } else {
             auto exportedPortName = infoIt->second.exportedName;
             bookkeepingCollection.erase(infoIt);
-            auto portIt = std::ranges::find_if(portCollection, [&exportedPortName](const auto& portOrCollection) { return std::visit([&](auto& in) { return in.name == exportedPortName; }, portOrCollection); });
+            auto portIt = std::ranges::find_if(portCollection, [&exportedPortName](const auto& portOrCollection) { return BlockModel::portName(portOrCollection) == exportedPortName; });
             if (portIt != portCollection.end()) {
                 portCollection.erase(portIt);
             } else {
@@ -516,7 +516,7 @@ public:
             throw gr::exception(std::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort));
         }
 
-        const bool        isArithmeticLike       = sourcePortRef.portInfo().isValueTypeArithmeticLike;
+        const bool        isArithmeticLike       = sourcePortRef.isArithmeticLikeValueType();
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
         _edges.emplace_back(*sourceBlockIt, sourcePort, *destinationBlockIt, destinationPort, sanitizedMinBufferSize, weight, std::string(edgeName));
     }
@@ -589,7 +589,7 @@ public:
         }
 
         const auto&       sourcePort             = sourceBlock.value()->dynamicOutputPort(sourcePortDefinition, location);
-        const bool        isArithmeticLike       = sourcePort.portInfo().isValueTypeArithmeticLike;
+        const bool        isArithmeticLike       = sourcePort.isArithmeticLikeValueType();
         const std::size_t sanitizedMinBufferSize = minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : minBufferSize;
         _edges.emplace_back(sourceBlock.value(), sourcePortDefinition, destinationBlock.value(), destinationPortDefinition, sanitizedMinBufferSize, weight, std::move(edgeName));
         return ConnectionResult::SUCCESS;
@@ -620,7 +620,7 @@ public:
                 const bool connectionResult = sourcePort.connect(destinationPort) == ConnectionResult::SUCCESS;
                 edge._state                 = connectionResult && resizeResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
                 edge._actualBufferSize      = sourcePort.bufferSize();
-                edge._edgeType              = sourcePort.type();
+                edge._edgeType              = port::decodePortType(sourcePort.portMaskInfo());
                 edge._sourcePort            = std::addressof(sourcePort);
                 edge._destinationPort       = std::addressof(destinationPort);
             }
