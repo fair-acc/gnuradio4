@@ -9,6 +9,17 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
+# limit parallel compile/link jobs to prevent OOM with template-heavy TUs override with -DGR_BUILD_PARALLEL_LEVEL=<N>
+# (CI with more RAM can raise this)
+set(GR_BUILD_PARALLEL_LEVEL
+    "6"
+    CACHE STRING "Maximum parallel compile/link jobs")
+if(CMAKE_GENERATOR MATCHES "Ninja")
+  set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_pool=${GR_BUILD_PARALLEL_LEVEL} link_pool=2)
+  set(CMAKE_JOB_POOL_COMPILE compile_pool)
+  set(CMAKE_JOB_POOL_LINK link_pool)
+endif()
+
 if(CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$") # if this hasn't been set before via e.g. emcmake
   message(" Transpiling to WASM: using: Emscripten (${CMAKE_CXX_COMPILER})")
   set(EMSCRIPTEN ON)
@@ -38,6 +49,23 @@ if(NOT MSVC)
     set(_LD_GC_SECTIONS "-Wl,--gc-sections -ffunction-sections -fdata-sections")
   endif()
 
+  if(APPLE)
+    # macOS Mach-O two-level namespace duplicates singletons (e.g. globalBlockRegistry()) when a static library is
+    # linked into both the executable and shared plugins; -flat_namespace forces ELF-like single-level lookup ensuring
+    # one instance. -stack_size 8 MiB matches the Linux default — macOS ARM64 non-main threads default to 512 KiB.
+    string(APPEND _LD_GC_SECTIONS " -Wl,-flat_namespace")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-stack_size,0x800000")
+  endif()
+
+  # prefer mold > lld > system linker (Linux/non-Emscripten only) --icf=safe (Identical Code Folding) is disabled under
+  # sanitizers to avoid merging functions that sanitiser instrumentation needs to track separately
+  set(_USE_ICF TRUE)
+  if(ADDRESS_SANITIZER
+     OR UB_SANITIZER
+     OR THREAD_SANITIZER)
+    set(_USE_ICF FALSE)
+  endif()
+
   if(NOT
      CMAKE_SYSTEM_NAME
      STREQUAL
@@ -45,12 +73,18 @@ if(NOT MSVC)
      AND NOT APPLE)
     find_program(MOLD_BIN ld.mold)
     if(MOLD_BIN)
-      set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=mold -Wl,--icf=safe")
+      set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=mold")
+      if(_USE_ICF)
+        string(APPEND _LD_GC_SECTIONS " -Wl,--icf=safe")
+      endif()
       message(STATUS "Using mold @ ${MOLD_BIN} as the linker.")
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
       find_program(LLD_BIN ld.lld)
       if(LLD_BIN)
-        set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=lld -Wl,--icf=safe")
+        set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=lld")
+        if(_USE_ICF)
+          string(APPEND _LD_GC_SECTIONS " -Wl,--icf=safe")
+        endif()
         message(STATUS "Using lld @ ${LLD_BIN} as the linker.")
       endif()
     endif()
