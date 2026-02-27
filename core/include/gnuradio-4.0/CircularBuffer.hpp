@@ -375,6 +375,7 @@ private:
                             std::copy_n(base + size, nSecondHalf, base);
                         }
                     }
+                    gr::atomicThreadFence();
                 }
                 _parent->_buffer->_claimStrategy.publish(_parent->_offset, _parent->_nRequestedSamplesToPublish);
                 _parent->_offset += _parent->_nRequestedSamplesToPublish;
