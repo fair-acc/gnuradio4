@@ -67,9 +67,7 @@ const suite<"gr::atomic_ref"> _0 = [] {
 
         std::this_thread::sleep_for(5ms);
         aflag.store_release(1UZ);
-#if !defined(GR_HAS_SYCL)
-        aflag.notify_all(); // no-op under SYCL path
-#endif
+        aflag.notify_all();
         t.join();
     };
 
@@ -85,19 +83,12 @@ const suite<"gr::atomic_ref"> _0 = [] {
         std::thread prod([&] {
             s.payload = 1234;       // plain store
             aflag.store_release(1); // publish
-#if !defined(GR_HAS_SYCL)
             aflag.notify_one();
-#endif
         });
 
         std::thread cons([&] {
-            // Wait for publication
             while (aflag.load_acquire() == 0) {
-#if defined(GR_HAS_SYCL)
-                std::this_thread::yield(); // polite busy wait on SYCL path
-#else
                 aflag.wait(0);
-#endif
             }
             // Must see the published payload due to acquire/release
             expect(eq(s.payload, 1234));
@@ -118,12 +109,14 @@ const suite<"gr::atomic_ref"> _0 = [] {
         th.reserve(kThreads);
         for (std::size_t t = 0; t < kThreads; ++t) {
             th.emplace_back([&] {
-                for (std::size_t i = 0; i < kIters; ++i)
+                for (std::size_t i = 0; i < kIters; ++i) {
                     (void)a.fetch_add(1);
+                }
             });
         }
-        for (auto& t : th)
+        for (auto& t : th) {
             t.join();
+        }
 
         expect(eq(a.load_acquire(), kThreads * kIters));
     };

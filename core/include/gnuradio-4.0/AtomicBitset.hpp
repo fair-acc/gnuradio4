@@ -1,8 +1,9 @@
 #ifndef GNURADIO_ATOMICBITSET_HPP
 #define GNURADIO_ATOMICBITSET_HPP
 
-#include <atomic>
 #include <vector>
+
+#include <gnuradio-4.0/AtomicRef.hpp>
 
 #ifndef forceinline
 // use this for hot-spots only <-> may bloat code size, not fit into cache and consequently slow down execution
@@ -23,29 +24,27 @@ class AtomicBitset {
     static constexpr std::size_t _bitsPerWord  = sizeof(size_t) * 8UZ;
     static constexpr std::size_t _nStaticWords = isSizeDynamic ? 1UZ : (Size + _bitsPerWord - 1UZ) / _bitsPerWord;
 
-    // using DynamicArrayType = std::unique_ptr<std::atomic<std::size_t>[]>;
-    using DynamicArrayType = std::vector<std::atomic<std::size_t>>;
-    using StaticArrayType  = std::array<std::atomic<std::size_t>, _nStaticWords>;
+    using DynamicArrayType = std::vector<std::size_t>;
+    using StaticArrayType  = std::array<std::size_t, _nStaticWords>;
     using ArrayType        = std::conditional_t<isSizeDynamic, DynamicArrayType, StaticArrayType>;
 
-    std::size_t _size = Size;
-    ArrayType   _bits;
+    std::size_t       _size = Size;
+    mutable ArrayType _bits;
 
 public:
     AtomicBitset()
     requires(!isSizeDynamic)
     {
         for (auto& word : _bits) {
-            word.store(0UZ, std::memory_order_relaxed);
+            gr::atomic_ref(word).store_relaxed(0UZ);
         }
     }
 
     explicit AtomicBitset(std::size_t size = 0UZ)
     requires(isSizeDynamic)
-        : _size(size), _bits(std::vector<std::atomic<std::size_t>>(size)) {
-        // assert(size > 0UZ);
+        : _size(size), _bits(std::vector<std::size_t>(size)) {
         for (std::size_t i = 0; i < _size; i++) {
-            _bits[i].store(0UZ, std::memory_order_relaxed);
+            gr::atomic_ref(_bits[i]).store_relaxed(0UZ);
         }
     }
 
@@ -58,9 +57,9 @@ public:
         std::size_t oldBits;
         std::size_t newBits;
         do {
-            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            oldBits = gr::atomic_ref(_bits[wordIndex]).load_relaxed();
             newBits = value ? (oldBits | mask) : (oldBits & ~mask);
-        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+        } while (!gr::atomic_ref(_bits[wordIndex]).compare_exchange(oldBits, newBits));
     }
 
     void set(std::size_t begin, std::size_t end, bool value) {
@@ -112,7 +111,7 @@ public:
         const std::size_t mask = 1UL << bitIndex;
 #endif
 
-        return (_bits[wordIndex].load(std::memory_order_acquire) & mask) != 0;
+        return (gr::atomic_ref(_bits[wordIndex]).load_acquire() & mask) != 0;
     }
 
     [[nodiscard]] constexpr std::size_t size() const { return _size; }
@@ -124,12 +123,12 @@ private:
         std::size_t       oldBits;
         std::size_t       newBits;
         do {
-            oldBits = _bits[wordIndex].load(std::memory_order_relaxed);
+            oldBits = gr::atomic_ref(_bits[wordIndex]).load_relaxed();
             newBits = value ? (oldBits | mask) : (oldBits & ~mask);
-        } while (!_bits[wordIndex].compare_exchange_weak(oldBits, newBits, std::memory_order_release, std::memory_order_relaxed));
+        } while (!gr::atomic_ref(_bits[wordIndex]).compare_exchange(oldBits, newBits));
     }
 
-    forceinline void setFullWord(std::size_t wordIndex, bool value) { _bits[wordIndex].store(value ? ~0UZ : 0UZ, std::memory_order_release); }
+    forceinline void setFullWord(std::size_t wordIndex, bool value) { gr::atomic_ref(_bits[wordIndex]).store_release(value ? ~0UZ : 0UZ); }
 };
 
 } // namespace gr

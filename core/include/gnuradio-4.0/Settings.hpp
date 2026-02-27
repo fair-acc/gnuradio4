@@ -1,7 +1,6 @@
 #ifndef GNURADIO_SETTINGS_HPP
 #define GNURADIO_SETTINGS_HPP
 
-#include <atomic>
 #include <chrono>
 #include <concepts>
 #include <format>
@@ -10,6 +9,7 @@
 #include <set>
 #include <variant>
 
+#include <gnuradio-4.0/AtomicRef.hpp>
 #include <gnuradio-4.0/BlockTraits.hpp>
 #include <gnuradio-4.0/PmtTypeHelpers.hpp>
 #include <gnuradio-4.0/Tag.hpp>
@@ -472,7 +472,7 @@ public:
     using MatchPredicate = std::function<std::optional<bool>(const pmt::Value&, const pmt::Value&, std::size_t)>;
 
 protected:
-    std::atomic_bool   _changed{false};
+    mutable bool       _changed{false};
     mutable std::mutex _mutex{};
 
     // key: SettingsCtx.context, value: queue of parameters with the same SettingsCtx.context but for different time
@@ -1112,7 +1112,7 @@ public:
             }
         }
         _stagedParameters.clear();
-        _changed.store(false);
+        gr::atomic_ref(_changed).store_release(false);
         return result;
     }
 

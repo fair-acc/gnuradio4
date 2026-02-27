@@ -125,8 +125,8 @@ private:
 protected:
     using ProfileHandle = decltype(std::declval<TProfiler&>().forThisThread());
 
-    std::atomic_bool              _valid{true};
-    std::atomic<std::size_t>      _nWatchdogsRunning{0};
+    bool                          _valid{true};
+    std::size_t                   _nWatchdogsRunning{0};
     meta::indirect<gr::Graph>     _graph{};
     TProfiler                     _profiler{};
     ProfileHandle                 _profilerHandler{_profiler.forThisThread()};
@@ -148,9 +148,9 @@ protected:
     std::vector<gr::Message> _pendingMessagesToChildren;
     bool                     _messagePortsConnected = false;
 
-    std::atomic_flag         _processingScheduledMessages;
-    std::atomic<bool>        _workQuiescenceRequested{false};
-    std::atomic<std::size_t> _nWorkersInWork{0};
+    std::atomic_flag _processingScheduledMessages;
+    bool             _workQuiescenceRequested{false};
+    std::size_t      _nWorkersInWork{0};
 
     void rebuildProfiler(const profiling::Options& opt) {
         std::destroy_at(std::addressof(_profiler));
@@ -191,13 +191,13 @@ public:
     [[nodiscard]] static constexpr auto executionPolicy() { return execution; }
 
     void requestWorkQuiescence() {
-        _workQuiescenceRequested.store(true, std::memory_order_release);
-        while (_nWorkersInWork.load(std::memory_order_acquire) > 0) {
+        gr::atomic_ref(_workQuiescenceRequested).store_release(true);
+        while (gr::atomic_ref(_nWorkersInWork).load_acquire() > 0) {
             std::this_thread::yield();
         }
     }
 
-    void releaseWorkQuiescence() { _workQuiescenceRequested.store(false, std::memory_order_release); }
+    void releaseWorkQuiescence() { gr::atomic_ref(_workQuiescenceRequested).store_release(false); }
 
     void requestWorkQuiescenceAll() {
         requestWorkQuiescence();
@@ -254,10 +254,10 @@ public:
         }
         waitDone();
 
-        _valid.store(false, std::memory_order_release); // Mark as invalid
+        gr::atomic_ref(_valid).store_release(false); // Mark as invalid
 
         // the watchdog dereferences SchedulerBase, wait until it finishes
-        while (_nWatchdogsRunning.load() != 0) {
+        while (gr::atomic_ref(_nWatchdogsRunning).load_acquire() != 0) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
@@ -580,7 +580,7 @@ protected:
         auto ioThreadPool = gr::thread_pool::Manager::defaultIoPool();
 
         // keep outside of the lambda, as ~SchedulerBase() might finish before watchdog even starts
-        _nWatchdogsRunning.fetch_add(1, std::memory_order_acq_rel);
+        gr::atomic_ref(_nWatchdogsRunning).fetch_add(1UZ);
 
         ioThreadPool->execute([this] { this->runWatchDog(watchdog_timeout.value, timeout_inactivity_count.value); });
 
@@ -658,15 +658,15 @@ protected:
             }
 
             if (activeState == RUNNING) {
-                if (_workQuiescenceRequested.load(std::memory_order_acquire)) {
+                if (gr::atomic_ref(_workQuiescenceRequested).load_acquire()) {
                     std::this_thread::yield();
                 } else {
-                    _nWorkersInWork.fetch_add(1, std::memory_order_acq_rel);
-                    if (_workQuiescenceRequested.load(std::memory_order_acquire)) {
-                        _nWorkersInWork.fetch_sub(1, std::memory_order_release);
+                    gr::atomic_ref(_nWorkersInWork).fetch_add(1UZ);
+                    if (gr::atomic_ref(_workQuiescenceRequested).load_acquire()) {
+                        gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
                     } else {
                         gr::work::Result result = traverseBlockListOnce(localBlockList);
-                        _nWorkersInWork.fetch_sub(1, std::memory_order_release);
+                        gr::atomic_ref(_nWorkersInWork).fetch_sub(1UZ);
                         if (result.status == work::Status::DONE) {
                             break; // nothing happened -> shutdown this worker
                         } else if (result.status == work::Status::ERROR) {
@@ -706,18 +706,18 @@ protected:
     }
 
     void runWatchDog(std::size_t timeOut_ms, std::size_t timeOut_count) {
-        on_scope_exit _ = [this] { _nWatchdogsRunning.fetch_sub(1, std::memory_order_acq_rel); };
+        on_scope_exit _ = [this] { gr::atomic_ref(_nWatchdogsRunning).fetch_sub(1UZ); };
 
         auto thisName = gr::meta::shorten_type_name(this->unique_name);
         gr::thread_pool::thread::setThreadName(std::format("WatchDog-{}", thisName));
 
         const auto deadline      = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
         const auto checkInterval = std::chrono::milliseconds(std::max(timeout_ms / 10UZ, 1UZ));
-        while (_valid.load(std::memory_order_acquire) && _nRunningJobs->value() == 0UZ && std::chrono::steady_clock::now() < deadline && lifecycle::isActive(this->state())) {
+        while (gr::atomic_ref(_valid).load_acquire() && _nRunningJobs->value() == 0UZ && std::chrono::steady_clock::now() < deadline && lifecycle::isActive(this->state())) {
             std::this_thread::sleep_for(checkInterval);
         }
 
-        if (!_valid.load(std::memory_order_acquire) || _nRunningJobs->value() == 0UZ || !lifecycle::isActive(this->state())) {
+        if (!gr::atomic_ref(_valid).load_acquire() || _nRunningJobs->value() == 0UZ || !lifecycle::isActive(this->state())) {
             return; // abort watchdog: scheduler inactive or jobs already finished.
         }
 

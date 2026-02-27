@@ -312,8 +312,8 @@ class Profiler {
     using HandlerType = Handler<Profiler, WriterType>;
     std::mutex                             _handlers_lock;
     std::map<std::thread::id, HandlerType> _handlers;
-    std::atomic<bool>                      _finished      = false;
-    std::atomic<bool>                      _consumer_done = false;
+    bool                                   _finished      = false;
+    bool                                   _consumer_done = false;
     decltype(_buffer.new_reader())         _reader        = _buffer.new_reader();
     detail::time_point                     _start         = detail::clock::now();
 
@@ -326,8 +326,8 @@ public:
             std::ofstream out_file;
             if (options.output_mode == OutputMode::File) {
                 if (file_name.empty()) {
-                    static std::atomic<int> counter = 0;
-                    file_name                       = std::format("profile.{}.{}.trace", getpid(), counter++);
+                    static int counter = 0;
+                    file_name          = std::format("profile.{}.{}.trace", getpid(), gr::atomic_ref(counter).fetch_add(1));
                 }
                 out_file = std::ofstream(file_name, std::ios::out | std::ios::binary);
             }
@@ -343,7 +343,7 @@ public:
             bool is_first = true;
             while (!seen_finished) {
                 const auto iteration_start = detail::clock::now();
-                seen_finished              = finished;
+                seen_finished              = gr::atomic_ref(finished).load_acquire();
 
                 while (reader.available() > 0) {
                     ReaderSpanLike auto event = reader.get(1);
@@ -369,16 +369,16 @@ public:
                 }
             }
             std::println(out_stream, "\n]");
-            consumer_done = true;
-            consumer_done.notify_all();
+            gr::atomic_ref(consumer_done).store_release(true);
+            gr::atomic_ref(consumer_done).notify_all();
         });
 
         reset();
     }
 
     ~Profiler() {
-        _finished = true;
-        _consumer_done.wait(false);
+        gr::atomic_ref(_finished).store_release(true);
+        gr::atomic_ref(_consumer_done).wait(false);
     }
 
     Profiler(const Profiler&)            = delete;
