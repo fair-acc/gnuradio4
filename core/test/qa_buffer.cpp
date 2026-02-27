@@ -604,7 +604,7 @@ const boost::ut::suite StreamTagConcept = [] {
     "StreamTagConcept"_test = [] {
         // implements a proof-of-concept how stream-tags could be dealt with
         using namespace gr;
-        struct alignas(gr::hardware_destructive_interference_size) buffer_tag {
+        struct alignas(gr::kCacheLine) buffer_tag {
             // N.B. type need to be favourably sized e.g. 1 or a power of 2
             // -> otherwise the automatic buffer sizes are getting very large
             int64_t     index;

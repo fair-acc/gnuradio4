@@ -21,7 +21,7 @@ enum class ReaderWriterLockType { READ, WRITE };
  * N.B. The lock is unlocked when the counter reaches 0.
  */
 class ReaderWriterLock {
-    alignas(gr::meta::kCacheLine) mutable std::atomic<std::int64_t> _activeReaderCount{0};
+    alignas(gr::kCacheLine) mutable std::atomic<std::int64_t> _activeReaderCount{0};
 
 public:
     ReaderWriterLock() = default;

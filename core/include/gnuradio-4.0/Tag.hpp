@@ -10,14 +10,6 @@
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/formatter/ValueFormatter.hpp>
 
-#ifdef __cpp_lib_hardware_interference_size
-using std::hardware_constructive_interference_size;
-using std::hardware_destructive_interference_size;
-#else
-inline constexpr std::size_t hardware_destructive_interference_size  = 64;
-inline constexpr std::size_t hardware_constructive_interference_size = 64;
-#endif
-
 #ifdef __EMSCRIPTEN__
 // constexpr for cases where emscripten does not yet support constexpr and has to fall back to static const or nothing
 #define EM_CONSTEXPR
@@ -79,7 +71,7 @@ concept PropertyMapType = std::same_as<std::decay_t<T>, property_map>;
  * may choose to chunk the data based on the MIN_SAMPLES/MAX_SAMPLES criteria only, or in addition break-up the stream
  * so that there is only one tag per scheduler iteration. Multiple tags on the same sample shall be merged to one.
  */
-struct alignas(hardware_constructive_interference_size) Tag {
+struct alignas(kCacheLine) Tag {
     std::size_t  index{0UZ};
     property_map map{};
 

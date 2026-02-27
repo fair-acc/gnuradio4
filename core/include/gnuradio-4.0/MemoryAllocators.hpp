@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <gnuradio-4.0/meta/CacheLineSize.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::allocator {
@@ -28,7 +29,7 @@ template<typename T>
 }
 
 /** @brief STL allocator guaranteeing `alignment` byte alignment. */
-template<typename T, std::size_t alignment = 64UZ>
+template<typename T, std::size_t alignment = gr::kCacheLine>
 requires(std::has_single_bit(alignment) && alignment >= alignof(T))
 struct Aligned {
     using value_type = T;
@@ -60,7 +61,7 @@ struct Aligned {
 };
 
 template<typename T>
-using Default = Aligned<T, 64UZ>;
+using Default = Aligned<T, gr::kCacheLine>;
 
 namespace detail {
 enum class Event { allocate, deallocate, allocate_at_least };

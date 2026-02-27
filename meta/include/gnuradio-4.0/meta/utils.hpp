@@ -8,6 +8,8 @@
 #include <format>
 #include <map>
 #include <new>
+
+#include <gnuradio-4.0/meta/CacheLineSize.hpp>
 #include <numeric>
 #include <print>
 #include <ranges>
@@ -806,12 +808,6 @@ auto tuple_transform_enumerated(Function&& function, Tuple&& tuple, Tuples&&... 
 static_assert(std::is_same_v<std::vector<int>, type_transform<std::vector, int>>);
 static_assert(std::is_same_v<std::tuple<std::vector<int>, std::vector<float>>, type_transform<std::vector, std::tuple<int, float>>>);
 static_assert(std::is_same_v<void, type_transform<std::vector, void>>);
-
-#ifdef __cpp_lib_hardware_interference_size
-static inline constexpr const std::size_t kCacheLine = std::hardware_destructive_interference_size;
-#else
-static inline constexpr const std::size_t kCacheLine = 64;
-#endif
 
 namespace detail {
 

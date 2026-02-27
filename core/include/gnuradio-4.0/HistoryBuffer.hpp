@@ -13,6 +13,8 @@
 
 #include <format>
 
+#include <gnuradio-4.0/meta/CacheLineSize.hpp>
+
 namespace gr {
 
 /**
@@ -67,7 +69,7 @@ class HistoryBuffer {
     using signed_index_type = std::make_signed_t<std::size_t>;
     using buffer_type       = typename std::conditional_t<N == std::dynamic_extent, std::vector<T, Allocator>, std::array<T, N * 2>>;
 
-    alignas(64) mutable buffer_type _buffer{};
+    alignas(kCacheLine) mutable buffer_type _buffer{};
     std::size_t         _capacity = N;
     std::size_t         _write_position{0UZ};
     std::size_t         _size{0UZ};
