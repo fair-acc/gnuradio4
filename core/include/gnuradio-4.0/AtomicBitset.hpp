@@ -1,6 +1,7 @@
 #ifndef GNURADIO_ATOMICBITSET_HPP
 #define GNURADIO_ATOMICBITSET_HPP
 
+#include <cassert>
 #include <vector>
 
 #include <gnuradio-4.0/AtomicRef.hpp>
@@ -42,9 +43,9 @@ public:
 
     explicit AtomicBitset(std::size_t size = 0UZ)
     requires(isSizeDynamic)
-        : _size(size), _bits(std::vector<std::size_t>(size)) {
-        for (std::size_t i = 0; i < _size; i++) {
-            gr::atomic_ref(_bits[i]).store_relaxed(0UZ);
+        : _size(size), _bits((size + _bitsPerWord - 1UZ) / _bitsPerWord) {
+        for (auto& word : _bits) {
+            gr::atomic_ref(word).store_relaxed(0UZ);
         }
     }
 

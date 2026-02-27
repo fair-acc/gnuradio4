@@ -1,17 +1,19 @@
 #ifndef GNURADIO_CLAIMSTRATEGY_HPP
 #define GNURADIO_CLAIMSTRATEGY_HPP
 
+#include <array>
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <vector>
 
+#include <gnuradio-4.0/meta/CacheLineSize.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
-#include "AtomicBitset.hpp"
 #include "Sequence.hpp"
 #include "WaitStrategy.hpp"
 
@@ -116,43 +118,68 @@ private:
 static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
 
 /**
- * Claim strategy for claiming sequences for access to a data structure while tracking dependent Sequences.
- * Suitable for use for sequencing across multiple publisher threads.
- * Note on cursor:  With this sequencer the cursor value is updated after the call to SequencerBase::next(),
- * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
+ * @brief Multi-producer claim strategy using per-slot sequence counters (LMAX Disruptor pattern).
+ *
+ * Each ring-buffer slot stores the sequence number of its last completed write.
+ * publish() marks slots with a single atomic store (no CAS), then advances the
+ * publish cursor past all contiguously completed slots.  The stored sequence
+ * naturally distinguishes wrap-around rounds, so no separate clear pass is needed.
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(kCacheLine) MultiProducerStrategy {
-    AtomicBitset<SIZE>  _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
+    static constexpr bool kIsSizeDynamic = (SIZE == std::dynamic_extent);
+    static constexpr bool kIsSizePow2    = !kIsSizeDynamic && std::has_single_bit(SIZE);
+
+    using AvailableBufferType = std::conditional_t<kIsSizeDynamic, std::vector<std::size_t>, std::array<std::size_t, kIsSizeDynamic ? 1UZ : SIZE>>;
+
+    AvailableBufferType _availableBuffer;
     const std::size_t   _size   = SIZE;
-    const bool          _isPow2 = std::has_single_bit(SIZE);
-    const std::size_t   _mask   = SIZE - 1; // valid only when _isPow2
+    const bool          _isPow2 = kIsSizePow2;
+    const std::size_t   _mask   = SIZE - 1;
+    mutable std::size_t _cachedMinReaderCursor{kInitialCursorValue};
     mutable std::size_t _cachedReaderCount{0UZ};
     mutable Sequence*   _cachedSingleReader{nullptr}; // fast path: direct pointer when ≤1 reader
 
     forceinline constexpr std::size_t calculateIndex(std::size_t seq) const noexcept {
-        if constexpr (SIZE == std::dynamic_extent) {
-            return _isPow2 ? (seq & _mask) : (seq % _size);
-        } else {
-            if constexpr (std::has_single_bit(SIZE)) {
+        if constexpr (!kIsSizeDynamic) {
+            if constexpr (kIsSizePow2) {
                 return seq & (SIZE - 1);
             } else {
                 return seq % SIZE;
             }
+        } else {
+            if (_isPow2) [[likely]] {
+                return seq & _mask;
+            }
+            return seq % _size;
+        }
+    }
+
+    void initAvailableBuffer() noexcept {
+        for (auto& slot : _availableBuffer) {
+            gr::atomic_ref(slot).store_relaxed(std::numeric_limits<std::size_t>::max());
         }
     }
 
 public:
-    Sequence                                                _reserveCursor; // slots can be reserved starting from _reserveCursor
-    Sequence                                                _publishCursor; // slots are published and ready to be read until _publishCursor
+    Sequence                                                _reserveCursor;
+    Sequence                                                _publishCursor;
     TWaitStrategy                                           _waitStrategy;
-    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()}; // list of dependent reader sequences
+    std::shared_ptr<std::vector<std::shared_ptr<Sequence>>> _readSequences{std::make_shared<std::vector<std::shared_ptr<Sequence>>>()};
 
     MultiProducerStrategy() = delete;
 
     explicit MultiProducerStrategy(std::size_t bufferSize)
-    requires(SIZE == std::dynamic_extent)
-        : _slotStates(AtomicBitset<>(bufferSize)), _size(bufferSize), _mask(bufferSize - 1) {}
+    requires(kIsSizeDynamic)
+        : _availableBuffer(bufferSize), _size(bufferSize), _isPow2(std::has_single_bit(bufferSize)), _mask(bufferSize - 1) {
+        initAvailableBuffer();
+    }
+
+    explicit MultiProducerStrategy(std::size_t /*bufferSize*/ = SIZE)
+    requires(!kIsSizeDynamic)
+    {
+        initAvailableBuffer();
+    }
 
     MultiProducerStrategy(const MultiProducerStrategy&)  = delete;
     MultiProducerStrategy(const MultiProducerStrategy&&) = delete;
@@ -163,22 +190,28 @@ public:
         _cachedSingleReader = (_cachedReaderCount == 1UZ) ? _readSequences->front().get() : nullptr;
     }
 
-    [[nodiscard]] std::size_t next(std::size_t nSlotsToClaim = 1) {
+    [[nodiscard]] std::size_t next(std::size_t nSlotsToClaim = 1) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
         std::size_t currentReserveCursor;
         std::size_t nextReserveCursor;
         SpinWait    spinWait;
         do {
-            currentReserveCursor = _reserveCursor.value();
-            nextReserveCursor    = currentReserveCursor + nSlotsToClaim;
-            if (nextReserveCursor - getMinReaderCursor() > _size) { // not enough slots in buffer
-                if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
-                    _waitStrategy.signalAllWhenBlocking();
+            currentReserveCursor        = _reserveCursor.value();
+            nextReserveCursor           = currentReserveCursor + nSlotsToClaim;
+            const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_relaxed();
+            if (nextReserveCursor - cachedMin > _size) {
+                const std::size_t freshMin = getMinReaderCursor();
+                gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(freshMin);
+                if (nextReserveCursor - freshMin > _size) {
+                    if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
+                        _waitStrategy.signalAllWhenBlocking();
+                    }
+                    spinWait.spinOnce();
+                    continue;
                 }
-                spinWait.spinOnce();
-                continue;
-            } else if (_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor)) {
+            }
+            if (_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor)) {
                 break;
             }
         } while (true);
@@ -193,37 +226,53 @@ public:
         std::size_t nextReserveCursor;
 
         do {
-            currentReserveCursor = _reserveCursor.value();
-            nextReserveCursor    = currentReserveCursor + nSlotsToClaim;
-            if (nextReserveCursor - getMinReaderCursor() > _size) { // not enough slots in buffer
-                return std::nullopt;
+            currentReserveCursor        = _reserveCursor.value();
+            nextReserveCursor           = currentReserveCursor + nSlotsToClaim;
+            const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_relaxed();
+            if (nextReserveCursor - cachedMin > _size) {
+                const std::size_t freshMin = getMinReaderCursor();
+                gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(freshMin);
+                if (nextReserveCursor - freshMin > _size) {
+                    return std::nullopt;
+                }
             }
         } while (!_reserveCursor.compareAndSet(currentReserveCursor, nextReserveCursor));
         return nextReserveCursor;
     }
 
-    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return _size - (_reserveCursor.value() - getMinReaderCursor()); }
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept {
+        const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_relaxed();
+        const std::size_t used      = _reserveCursor.value() - cachedMin;
+        if (used < _size) [[likely]] {
+            return _size - used;
+        }
+        const std::size_t freshMin = getMinReaderCursor();
+        gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(freshMin);
+        return _size - (_reserveCursor.value() - freshMin);
+    }
 
     void publish(std::size_t offset, std::size_t nSlotsToClaim) {
         if (nSlotsToClaim == 0) {
             return;
         }
-        setSlotsStates(offset, offset + nSlotsToClaim, true);
 
-        // ensure publish cursor is only advanced after all prior slots are published
+        for (std::size_t seq = offset; seq < offset + nSlotsToClaim; ++seq) {
+            gr::atomic_ref(_availableBuffer[calculateIndex(seq)]).store_release(seq);
+        }
+
         std::size_t currentPublishCursor;
         std::size_t nextPublishCursor;
         do {
             currentPublishCursor = _publishCursor.value();
             nextPublishCursor    = currentPublishCursor;
 
-            while (_slotStates.test(calculateIndex(nextPublishCursor)) && nextPublishCursor - currentPublishCursor < _slotStates.size()) {
-                nextPublishCursor++;
+            while (nextPublishCursor - currentPublishCursor < _size && gr::atomic_ref(_availableBuffer[calculateIndex(nextPublishCursor)]).load_acquire() == nextPublishCursor) {
+                ++nextPublishCursor;
+            }
+            if (nextPublishCursor == currentPublishCursor) {
+                return;
             }
         } while (!_publishCursor.compareAndSet(currentPublishCursor, nextPublishCursor));
-
-        //  clear completed slots up to the new published cursor
-        setSlotsStates(currentPublishCursor, nextPublishCursor, false);
 
         if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
             _waitStrategy.signalAllWhenBlocking();
@@ -239,27 +288,6 @@ private:
             return kInitialCursorValue;
         }
         return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
-    }
-
-    void setSlotsStates(std::size_t seqBegin, std::size_t seqEnd, bool value) {
-        assert(seqBegin <= seqEnd);
-        assert(seqEnd - seqBegin <= _size && "Begin cannot overturn end");
-        const std::size_t beginSet  = calculateIndex(seqBegin);
-        const std::size_t endSet    = calculateIndex(seqEnd);
-        const auto        diffReset = seqEnd - seqBegin;
-
-        if (beginSet <= endSet && diffReset < _size) {
-            _slotStates.set(beginSet, endSet, value);
-        } else {
-            _slotStates.set(beginSet, _size, value);
-            if (endSet > 0UZ) {
-                _slotStates.set(0UZ, endSet, value);
-            }
-        }
-        // Non-bulk AtomicBitset API
-        //        for (std::size_t seq = static_cast<std::size_t>(seqBegin); seq < static_cast<std::size_t>(seqEnd); seq++) {
-        //            _slotStates.set(wrap(seq), value);
-        //        }
     }
 };
 
