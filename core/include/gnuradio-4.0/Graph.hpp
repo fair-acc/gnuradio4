@@ -1217,15 +1217,15 @@ class MergeByIndex : public Block<MergeByIndex<Left, OutId, Right, InId>> {
     friend struct to_left_descriptor;
 
 public:
-    using AllPorts = meta::concat<
+    using OverridePortList = meta::concat<
         // Left:
         typename meta::concat<typename traits::block::all_port_descriptors<Left>::template filter<traits::port::is_message_port>, traits::block::stream_input_ports<Left>, meta::remove_at<OutId, traits::block::stream_output_ports<Left>>>::template transform<to_left_descriptor>,
         // Right:
         typename meta::concat<typename traits::block::all_port_descriptors<Right>::template filter<traits::port::is_message_port>, meta::remove_at<InId, traits::block::stream_input_ports<Right>>, traits::block::stream_output_ports<Right>>::template transform<to_right_descriptor>>;
 
-    using InputPortTypes = typename AllPorts::template filter<traits::port::is_input_port, traits::port::is_stream_port>::template transform<traits::port::type>;
+    using InputPortTypes = typename OverridePortList::template filter<traits::port::is_input_port, traits::port::is_stream_port>::template transform<traits::port::type>;
 
-    using ReturnType = typename AllPorts::template filter<traits::port::is_output_port, traits::port::is_stream_port>::template transform<traits::port::type>::tuple_or_type;
+    using ReturnType = typename OverridePortList::template filter<traits::port::is_output_port, traits::port::is_stream_port>::template transform<traits::port::type>::tuple_or_type;
 
     GR_MAKE_REFLECTABLE(MergeByIndex);
 
@@ -1434,12 +1434,10 @@ using Merge = MergeByIndex<Left, detail::checkedIndexForName<OutName, typename t
 template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
     BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
     std::size_t ForwardFeedbackInputPortIndex>
-class FeedbackMergeByIndex : public Block<FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
+class FeedbackMergeBase {
     static std::atomic_size_t _unique_id_counter;
 
 public:
-    GR_MAKE_REFLECTABLE(FeedbackMergeByIndex);
-
     static_assert(traits::block::stream_input_port_types<Feedback>::size == 1, "Feedback block needs to have only one input port");
     static_assert(traits::block::stream_input_port_types<Forward>::size >= 2, "Forward block must have at least 2 input ports");
 
@@ -1457,24 +1455,21 @@ public:
 
     using SelfInputPortDescriptors  = meta::remove_at<ForwardFeedbackInputPortIndex, typename traits::block::stream_input_ports<Forward>>;
     using SelfOutputPortDescriptors = typename traits::block::stream_output_ports<Forward>;
-    using AllPorts                  = meta::concat<SelfInputPortDescriptors, SelfOutputPortDescriptors>;
+    using OverridePortList          = meta::concat<SelfInputPortDescriptors, SelfOutputPortDescriptors>;
 
     using SelfInputPortTypes  = meta::remove_at<ForwardFeedbackInputPortIndex, typename traits::block::stream_input_port_types<Forward>>;
     using SelfOutputPortTypes = typename traits::block::stream_output_port_types<Forward>;
     using ReturnType          = typename SelfOutputPortTypes::tuple_or_type;
 
-    const std::size_t unique_id   = _unique_id_counter++;
-    const std::string unique_name = std::format("FeedbackMergeByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
+    FeedbackMergeBase(const FeedbackMergeBase&)            = delete;
+    FeedbackMergeBase& operator=(const FeedbackMergeBase&) = delete;
+    FeedbackMergeBase& operator=(FeedbackMergeBase&&)      = delete;
 
-    FeedbackMergeByIndex(const FeedbackMergeByIndex&)            = delete;
-    FeedbackMergeByIndex& operator=(const FeedbackMergeByIndex&) = delete;
-    FeedbackMergeByIndex& operator=(FeedbackMergeByIndex&&)      = delete;
+    FeedbackMergeBase(FeedbackMergeBase&& other) : forward(std::move(other.forward)), feedback(std::move(other.feedback)), state(std::move(other.state)) {}
 
-    FeedbackMergeByIndex(FeedbackMergeByIndex&& other) : forward(std::move(other.forward)), feedback(std::move(other.feedback)), _state(std::move(other._state)) {}
+    constexpr FeedbackMergeBase(Forward&& fwd, Feedback&& fbk) : forward(std::move(fwd)), feedback(std::move(fbk)) {}
 
-    constexpr FeedbackMergeByIndex(Forward&& fwd, Feedback&& fbk) : forward(std::move(fwd)), feedback(std::move(fbk)) {}
-
-    FeedbackMergeByIndex(gr::property_map init = {}) : forward(init), feedback(init) {}
+    FeedbackMergeBase(gr::property_map init = {}) : forward(init), feedback(init) {}
 
     template<typename... Ts>
     requires(SelfInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
@@ -1483,17 +1478,36 @@ public:
 
         auto output = [&]<std::size_t... BeforeIdx, std::size_t... AfterIdx>(std::index_sequence<BeforeIdx...>, std::index_sequence<AfterIdx...>) {
             constexpr std::size_t afterOffset = ForwardFeedbackInputPortIndex + 1;
-            return forward.processOne(std::get<BeforeIdx>(forwardInputTuple)..., _state, std::get<afterOffset + AfterIdx - 1>(forwardInputTuple)...);
+            return forward.processOne(std::get<BeforeIdx>(forwardInputTuple)..., state, std::get<afterOffset + AfterIdx - 1>(forwardInputTuple)...);
         }(std::make_index_sequence<ForwardFeedbackInputPortIndex>(), std::make_index_sequence<sizeof...(Ts) - ForwardFeedbackInputPortIndex>());
 
-        _state = feedback.processOne(output);
+        state = feedback.processOne(output);
         return output;
     }
 
-private:
     Forward                    forward;
     Feedback                   feedback;
-    FeedbackConnectionPortType _state{};
+    FeedbackConnectionPortType state{};
+};
+
+template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
+    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
+    std::size_t ForwardFeedbackInputPortIndex>
+class FeedbackMergeByIndex : public Block<FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>>, //
+                             FeedbackMergeBase<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex> {
+    using impl_t = FeedbackMergeBase<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>;
+
+    static std::atomic_size_t _unique_id_counter;
+
+public:
+    const std::size_t unique_id   = _unique_id_counter++;
+    const std::string unique_name = std::format("FeedbackMergeByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
+
+    using OverridePortList = typename impl_t::OverridePortList;
+    using impl_t::impl_t;
+    using impl_t::processOne;
+
+    GR_MAKE_REFLECTABLE(FeedbackMergeByIndex);
 };
 
 template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
@@ -1511,6 +1525,90 @@ using FeedbackMerge = FeedbackMergeByIndex<                                     
 
 /*******************************************************************************************************/
 /**************************** end of FeedbackMerge Implementation **************************************/
+/*******************************************************************************************************/
+
+/*******************************************************************************************************/
+/**************************** begin of SplitMerge Implementation ************************************/
+/*******************************************************************************************************/
+
+/**
+ * Feedback merge for blocks that feed data previously generated
+ * to one of the ports, with splitOut port to allow connecting other
+ * blocks to the output of the feedback block.
+ *
+ * SplitMerge<Adder, "out", Scale<0.2f>, "out", "in2">;
+ *
+ *           Forward
+ *           adder          *-------------------> out of SplitMerge
+ *           +----+        /
+ * ------in1-|    |       /     Feedback
+ *           |    |-out--*      scale         *-> splitOut
+ *     *-in2-|    |       \     +----+       /
+ *    /      +----+        *-in-|    |-out--*
+ *    |                         +----+       \
+ *    \______________________________________/
+ *
+ */
+template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
+    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
+    std::size_t ForwardFeedbackInputPortIndex>
+class SplitMergeByIndex : public Block<SplitMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>>, //
+                          FeedbackMergeBase<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex> {
+    static std::atomic_size_t _unique_id_counter;
+    using impl_t = FeedbackMergeBase<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>;
+    using this_t = SplitMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>;
+
+public:
+    gr::PortOut<typename impl_t::FeedbackConnectionPortType> splitOut;
+
+    GR_MAKE_REFLECTABLE(SplitMergeByIndex, splitOut);
+
+    const std::size_t unique_id   = _unique_id_counter++;
+    const std::string unique_name = std::format("SplitMergeByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
+
+    using OverridePortList = meta::concat<typename impl_t::OverridePortList,             //
+        gr::meta::typelist<                                                              //
+            gr::detail::PortDescriptor<float, "splitOut",                                //
+                gr::PortType::STREAM, gr::PortDirection::OUTPUT, gr::detail::SinglePort, //
+                /*KindExtraData=*/0, /*MemberIdx=*/refl::data_member_count<Block<this_t>>>>>;
+
+    constexpr auto processOne() { return 0.0f; }
+
+    template<typename... Ts>
+    requires(impl_t::SelfInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
+    constexpr auto processOne(Ts&&... inputs) {
+        auto result = impl_t::processOne(std::forward<Ts>(inputs)...);
+
+        {
+            auto splitOutSpan = splitOut.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            splitOutSpan[0]   = impl_t::state;
+        }
+
+        if constexpr (meta::is_instantiation_of<typename impl_t::ReturnType, std::tuple>) {
+            return std::tuple_cat(result, std::make_tuple(impl_t::state));
+        } else {
+            return std::tuple(result, impl_t::state);
+        }
+    }
+
+    using impl_t::impl_t;
+};
+
+template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
+    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
+    std::size_t ForwardFeedbackInputPortIndex>
+inline std::atomic_size_t SplitMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::_unique_id_counter{0UZ};
+
+template<BlockLike Forward, meta::fixed_string ForwardOutputPortName, //
+    BlockLike Feedback, meta::fixed_string FeedbackOutputPortName,    //
+    meta::fixed_string ForwardFeedbackInputPortName>
+using SplitMerge = SplitMergeByIndex<                                                                                       //
+    Forward, detail::checkedIndexForName<ForwardOutputPortName, typename traits::block::stream_output_ports<Forward>>(),    //
+    Feedback, detail::checkedIndexForName<FeedbackOutputPortName, typename traits::block::stream_output_ports<Feedback>>(), //
+    detail::checkedIndexForName<ForwardFeedbackInputPortName, typename traits::block::stream_input_ports<Forward>>()>;
+
+/*******************************************************************************************************/
+/**************************** end of SplitMerge Implementation *****************************************/
 /*******************************************************************************************************/
 
 // TODO: add nicer enum formatter

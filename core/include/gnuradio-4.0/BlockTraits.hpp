@@ -107,20 +107,10 @@ struct all_port_descriptors_impl {
         }>;
 };
 
-// This partial specialization could be generalized into a customization point. But we probably want to think of a
-// better name than 'AllPorts' for triggering that customization.
-template<refl::reflectable Left, refl::reflectable Right, size_t OutId, size_t InId>
-struct all_port_descriptors_impl<gr::MergeByIndex<Left, OutId, Right, InId>> {
-    using type = gr::MergeByIndex<Left, OutId, Right, InId>::AllPorts;
-};
-
-// This partial specialization could be generalized into a customization point. But we probably want to think of a
-// better name than 'AllPorts' for triggering that customization.
-template<refl::reflectable Forward, std::size_t ForwardOutputPortIndex, //
-    refl::reflectable Feedback, std::size_t FeedbackOutputPortIndex,    //
-    std::size_t ForwardFeedbackInputPortIndex>
-struct all_port_descriptors_impl<gr::FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>> {
-    using type = gr::FeedbackMergeByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex>::AllPorts;
+template<PortReflectable TBlock>
+requires(requires { typename TBlock::OverridePortList; })
+struct all_port_descriptors_impl<TBlock> {
+    using type = TBlock::OverridePortList;
 };
 } // namespace detail
 
