@@ -56,9 +56,14 @@ public:
     PluginHandler() = default;
 
     explicit PluginHandler(const std::string& plugin_file) {
-        // TODO: Document why RTLD_LOCAL and not RTLD_GLOBAL is used here. (RTLD_LOCAL breaks RTTI/dynamic_cast across
-        // plugin boundaries. Note that RTTI can be very helpful in the debugger.)
+        // RTLD_LOCAL keeps plugin symbols isolated but breaks RTTI/dynamic_cast across dylib boundaries.
+        // On macOS (Mach-O two-level namespace), RTLD_LOCAL also risks duplicating singletons such as
+        // globalBlockRegistry(); use RTLD_GLOBAL there to match Linux ELF flat-namespace behaviour.
+#ifdef __APPLE__
+        _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+#else
         _dl_handle = dlopen(plugin_file.c_str(), RTLD_LAZY | RTLD_LOCAL);
+#endif
         if (!_dl_handle) {
             _status = "Failed to load the plugin file";
             return;
