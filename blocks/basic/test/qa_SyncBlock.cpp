@@ -18,6 +18,7 @@ struct TestParams {
     std::vector<gr::Tensor<int>>      expectedValues;
     std::vector<std::vector<gr::Tag>> expectedTags;
     std::size_t                       expectedNSamples = 0UZ;
+    std::ptrdiff_t                    indexTolerance   = 0; // tag index comparison tolerance (for buffer-size-dependent indices)
 };
 
 void runTest(const TestParams& par) {
@@ -84,7 +85,7 @@ void runTest(const TestParams& par) {
     }
 
     for (std::size_t i = 0; i < sinks.size(); i++) {
-        expect(equal_tag_lists(sinks[i]->_tags, par.expectedTags[i], {}));
+        expect(equal_tag_lists(sinks[i]->_tags, par.expectedTags[i], {}, par.indexTolerance));
     }
 }
 
@@ -171,7 +172,8 @@ const boost::ut::suite SyncBlockTests = [] {
             {                                                                                                                               //
                 {genDropTag(0, 9), genSyncTag(1, 100), genDropTag(65537, 91), genSyncTag(100'000, 200), genDropSyncTag(200'000, 900, 300)}, // 65537 -> depends on buffer size
                 {genSyncTag(1, 100), genSyncTag(100'000, 200), genSyncTag(200'000, 300)}},                                                  //
-            .expectedNSamples = 299'000});
+            .expectedNSamples = 299'000,
+            .indexTolerance   = 2}); // drop tag index varies with buffer size across platforms/build configs
     };
 
     "SyncBlock back pressure test"_test = [] {

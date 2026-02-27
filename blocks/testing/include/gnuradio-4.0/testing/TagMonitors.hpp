@@ -63,24 +63,33 @@ inline constexpr void mismatch_report(const IterType& mismatchedTag1, const Iter
     }
 }
 
-inline constexpr bool equal_tag_lists(const std::vector<Tag>& tags1, const std::vector<Tag>& tags2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt) {
+inline constexpr bool equal_tag_lists(const std::vector<Tag>& tags1, const std::vector<Tag>& tags2, const std::optional<std::vector<std::string>>& ignoreKeys = std::nullopt, std::ptrdiff_t indexTolerance = 0) {
     if (tags1.size() != tags2.size()) {
         std::println("vectors have different sizes ({} vs {})\n", tags1.size(), tags2.size());
         return false;
     }
 
-    auto customComparator = [&ignoreKeys](const Tag& tag1, const Tag& tag2) {
-        if (ignoreKeys != std::nullopt && !ignoreKeys.value().empty()) {
-            // make a copy of the maps to compare without the ignored key
-            auto map1 = tag1.map;
-            auto map2 = tag2.map;
-            for (const auto& ignoreKey : ignoreKeys.value()) {
-                map1.erase(convert_string_domain(ignoreKey));
-                map2.erase(convert_string_domain(ignoreKey));
+    auto customComparator = [&ignoreKeys, indexTolerance](const Tag& tag1, const Tag& tag2) {
+        auto mapsEqual = [&]() {
+            if (ignoreKeys != std::nullopt && !ignoreKeys.value().empty()) {
+                auto map1 = tag1.map;
+                auto map2 = tag2.map;
+                for (const auto& ignoreKey : ignoreKeys.value()) {
+                    map1.erase(convert_string_domain(ignoreKey));
+                    map2.erase(convert_string_domain(ignoreKey));
+                }
+                return map1 == map2;
             }
-            return map1 == map2;
-        }
-        return tag1 == tag2; // Use Tag's equality operator
+            return tag1.map == tag2.map;
+        };
+        auto indexClose = [&]() {
+            if (indexTolerance == 0) {
+                return tag1.index == tag2.index;
+            }
+            auto diff = static_cast<std::ptrdiff_t>(tag1.index) - static_cast<std::ptrdiff_t>(tag2.index);
+            return diff >= -indexTolerance && diff <= indexTolerance;
+        };
+        return indexClose() && mapsEqual();
     };
 
     auto [mismatchedTag1, mismatchedTag2] = std::mismatch(tags1.begin(), tags1.end(), tags2.begin(), customComparator);
