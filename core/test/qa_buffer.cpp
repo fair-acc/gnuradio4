@@ -177,7 +177,7 @@ const boost::ut::suite DoubleMappedAllocatorTests = [] {
 #endif
 
 template<typename Writer, std::size_t N>
-void writeVaryingChunkSizes(Writer& writer, std::size_t writerID) {
+void writeVaryingChunkSizes(Writer& writer, std::size_t writerID, std::size_t& errors) {
     gr::thread_pool::thread::setThreadName(std::format("writer#{}", writerID));
     std::size_t pos    = 0;
     std::size_t iWrite = 0;
@@ -186,13 +186,12 @@ void writeVaryingChunkSizes(Writer& writer, std::size_t writerID) {
         const auto              chunkSize   = std::min(kChunkSizes[iWrite % kChunkSizes.size()], N - pos);
         gr::WriterSpanLike auto out         = writer.tryReserve(chunkSize);
         if (out.size() != 0) {
-            boost::ut::expect(boost::ut::eq(writer.nRequestedSamplesToPublish(), 0UZ));
+            errors += (writer.nRequestedSamplesToPublish() != 0UZ) ? 1UZ : 0UZ;
             for (std::size_t i = 0UZ; i < out.size(); i++) {
                 out[i] = {{0, static_cast<int>(pos + i)}};
             }
             out.publish(out.size());
-
-            boost::ut::expect(boost::ut::eq(writer.nRequestedSamplesToPublish(), chunkSize));
+            errors += (writer.nRequestedSamplesToPublish() != chunkSize) ? 1UZ : 0UZ;
             pos += chunkSize;
             ++iWrite;
         }
@@ -476,30 +475,35 @@ const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {
         gr::BufferReaderLike auto reader2 = buffer.new_reader();
 
         constexpr auto kWrites      = 200000UZ;
-        auto           writerThread = std::thread(&writeVaryingChunkSizes<decltype(writer), kWrites>, std::ref(writer), 0Uz);
+        std::size_t    writerErrors = 0;
+        auto           writerThread = std::thread(&writeVaryingChunkSizes<decltype(writer), kWrites>, std::ref(writer), 0Uz, std::ref(writerErrors));
 
-        auto readerFnc = [](auto reader, std::size_t readerID) {
+        auto readerFnc = [](auto reader, std::size_t readerID, std::size_t& errors) {
             gr::thread_pool::thread::setThreadName(std::format("reader#{}", readerID));
             std::size_t i = 0;
             while (i < kWrites) {
                 auto in = reader.get().get();
                 for (auto j = 0UZ; j < in.size(); j++) {
                     auto vIt = in[j].find(0);
-                    expect(vIt != in[j].end());
+                    errors += (vIt == in[j].end()) ? 1UZ : 0UZ;
                     if (vIt != in[j].end()) {
-                        expect(eq(vIt->second, static_cast<int>(i)));
+                        errors += (vIt->second != static_cast<int>(i)) ? 1UZ : 0UZ;
                     }
                     i++;
                 }
-                expect(in.consume(in.size()));
+                errors += !in.consume(in.size()) ? 1UZ : 0UZ;
             }
         };
 
-        auto reader1Thread = std::thread(readerFnc, std::ref(reader1), 0UZ);
-        auto reader2Thread = std::thread(readerFnc, std::ref(reader2), 1UZ);
+        std::size_t reader1Errors = 0, reader2Errors = 0;
+        auto        reader1Thread = std::thread(readerFnc, std::ref(reader1), 0UZ, std::ref(reader1Errors));
+        auto        reader2Thread = std::thread(readerFnc, std::ref(reader2), 1UZ, std::ref(reader2Errors));
         writerThread.join();
         reader1Thread.join();
         reader2Thread.join();
+        expect(eq(writerErrors, 0UZ)) << "writer errors";
+        expect(eq(reader1Errors, 0UZ)) << "reader1 errors";
+        expect(eq(reader2Errors, 0UZ)) << "reader2 errors";
     };
 
     "MultiProducerStdMapMultipleWriters"_test = [] {
@@ -517,12 +521,13 @@ const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {
             writers.push_back(buffer.new_writer());
         }
 
+        std::array<std::size_t, kNWriters> writerErrors{};
         std::array<std::thread, kNWriters> writerThreads;
         for (std::size_t i = 0UZ; i < kNWriters; i++) {
-            writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]), i);
+            writerThreads[i] = std::thread(&writeVaryingChunkSizes<decltype(writers[i]), kWrites>, std::ref(writers[i]), i, std::ref(writerErrors[i]));
         }
 
-        auto readerFnc = [](auto reader) {
+        auto readerFnc = [](auto reader, std::size_t& errors) {
             std::array<int, kNWriters> next;
             std::ranges::fill(next, 0);
             std::size_t read = 0UZ;
@@ -530,32 +535,37 @@ const boost::ut::suite<"CircularBuffer<T>"> _circ0 = [] {
                 auto in = reader.get().get();
                 for (const auto& map : in) {
                     auto vIt = map.find(0);
-                    expect(vIt != map.end()) << "map does not contain zero";
+                    errors += (vIt == map.end()) ? 1UZ : 0UZ;
                     if (vIt == map.end()) {
                         continue;
                     }
                     const auto value = vIt->second;
-                    expect(ge(value, 0)) << "value in map should be greater than zero";
-                    expect(le(value, static_cast<int>(kWrites))) << "value in map should be smaller than number of samples to publish";
+                    errors += (value < 0) ? 1UZ : 0UZ;
+                    errors += (value > static_cast<int>(kWrites)) ? 1UZ : 0UZ;
                     const auto nextIt = std::ranges::find(next, value);
-                    expect(nextIt != next.end()) << "No writer thread waiting for that number";
+                    errors += (nextIt == next.end()) ? 1UZ : 0UZ;
                     if (nextIt == next.end()) {
                         continue;
                     }
                     *nextIt = value + 1;
                 }
                 read += in.size();
-                expect(in.consume(in.size())) << "Failed to consume all";
+                errors += !in.consume(in.size()) ? 1UZ : 0UZ;
             }
         };
 
-        auto reader1Thread = std::thread(readerFnc, std::ref(reader1));
-        auto reader2Thread = std::thread(readerFnc, std::ref(reader2));
+        std::size_t reader1Errors = 0, reader2Errors = 0;
+        auto        reader1Thread = std::thread(readerFnc, std::ref(reader1), std::ref(reader1Errors));
+        auto        reader2Thread = std::thread(readerFnc, std::ref(reader2), std::ref(reader2Errors));
         for (std::size_t i = 0; i < kNWriters; i++) {
             writerThreads[i].join();
         }
         reader1Thread.join();
         reader2Thread.join();
+        const auto totalWriterErrors = std::accumulate(writerErrors.begin(), writerErrors.end(), 0UZ);
+        expect(eq(totalWriterErrors, 0UZ)) << "writer errors";
+        expect(eq(reader1Errors, 0UZ)) << "reader1 errors";
+        expect(eq(reader2Errors, 0UZ)) << "reader2 errors";
     };
 };
 

@@ -33,7 +33,10 @@ concept ClaimStrategyLike = requires(T /*const*/ t, const std::size_t sequence, 
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(kCacheLine) SingleProducerStrategy {
-    const std::size_t _size = SIZE;
+    const std::size_t   _size = SIZE;
+    mutable std::size_t _cachedMinReaderCursor{kInitialCursorValue};
+    mutable std::size_t _cachedReaderCount{0UZ};
+    mutable Sequence*   _cachedSingleReader{nullptr}; // fast path: direct pointer when ≤1 reader
 
 public:
     Sequence                                                _publishCursor;                      // slots are published and ready to be read until _publishCursor
@@ -46,11 +49,16 @@ public:
     SingleProducerStrategy(const SingleProducerStrategy&&) = delete;
     void operator=(const SingleProducerStrategy&)          = delete;
 
+    void updateCachedReaderInfo() const noexcept {
+        _cachedReaderCount  = _readSequences->size();
+        _cachedSingleReader = (_cachedReaderCount == 1UZ) ? _readSequences->front().get() : nullptr;
+    }
+
     std::size_t next(const std::size_t nSlotsToClaim = 1) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
         SpinWait spinWait;
-        while (getRemainingCapacity() < nSlotsToClaim) { // while not enough slots in buffer
+        while (getRemainingCapacity(nSlotsToClaim) < nSlotsToClaim) {
             if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
                 _waitStrategy.signalAllWhenBlocking();
             }
@@ -63,14 +71,14 @@ public:
     [[nodiscard]] std::optional<std::size_t> tryNext(const std::size_t nSlotsToClaim) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        if (getRemainingCapacity() < nSlotsToClaim) { // not enough slots in buffer
+        if (getRemainingCapacity(nSlotsToClaim) < nSlotsToClaim) {
             return std::nullopt;
         }
         _reserveCursor += nSlotsToClaim;
         return _reserveCursor;
     }
 
-    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return _size - (_reserveCursor - getMinReaderCursor()); }
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return getRemainingCapacity(1); }
 
     void publish(std::size_t offset, std::size_t nSlotsToClaim) {
         const auto sequence = offset + nSlotsToClaim;
@@ -82,8 +90,23 @@ public:
     }
 
 private:
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity(std::size_t required) const noexcept {
+        if (_cachedReaderCount <= 2UZ) { // ≤2 readers: cache avoids scanning all cursors on every call
+            const std::size_t remaining = _size - (_reserveCursor - _cachedMinReaderCursor);
+            if (remaining >= required && remaining <= _size) [[likely]] {
+                return remaining;
+            }
+        }
+        // >2 readers or cache miss: rescan paces the producer, preventing coherence saturation on _publishCursor
+        _cachedMinReaderCursor = getMinReaderCursor();
+        return _size - (_reserveCursor - _cachedMinReaderCursor);
+    }
+
     [[nodiscard]] forceinline std::size_t getMinReaderCursor() const noexcept {
-        if (_readSequences->empty()) {
+        if (_cachedSingleReader) {
+            return _cachedSingleReader->value();
+        }
+        if (_cachedReaderCount == 0UZ) {
             return kInitialCursorValue;
         }
         return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
@@ -100,10 +123,12 @@ static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(kCacheLine) MultiProducerStrategy {
-    AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
-    const std::size_t  _size   = SIZE;
-    const bool         _isPow2 = std::has_single_bit(SIZE);
-    const std::size_t  _mask   = SIZE - 1; // valid only when _isPow2
+    AtomicBitset<SIZE>  _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
+    const std::size_t   _size   = SIZE;
+    const bool          _isPow2 = std::has_single_bit(SIZE);
+    const std::size_t   _mask   = SIZE - 1; // valid only when _isPow2
+    mutable std::size_t _cachedReaderCount{0UZ};
+    mutable Sequence*   _cachedSingleReader{nullptr}; // fast path: direct pointer when ≤1 reader
 
     forceinline constexpr std::size_t calculateIndex(std::size_t seq) const noexcept {
         if constexpr (SIZE == std::dynamic_extent) {
@@ -132,6 +157,11 @@ public:
     MultiProducerStrategy(const MultiProducerStrategy&)  = delete;
     MultiProducerStrategy(const MultiProducerStrategy&&) = delete;
     void operator=(const MultiProducerStrategy&)         = delete;
+
+    void updateCachedReaderInfo() const noexcept {
+        _cachedReaderCount  = _readSequences->size();
+        _cachedSingleReader = (_cachedReaderCount == 1UZ) ? _readSequences->front().get() : nullptr;
+    }
 
     [[nodiscard]] std::size_t next(std::size_t nSlotsToClaim = 1) {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
@@ -202,7 +232,10 @@ public:
 
 private:
     [[nodiscard]] forceinline std::size_t getMinReaderCursor() const noexcept {
-        if (_readSequences->empty()) {
+        if (_cachedSingleReader) {
+            return _cachedSingleReader->value();
+        }
+        if (_cachedReaderCount == 0UZ) {
             return kInitialCursorValue;
         }
         return std::ranges::min(*_readSequences | std::views::transform([](const auto& cursor) { return cursor->value(); }));
