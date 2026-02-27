@@ -425,7 +425,31 @@ This guide does **not** prescribe formatting rules — only semantic and structu
 
 ---
 
-## 10 · Quick Reference Checklist
+## 10 · Local Build & Resource Management
+
+When building this project locally (e.g. during development or debugging sessions), follow
+these constraints to avoid out-of-memory conditions and system instability:
+
+- **Limit parallelism to 6 cores** — use `cmake --build build -j6` (or `make -j6` / `ninja -j6`).
+  Never use `-j` without a number or with values exceeding 6. GR4 template-heavy translation
+  units consume significant memory; oversubscription causes swapping and OOM kills.
+- **Build types**: use `Debug` for general debugging and `Release` for performance/benchmarking.
+  Configure with `-DCMAKE_BUILD_TYPE=Debug` or `-DCMAKE_BUILD_TYPE=Release`.
+- **Compiler priority** (when testing across compilers, work in this order):
+  1. **GCC 15** — primary development compiler
+  2. **Clang 20** — secondary, catches different diagnostics
+  3. **Emscripten** — web/WASM target
+  4. **GCC 14** — backward compatibility
+- **Typical CMake configure + build**:
+  ```bash
+  cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++-15
+  cmake --build build -j6
+  ```
+- **Running tests**: `ctest --test-dir build --output-on-failure -j6`
+
+---
+
+## 11 · Quick Reference Checklist
 
 Before submitting any code change, verify:
 

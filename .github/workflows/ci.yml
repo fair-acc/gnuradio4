@@ -82,7 +82,7 @@ jobs:
             cmake_flags: "-DADDRESS_SANITIZER=ON"
           - cc: clang-20
             cxx: clang++-20
-            cmake_flags: "-DADDRESS_SANITIZER=ON -DCMAKE_LINKER=/usr/bin/clang-20"
+            cmake_flags: "-DADDRESS_SANITIZER=ON"
           - label: "AdaptiveCpp"
             cc: clang-20
             cxx: acpp
