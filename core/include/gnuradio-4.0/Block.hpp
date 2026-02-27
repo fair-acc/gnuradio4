@@ -164,8 +164,8 @@ template<auto... MatchPortEnums, std::ranges::input_range RangeA, std::ranges::i
 
 template<typename Derived, PortDirection portDirection, PortType portType>
 class PortCache {
-    using AllocatorSize    = gr::allocator::Aligned<std::size_t, gr::meta::kCacheLine>;
-    using AllocatorBitMask = gr::allocator::Aligned<port::BitMask, gr::meta::kCacheLine>;
+    using AllocatorSize    = gr::allocator::Aligned<std::size_t, gr::kCacheLine>;
+    using AllocatorBitMask = gr::allocator::Aligned<port::BitMask, gr::kCacheLine>;
 
     // reference to derived class containing the ports
     Derived& _self;
@@ -731,7 +731,7 @@ public:
         return std::get<T>(*this);
     }
 
-    alignas(hardware_destructive_interference_size) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
+    alignas(kCacheLine) std::shared_ptr<gr::Sequence> progress = std::make_shared<gr::Sequence>();
 
     using ResamplingValue = std::conditional_t<ResamplingControl::kIsConst, const gr::Size_t, gr::Size_t>;
     using ResamplingLimit = Limits<1UL, std::numeric_limits<ResamplingValue>::max()>;

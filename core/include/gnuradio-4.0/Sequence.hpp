@@ -12,6 +12,7 @@
 #include <format>
 
 #include <gnuradio-4.0/AtomicRef.hpp>
+#include <gnuradio-4.0/meta/CacheLineSize.hpp>
 
 namespace gr {
 
@@ -20,18 +21,6 @@ namespace gr {
 // consequently slow down execution
 #define forceinline inline __attribute__((always_inline))
 #endif
-
-#if defined(__APPLE__) && defined(__aarch64__)
-// Apple Silicon (M1–M4) uses 128-byte L2 cache lines
-inline constexpr std::size_t hardware_destructive_interference_size  = 128;
-inline constexpr std::size_t hardware_constructive_interference_size = 128;
-#elif defined(__cpp_lib_hardware_interference_size)
-using std::hardware_constructive_interference_size;
-using std::hardware_destructive_interference_size;
-#else
-inline constexpr std::size_t hardware_destructive_interference_size  = 64;
-inline constexpr std::size_t hardware_constructive_interference_size = 64;
-#endif
 static constexpr const std::size_t kInitialCursorValue = 0L;
 
 /**
@@ -39,7 +28,7 @@ static constexpr const std::size_t kInitialCursorValue = 0L;
  * processors. Support a number of concurrent operations including CAS and order writes.
  * Also avoids false sharing by adding padding cacheline-padding around the volatile field.
  */
-class alignas(hardware_destructive_interference_size) Sequence {
+class alignas(kCacheLine) Sequence {
     mutable std::size_t _fieldsValue{kInitialCursorValue};
 
 public:

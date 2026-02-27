@@ -32,7 +32,7 @@ concept ClaimStrategyLike = requires(T /*const*/ t, const std::size_t sequence, 
 };
 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
-class alignas(hardware_constructive_interference_size) SingleProducerStrategy {
+class alignas(kCacheLine) SingleProducerStrategy {
     const std::size_t _size = SIZE;
 
 public:
@@ -99,7 +99,7 @@ static_assert(ClaimStrategyLike<SingleProducerStrategy<1024, NoWaitStrategy>>);
  * to determine the highest available sequence that can be read, then getHighestPublishedSequence should be used.
  */
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
-class alignas(hardware_constructive_interference_size) MultiProducerStrategy {
+class alignas(kCacheLine) MultiProducerStrategy {
     AtomicBitset<SIZE> _slotStates; // tracks the state of each ringbuffer slot, true -> completed and ready to be read
     const std::size_t  _size   = SIZE;
     const bool         _isPow2 = std::has_single_bit(SIZE);
