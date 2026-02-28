@@ -1,5 +1,8 @@
 add_library(gr-http INTERFACE)
 target_link_libraries(gr-http INTERFACE gnuradio-core gnuradio-algorithm httplib::httplib)
+if(APPLE)
+  target_link_libraries(gr-http INTERFACE "-framework CFNetwork")
+endif()
 target_include_directories(gr-http INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                              $<INSTALL_INTERFACE:include/>)
 
