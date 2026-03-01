@@ -31,7 +31,7 @@ GNU Radio 4.0 uses modern C++ (C++23), and is tested for
 - CMake (>= 3.25),
 - GCC (>=13.3, better: >=14.2)
 - Clang (>=18, recommended), and
-- Emscripten (3.1.66).
+- Emscripten (5.0.1).
 
 **To build**:
 
@@ -109,13 +109,12 @@ describe how to set up a local development environment.
 ## License and Copyright
 
 Unless otherwise noted: SPDX-License-Identifier: MIT<br>
-All code contributions to GNU Radio core and runtime will be integrated into a library under the MIT, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either.  GNU Radio also allows for individual block libraries to be licensed as GPLv3.
+All code contributions to GNU Radio core and runtime will be integrated into a library under the MIT, ensuring it remains free/libre (FLOSS) for both personal and commercial use, without further constraints on either. GNU Radio also allows for individual block libraries to be licensed as GPLv3.
 For details on these distinctions and how to contribute, please consult: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Copyright (C) The GNU Radio Authors<br>
 Copyright (C) Contributors to the GNU Radio Project<br>
 Copyright (C) FAIR - Facility for Antiproton & Ion Research, Darmstadt, Germany<br>
-
 
 ## Acknowledgements
 
