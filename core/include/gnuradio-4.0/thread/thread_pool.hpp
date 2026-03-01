@@ -581,6 +581,27 @@ private:
         return extracted;
     }
 
+    template<typename F, typename... A>
+    auto getTaskImpl(F&& f, A&&... args) {
+        auto extracted = _recycledTasks.pop();
+        if (extracted.empty()) {
+            if constexpr (sizeof...(A) == 0) {
+                extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::forward<F>(f)});
+            } else {
+                extracted.push_front(Task{.id = _taskID.fetch_add(1U) + 1U, .func = std::bind_front(std::forward<F>(f), std::forward<A>(args)...)});
+            }
+        } else {
+            auto& task = extracted.front();
+            task.id    = _taskID.fetch_add(1U) + 1U;
+            if constexpr (sizeof...(A) == 0) {
+                task.func = std::forward<F>(f);
+            } else {
+                task.func = std::bind_front(std::forward<F>(f), std::forward<A>(args)...);
+            }
+        }
+        return extracted;
+    }
+
     template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args>
     auto createTask(Callable&& func, Args&&... funcArgs) {
         auto  taskContainer = getTaskImpl(std::forward<Callable>(func), std::forward<Args>(funcArgs)...);
