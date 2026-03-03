@@ -100,7 +100,7 @@ emitted values to the filter's `cutoff_freq` setting.
 Defines the semantic placement intent for drawable blocks:
 
 | Category       | Purpose                                             | Examples                       |
-|----------------|-----------------------------------------------------|--------------------------------|
+| -------------- | --------------------------------------------------- | ------------------------------ |
 | `None`         | No UI contribution (default)                        | Processing-only blocks         |
 | `MenuBar`      | Global application menu items                       | File/Edit/View menus           |
 | `Toolbar`      | Compact, frequently used actions and controls       | Play/pause, sliders, toggles   |
@@ -136,7 +136,7 @@ struct Drawable {
 ### Template Parameters
 
 | Parameter   | Type                     | Description                                                      |
-|-------------|--------------------------|------------------------------------------------------------------|
+| ----------- | ------------------------ | ---------------------------------------------------------------- |
 | `category_` | `UICategory`             | Semantic placement intent                                        |
 | `toolkit_`  | `gr::meta::fixed_string` | Target toolkit identifier (e.g., `"ImGui"`, `"Qt"`, `"console"`) |
 
@@ -187,7 +187,7 @@ gr::work::Status draw(const gr::property_map& config = {}) noexcept;
 **Return value:**
 
 | Status                | Meaning                           |
-|-----------------------|-----------------------------------|
+| --------------------- | --------------------------------- |
 | `work::Status::OK`    | Rendered successfully             |
 | `work::Status::DONE`  | Block finished, UI can be removed |
 | `work::Status::ERROR` | Rendering failed                  |
@@ -309,11 +309,12 @@ gr::MsgPortIn                 settingsIn;  // key-value settings (value type: gr
 │ Loop rate: e.g. ~25 Hz                    draw(property_map{})│
 └───────────────────────────────────────────────────────────────┘
 ```
+
 - **Scheduler** calls `processBulk()`/`processOne()` for data flow
 - **Render loop** (external, toolkit-owned) calls `draw()` for presentation
 
-*N.B. the UI rendering is not required to be a separate thread, can be part of a global UI polling loop, 
-or even run a similar (or the same) scheduler as the stream-processing scheduler.*
+_N.B. the UI rendering is not required to be a separate thread, can be part of a global UI polling loop,
+or even run a similar (or the same) scheduler as the stream-processing scheduler._
 
 ### Thread Safety
 
@@ -330,8 +331,8 @@ Common patterns:
 - **Atomic flags** for simple state signaling
 - **Double buffering** for complex state snapshots
 
-The `config` parameter in `draw(const property_map& config)` follows a similar principle: its contents are a *
-*toolkit-specific API contract** that the application must consistently honour.
+The `config` parameter in `draw(const property_map& config)` follows a similar principle: its contents are a \*
+\*toolkit-specific API contract\*\* that the application must consistently honour.
 
 ## More Complete Example
 
@@ -419,9 +420,9 @@ void runApplication() {
     auto& chart  = graph.emplaceBlock<ChartMonitor<float>>();
     auto& slider = graph.emplaceBlock<ParameterSlider<float>>({{"target_key", "gain"}});
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(source).to<"in">(filter)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(filter).to<"in">(chart)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out">(slider).to<"settings">(filter)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(source, source.out, filter, filter.in)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(filter, filter.out, chart, chart.in)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect(slider, slider.out, filter, filter.settings)));
 
     gr::scheduler::Simple sched;
     if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -471,14 +472,14 @@ struct Drawable {
 ### Block Members (inherited)
 
 | Member             | Type           | Description                           |
-|--------------------|----------------|---------------------------------------|
+| ------------------ | -------------- | ------------------------------------- |
 | `ui_constraints`   | `property_map` | Toolkit-specific layout hints         |
 | `meta_information` | `property_map` | Contains `"Drawable"` key if drawable |
 
 ### BlockModel Interface
 
 | Method         | Returns        | Description                        |
-|----------------|----------------|------------------------------------|
+| -------------- | -------------- | ---------------------------------- |
 | `uiCategory()` | `UICategory`   | Runtime category query             |
 | `draw(config)` | `work::Status` | Invoke block's draw implementation |
 
