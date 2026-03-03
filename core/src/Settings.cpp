@@ -4,9 +4,9 @@ namespace gr {
 
 // --- Simple accessors ---
 
-bool CtxSettingsBase::changed() const noexcept { return _changed; }
+bool CtxSettingsBase::changed() const noexcept { return gr::atomic_ref(_changed).load_acquire(); }
 
-void CtxSettingsBase::setChanged(bool b) noexcept { _changed.store(b); }
+void CtxSettingsBase::setChanged(bool b) noexcept { gr::atomic_ref(_changed).store_release(b); }
 
 void CtxSettingsBase::setInitBlockParameters(const property_map& parameters) { _initBlockParameters = parameters; }
 
@@ -205,7 +205,7 @@ bool CtxSettingsBase::removeContext(SettingsCtx ctx) {
 
 void CtxSettingsBase::assignFrom(const CtxSettingsBase& other) {
     std::scoped_lock lock(_mutex, other._mutex);
-    std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
+    gr::atomic_ref(_changed).store_release(gr::atomic_ref(other._changed).load_acquire());
     _storedParameters      = other._storedParameters;
     _defaultParameters     = other._defaultParameters;
     _initBlockParameters   = other._initBlockParameters;
@@ -219,7 +219,7 @@ void CtxSettingsBase::assignFrom(const CtxSettingsBase& other) {
 
 void CtxSettingsBase::assignFrom(CtxSettingsBase&& other) noexcept {
     std::scoped_lock lock(_mutex, other._mutex);
-    std::atomic_store_explicit(&_changed, std::atomic_load_explicit(&other._changed, std::memory_order_acquire), std::memory_order_release);
+    gr::atomic_ref(_changed).store_release(gr::atomic_ref(other._changed).load_acquire());
     _storedParameters      = std::move(other._storedParameters);
     _defaultParameters     = std::move(other._defaultParameters);
     _initBlockParameters   = std::move(other._initBlockParameters);

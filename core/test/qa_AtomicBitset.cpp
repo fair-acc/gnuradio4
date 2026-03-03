@@ -1,20 +1,13 @@
 #include <boost/ut.hpp>
 
 #include <algorithm>
-#include <array>
-#include <complex>
+#include <cstdio>
 #include <format>
-#include <numeric>
 #include <ranges>
-#include <tuple>
+#include <thread>
+#include <vector>
 
-#include <gnuradio-4.0/Buffer.hpp>
-#include <gnuradio-4.0/BufferSkeleton.hpp>
-#include <gnuradio-4.0/CircularBuffer.hpp>
-#include <gnuradio-4.0/HistoryBuffer.hpp>
-#include <gnuradio-4.0/Sequence.hpp>
-#include <gnuradio-4.0/WaitStrategy.hpp>
-#include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/AtomicBitset.hpp>
 
 template<typename TBitset>
 void runAtomicBitsetTest(TBitset& bitset, std::size_t bitsetSize) {
@@ -73,21 +66,27 @@ void runAtomicBitsetTest(TBitset& bitset, std::size_t bitsetSize) {
     }
 
 #if not defined(__EMSCRIPTEN__) && not defined(NDEBUG) && not defined(_WIN32)
-    expect(aborts([&] { bitset.set(bitsetSize); })) << "Setting bit should throw an assertion.";
-    expect(aborts([&] { bitset.reset(bitsetSize); })) << "Resetting bit should throw an assertion.";
-    expect(aborts([&] { bitset.test(bitsetSize); })) << "Testing bit should throw an assertion.";
-    // bulk operations
-    expect(aborts([&] { bitset.set(100UZ, 200UZ); })) << "Setting bulk bits should throw an assertion.";
-    expect(aborts([&] { bitset.reset(100UZ, 200UZ); })) << "Resetting bulk bits should throw an assertion.";
-    expect(aborts([&] { bitset.set(200UZ, 100UZ); })) << "Setting bulk begin > end should throw an assertion.";
-    expect(aborts([&] { bitset.reset(200UZ, 100UZ); })) << "Resetting bulk begin > end should throw an assertion.";
+    // aborts() forks — redirect stderr in the child to suppress expected assert messages
+    auto silently = [](auto&& fn) {
+        return [fn] {
+            std::ignore = std::freopen("/dev/null", "w", stderr);
+            fn();
+        };
+    };
+
+    expect(aborts(silently([&] { bitset.set(bitsetSize); }))) << "Setting bit should abort.";
+    expect(aborts(silently([&] { bitset.reset(bitsetSize); }))) << "Resetting bit should abort.";
+    expect(aborts(silently([&] { bitset.test(bitsetSize); }))) << "Testing bit should abort.";
+    expect(aborts(silently([&] { bitset.set(100UZ, 200UZ); }))) << "Setting bulk out-of-range should abort.";
+    expect(aborts(silently([&] { bitset.reset(100UZ, 200UZ); }))) << "Resetting bulk out-of-range should abort.";
+    expect(aborts(silently([&] { bitset.set(200UZ, 100UZ); }))) << "Setting bulk begin > end should abort.";
+    expect(aborts(silently([&] { bitset.reset(200UZ, 100UZ); }))) << "Resetting bulk begin > end should abort.";
 #endif
 }
 
 const boost::ut::suite AtomicBitsetTests = [] {
     using namespace boost::ut;
     using namespace gr;
-    using namespace gr::detail;
 
     "basics set/reset/test"_test = []() {
         auto dynamicBitset = AtomicBitset<>(128UZ);

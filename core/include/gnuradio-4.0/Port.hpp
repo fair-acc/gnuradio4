@@ -595,7 +595,7 @@ struct Port {
         // InputSpan(InputSpan&&) noexcept            = delete;
         // InputSpan& operator=(InputSpan&&) noexcept = delete;
 
-        ~InputSpan() override {
+        ~InputSpan() {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
                 if (rawTags.isConsumeRequested()) {                          // the user has already manually consumed tags
                     return;

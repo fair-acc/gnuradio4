@@ -702,7 +702,7 @@ enum class Category {
  */
 template<typename Derived, typename... Arguments>
 class Block : public lifecycle::StateMachine<Derived>, public BlockBase {
-    static std::atomic_size_t _uniqueIdCounter;
+    static inline std::size_t _uniqueIdCounter{0UZ};
     template<typename T, gr::meta::fixed_string description = "", typename... Args>
     using A = Annotated<T, description, Args...>;
 
@@ -746,7 +746,7 @@ public:
 
     gr::Size_t strideCounter = 0UL; // leftover stride from previous calls
 
-    gr::meta::immutable<std::size_t> unique_id   = _uniqueIdCounter++;
+    gr::meta::immutable<std::size_t> unique_id   = gr::atomic_ref(_uniqueIdCounter).fetch_add(1UZ);
     gr::meta::immutable<std::string> unique_name = std::format("{}#{}", gr::meta::type_name<Derived>(), unique_id);
 
     //
@@ -760,7 +760,7 @@ public:
         }
     }();
 #ifndef __EMSCRIPTEN__
-    static_assert(std::atomic<lifecycle::State>::is_always_lock_free, "std::atomic<lifecycle::State> is not lock-free");
+    static_assert(std::atomic_ref<lifecycle::State>::is_always_lock_free, "std::atomic_ref<lifecycle::State> is not lock-free");
 #endif
 
     //
@@ -2061,8 +2061,6 @@ std::format(R"(gr::work::Status processBulk({}{}{}) {{
     }
 }
 
-template<typename Derived, typename... Arguments>
-inline std::atomic_size_t Block<Derived, Arguments...>::_uniqueIdCounter{0UZ};
 } // namespace gr
 
 namespace gr {

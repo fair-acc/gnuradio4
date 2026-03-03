@@ -1180,7 +1180,7 @@ struct to_right_descriptor : TDesc {
 template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
 class MergedGraph<Left, Right, OutId, InId> : public Block<MergedGraph<Left, Right, OutId, InId>> {
     // FIXME: How do we refuse connection to a vector<Port>?
-    static std::atomic_size_t _unique_id_counter;
+    static inline std::size_t _unique_id_counter{0UZ};
 
     template<typename TDesc>
     friend struct to_right_descriptor;
@@ -1204,7 +1204,7 @@ public:
     // TODO: Add a comment why a unique ID is necessary for merged blocks but not for all other blocks. (I.e. unique_id
     // already is a member of the Block base class, this is shadowing that member with a different value. No other block
     // does this.)
-    const std::size_t unique_id   = _unique_id_counter++;
+    const std::size_t unique_id   = gr::atomic_ref(_unique_id_counter).fetch_add(1UZ);
     const std::string unique_name = std::format("MergedGraph<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
 
     MergedGraph(const MergedGraph<Left, Right, OutId, InId>& other)       = delete;
@@ -1337,9 +1337,6 @@ public:
     //     return base::work(requested_work);
     // }
 };
-
-template<SourceBlockLike Left, SinkBlockLike Right, std::size_t OutId, std::size_t InId>
-inline std::atomic_size_t MergedGraph<Left, Right, OutId, InId>::_unique_id_counter{0UZ};
 
 /**
  * This methods can merge simple blocks that are defined via a single `auto processOne(..)` producing a
