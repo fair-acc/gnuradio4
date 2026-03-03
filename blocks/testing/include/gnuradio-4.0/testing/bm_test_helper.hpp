@@ -69,14 +69,21 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     }
 };
 
-template<std::size_t N, typename base, typename aggregate>
-constexpr auto cascade(aggregate&& src, std::function<base()> generator = [] { return base(); }) {
-    if constexpr (N <= 1) {
-        return src;
-    } else {
-        return cascade<N - 1, base>(gr::mergeByIndex<0, 0>(std::forward<aggregate>(src), generator()), generator);
-    }
-}
+template<std::size_t N, typename Base, typename Aggregate>
+struct CascadeTypeHelper;
+
+template<typename Base, typename Aggregate>
+struct CascadeTypeHelper<0, Base, Aggregate> {
+    using type = Base;
+};
+
+template<std::size_t N, typename Base, typename Aggregate>
+struct CascadeTypeHelper {
+    using type = gr::MergeByIndex<typename CascadeTypeHelper<N - 1, Base, Aggregate>::type, 0, Base, 0>;
+};
+
+template<std::size_t N, typename Base>
+using CascadeType = typename CascadeTypeHelper<N, Base, Base>::type;
 
 } // namespace bm::test
 
