@@ -35,28 +35,35 @@ const boost::ut::suite<"FileIO Helpers tests"> fileIoHelpersTests = [] {
         expect(fio::isFileUri("FILE:/x") == true);
     };
 
-    "stripFileUriLocal - root dir"_test = [] {
-        // All should normalize to "/"
-        expect(eq(fio::stripFileUri("file:/").value(), "/"s));
-        expect(eq(fio::stripFileUri("file:///").value(), "/"s));
-        expect(eq(fio::stripFileUri("file://localhost").value(), "/"s));
-        expect(eq(fio::stripFileUri("file:////").value(), "/"s));
-        expect(eq(fio::stripFileUri("file://localhost").value(), "/"s));
+    "classifyUri"_test = [] {
+        expect(fio::classifyUri("/tmp/x") == fio::UriKind::LocalPath);
+        expect(fio::classifyUri("tmp/x") == fio::UriKind::LocalPath);
+        expect(fio::classifyUri("file:/tmp/x") == fio::UriKind::FileUri);
+        expect(fio::classifyUri("http://x") == fio::UriKind::HttpUri);
+        expect(fio::classifyUri("download:/x") == fio::UriKind::DownloadUri);
+        expect(fio::classifyUri("dialog:/open") == fio::UriKind::DialogUri);
+        expect(fio::classifyUri("wrong_sch://wrong_uri") == fio::UriKind::UnsupportedUri);
+        expect(fio::classifyUri("ftp://x") == fio::UriKind::UnsupportedUri);
     };
 
-    "stripFileUriLocal - absolute paths"_test = [] {
-        expect(eq(fio::stripFileUri("file:/usr/local/bin").value(), "/usr/local/bin"s));
-        expect(eq(fio::stripFileUri("file:///usr/local/bin").value(), "/usr/local/bin"s));
-        expect(eq(fio::stripFileUri("file://localhost/usr/local/bin").value(), "/usr/local/bin"s));
-        expect(eq(fio::stripFileUri("file:/usr///local/bin").value(), "/usr///local/bin"s));
-        expect(eq(fio::stripFileUri("file:////////usr/local/bin").value(), "/usr/local/bin"s));
-    };
-
-    "stripFileUriLocal - reject non-local authorities"_test = [] {
-        auto r1 = fio::stripFileUri("file://host/etc");
+    "toLocalPath"_test = [] {
+        expect(eq(fio::toLocalPath("/tmp/x").value(), "/tmp/x"s));
+        expect(eq(fio::toLocalPath("tmp/x").value(), "tmp/x"s));
+        expect(eq(fio::toLocalPath("file:/tmp/x").value(), "/tmp/x"s));
+        expect(eq(fio::toLocalPath("file:/").value(), "/"s));
+        expect(eq(fio::toLocalPath("file:///").value(), "/"s));
+        expect(eq(fio::toLocalPath("file://localhost").value(), "/"s));
+        expect(eq(fio::toLocalPath("file:////").value(), "/"s));
+        expect(eq(fio::toLocalPath("file:/usr/local/bin").value(), "/usr/local/bin"s));
+        expect(eq(fio::toLocalPath("file:///usr/local/bin").value(), "/usr/local/bin"s));
+        expect(eq(fio::toLocalPath("file://localhost/usr/local/bin").value(), "/usr/local/bin"s));
+        expect(eq(fio::toLocalPath("file:/usr///local/bin").value(), "/usr///local/bin"s));
+        expect(eq(fio::toLocalPath("file:////////usr/local/bin").value(), "/usr/local/bin"s));
+        expect(!fio::toLocalPath("http://x").has_value());
+        auto r1 = fio::toLocalPath("file://host/etc");
         expect(!r1.has_value());
 
-        auto r2 = fio::stripFileUri("file://example.com");
+        auto r2 = fio::toLocalPath("file://example.com");
         expect(!r2.has_value());
     };
 };

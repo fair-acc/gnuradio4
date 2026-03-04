@@ -181,7 +181,7 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
     struct LocalFileParams {
         // Note: Emscripten writes to MEMFS
         std::string uri            = "file:/tmp/gr4_fileio_test/TestFileIo.bin";
-        std::string localPath      = fileio::detail::stripFileUri(uri).value();
+        std::string localPath      = fileio::detail::toLocalPath(uri).value();
         std::string expectedString = createTestFile(localPath);
 
         void cleanup() {
@@ -254,6 +254,42 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
         std::println("FileIO - Local with offset end");
     };
 
+    "FileIO - Local with offset and chunk alignment"_test = [&] {
+        std::println("FileIO - Local with offset and chunk alignment begin");
+
+        LocalFileParams params;
+        params.expectedString = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZab"; // 38 bytes
+        {
+            std::ofstream out(params.localPath, std::ios::binary | std::ios::trunc);
+            expect(out.is_open());
+            out.write(params.expectedString.data(), static_cast<std::streamsize>(params.expectedString.size()));
+        }
+
+        fileio::ReaderConfig config;
+        config.offset              = 1uz;
+        config.chunkBytes          = 9uz;
+        config.chunkAlignmentBytes = 4uz;
+
+        auto readerExp = fileio::readAsync(params.uri, config);
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto                           reader        = std::move(readerExp.value());
+            auto                           subResults    = getReadResult(reader);
+            const std::vector<std::size_t> expectedSizes = {8uz, 8uz, 8uz, 8uz, 4uz, 1uz};
+
+            expect(!reader.cancelRequested());
+            expect(eq(subResults.errorCounter, 0uz));
+            expect(eq(params.expectedString.substr(1), joinBytesToString(subResults.allData))); // offset = 1
+            expect(eq(subResults.allData.size(), expectedSizes.size()));
+            for (std::size_t i = 0; i < expectedSizes.size(); ++i) {
+                expect(eq(subResults.allData[i].size(), expectedSizes[i]));
+            }
+        }
+
+        params.cleanup();
+        std::println("FileIO - Local with offset and chunk alignment end");
+    };
+
     "FileIO - Local offset >= size"_test = [&] {
         std::println("FileIO - Local offset >= size begin");
 
@@ -294,7 +330,7 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
         std::println("FileIO - Writer local append begin");
 
         const std::string uri     = "file:/tmp/gr4_fileio_test/TestFileIoWriterOverwriteAppend.bin";
-        auto              pathExp = fileio::detail::stripFileUri(uri);
+        auto              pathExp = fileio::detail::toLocalPath(uri);
         expect(pathExp.has_value());
         const std::string     localPath = pathExp.value();
         std::filesystem::path path{localPath};
@@ -784,6 +820,38 @@ const boost::ut::suite<"FileIO Emscripten tests"> fileIoEmscriptenTests = [] {
         std::println("FileIO - Emscripten writer http POST - error end");
     };
 
+    "FileIO - Emscripten reader http immediate handle destruction"_test = [&] {
+        std::println("FileIO - Emscripten reader immediate handle destruction begin");
+
+        for (std::size_t i = 0; i < 8; i++) {
+            auto readerExp = readAsyncEmscriptenHttpWorkerThread("http://127.0.0.1:8080/getNumbers", fileio::ReaderConfig{});
+            expect(readerExp.has_value());
+            if (readerExp.has_value()) {
+                // Intentionally drop Reader immediately after starting async request.
+                [[maybe_unused]] auto reader = std::move(readerExp.value());
+            }
+        }
+        std::this_thread::sleep_for(2000ms);
+        std::println("FileIO - Emscripten reader immediate handle destruction end");
+    };
+
+    "FileIO - Emscripten writer http immediate handle destruction"_test = [&] {
+        std::println("FileIO - Emscripten writer immediate handle destruction begin");
+
+        std::string               body = createTestString();
+        std::vector<std::uint8_t> bytes(body.begin(), body.end());
+        for (std::size_t i = 0; i < 8; i++) {
+            auto writerExp = writeAsyncEmscriptenHttpWorkerThread("http://127.0.0.1:8080/postNumbers", bytes, fileio::WriterConfig{});
+            expect(writerExp.has_value());
+            if (writerExp.has_value()) {
+                // Intentionally drop Writer immediately after starting async request.
+                [[maybe_unused]] auto writer = std::move(writerExp.value());
+            }
+        }
+        std::this_thread::sleep_for(2000ms);
+        std::println("FileIO - Emscripten writer immediate handle destruction end");
+    };
+
     emscripten_run_script("stopServer();");
     if (serverThread.joinable()) {
         serverThread.join();
@@ -815,6 +883,64 @@ const boost::ut::suite<"FileIO Memory Source tests"> fileIoMemorySourceTests = [
             expect(eq(expectedString, joinBytesToString(subResults.allData)));
         }
         std::println("FileIO - Memory source end");
+    };
+
+    "FileIO - Memory source insufficient buffer returns error"_test = [&] {
+        std::string          expectedString = createTestString().substr(0, 33);
+        fileio::ReaderConfig config;
+        config.chunkBytes    = 11uz;
+        config.bufferMinSize = 3uz; // requires 4 slots
+
+        std::vector<std::uint8_t> bytes(expectedString.begin(), expectedString.end());
+        auto                      readerExp = fileio::readAsync(std::span<const std::uint8_t>(bytes.data(), bytes.size()), config, "<memory:small-buffer>");
+        expect(!readerExp.has_value());
+    };
+
+    "FileIO - Memory source chunk alignment"_test = [&] {
+        const std::string payload = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZab";
+
+        fileio::ReaderConfig config;
+        config.chunkBytes          = 9uz;
+        config.chunkAlignmentBytes = 4uz;
+
+        std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
+        auto                      readerExp = fileio::readAsync(std::span<const std::uint8_t>(bytes.data(), bytes.size()), config, "<memory:aligned>");
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto                           reader        = std::move(readerExp.value());
+            auto                           subResults    = getReadResult(reader);
+            const std::vector<std::size_t> expectedSizes = {8uz, 8uz, 8uz, 8uz, 4uz, 2uz};
+
+            expect(!reader.cancelRequested());
+            expect(eq(subResults.errorCounter, 0uz));
+            expect(eq(payload, joinBytesToString(subResults.allData)));
+            expect(eq(subResults.allData.size(), expectedSizes.size()));
+            for (std::size_t i = 0; i < expectedSizes.size(); ++i) {
+                expect(eq(subResults.allData[i].size(), expectedSizes[i]));
+            }
+        }
+    };
+
+    "FileIO - Memory source publishes final pending bytes"_test = [&] {
+        const std::string payload = "abc";
+
+        fileio::ReaderConfig config;
+        config.chunkBytes          = 9uz;
+        config.chunkAlignmentBytes = 4uz;
+
+        std::vector<std::uint8_t> bytes(payload.begin(), payload.end());
+        auto                      readerExp = fileio::readAsync(std::span<const std::uint8_t>(bytes.data(), bytes.size()), config, "<memory:final-pending>");
+        expect(readerExp.has_value());
+        if (readerExp.has_value()) {
+            auto reader     = std::move(readerExp.value());
+            auto subResults = getReadResult(reader);
+
+            expect(!reader.cancelRequested());
+            expect(eq(subResults.errorCounter, 0uz));
+            expect(eq(payload, joinBytesToString(subResults.allData)));
+            expect(eq(subResults.allData.size(), 1uz));
+            expect(eq(subResults.allData[0].size(), 3uz));
+        }
     };
 };
 
@@ -854,16 +980,22 @@ const boost::ut::suite<"FileIO error tests"> fileIoErrorTests = [] {
         auto                      readerExp = fileio::readAsync(std::span<const std::uint8_t>(bytes.data(), bytes.size()), config, "<memory:maxSize>");
         expect(readerExp.has_value());
         if (readerExp.has_value()) {
-            auto        sub          = std::move(readerExp.value());
-            bool        finished     = false;
-            std::size_t dataCounter  = 0;
-            std::size_t errorCounter = 0;
+            auto                       sub                   = std::move(readerExp.value());
+            bool                       finished              = false;
+            std::size_t                dataCounter           = 0;
+            std::size_t                errorCounter          = 0;
+            std::size_t                requiredOutputCounter = 0;
+            std::optional<std::size_t> lastRequiredOutputSize;
             while (!finished) {
                 const std::size_t maxSize = errorCounter < 5 ? 2uz : 1000uz;
 
                 sub.poll(
-                    [&finished, &dataCounter, &errorCounter](const auto& res) {
+                    [&finished, &dataCounter, &errorCounter, &requiredOutputCounter, &lastRequiredOutputSize](const auto& res) {
                         finished = res.isFinal;
+                        if (res.requiredOutputSize.has_value()) {
+                            requiredOutputCounter++;
+                            lastRequiredOutputSize = res.requiredOutputSize;
+                        }
                         if (res.data.has_value()) {
                             auto data = res.data.value();
                             if (!data.empty()) {
@@ -878,6 +1010,11 @@ const boost::ut::suite<"FileIO error tests"> fileIoErrorTests = [] {
             }
             expect(eq(dataCounter, 1uz));
             expect(ge(errorCounter, 5uz));
+            expect(eq(requiredOutputCounter, errorCounter));
+            expect(lastRequiredOutputSize.has_value());
+            if (lastRequiredOutputSize.has_value()) {
+                expect(eq(*lastRequiredOutputSize, 190uz));
+            }
         }
     };
 };

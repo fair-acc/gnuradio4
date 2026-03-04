@@ -17,6 +17,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <print>
 #include <span>
@@ -51,8 +52,8 @@
  *    - poll(cb, maxSize, doWait) delivers chunks or errors via PollResult, where cb is called with either data or an error, and a final message.
  *      maxSize should typically be set to number of free bytes in the caller’s output buffer. This guarantees that all data reported by a single poll()
  *      call can be written directly without intermediate storage. The default is std::numeric_limits<std::size_t>::max(), meaning "no explicit limit".
- *      The caller should ensure that ReaderConfig::chunkBytes <= maxSize; otherwise an error is returned, and if that error is not handled correctly in cb,
- *      user code may end up in an infinite loop.
+ *      If a queued chunk exceeds maxSize, PollResult::requiredOutputSize is set and the queued message is left unconsumed so the caller can retry later with
+ *      a larger output buffer. The caller should handle this condition explicitly; otherwise user code may end up in an infinite loop.
  *    - get() is a convenience: it blocks on a worker thread and concatenates all data into a single std::vector<uint8_t>.
  *    - cancel() requests a soft cancel; for Emscripten this is best-effort (we cannot synchronously abort emscripten_fetch on another thread).
  *
@@ -98,20 +99,37 @@ namespace gr::algorithm::fileio {
 // Read from file and http GET
 
 namespace detail {
-inline constexpr std::string_view kMessageDataKey = "data";
-}
+inline constexpr std::string_view kMessageDataKey      = "data";
+inline constexpr std::size_t      defaultMinBufferSize = 1024uz;
+} // namespace detail
 
 struct ReaderConfig {
     // Note about chunkBytes: When using Reader::poll(cb, maxSize, doWait) - the caller should ensure that chunkBytes <= maxSize; otherwise an error is returned,
     // and if that error is not handled correctly in cb, user code may end up in an infinite loop.
-    std::size_t                        chunkBytes       = std::numeric_limits<std::size_t>::max();
-    std::optional<std::size_t>         offset           = std::nullopt;
-    std::uint64_t                      httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
-    std::size_t                        bufferMinSize    = 1024;           // one gr::Message per slot
-    bool                               longPolling      = false;
-    std::map<std::string, std::string> httpHeaders      = {};
-    bool                               tlsVerifyPeer    = true; // for native https
+    std::size_t                        chunkBytes                = std::numeric_limits<std::size_t>::max();
+    std::size_t                        chunkAlignmentBytes       = 1uz; // align non-final data messages to this size when possible
+    std::optional<std::size_t>         offset                    = std::nullopt;
+    std::uint64_t                      httpTimeoutNanos          = 30'000'000'000;               // 30 s time-out for http(s)
+    std::size_t                        bufferMinSize             = detail::defaultMinBufferSize; // one gr::Message per slot; 0 means "use defaultMinBufferSize"
+    bool                               longPolling               = false;
+    std::map<std::string, std::string> httpHeaders               = {};
+    bool                               tlsVerifyPeer             = true; // for native https
+    bool                               emscriptenRunOnMainThread = true; // primarily for unit tests
 };
+
+namespace detail {
+inline void normalizeReaderConfig(ReaderConfig& config) noexcept {
+    if (config.bufferMinSize == 0uz) {
+        config.bufferMinSize = defaultMinBufferSize;
+    }
+    if (config.chunkAlignmentBytes == 0uz) {
+        config.chunkAlignmentBytes = 1uz;
+    }
+    if (config.chunkBytes != std::numeric_limits<std::size_t>::max() && config.chunkBytes < config.chunkAlignmentBytes) {
+        config.chunkBytes = config.chunkAlignmentBytes;
+    }
+}
+} // namespace detail
 
 struct ReaderState {
     std::string  uri;
@@ -120,15 +138,16 @@ struct ReaderState {
     gr::CircularBuffer<gr::Message> buffer;
     decltype(buffer.new_writer())   bufferWriter;
     decltype(buffer.new_reader())   bufferReader;
+    std::vector<std::uint8_t>       pendingBytes;
 
     std::atomic<std::size_t> updateCounter{0};
     std::atomic<bool>        cancelRequested{false};
-    std::atomic<bool>        finalPublished{false}; // mostly for debugging
+    std::atomic<bool>        finalPublished{false};
 
     std::unique_ptr<DialogOpenHandle> dialogHandle; // Present only for dialog:/ readers
 
     ReaderState(std::string uri_, ReaderConfig config_) //
-        : uri(std::move(uri_)), config(config_), buffer(config_.bufferMinSize), bufferWriter(buffer.new_writer()), bufferReader(buffer.new_reader()) {}
+        : uri(std::move(uri_)), config(std::move(config_)), buffer(config.bufferMinSize), bufferWriter(buffer.new_writer()), bufferReader(buffer.new_reader()) {}
 
 #ifndef NDEBUG
     ~ReaderState() {
@@ -144,6 +163,7 @@ struct Reader {
     struct PollResult {
         std::expected<std::span<const std::uint8_t>, gr::Error> data = std::span<const std::uint8_t>{}; // span is valid only during callback
         bool                                                    isFinal{false};
+        std::optional<std::size_t>                              requiredOutputSize{}; // in poll (): if a queued chunk exceeds maxSize, PollResult::requiredOutputSize is set
     };
 
 private:
@@ -180,19 +200,22 @@ public:
 #endif
 
         while (true) {
+            auto expected = _state->updateCounter.load(std::memory_order_acquire);
             if (_state->bufferReader.available() > 0) {
                 return;
             }
             if (_state->cancelRequested.load(std::memory_order_acquire)) {
                 return;
             }
-            auto expected = _state->updateCounter.load(std::memory_order_acquire);
+            if (_state->finalPublished.load(std::memory_order_acquire)) {
+                return;
+            }
             _state->updateCounter.wait(expected, std::memory_order_acquire);
         }
     }
 
-    // Note: The caller should ensure that ReaderConfig::chunkBytes <= maxSize; otherwise an error is returned,
-    // and if that error is not handled correctly in callback, user code may end up in an infinite loop.
+    // Note: If a queued chunk exceeds maxSize, PollResult::requiredOutputSize is set and the queued message is
+    // left unconsumed so the caller can retry later with a larger output buffer.
     template<typename TCallback>
     requires std::invocable<TCallback, PollResult> && std::same_as<std::invoke_result_t<TCallback, PollResult>, void>
     void poll(TCallback&& callback, std::size_t maxSize = std::numeric_limits<std::size_t>::max(), bool doWait = false) {
@@ -229,7 +252,8 @@ public:
                     std::ignore = span.consume(1);
                     return;
                 } else {
-                    res.data = std::unexpected{gr::Error{std::format("message data size ({}) exceeds max requested size ({})", bytes->size(), maxSize)}};
+                    res.requiredOutputSize = bytes->size();
+                    res.data               = std::unexpected{gr::Error{std::format("message data size ({}) exceeds max requested size ({})", bytes->size(), maxSize)}};
                     std::invoke(std::forward<TCallback>(callback), std::move(res));
                     std::ignore = span.consume(0);
                     return;
@@ -285,7 +309,7 @@ inline void publishMessage(ReaderState* state, gr::Message&& m) {
     state->updateCounter.notify_all();
 }
 
-inline void pushData(ReaderState* state, Tensor<std::uint8_t>&& values) {
+inline void publishDataMessage(ReaderState* state, Tensor<std::uint8_t>&& values) {
     if (state == nullptr || state->cancelRequested.load(std::memory_order_acquire) || values.empty()) {
         return;
     }
@@ -297,20 +321,58 @@ inline void pushData(ReaderState* state, Tensor<std::uint8_t>&& values) {
     publishMessage(state, std::move(msg));
 }
 
+inline void publishPendingBytes(ReaderState* state) {
+    if (state == nullptr || state->pendingBytes.empty() || state->cancelRequested.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    publishDataMessage(state, Tensor<std::uint8_t>(state->pendingBytes.begin(), state->pendingBytes.end()));
+    state->pendingBytes.clear();
+}
+
 inline void pushData(ReaderState* state, std::span<const std::uint8_t> data) {
     if (state == nullptr || data.empty() || state->cancelRequested.load(std::memory_order_acquire)) {
         return;
     }
 
-    const std::size_t total = data.size();
-    const std::size_t chunk = std::max<std::size_t>(1, state->config.chunkBytes);
-    std::size_t       pos   = 0;
-    while (pos < total) {
-        const std::size_t n     = std::min(chunk, total - pos);
-        auto              first = std::next(data.begin(), static_cast<std::ptrdiff_t>(pos));
-        auto              last  = std::next(first, static_cast<std::ptrdiff_t>(n));
-        pushData(state, Tensor<std::uint8_t>(first, last));
-        pos += n;
+    const std::size_t align = std::max<std::size_t>(1uz, state->config.chunkAlignmentBytes);
+    const std::size_t chunk = state->config.chunkBytes == std::numeric_limits<std::size_t>::max() ? std::numeric_limits<std::size_t>::max() : std::max<std::size_t>(align, state->config.chunkBytes);
+
+    if (!state->pendingBytes.empty()) {
+        const std::size_t total = state->pendingBytes.size() + data.size();
+        if (total < align) {
+            state->pendingBytes.insert(state->pendingBytes.end(), data.begin(), data.end());
+            return;
+        }
+
+        std::size_t firstChunkSize = chunk == std::numeric_limits<std::size_t>::max() ? total : std::min(chunk, total);
+        firstChunkSize -= firstChunkSize % align;
+
+        std::vector<std::uint8_t> merged;
+        merged.reserve(firstChunkSize);
+        merged.insert(merged.end(), state->pendingBytes.begin(), state->pendingBytes.end());
+
+        const std::size_t takeFromRemaining = firstChunkSize - state->pendingBytes.size();
+        merged.insert(merged.end(), data.begin(), data.begin() + static_cast<std::ptrdiff_t>(takeFromRemaining));
+
+        publishDataMessage(state, Tensor<std::uint8_t>(merged.begin(), merged.end()));
+        state->pendingBytes.clear();
+        data = data.subspan(takeFromRemaining);
+    }
+
+    while (data.size() >= align) {
+        std::size_t n = chunk == std::numeric_limits<std::size_t>::max() ? data.size() : std::min(chunk, data.size());
+        n -= n % align;
+        if (n == 0) {
+            break;
+        }
+
+        publishDataMessage(state, Tensor<std::uint8_t>(data.begin(), data.begin() + static_cast<std::ptrdiff_t>(n)));
+        data = data.subspan(n);
+    }
+
+    if (!data.empty()) {
+        state->pendingBytes.insert(state->pendingBytes.end(), data.begin(), data.end());
     }
 }
 
@@ -325,9 +387,15 @@ inline void pushError(ReaderState* state, std::string_view msg) {
     publishMessage(state, std::move(errorMsg));
 }
 
-inline void pushFinal(ReaderState* state) {
+inline void pushFinal(ReaderState* state, bool publishPending = true) {
     if (state == nullptr) {
         return;
+    }
+
+    if (publishPending) {
+        publishPendingBytes(state);
+    } else {
+        state->pendingBytes.clear();
     }
 
     bool expected = false;
@@ -344,7 +412,7 @@ inline void pushFinal(ReaderState* state) {
 
 inline void pushErrorFinal(ReaderState* state, std::string_view msg) {
     pushError(state, msg);
-    pushFinal(state);
+    pushFinal(state, false);
 }
 
 inline void runReadMemorySource(ReaderState* state, std::span<const std::uint8_t> bytes) {
@@ -410,16 +478,13 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         const std::size_t         thisChunk = std::min(chunk, remaining);
         std::vector<std::uint8_t> values(thisChunk);
 
-        in.read(reinterpret_cast<char*>(values.data()), static_cast<std::streamsize>(values.size()));
+        in.read(reinterpret_cast<char*>(values.data()), static_cast<std::streamsize>(thisChunk));
         const std::streamsize nRead = in.gcount();
         if (nRead <= 0) {
             break;
         }
         const std::size_t nReadSize = static_cast<std::size_t>(nRead);
-        if (nReadSize < values.size()) {
-            values.resize(nReadSize);
-        }
-        pushData(state.get(), std::move(values));
+        pushData(state.get(), std::span<const std::uint8_t>(values.data(), nReadSize));
         if (in.eof()) {
             break;
         }
@@ -434,7 +499,7 @@ inline void runReadLocalFile(std::shared_ptr<ReaderState> state) {
         pushErrorFinal(state.get(), std::format("I/O error while reading file: {}", state->uri));
     } else {
         in.close();
-        pushFinal(state.get());
+        pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     }
 }
 
@@ -494,7 +559,7 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
 
     if (!state->config.longPolling) {
         std::ignore = runHttpGetNativeOnce(state);
-        pushFinal(state.get());
+        pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     } else { // long polling
         while (!state->cancelRequested.load(std::memory_order_acquire)) {
             const bool ok = runHttpGetNativeOnce(state);
@@ -502,7 +567,7 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
                 break; // cancel or error. TODO send request on error or break?
             }
         }
-        pushFinal(state.get());
+        pushFinal(state.get(), !state->cancelRequested.load(std::memory_order_acquire));
     }
 }
 
@@ -510,8 +575,30 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
 
 #if __EMSCRIPTEN__
 
-inline void runHttpGetEmscriptenImpl(ReaderState* state) {
+namespace detail {
+// Emscripten fetch stores only raw `void* userData`.
+// These context objects keep ReaderState safe even if the user drops Reader before completion.
+struct ReaderFetchContext {
+    std::weak_ptr<ReaderState>          weakState;
+    std::shared_ptr<ReaderFetchContext> keepAlive;
+};
+
+inline void releaseReaderFetchContext(ReaderFetchContext* context) {
+    if (context != nullptr) {
+        context->weakState.reset();
+        context->keepAlive.reset();
+    }
+}
+} // namespace detail
+
+inline void runHttpGetEmscriptenImpl(detail::ReaderFetchContext* context) {
+    if (context == nullptr) {
+        return;
+    }
+
+    auto state = context->weakState.lock();
     if (state == nullptr) {
+        detail::releaseReaderFetchContext(context);
         return;
     }
 
@@ -519,7 +606,7 @@ inline void runHttpGetEmscriptenImpl(ReaderState* state) {
     emscripten_fetch_attr_init(&attr);
     std::strcpy(attr.requestMethod, "GET");
     attr.attributes   = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.userData     = state;
+    attr.userData     = context;
     attr.timeoutMSecs = 0; // non-zero currently causes immediate onerror
 
     std::vector<const char*> headers;
@@ -536,53 +623,71 @@ inline void runHttpGetEmscriptenImpl(ReaderState* state) {
     }
 
     attr.onsuccess = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<ReaderState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<detail::ReaderFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->weakState.lock() : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            detail::releaseReaderFetchContext(ctx);
             return;
         }
 
+        auto*      st          = stateShared.get();
         const bool longPolling = st->config.longPolling;
 
-        if (!st->cancelRequested.load(std::memory_order_acquire) && fetch->data && fetch->numBytes > 0) {
+        if (!st->cancelRequested.load(std::memory_order_acquire) && fetch->data != nullptr && fetch->numBytes > 0) {
             pushData(st, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(fetch->data), static_cast<std::size_t>(fetch->numBytes)));
         }
 
         if (!longPolling || st->cancelRequested.load(std::memory_order_acquire)) {
-            pushFinal(st);
+            pushFinal(st, !st->cancelRequested.load(std::memory_order_acquire));
             emscripten_fetch_close(fetch);
+            detail::releaseReaderFetchContext(ctx);
         } else {
             emscripten_fetch_close(fetch);
-            runHttpGetEmscriptenImpl(st);
+            runHttpGetEmscriptenImpl(ctx);
         }
     };
 
     attr.onerror = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<ReaderState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<detail::ReaderFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->weakState.lock() : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            detail::releaseReaderFetchContext(ctx);
             return;
         }
 
+        auto* st = stateShared.get();
         if (st->cancelRequested.load(std::memory_order_acquire)) {
-            pushError(st, std::format("fetch error (status {}). Cancelled by a user", fetch ? fetch->status : -1));
+            pushError(st, std::format("fetch error (status {}). Cancelled by a user", fetch != nullptr ? fetch->status : -1));
         } else {
-            pushError(st, std::format("fetch error (status {})", fetch ? fetch->status : -1));
+            pushError(st, std::format("fetch error (status {})", fetch != nullptr ? fetch->status : -1));
         }
-        pushFinal(st);
+        pushFinal(st, false);
         emscripten_fetch_close(fetch);
+        detail::releaseReaderFetchContext(ctx);
     };
 
     // clang-format off
     int hasFetch = EM_ASM_INT({ return (typeof globalThis.fetch === 'function') ? 1 : 0; });
     // clang-format on
     if (hasFetch == 0) {
-        pushErrorFinal(state, "fetch is not available on this JS context");
+        if (auto currentState = context->weakState.lock(); currentState != nullptr) {
+            pushErrorFinal(currentState.get(), "fetch is not available on this JS context");
+        }
+        detail::releaseReaderFetchContext(context);
         return;
     }
     emscripten_fetch_t* tmpFetch = emscripten_fetch(&attr, state->uri.c_str());
     if (tmpFetch == nullptr) {
-        pushErrorFinal(state, "emscripten_fetch returned null emscripten_fetch_t");
+        if (auto currentState = context->weakState.lock(); currentState != nullptr) {
+            pushErrorFinal(currentState.get(), "emscripten_fetch returned null emscripten_fetch_t");
+        }
+        detail::releaseReaderFetchContext(context);
         return;
     }
 }
@@ -592,95 +697,133 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
     if (state == nullptr) {
         return;
     }
+    auto context       = std::make_shared<detail::ReaderFetchContext>();
+    context->weakState = state;
+    context->keepAlive = context;
     if constexpr (runOnMainThread) {
         if (emscripten_is_main_runtime_thread()) {
-            runHttpGetEmscriptenImpl(state.get());
+            runHttpGetEmscriptenImpl(context.get());
         } else {
             emscripten_async_run_in_main_runtime_thread(
                 EM_FUNC_SIG_IP,
-                +[](void* st) {
-                    runHttpGetEmscriptenImpl(static_cast<ReaderState*>(st));
+                +[](void* ctx) {
+                    runHttpGetEmscriptenImpl(static_cast<detail::ReaderFetchContext*>(ctx));
                     return 0;
                 },
-                state.get());
+                context.get());
         }
     } else {
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpGetEmscriptenImpl(state.get()); });
+        gr::thread_pool::Manager::defaultIoPool()->execute([ctx = context.get()]() mutable { runHttpGetEmscriptenImpl(ctx); });
     }
 }
 
 #endif
 
-// Note for Emscripten: The returned `Reader` must remain alive until the underlying request has completed (final message received)
-// or has been cancelled and fully processed.
+// Lifetime note:
+// - For HTTP(S) Readers under Emscripten, dropping the returned `Reader` is memory-safe; pending HTTP callbacks
+//   stop publishing new data/final events once the Reader state expires.
+// - For `dialog:/` Readers, the caller must keep the returned `Reader` alive until the registered
+//   DialogOpenCallback completes with exactly one terminal callback: completeWithMemory(...), completeWithFile(...), or fail(...).
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::string_view uri, ReaderConfig config = {}) {
-    if (detail::isDialogUri(uri)) {
+    detail::normalizeReaderConfig(config);
+    const auto uriKind = detail::classifyUri(uri);
+
+    if (uriKind == detail::UriKind::DialogUri) {
         auto& dialogCallback = detail::dialogOpenCallback();
         if (!dialogCallback) {
             return std::unexpected(gr::Error{"dialog:/open used but no DialogOpenCallback registered"});
         }
 
-        auto state = std::make_shared<ReaderState>(std::string(uri), config);
+        auto                       state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
+        std::weak_ptr<ReaderState> weakState{state};
 
         state->dialogHandle      = std::make_unique<DialogOpenHandle>();
         DialogOpenHandle& handle = *state->dialogHandle;
 
-        handle.completeWithMemory = [state](std::span<const std::uint8_t> bytes) { runReadMemorySource(state, bytes); };
-        handle.completeWithFile   = [state](std::string path) {
-            if (state != nullptr) {
-                state->uri = std::move(path);
-                gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
+        handle.completeWithMemory = [weakState](std::span<const std::uint8_t> bytes) {
+            if (auto st = weakState.lock()) {
+                runReadMemorySource(st, bytes);
             }
         };
-        handle.fail = [state](std::string_view msg) { pushErrorFinal(state.get(), msg); };
+        handle.completeWithFile = [weakState](std::string path) {
+            if (auto st = weakState.lock()) {
+                st->uri = std::move(path);
+                gr::thread_pool::Manager::defaultIoPool()->execute([st = std::move(st)]() mutable { runReadLocalFile(st); });
+            }
+        };
+        handle.fail = [weakState](std::string_view msg) {
+            if (auto st = weakState.lock()) {
+                pushErrorFinal(st.get(), msg);
+            }
+        };
 
         dialogCallback(handle);
         return Reader{state};
     }
 
 #if __EMSCRIPTEN__
-    if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<ReaderState>(newPath.value(), config);
+        auto state = std::make_shared<ReaderState>(pathExp.value(), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
-    } else if (detail::isHttpUri(uri)) {
-        auto state = std::make_shared<ReaderState>(std::string(uri), config);
+    } else if (uriKind == detail::UriKind::HttpUri) {
+        auto state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
         runHttpGetEmscripten(state);
         return Reader{state};
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for readAsync(): {}", uri)});
     }
 #else
-    if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<ReaderState>(newPath.value(), config);
+        auto state = std::make_shared<ReaderState>(pathExp.value(), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
-    } else if (detail::isHttpUri(uri)) {
+    } else if (uriKind == detail::UriKind::HttpUri) {
 #if GR_HTTP_ENABLED
-        auto state = std::make_shared<ReaderState>(std::string(uri), config);
+        auto state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpGetNative(state); });
         return Reader{state};
 #else
         return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
 #endif
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for readAsync(): {}", uri)});
     }
 #endif
 }
 
+namespace detail {
+[[nodiscard]] inline std::size_t requiredMemoryReadSlots(const std::size_t totalBytes, const ReaderConfig& config) noexcept {
+    const std::size_t offset = config.offset.value_or(0);
+    if (offset >= totalBytes) {
+        return 1uz; // final only
+    }
+    const std::size_t chunk     = std::max<std::size_t>(1, config.chunkBytes);
+    const std::size_t effective = totalBytes - offset;
+    const std::size_t dataSlots = (effective / chunk) + ((effective % chunk) != 0 ? 1uz : 0uz);
+    return dataSlots + 1uz; // + final
+}
+} // namespace detail
+
 // Note: For in-memory Readers, all data and the final message are pushed synchronously inside readAsync(). There is no ongoing background
 // work after readAsync() returns; cancel() has no effect in this case.
+// If bufferMinSize cannot hold all produced data chunks plus the final message, readAsync returns an error instead of blocking.
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::span<const std::uint8_t> data, ReaderConfig config = {}, std::string_view logicalUri = "<memory>") {
-    auto state = std::make_shared<ReaderState>(std::string(logicalUri), config);
+    detail::normalizeReaderConfig(config);
+
+    if (const std::size_t requiredSlots = detail::requiredMemoryReadSlots(data.size(), config); requiredSlots > config.bufferMinSize) {
+        return std::unexpected(gr::Error{std::format("Failed to readAsync: bufferMinSize ({}) too small, requires at least {} slots", config.bufferMinSize, requiredSlots)});
+    }
+
+    auto state = std::make_shared<ReaderState>(std::string(logicalUri), std::move(config));
     runReadMemorySource(state, data); // write all data directly to CircularBuffer, no extra copy
     return Reader{state};
 }
@@ -725,7 +868,7 @@ struct WriterState {
 #ifndef NDEBUG
     ~WriterState() {
         if (!done.load(std::memory_order_acquire)) {
-            std::puts("ReaderState destroyed without final message");
+            std::puts("WriterState destroyed without final message");
         }
     }
 #endif
@@ -882,8 +1025,28 @@ struct Writer {
 #if __EMSCRIPTEN__
 namespace detail {
 
-inline void runHttpPostEmscriptenImpl(WriterState* state) {
+// Emscripten fetch stores only raw `void* userData`.
+// These context objects keep WriterState safe even if the user drops Writer before completion.
+struct WriterFetchContext {
+    std::shared_ptr<WriterState>        state;
+    std::shared_ptr<WriterFetchContext> keepAlive;
+};
+
+inline void releaseWriterFetchContext(WriterFetchContext* context) {
+    if (context != nullptr) {
+        context->state.reset();
+        context->keepAlive.reset();
+    }
+}
+
+inline void runHttpPostEmscriptenImpl(WriterFetchContext* context) {
+    if (context == nullptr) {
+        return;
+    }
+
+    auto state = context->state;
     if (state == nullptr) {
+        releaseWriterFetchContext(context);
         return;
     }
 
@@ -892,7 +1055,7 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
     std::strcpy(attr.requestMethod, "POST");
     attr.attributes   = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
     attr.timeoutMSecs = 0; // non-zero currently causes immediate onerror in our tests
-    attr.userData     = state;
+    attr.userData     = context;
 
     std::vector<const char*> headers;
     if (!state->config.httpHeaders.empty()) {
@@ -911,12 +1074,17 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
     attr.requestDataSize = state->data.size();
 
     attr.onsuccess = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<WriterState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<WriterFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->state : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            releaseWriterFetchContext(ctx);
             return;
         }
-        int status = fetch != nullptr ? fetch->status : -1;
+        auto* st     = stateShared.get();
+        int   status = fetch != nullptr ? fetch->status : -1;
 
         std::expected<WriteResult, gr::Error> r;
         if (status < 200 || status >= 400) {
@@ -924,7 +1092,7 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
         } else {
             WriteResult res;
             res.httpStatus = status;
-            if (fetch && fetch->data && fetch->numBytes > 0) {
+            if (fetch != nullptr && fetch->data != nullptr && fetch->numBytes > 0) {
                 res.httpResponseBody.assign(fetch->data, fetch->data + fetch->numBytes);
             }
             r = std::move(res);
@@ -936,17 +1104,22 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
 
         st->setResult(std::move(r));
         emscripten_fetch_close(fetch);
+        releaseWriterFetchContext(ctx);
     };
 
     attr.onerror = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<WriterState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<WriterFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->state : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            releaseWriterFetchContext(ctx);
             return;
         }
-
-        int  status = fetch != nullptr ? fetch->status : -1;
-        auto r      = std::unexpected(gr::Error{std::format("httpUploadPost (WASM): fetch error, status {}", status)});
+        auto* st     = stateShared.get();
+        int   status = fetch != nullptr ? fetch->status : -1;
+        auto  r      = std::unexpected(gr::Error{std::format("httpUploadPost (WASM): fetch error, status {}", status)});
 
         if (st->cancelRequested.load(std::memory_order_acquire)) {
             r = std::unexpected(gr::Error{"writeAsync: cancelled by user"});
@@ -954,44 +1127,55 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
 
         st->setResult(std::move(r));
         emscripten_fetch_close(fetch);
+        releaseWriterFetchContext(ctx);
     };
 
     // clang-format off
     int hasFetch = EM_ASM_INT({ return (typeof globalThis.fetch === 'function') ? 1 : 0; });
     // clang-format on
-    if (!hasFetch) {
-        auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): fetch is not available in this JS context"});
-        state->setResult(std::move(r));
+    if (hasFetch == 0) {
+        if (context->state != nullptr) {
+            auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): fetch is not available in this JS context"});
+            context->state->setResult(std::move(r));
+        }
+        releaseWriterFetchContext(context);
         return;
     }
 
     emscripten_fetch_t* tmpFetch = emscripten_fetch(&attr, state->uri.c_str());
-    if (!tmpFetch) {
-        auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): emscripten_fetch returned null emscripten_fetch_t"});
-        state->setResult(std::move(r));
+    if (tmpFetch == nullptr) {
+        if (context->state != nullptr) {
+            auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): emscripten_fetch returned null emscripten_fetch_t"});
+            context->state->setResult(std::move(r));
+        }
+        releaseWriterFetchContext(context);
+        return;
     }
 }
 
 template<bool runOnMainThread = true>
 inline void runHttpPostEmscripten(std::shared_ptr<WriterState> state) {
-    if (!state) {
+    if (state == nullptr) {
         return;
     }
+    auto context       = std::make_shared<WriterFetchContext>();
+    context->state     = std::move(state);
+    context->keepAlive = context;
 
     if constexpr (runOnMainThread) {
         if (emscripten_is_main_runtime_thread()) {
-            runHttpPostEmscriptenImpl(state.get());
+            runHttpPostEmscriptenImpl(context.get());
         } else {
             emscripten_async_run_in_main_runtime_thread(
                 EM_FUNC_SIG_IP,
-                +[](void* st) {
-                    runHttpPostEmscriptenImpl(static_cast<WriterState*>(st));
+                +[](void* ctx) {
+                    runHttpPostEmscriptenImpl(static_cast<WriterFetchContext*>(ctx));
                     return 0;
                 },
-                state.get());
+                context.get());
         }
     } else {
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpPostEmscriptenImpl(state.get()); });
+        gr::thread_pool::Manager::defaultIoPool()->execute([ctx = context.get()]() mutable { runHttpPostEmscriptenImpl(ctx); });
     }
 }
 
@@ -1069,9 +1253,10 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #endif // __EMSCRIPTEN__
 
 [[nodiscard]] inline std::expected<Writer, gr::Error> writeAsync(std::string_view uri, std::span<const std::uint8_t> data, const WriterConfig& config = {}) {
+    const auto uriKind = detail::classifyUri(uri);
 
 #if __EMSCRIPTEN__
-    if (detail::isHttpUri(uri)) {
+    if (uriKind == detail::UriKind::HttpUri) {
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
         }
@@ -1079,7 +1264,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         state->data.assign(data.begin(), data.end());
         detail::runHttpPostEmscripten(state);
         return Writer{state};
-    } else if (detail::isDownloadUri(uri)) {
+    } else if (uriKind == detail::UriKind::DownloadUri) {
         const auto filename = detail::stripDownloadUri(uri);
         if (!filename.has_value()) {
             return std::unexpected(filename.error());
@@ -1091,12 +1276,12 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         detail::runDownloadEmscripten(state);
         return Writer{state};
 
-    } else if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    } else if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<WriterState>(newPath.value(), config);
+        auto state = std::make_shared<WriterState>(pathExp.value(), config);
         state->data.assign(data.begin(), data.end());
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
             auto r = runWriteLocalFile(state);
@@ -1107,11 +1292,11 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         });
         return Writer{state};
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for writeAsync(): {}", uri)});
     }
 #else
 
-    if (detail::isHttpUri(uri)) {
+    if (uriKind == detail::UriKind::HttpUri) {
 #if GR_HTTP_ENABLED
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
@@ -1126,7 +1311,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #else
         return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
 #endif
-    } else if (detail::isDownloadUri(uri)) {
+    } else if (uriKind == detail::UriKind::DownloadUri) {
         const auto filenameExp = detail::stripDownloadUri(uri);
         if (!filenameExp.has_value()) {
             return std::unexpected(filenameExp.error());
@@ -1145,12 +1330,12 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         });
         return Writer{state};
 
-    } else if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    } else if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<WriterState>(newPath.value(), config);
+        auto state = std::make_shared<WriterState>(pathExp.value(), config);
         state->data.assign(data.begin(), data.end());
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
             auto r = runWriteLocalFile(state);
@@ -1161,7 +1346,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         });
         return Writer{state};
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for writeAsync(): {}", uri)});
     }
 #endif
 }
