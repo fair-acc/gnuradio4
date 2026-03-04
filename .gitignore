@@ -58,3 +58,6 @@ emscripten-toolchain.ini
 node_modules/
 package.json
 package-lock.json
+.nvmrc
+
+.devcontainer/
