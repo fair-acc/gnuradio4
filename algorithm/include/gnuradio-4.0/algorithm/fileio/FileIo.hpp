@@ -611,8 +611,11 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
 
 #endif
 
-// Note for Emscripten: The returned `Reader` must remain alive until the underlying request has completed (final message received)
-// or has been cancelled and fully processed.
+// Lifetime note:
+// - For HTTP(S) Readers under Emscripten, dropping the returned `Reader` is memory-safe; pending HTTP callbacks
+//   stop publishing new data/final events once the Reader state expires.
+// - For `dialog:/` Readers, the caller must keep the returned `Reader` alive until the registered
+//   DialogOpenCallback completes with exactly one terminal callback: completeWithMemory(...), completeWithFile(...), or fail(...).
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::string_view uri, ReaderConfig config = {}) {
     if (detail::isDialogUri(uri)) {
         auto& dialogCallback = detail::dialogOpenCallback();
@@ -620,19 +623,28 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
             return std::unexpected(gr::Error{"dialog:/open used but no DialogOpenCallback registered"});
         }
 
-        auto state = std::make_shared<ReaderState>(std::string(uri), config);
+        auto                       state = std::make_shared<ReaderState>(std::string(uri), config);
+        std::weak_ptr<ReaderState> weakState{state};
 
         state->dialogHandle      = std::make_unique<DialogOpenHandle>();
         DialogOpenHandle& handle = *state->dialogHandle;
 
-        handle.completeWithMemory = [state](std::span<const std::uint8_t> bytes) { runReadMemorySource(state, bytes); };
-        handle.completeWithFile   = [state](std::string path) {
-            if (state != nullptr) {
-                state->uri = std::move(path);
-                gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
+        handle.completeWithMemory = [weakState](std::span<const std::uint8_t> bytes) {
+            if (auto st = weakState.lock()) {
+                runReadMemorySource(st, bytes);
             }
         };
-        handle.fail = [state](std::string_view msg) { pushErrorFinal(state.get(), msg); };
+        handle.completeWithFile = [weakState](std::string path) {
+            if (auto st = weakState.lock()) {
+                st->uri = std::move(path);
+                gr::thread_pool::Manager::defaultIoPool()->execute([st = std::move(st)]() mutable { runReadLocalFile(st); });
+            }
+        };
+        handle.fail = [weakState](std::string_view msg) {
+            if (auto st = weakState.lock()) {
+                pushErrorFinal(st.get(), msg);
+            }
+        };
 
         dialogCallback(handle);
         return Reader{state};
