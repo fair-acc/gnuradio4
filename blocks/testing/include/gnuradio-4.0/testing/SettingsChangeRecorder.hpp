@@ -8,7 +8,7 @@ namespace gr::testing {
 
 namespace utils {
 
-std::string format_variant(const auto& value) noexcept {
+inline std::string format_variant(const auto& value) noexcept {
     std::string result;
     pmt::ValueVisitor([&result](auto& arg) {
         using Type = std::decay_t<decltype(arg)>;
@@ -27,7 +27,7 @@ std::string format_variant(const auto& value) noexcept {
     return result;
 }
 
-void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
+inline void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
     for (const auto& [key, newValue] : newMap) {
         if (!oldMap.contains(key)) {
             std::print("    key added '{}` = {}\n", std::string_view(key), format_variant(newValue));
