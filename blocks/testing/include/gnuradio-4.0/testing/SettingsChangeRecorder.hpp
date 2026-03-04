@@ -27,7 +27,7 @@ std::string format_variant(const auto& value) noexcept {
         value);
 }
 
-void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
+inline void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
     for (const auto& [key, newValue] : newMap) {
         if (!oldMap.contains(key)) {
             std::print("    key added '{}` = {}\n", key, format_variant(newValue));

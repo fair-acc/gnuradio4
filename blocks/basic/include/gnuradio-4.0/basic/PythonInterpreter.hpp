@@ -378,9 +378,9 @@ public:
     }
 };
 
-std::atomic<std::size_t> Interpreter::_nInterpreters{0UZ};
-std::atomic<std::size_t> Interpreter::_nNumPyInit{0UZ};
-PyThreadState*           Interpreter::_interpreterThreadState = nullptr;
+inline std::atomic<std::size_t> Interpreter::_nInterpreters{0UZ};
+inline std::atomic<std::size_t> Interpreter::_nNumPyInit{0UZ};
+inline PyThreadState*           Interpreter::_interpreterThreadState = nullptr;
 
 } // namespace gr::python
 

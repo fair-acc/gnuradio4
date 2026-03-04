@@ -1,3 +1,6 @@
+#ifndef QA_FILEIO_COMMON_HPP
+#define QA_FILEIO_COMMON_HPP
+
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/fileio/BasicFileIo.hpp>
@@ -7,10 +10,12 @@
 
 #include <format>
 
-namespace {
+namespace gr::blocks::fileio::qa {
+
 using namespace std::chrono_literals;
+
 template<typename Scheduler>
-auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::chrono::milliseconds pollingPeriod = 40ms) {
+inline auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::chrono::milliseconds pollingPeriod = 40ms) {
     auto externalInterventionNeeded = std::make_shared<std::atomic_bool>(false);
 
     std::thread watchdogThread([&sched, externalInterventionNeeded, timeOut, pollingPeriod]() {
@@ -31,7 +36,7 @@ auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::ch
 }
 
 template<typename DataType>
-void runTest(const gr::blocks::fileio::Mode mode) {
+inline void runTest(const gr::blocks::fileio::Mode mode) {
     using namespace boost::ut;
     using namespace gr::blocks::fileio;
     using namespace gr::testing;
@@ -83,7 +88,6 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         }
     };
 
-    // N.B. test directory contains the output files from the previous sink test
     "BasicFileSource"_test = [&] { // NOSONAR capture all
         std::string testCaseName = std::format("BasicFileSource: failed for type '{}' and '{}", gr::meta::type_name<DataType>(), modeName);
         gr::Graph   flow;
@@ -107,7 +111,6 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         expect(eq(fileSource._totalBytesRead, nSamples * sizeof(DataType))) << testCaseName;
     };
 
-    // Test for `offset` and `length` parameters
     "BasicFileSource with offset and length"_test = [&] { // NOSONAR capture all
         constexpr gr::Size_t offsetSamples = 8U;
         constexpr gr::Size_t lengthSamples = 8U;
@@ -138,21 +141,6 @@ void runTest(const gr::blocks::fileio::Mode mode) {
     expect(!gr::blocks::fileio::detail::deleteFilesContaining(fileName).empty());
 }
 
-} // anonymous namespace
+} // namespace gr::blocks::fileio::qa
 
-const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
-    using namespace std::chrono_literals;
-    using namespace boost::ut;
-    using namespace gr;
-
-    constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double>>();
-
-    using enum gr::blocks::fileio::Mode;
-    "overwrite mode"_test = []<typename T>(const T&) { runTest<T>(overwrite); } | kArithmeticTypes;
-
-    "append mode"_test = []<typename T>(const T&) { runTest<T>(append); } | kArithmeticTypes;
-
-    "create new mode"_test = []<typename T>(const T&) { runTest<T>(multi); } | kArithmeticTypes;
-};
-
-int main() { /* not needed for UT */ }
+#endif // QA_FILEIO_COMMON_HPP
