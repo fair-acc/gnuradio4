@@ -848,6 +848,17 @@ const boost::ut::suite<"FileIO Memory Source tests"> fileIoMemorySourceTests = [
         }
         std::println("FileIO - Memory source end");
     };
+
+    "FileIO - Memory source insufficient buffer returns error"_test = [&] {
+        std::string expectedString = createTestString().substr(0, 33);
+        fileio::ReaderConfig config;
+        config.chunkBytes    = 11uz;
+        config.bufferMinSize = 3uz; // requires 4 slots
+
+        std::vector<std::uint8_t> bytes(expectedString.begin(), expectedString.end());
+        auto                      readerExp = fileio::readAsync(std::span<const std::uint8_t>(bytes.data(), bytes.size()), config, "<memory:small-buffer>");
+        expect(!readerExp.has_value());
+    };
 };
 
 const boost::ut::suite<"FileIO error tests"> fileIoErrorTests = [] {

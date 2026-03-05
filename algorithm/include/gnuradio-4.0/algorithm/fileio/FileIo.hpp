@@ -733,9 +733,27 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
 #endif
 }
 
+namespace detail {
+[[nodiscard]] inline std::size_t requiredMemoryReadSlots(const std::size_t totalBytes, const ReaderConfig& config) noexcept {
+    const std::size_t offset = config.offset.value_or(0);
+    if (offset >= totalBytes) {
+        return 1uz; // final only
+    }
+    const std::size_t chunk     = std::max<std::size_t>(1, config.chunkBytes);
+    const std::size_t effective = totalBytes - offset;
+    const std::size_t dataSlots = (effective / chunk) + ((effective % chunk) != 0 ? 1uz : 0uz);
+    return dataSlots + 1uz; // + final
+}
+} // namespace detail
+
 // Note: For in-memory Readers, all data and the final message are pushed synchronously inside readAsync(). There is no ongoing background
 // work after readAsync() returns; cancel() has no effect in this case.
+// If bufferMinSize cannot hold all produced data chunks plus the final message, readAsync returns an error instead of blocking.
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::span<const std::uint8_t> data, ReaderConfig config = {}, std::string_view logicalUri = "<memory>") {
+    if (const std::size_t requiredSlots = detail::requiredMemoryReadSlots(data.size(), config); requiredSlots > config.bufferMinSize) {
+        return std::unexpected(gr::Error{std::format("Failed to readAsync: bufferMinSize ({}) too small, requires at least {} slots", config.bufferMinSize, requiredSlots)});
+    }
+
     auto state = std::make_shared<ReaderState>(std::string(logicalUri), config);
     runReadMemorySource(state, data); // write all data directly to CircularBuffer, no extra copy
     return Reader{state};
