@@ -123,7 +123,7 @@ class PythonBlockWrapper: ## helper class to make the C++ class appear as a Pyth
         {0}.setSettings(self.capsule, settings)
 
 this_block = PythonBlockWrapper(capsule))p",
-        _moduleDefinitions->m_name);
+                _moduleDefinitions->m_name);
     poc_property_map    _settingsMap{{"key1", "value1"}, {"key2", "value2"}};
     bool                _tagAvailable = false;
     tag_type            _tag          = "Simulated Tag";
