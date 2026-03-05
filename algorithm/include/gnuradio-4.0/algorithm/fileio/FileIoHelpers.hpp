@@ -97,7 +97,7 @@ namespace detail {
 [[nodiscard]] inline bool isDialogUri([[maybe_unused]] std::string_view uri) { return ciEquals(schemeOf(uri), "dialog"); }
 
 [[nodiscard]] inline std::expected<std::string, gr::Error> stripDownloadUri(std::string_view uri) {
-    if (!isDownloadUri(uri) || !isDownloadUri(uri)) {
+    if (!isDownloadUri(uri)) {
         return std::unexpected(gr::Error{std::format("Not a browser download URI:{}", uri)});
     }
     return std::string(uri.substr(std::string_view("download:/").size()));

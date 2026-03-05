@@ -133,7 +133,7 @@ struct ReaderState {
 
     std::atomic<std::size_t> updateCounter{0};
     std::atomic<bool>        cancelRequested{false};
-    std::atomic<bool>        finalPublished{false}; // mostly for debugging
+    std::atomic<bool>        finalPublished{false};
 
     std::unique_ptr<DialogOpenHandle> dialogHandle; // Present only for dialog:/ readers
 
@@ -190,13 +190,16 @@ public:
 #endif
 
         while (true) {
+            auto expected = _state->updateCounter.load(std::memory_order_acquire);
             if (_state->bufferReader.available() > 0) {
                 return;
             }
             if (_state->cancelRequested.load(std::memory_order_acquire)) {
                 return;
             }
-            auto expected = _state->updateCounter.load(std::memory_order_acquire);
+            if (_state->finalPublished.load(std::memory_order_acquire)) {
+                return;
+            }
             _state->updateCounter.wait(expected, std::memory_order_acquire);
         }
     }
