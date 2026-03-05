@@ -784,6 +784,38 @@ const boost::ut::suite<"FileIO Emscripten tests"> fileIoEmscriptenTests = [] {
         std::println("FileIO - Emscripten writer http POST - error end");
     };
 
+    "FileIO - Emscripten reader http immediate handle destruction"_test = [&] {
+        std::println("FileIO - Emscripten reader immediate handle destruction begin");
+
+        for (std::size_t i = 0; i < 8; i++) {
+            auto readerExp = readAsyncEmscriptenHttpWorkerThread("http://127.0.0.1:8080/getNumbers", fileio::ReaderConfig{});
+            expect(readerExp.has_value());
+            if (readerExp.has_value()) {
+                // Intentionally drop Reader immediately after starting async request.
+                [[maybe_unused]] auto reader = std::move(readerExp.value());
+            }
+        }
+        std::this_thread::sleep_for(2000ms);
+        std::println("FileIO - Emscripten reader immediate handle destruction end");
+    };
+
+    "FileIO - Emscripten writer http immediate handle destruction"_test = [&] {
+        std::println("FileIO - Emscripten writer immediate handle destruction begin");
+
+        std::string               body = createTestString();
+        std::vector<std::uint8_t> bytes(body.begin(), body.end());
+        for (std::size_t i = 0; i < 8; i++) {
+            auto writerExp = writeAsyncEmscriptenHttpWorkerThread("http://127.0.0.1:8080/postNumbers", bytes, fileio::WriterConfig{});
+            expect(writerExp.has_value());
+            if (writerExp.has_value()) {
+                // Intentionally drop Writer immediately after starting async request.
+                [[maybe_unused]] auto writer = std::move(writerExp.value());
+            }
+        }
+        std::this_thread::sleep_for(2000ms);
+        std::println("FileIO - Emscripten writer immediate handle destruction end");
+    };
+
     emscripten_run_script("stopServer();");
     if (serverThread.joinable()) {
         serverThread.join();

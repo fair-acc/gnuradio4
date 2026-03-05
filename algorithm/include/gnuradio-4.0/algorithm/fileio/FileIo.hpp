@@ -17,6 +17,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <print>
 #include <span>
@@ -510,8 +511,30 @@ inline void runHttpGetNative(std::shared_ptr<ReaderState> state) {
 
 #if __EMSCRIPTEN__
 
-inline void runHttpGetEmscriptenImpl(ReaderState* state) {
+namespace detail {
+// Emscripten fetch stores only raw `void* userData`.
+// These context objects keep ReaderState safe even if the user drops Reader before completion.
+struct ReaderFetchContext {
+    std::weak_ptr<ReaderState>          weakState;
+    std::shared_ptr<ReaderFetchContext> keepAlive;
+};
+
+inline void releaseReaderFetchContext(ReaderFetchContext* context) {
+    if (context != nullptr) {
+        context->weakState.reset();
+        context->keepAlive.reset();
+    }
+}
+} // namespace detail
+
+inline void runHttpGetEmscriptenImpl(detail::ReaderFetchContext* context) {
+    if (context == nullptr) {
+        return;
+    }
+
+    auto state = context->weakState.lock();
     if (state == nullptr) {
+        detail::releaseReaderFetchContext(context);
         return;
     }
 
@@ -519,7 +542,7 @@ inline void runHttpGetEmscriptenImpl(ReaderState* state) {
     emscripten_fetch_attr_init(&attr);
     std::strcpy(attr.requestMethod, "GET");
     attr.attributes   = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.userData     = state;
+    attr.userData     = context;
     attr.timeoutMSecs = 0; // non-zero currently causes immediate onerror
 
     std::vector<const char*> headers;
@@ -536,53 +559,71 @@ inline void runHttpGetEmscriptenImpl(ReaderState* state) {
     }
 
     attr.onsuccess = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<ReaderState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<detail::ReaderFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->weakState.lock() : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            detail::releaseReaderFetchContext(ctx);
             return;
         }
 
+        auto*      st          = stateShared.get();
         const bool longPolling = st->config.longPolling;
 
-        if (!st->cancelRequested.load(std::memory_order_acquire) && fetch->data && fetch->numBytes > 0) {
+        if (!st->cancelRequested.load(std::memory_order_acquire) && fetch->data != nullptr && fetch->numBytes > 0) {
             pushData(st, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(fetch->data), static_cast<std::size_t>(fetch->numBytes)));
         }
 
         if (!longPolling || st->cancelRequested.load(std::memory_order_acquire)) {
             pushFinal(st);
             emscripten_fetch_close(fetch);
+            detail::releaseReaderFetchContext(ctx);
         } else {
             emscripten_fetch_close(fetch);
-            runHttpGetEmscriptenImpl(st);
+            runHttpGetEmscriptenImpl(ctx);
         }
     };
 
     attr.onerror = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<ReaderState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<detail::ReaderFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->weakState.lock() : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            detail::releaseReaderFetchContext(ctx);
             return;
         }
 
+        auto* st = stateShared.get();
         if (st->cancelRequested.load(std::memory_order_acquire)) {
-            pushError(st, std::format("fetch error (status {}). Cancelled by a user", fetch ? fetch->status : -1));
+            pushError(st, std::format("fetch error (status {}). Cancelled by a user", fetch != nullptr ? fetch->status : -1));
         } else {
-            pushError(st, std::format("fetch error (status {})", fetch ? fetch->status : -1));
+            pushError(st, std::format("fetch error (status {})", fetch != nullptr ? fetch->status : -1));
         }
         pushFinal(st);
         emscripten_fetch_close(fetch);
+        detail::releaseReaderFetchContext(ctx);
     };
 
     // clang-format off
     int hasFetch = EM_ASM_INT({ return (typeof globalThis.fetch === 'function') ? 1 : 0; });
     // clang-format on
     if (hasFetch == 0) {
-        pushErrorFinal(state, "fetch is not available on this JS context");
+        if (auto currentState = context->weakState.lock(); currentState != nullptr) {
+            pushErrorFinal(currentState.get(), "fetch is not available on this JS context");
+        }
+        detail::releaseReaderFetchContext(context);
         return;
     }
     emscripten_fetch_t* tmpFetch = emscripten_fetch(&attr, state->uri.c_str());
     if (tmpFetch == nullptr) {
-        pushErrorFinal(state, "emscripten_fetch returned null emscripten_fetch_t");
+        if (auto currentState = context->weakState.lock(); currentState != nullptr) {
+            pushErrorFinal(currentState.get(), "emscripten_fetch returned null emscripten_fetch_t");
+        }
+        detail::releaseReaderFetchContext(context);
         return;
     }
 }
@@ -592,20 +633,23 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
     if (state == nullptr) {
         return;
     }
+    auto context       = std::make_shared<detail::ReaderFetchContext>();
+    context->weakState = state;
+    context->keepAlive = context;
     if constexpr (runOnMainThread) {
         if (emscripten_is_main_runtime_thread()) {
-            runHttpGetEmscriptenImpl(state.get());
+            runHttpGetEmscriptenImpl(context.get());
         } else {
             emscripten_async_run_in_main_runtime_thread(
                 EM_FUNC_SIG_IP,
-                +[](void* st) {
-                    runHttpGetEmscriptenImpl(static_cast<ReaderState*>(st));
+                +[](void* ctx) {
+                    runHttpGetEmscriptenImpl(static_cast<detail::ReaderFetchContext*>(ctx));
                     return 0;
                 },
-                state.get());
+                context.get());
         }
     } else {
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpGetEmscriptenImpl(state.get()); });
+        gr::thread_pool::Manager::defaultIoPool()->execute([ctx = context.get()]() mutable { runHttpGetEmscriptenImpl(ctx); });
     }
 }
 
@@ -737,7 +781,7 @@ struct WriterState {
 #ifndef NDEBUG
     ~WriterState() {
         if (!done.load(std::memory_order_acquire)) {
-            std::puts("ReaderState destroyed without final message");
+            std::puts("WriterState destroyed without final message");
         }
     }
 #endif
@@ -894,8 +938,28 @@ struct Writer {
 #if __EMSCRIPTEN__
 namespace detail {
 
-inline void runHttpPostEmscriptenImpl(WriterState* state) {
+// Emscripten fetch stores only raw `void* userData`.
+// These context objects keep WriterState safe even if the user drops Writer before completion.
+struct WriterFetchContext {
+    std::shared_ptr<WriterState>        state;
+    std::shared_ptr<WriterFetchContext> keepAlive;
+};
+
+inline void releaseWriterFetchContext(WriterFetchContext* context) {
+    if (context != nullptr) {
+        context->state.reset();
+        context->keepAlive.reset();
+    }
+}
+
+inline void runHttpPostEmscriptenImpl(WriterFetchContext* context) {
+    if (context == nullptr) {
+        return;
+    }
+
+    auto state = context->state;
     if (state == nullptr) {
+        releaseWriterFetchContext(context);
         return;
     }
 
@@ -904,7 +968,7 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
     std::strcpy(attr.requestMethod, "POST");
     attr.attributes   = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
     attr.timeoutMSecs = 0; // non-zero currently causes immediate onerror in our tests
-    attr.userData     = state;
+    attr.userData     = context;
 
     std::vector<const char*> headers;
     if (!state->config.httpHeaders.empty()) {
@@ -923,12 +987,17 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
     attr.requestDataSize = state->data.size();
 
     attr.onsuccess = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<WriterState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<WriterFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->state : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            releaseWriterFetchContext(ctx);
             return;
         }
-        int status = fetch != nullptr ? fetch->status : -1;
+        auto* st     = stateShared.get();
+        int   status = fetch != nullptr ? fetch->status : -1;
 
         std::expected<WriteResult, gr::Error> r;
         if (status < 200 || status >= 400) {
@@ -936,7 +1005,7 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
         } else {
             WriteResult res;
             res.httpStatus = status;
-            if (fetch && fetch->data && fetch->numBytes > 0) {
+            if (fetch != nullptr && fetch->data != nullptr && fetch->numBytes > 0) {
                 res.httpResponseBody.assign(fetch->data, fetch->data + fetch->numBytes);
             }
             r = std::move(res);
@@ -948,17 +1017,22 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
 
         st->setResult(std::move(r));
         emscripten_fetch_close(fetch);
+        releaseWriterFetchContext(ctx);
     };
 
     attr.onerror = [](emscripten_fetch_t* fetch) {
-        auto* st = static_cast<WriterState*>(fetch->userData);
-        if (st == nullptr) {
-            emscripten_fetch_close(fetch);
+        auto* ctx         = fetch != nullptr ? static_cast<WriterFetchContext*>(fetch->userData) : nullptr;
+        auto  stateShared = ctx != nullptr ? ctx->state : nullptr;
+        if (ctx == nullptr || stateShared == nullptr) {
+            if (fetch != nullptr) {
+                emscripten_fetch_close(fetch);
+            }
+            releaseWriterFetchContext(ctx);
             return;
         }
-
-        int  status = fetch != nullptr ? fetch->status : -1;
-        auto r      = std::unexpected(gr::Error{std::format("httpUploadPost (WASM): fetch error, status {}", status)});
+        auto* st     = stateShared.get();
+        int   status = fetch != nullptr ? fetch->status : -1;
+        auto  r      = std::unexpected(gr::Error{std::format("httpUploadPost (WASM): fetch error, status {}", status)});
 
         if (st->cancelRequested.load(std::memory_order_acquire)) {
             r = std::unexpected(gr::Error{"writeAsync: cancelled by user"});
@@ -966,44 +1040,55 @@ inline void runHttpPostEmscriptenImpl(WriterState* state) {
 
         st->setResult(std::move(r));
         emscripten_fetch_close(fetch);
+        releaseWriterFetchContext(ctx);
     };
 
     // clang-format off
     int hasFetch = EM_ASM_INT({ return (typeof globalThis.fetch === 'function') ? 1 : 0; });
     // clang-format on
-    if (!hasFetch) {
-        auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): fetch is not available in this JS context"});
-        state->setResult(std::move(r));
+    if (hasFetch == 0) {
+        if (context->state != nullptr) {
+            auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): fetch is not available in this JS context"});
+            context->state->setResult(std::move(r));
+        }
+        releaseWriterFetchContext(context);
         return;
     }
 
     emscripten_fetch_t* tmpFetch = emscripten_fetch(&attr, state->uri.c_str());
-    if (!tmpFetch) {
-        auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): emscripten_fetch returned null emscripten_fetch_t"});
-        state->setResult(std::move(r));
+    if (tmpFetch == nullptr) {
+        if (context->state != nullptr) {
+            auto r = std::unexpected(gr::Error{"httpUploadPost (WASM): emscripten_fetch returned null emscripten_fetch_t"});
+            context->state->setResult(std::move(r));
+        }
+        releaseWriterFetchContext(context);
+        return;
     }
 }
 
 template<bool runOnMainThread = true>
 inline void runHttpPostEmscripten(std::shared_ptr<WriterState> state) {
-    if (!state) {
+    if (state == nullptr) {
         return;
     }
+    auto context       = std::make_shared<WriterFetchContext>();
+    context->state     = std::move(state);
+    context->keepAlive = context;
 
     if constexpr (runOnMainThread) {
         if (emscripten_is_main_runtime_thread()) {
-            runHttpPostEmscriptenImpl(state.get());
+            runHttpPostEmscriptenImpl(context.get());
         } else {
             emscripten_async_run_in_main_runtime_thread(
                 EM_FUNC_SIG_IP,
-                +[](void* st) {
-                    runHttpPostEmscriptenImpl(static_cast<WriterState*>(st));
+                +[](void* ctx) {
+                    runHttpPostEmscriptenImpl(static_cast<WriterFetchContext*>(ctx));
                     return 0;
                 },
-                state.get());
+                context.get());
         }
     } else {
-        gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpPostEmscriptenImpl(state.get()); });
+        gr::thread_pool::Manager::defaultIoPool()->execute([ctx = context.get()]() mutable { runHttpPostEmscriptenImpl(ctx); });
     }
 }
 
