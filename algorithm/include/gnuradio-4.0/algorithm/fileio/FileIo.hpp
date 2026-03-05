@@ -99,20 +99,29 @@ namespace gr::algorithm::fileio {
 // Read from file and http GET
 
 namespace detail {
-inline constexpr std::string_view kMessageDataKey = "data";
-}
+inline constexpr std::string_view kMessageDataKey      = "data";
+inline constexpr std::size_t      defaultMinBufferSize = 1024uz;
+} // namespace detail
 
 struct ReaderConfig {
     // Note about chunkBytes: When using Reader::poll(cb, maxSize, doWait) - the caller should ensure that chunkBytes <= maxSize; otherwise an error is returned,
     // and if that error is not handled correctly in cb, user code may end up in an infinite loop.
     std::size_t                        chunkBytes       = std::numeric_limits<std::size_t>::max();
     std::optional<std::size_t>         offset           = std::nullopt;
-    std::uint64_t                      httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
-    std::size_t                        bufferMinSize    = 1024;           // one gr::Message per slot
+    std::uint64_t                      httpTimeoutNanos = 30'000'000'000;               // 30 s time-out for http(s)
+    std::size_t                        bufferMinSize    = detail::defaultMinBufferSize; // one gr::Message per slot; 0 means "use defaultMinBufferSize"
     bool                               longPolling      = false;
     std::map<std::string, std::string> httpHeaders      = {};
     bool                               tlsVerifyPeer    = true; // for native https
 };
+
+namespace detail {
+inline void normalizeReaderConfig(ReaderConfig& config) noexcept {
+    if (config.bufferMinSize == 0uz) {
+        config.bufferMinSize = defaultMinBufferSize;
+    }
+}
+} // namespace detail
 
 struct ReaderState {
     std::string  uri;
@@ -129,7 +138,7 @@ struct ReaderState {
     std::unique_ptr<DialogOpenHandle> dialogHandle; // Present only for dialog:/ readers
 
     ReaderState(std::string uri_, ReaderConfig config_) //
-        : uri(std::move(uri_)), config(config_), buffer(config_.bufferMinSize), bufferWriter(buffer.new_writer()), bufferReader(buffer.new_reader()) {}
+        : uri(std::move(uri_)), config(std::move(config_)), buffer(config.bufferMinSize), bufferWriter(buffer.new_writer()), bufferReader(buffer.new_reader()) {}
 
 #ifndef NDEBUG
     ~ReaderState() {
@@ -661,13 +670,15 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
 // - For `dialog:/` Readers, the caller must keep the returned `Reader` alive until the registered
 //   DialogOpenCallback completes with exactly one terminal callback: completeWithMemory(...), completeWithFile(...), or fail(...).
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::string_view uri, ReaderConfig config = {}) {
+    detail::normalizeReaderConfig(config);
+
     if (detail::isDialogUri(uri)) {
         auto& dialogCallback = detail::dialogOpenCallback();
         if (!dialogCallback) {
             return std::unexpected(gr::Error{"dialog:/open used but no DialogOpenCallback registered"});
         }
 
-        auto                       state = std::make_shared<ReaderState>(std::string(uri), config);
+        auto                       state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
         std::weak_ptr<ReaderState> weakState{state};
 
         state->dialogHandle      = std::make_unique<DialogOpenHandle>();
@@ -700,11 +711,11 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
         if (!newPath.has_value()) {
             return std::unexpected(newPath.error());
         }
-        auto state = std::make_shared<ReaderState>(newPath.value(), config);
+        auto state = std::make_shared<ReaderState>(newPath.value(), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
     } else if (detail::isHttpUri(uri)) {
-        auto state = std::make_shared<ReaderState>(std::string(uri), config);
+        auto state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
         runHttpGetEmscripten(state);
         return Reader{state};
     } else {
@@ -716,12 +727,12 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
         if (!newPath.has_value()) {
             return std::unexpected(newPath.error());
         }
-        auto state = std::make_shared<ReaderState>(newPath.value(), config);
+        auto state = std::make_shared<ReaderState>(newPath.value(), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
     } else if (detail::isHttpUri(uri)) {
 #if GR_HTTP_ENABLED
-        auto state = std::make_shared<ReaderState>(std::string(uri), config);
+        auto state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpGetNative(state); });
         return Reader{state};
 #else
@@ -750,11 +761,13 @@ namespace detail {
 // work after readAsync() returns; cancel() has no effect in this case.
 // If bufferMinSize cannot hold all produced data chunks plus the final message, readAsync returns an error instead of blocking.
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::span<const std::uint8_t> data, ReaderConfig config = {}, std::string_view logicalUri = "<memory>") {
+    detail::normalizeReaderConfig(config);
+
     if (const std::size_t requiredSlots = detail::requiredMemoryReadSlots(data.size(), config); requiredSlots > config.bufferMinSize) {
         return std::unexpected(gr::Error{std::format("Failed to readAsync: bufferMinSize ({}) too small, requires at least {} slots", config.bufferMinSize, requiredSlots)});
     }
 
-    auto state = std::make_shared<ReaderState>(std::string(logicalUri), config);
+    auto state = std::make_shared<ReaderState>(std::string(logicalUri), std::move(config));
     runReadMemorySource(state, data); // write all data directly to CircularBuffer, no extra copy
     return Reader{state};
 }
