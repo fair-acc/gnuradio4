@@ -1,10 +1,16 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(gnuradio CXX)
+project(gnuradio VERSION 4.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+set(GR4_PKG_VERSION
+    "${PROJECT_VERSION}-git"
+    CACHE STRING "Version string used in gnuradio4.pc")
+
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
 
 # Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -233,6 +239,7 @@ include(cmake/CompilerWarnings.cmake)
 add_subdirectory(blocklib_generator)
 
 add_library(gnuradio-options INTERFACE)
+install(TARGETS gnuradio-options EXPORT gnuradio4Targets)
 
 message(
   STATUS
@@ -386,12 +393,17 @@ endif()
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
 if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
-  target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
-                             INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+  target_include_directories(
+    magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/magic_enum/>
+              $<INSTALL_INTERFACE:include>)
 
   set(magic_enum_public_headers third_party/magic_enum/magic_enum.hpp third_party/magic_enum/magic_enum_utility.hpp)
   set_target_properties(magic_enum PROPERTIES PUBLIC_HEADER "${magic_enum_public_headers}")
-  install(TARGETS magic_enum PUBLIC_HEADER DESTINATION include)
+  install(
+    TARGETS magic_enum
+    EXPORT gnuradio4Targets
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endif()
 
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
@@ -483,7 +495,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
 endif()
 
 add_library(vir INTERFACE)
-target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
+target_include_directories(
+  vir
+  INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+install(TARGETS vir EXPORT gnuradio4Targets)
 
 # the script configure won't run on win32 without asking bash to do it
 if(WIN32)
@@ -598,6 +614,28 @@ configure_file(cmake/gnuradio4.pc.in ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc @O
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig # Standard location
         # for .pc files
 )
+
+set(GR_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/gnuradio4")
+
+configure_package_config_file(
+  cmake/gnuradio4Config.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
+  INSTALL_DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion)
+
+install(
+  EXPORT gnuradio4Targets
+  FILE gnuradio4Targets.cmake
+  NAMESPACE gnuradio4::
+  DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake" "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake"
+  DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
 # print effective options
 message(STATUS "================================================")

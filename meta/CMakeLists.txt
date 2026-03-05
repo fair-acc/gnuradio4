@@ -5,7 +5,11 @@ target_link_libraries(gnuradio-meta INTERFACE gnuradio-options vir)
 
 set(meta_public_headers
     include/gnuradio-4.0/meta/CacheLineSize.hpp
+    include/gnuradio-4.0/meta/RangesHelper.hpp
+    include/gnuradio-4.0/meta/UnitTestHelper.hpp
     include/gnuradio-4.0/meta/formatter.hpp
+    include/gnuradio-4.0/meta/immutable.hpp
+    include/gnuradio-4.0/meta/indirect.hpp
     include/gnuradio-4.0/meta/reflection.hpp
     include/gnuradio-4.0/meta/typelist.hpp
     include/gnuradio-4.0/meta/utils.hpp
