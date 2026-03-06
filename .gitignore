@@ -49,6 +49,7 @@ language.settings.xml
 CMakeLists.txt.user
 .kdev4/
 *.kdev4
+.devcontainer/
 
 # python venv files
 virtualenv/
@@ -59,3 +60,4 @@ emscripten-toolchain.ini
 node_modules/
 package.json
 package-lock.json
+.nvmrc
