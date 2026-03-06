@@ -167,7 +167,7 @@ template<std::size_t... Is>
 auto can_processOne_invoke_test(auto& block, const auto& input, std::index_sequence<Is...>) -> decltype(block.processOne(std::get<Is>(input)...));
 
 template<PortReflectable TBlock>
-using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBlock>, vir::simdize<stream_input_port_types_tuple<TBlock>>::size()>;
+using simd_return_type_of_can_processOne = meta::simdize<stream_return_type<TBlock>, meta::simdize<stream_input_port_types_tuple<TBlock>>::size()>;
 } // namespace detail
 
 /* A block "can process simd" if its `processOne` function takes at least one argument and all
@@ -176,18 +176,18 @@ using simd_return_type_of_can_processOne = vir::simdize<stream_return_type<TBloc
  * The block can be a sink (no output ports).
  * The requirement of at least one function argument disallows source blocks.
  *
- * There is another (unnamed) concept for source blocks: Source blocks can implement
- * `processOne_simd(integral_constant N)`, which returns SIMD object(s) of width N.
+ * Source blocks (no input ports) can provide a width-accepting `processOne(constexpr_value auto N)`
+ * overload alongside the scalar `processOne()` to enable SIMD output generation.
  */
 template<typename TBlock>
 concept can_processOne_simd = //
-    PortReflectable<TBlock> and traits::block::stream_input_ports<TBlock>::template none_of<port::is_dynamic_port_collection> and traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+    PortReflectable<TBlock> and traits::block::stream_input_ports<TBlock>::template none_of<port::is_dynamic_port_collection> and traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
         { detail::can_processOne_invoke_test(block, input_simds, stream_input_ports<TBlock>::index_sequence) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
     };
 
 template<typename TBlock>
 concept can_processOne_simd_const = //
-    PortReflectable<TBlock> and traits::block::stream_input_ports<TBlock>::template none_of<port::is_dynamic_port_collection> and traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(const TBlock& block, const vir::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
+    PortReflectable<TBlock> and traits::block::stream_input_ports<TBlock>::template none_of<port::is_dynamic_port_collection> and traits::block::stream_input_port_types<TBlock>::size() > 0 and requires(const TBlock& block, const meta::simdize<stream_input_port_types_tuple<TBlock>>& input_simds) {
         { detail::can_processOne_invoke_test(block, input_simds, stream_input_ports<TBlock>::index_sequence) } -> std::same_as<detail::simd_return_type_of_can_processOne<TBlock>>;
     };
 

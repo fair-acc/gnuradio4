@@ -97,8 +97,6 @@ struct for_name {
     struct matches : std::bool_constant<matcherImpl<TPort>()> {};
 };
 
-struct Empty {};
-
 } // namespace detail
 
 namespace graph {
@@ -243,7 +241,7 @@ public:
         auto& portCollection        = portDirection == PortDirection::INPUT ? this->_dynamicInputPorts : this->_dynamicOutputPorts;
         if (exportFlag) {
             bookkeepingCollection.emplace(uniqueBlockName, PortNameMapper{std::string(portName), std::string(exportedName)});
-            auto& createdDynamicPort                                    = portCollection.emplace_back(gr::DynamicPort(port->get().weakRef()));
+            auto& createdDynamicPort                                    = portCollection.emplace_back(gr::DynamicPort(port.value()->weakRef()));
             std::get<gr::DynamicPort>(createdDynamicPort).metaInfo.name = exportedName;
         } else {
             auto exportedPortName = infoIt->second.exportedName;
@@ -301,7 +299,7 @@ public:
     [[nodiscard]] gr::property_map exportedOutputPorts() final { return exportedPortsFor(_exportedOutputPortsForBlock); }
 
 private:
-    std::expected<std::reference_wrapper<DynamicPort>, Error> findPortInBlock(std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::source_location location = std::source_location::current()) {
+    std::expected<DynamicPort*, Error> findPortInBlock(std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName, std::source_location location = std::source_location::current()) {
         const auto& asGraph = [this] -> const auto& {
             if constexpr (requires { this->blockRef().graph(); }) {
                 return this->blockRef().graph();
@@ -314,7 +312,7 @@ private:
             return std::unexpected(Error(block.error().message, location));
         }
 
-        return std::ref(portDirection == PortDirection::INPUT ? block.value()->dynamicInputPort(portName) : block.value()->dynamicOutputPort(portName));
+        return portDirection == PortDirection::INPUT ? block.value()->dynamicInputPort(portName) : block.value()->dynamicOutputPort(portName);
     }
 
     auto findExportedPortInfo(std::string_view uniqueBlockName, PortDirection portDirection, std::string_view portName) const {
@@ -449,8 +447,16 @@ public:
             return std::unexpected(Error(std::format("Block {} was not found in {}", destinationBlock, this->unique_name)));
         }
 
-        auto& sourcePortRef      = (*sourceBlockIt)->dynamicOutputPort(std::string_view(sourcePort));
-        auto& destinationPortRef = (*destinationBlockIt)->dynamicInputPort(std::string_view(destinationPort));
+        auto srcPortResult = (*sourceBlockIt)->dynamicOutputPort(std::string_view(sourcePort));
+        if (!srcPortResult) {
+            return std::unexpected(srcPortResult.error());
+        }
+        auto dstPortResult = (*destinationBlockIt)->dynamicInputPort(std::string_view(destinationPort));
+        if (!dstPortResult) {
+            return std::unexpected(dstPortResult.error());
+        }
+        auto& sourcePortRef      = *srcPortResult.value();
+        auto& destinationPortRef = *dstPortResult.value();
 
         if (sourcePortRef.typeName() != destinationPortRef.typeName()) {
             return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{} -- different types", sourceBlock, sourcePort, destinationBlock, destinationPort)));
@@ -458,8 +464,8 @@ public:
 
         auto connectionResult = sourcePortRef.connect(destinationPortRef);
 
-        if (connectionResult != ConnectionResult::SUCCESS) {
-            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{}", sourceBlock, sourcePort, destinationBlock, destinationPort)));
+        if (!connectionResult) {
+            return std::unexpected(Error(std::format("{}.{} can not be connected to {}.{}: {}", sourceBlock, sourcePort, destinationBlock, destinationPort, connectionResult.error().message)));
         }
 
         const bool        isArithmeticLike       = sourcePortRef.isArithmeticLikeValueType();
@@ -474,10 +480,14 @@ public:
             return std::unexpected(Error(std::format("Block {} was not found in {}", sourceBlock, this->unique_name)));
         }
 
-        auto& sourcePortRef = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
+        auto srcPortResult = (*sourceBlockIt)->dynamicOutputPort(sourcePort);
+        if (!srcPortResult) {
+            return std::unexpected(srcPortResult.error());
+        }
+        auto& sourcePortRef = *srcPortResult.value();
 
-        if (sourcePortRef.disconnect() == ConnectionResult::FAILED) {
-            return std::unexpected(Error(std::format("Block {} sourcePortRef could not be disconnected {}", sourceBlock, this->unique_name)));
+        if (auto result = sourcePortRef.disconnect(); !result) {
+            return std::unexpected(Error(std::format("Block {} sourcePortRef could not be disconnected {}: {}", sourceBlock, this->unique_name, result.error().message)));
         }
 
         return {};
@@ -487,50 +497,49 @@ public:
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message);
     std::optional<Message> propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message);
 
-    ConnectionResult connect(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
-        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,            //
-        EdgeParameters                        parameters = {},                                   //
+    [[nodiscard]] std::expected<void, Error> connect(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
+        std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,                                    //
+        EdgeParameters                        parameters = {},                                                           //
         [[maybe_unused]] std::source_location location   = std::source_location::current()) {
 
-        const bool isArithmeticLike = sourceBlock->dynamicOutputPort(sourcePort).isArithmeticLikeValueType();
+        auto       srcPortResult    = sourceBlock->dynamicOutputPort(sourcePort);
+        const bool isArithmeticLike = srcPortResult ? srcPortResult.value()->isArithmeticLikeValueType() : true;
         parameters.minBufferSize    = parameters.minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : parameters.minBufferSize;
 
         _edges.emplace_back(sourceBlock, std::move(sourcePort), //
             destinationBlock, std::move(destinationPort),       //
             std::move(parameters));
 
-        return ConnectionResult::SUCCESS;
+        return {};
     }
 
     template<gr::BlockLike SourceBlock, gr::BlockLike DestinationBlock>
-    ConnectionResult connect(SourceBlock& sourceBlock, PortDefinition sourcePort, //
-        DestinationBlock& destinationBlock, PortDefinition destinationPort,       //
-        EdgeParameters       parameters = {},                                     //
+    [[nodiscard]] std::expected<void, Error> connect(SourceBlock& sourceBlock, PortDefinition sourcePort, //
+        DestinationBlock& destinationBlock, PortDefinition destinationPort,                               //
+        EdgeParameters       parameters = {},                                                             //
         std::source_location location   = std::source_location::current()) {
 
         std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
         std::expected<std::shared_ptr<BlockModel>, Error> destinationBlockModel = graph::findBlock(*this, destinationBlock, location);
 
         if (!sourceBlockModel.has_value() || !destinationBlockModel.has_value()) {
-            std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlock.name, destinationBlock.name, location);
-            return ConnectionResult::FAILED;
+            return std::unexpected(Error(std::format("Source {} and/or destination {} do not belong to this graph", sourceBlock.name, destinationBlock.name), location));
         }
 
         return connect(*sourceBlockModel, std::move(sourcePort), *destinationBlockModel, std::move(destinationPort), std::move(parameters), location);
     }
 
     template<fixed_string SourcePort, fixed_string DestinationPort, gr::BlockLike SourceBlock, gr::BlockLike DestinationBlock>
-    ConnectionResult connect(SourceBlock& sourceBlock,      //
-        DestinationBlock&                 destinationBlock, //
-        EdgeParameters                    parameters = {},  //
-        std::source_location              location   = std::source_location::current()) {
+    [[nodiscard]] std::expected<void, Error> connect(SourceBlock& sourceBlock,      //
+        DestinationBlock&                                         destinationBlock, //
+        EdgeParameters                                            parameters = {},  //
+        std::source_location                                      location   = std::source_location::current()) {
 
         std::expected<std::shared_ptr<BlockModel>, Error> sourceBlockModel      = graph::findBlock(*this, sourceBlock, location);
         std::expected<std::shared_ptr<BlockModel>, Error> destinationBlockModel = graph::findBlock(*this, destinationBlock, location);
 
         if (!sourceBlockModel.has_value() || !destinationBlockModel.has_value()) {
-            std::print(stderr, "Source {} and/or destination {} do not belong to this graph - loc: {}\n", sourceBlock.name, destinationBlock.name, location);
-            return ConnectionResult::FAILED;
+            return std::unexpected(Error(std::format("Source {} and/or destination {} do not belong to this graph", sourceBlock.name, destinationBlock.name), location));
         }
 
         using SourcePortDescriptor      = typename traits::block::all_output_ports<SourceBlock>::template find_or_default<detail::for_name<SourcePort>::template matches, void>;
@@ -598,20 +607,21 @@ public:
         const auto destinationPortDefinition = getPortDefinition(inputPorts<PortType::ANY>(&destinationBlock), DestinationPort);
 
         if (!sourcePortDefinition) {
-            return ConnectionResult::FAILED;
+            return std::unexpected(sourcePortDefinition.error());
         }
         if (!destinationPortDefinition) {
-            return ConnectionResult::FAILED;
+            return std::unexpected(destinationPortDefinition.error());
         }
 
         const bool        isArithmeticLike       = sourcePortDefinition->isArithmeticLike;
         const std::size_t sanitizedMinBufferSize = parameters.minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : parameters.minBufferSize;
 
+        parameters.minBufferSize = sanitizedMinBufferSize;
         _edges.emplace_back(sourceBlockModel.value(), sourcePortDefinition->definition, //
             destinationBlockModel.value(), destinationPortDefinition->definition,       //
-            EdgeParameters{.minBufferSize = sanitizedMinBufferSize, .weight = parameters.weight, .name = std::move(parameters.name)});
+            std::move(parameters));
 
-        return ConnectionResult::SUCCESS;
+        return {};
     }
 
     using Block<Graph>::processMessages;
@@ -622,33 +632,35 @@ public:
     }
 
     Edge::EdgeState applyEdgeConnection(Edge& edge) {
-        try {
-            auto& sourcePort      = edge._sourceBlock->dynamicOutputPort(edge._sourcePortDefinition);
-            auto& destinationPort = edge._destinationBlock->dynamicInputPort(edge._destinationPortDefinition);
+        auto srcPortResult = edge._sourceBlock->dynamicOutputPort(edge._sourcePortDefinition);
+        auto dstPortResult = edge._destinationBlock->dynamicInputPort(edge._destinationPortDefinition);
 
-            if (sourcePort.typeName() != destinationPort.typeName()) {
-                edge._state = Edge::EdgeState::IncompatiblePorts;
-            } else {
-                const bool hasConnectedEdges = std::ranges::any_of(_edges, [&](const Edge& e) { return edge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected; });
-                bool       resizeResult      = true;
-                if (!hasConnectedEdges) {
-                    const std::size_t bufferSize = calculateStreamBufferSize(edge);
-                    resizeResult                 = sourcePort.resizeBuffer(bufferSize) == ConnectionResult::SUCCESS;
-                }
+        if (!srcPortResult || !dstPortResult) {
+            const auto& err = !srcPortResult ? srcPortResult.error() : dstPortResult.error();
+            std::println("applyEdgeConnection({}): {}", edge, err.message);
+            edge._state = Edge::EdgeState::PortNotFound;
+            return edge._state;
+        }
 
-                const bool connectionResult = sourcePort.connect(destinationPort) == ConnectionResult::SUCCESS;
-                edge._state                 = connectionResult && resizeResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
-                edge._actualBufferSize      = sourcePort.bufferSize();
-                edge._edgeType              = port::decodePortType(sourcePort.portMaskInfo());
-                edge._sourcePort            = std::addressof(sourcePort);
-                edge._destinationPort       = std::addressof(destinationPort);
+        auto& sourcePort      = *srcPortResult.value();
+        auto& destinationPort = *dstPortResult.value();
+
+        if (sourcePort.typeName() != destinationPort.typeName()) {
+            edge._state = Edge::EdgeState::IncompatiblePorts;
+        } else {
+            const bool hasConnectedEdges = std::ranges::any_of(_edges, [&](const Edge& e) { return edge.hasSameSourcePort(e) && e._state == Edge::EdgeState::Connected; });
+            bool       resizeResult      = true;
+            if (!hasConnectedEdges) {
+                const std::size_t bufferSize = calculateStreamBufferSize(edge);
+                resizeResult                 = sourcePort.resizeBuffer(bufferSize, edge._dataResource, edge._tagResource).has_value();
             }
-        } catch (gr::exception& e) {
-            std::println("applyEdgeConnection({}): {}", edge, e.what());
-            edge._state = Edge::EdgeState::PortNotFound;
-        } catch (...) {
-            std::println("applyEdgeConnection({}): unknown exception", edge);
-            edge._state = Edge::EdgeState::PortNotFound;
+
+            const bool connectionResult = sourcePort.connect(destinationPort).has_value();
+            edge._state                 = connectionResult && resizeResult ? Edge::EdgeState::Connected : Edge::EdgeState::ErrorConnecting;
+            edge._actualBufferSize      = sourcePort.bufferSize();
+            edge._edgeType              = port::decodePortType(sourcePort.portMaskInfo());
+            edge._sourcePort            = std::addressof(sourcePort);
+            edge._destinationPort       = std::addressof(destinationPort);
         }
 
         return edge._state;
@@ -682,7 +694,11 @@ public:
 
             auto disconnectAll = [](auto& ports) {
                 for (auto& port : ports) {
-                    std::ignore = std::visit([](auto& portOrCollection) { return portOrCollection.disconnect(); }, port);
+                    if (auto* p = std::get_if<gr::DynamicPort>(&port)) {
+                        std::ignore = p->disconnect();
+                    } else {
+                        std::ignore = std::get<BlockModel::NamedPortCollection>(port).disconnect();
+                    }
                 }
             };
 
@@ -1019,16 +1035,14 @@ std::vector<FeedbackLoop> detectFeedbackLoops(const GraphLike auto& graph) {
         auto destBlock   = edge.destinationBlock();
         auto destPortDef = edge.destinationPortDefinition();
 
-        std::size_t destPortIdx = std::visit(
-            [&destBlock](const auto& portDef) -> std::size_t {
-                using T = std::decay_t<decltype(portDef)>;
-                if constexpr (std::is_same_v<T, PortDefinition::IndexBased>) {
-                    return portDef.topLevel;
-                } else {
-                    return destBlock->dynamicInputPortIndex(portDef.name);
-                }
-            },
-            destPortDef.definition);
+        std::size_t destPortIdx;
+        if (auto* idx = std::get_if<PortDefinition::IndexBased>(&destPortDef.definition)) {
+            destPortIdx = idx->topLevel;
+        } else {
+            auto& str    = std::get<PortDefinition::StringBased>(destPortDef.definition);
+            auto  parsed = gr::detail::parsePort(str.name);
+            destPortIdx  = destBlock->dynamicInputPortIndex(std::string(parsed.portName)).value_or(meta::invalid_index);
+        }
 
         // known invariant at this stage: loop is rate-stable
         if (edgeIdx == 0UZ) {
@@ -1068,13 +1082,12 @@ std::vector<FeedbackLoop> detectFeedbackLoops(const GraphLike auto& graph) {
         return std::unexpected(Error("empty feedback loop cannot be primed", location));
     }
     // need to inject in the last edge where the feedback loop is closed
-    const auto& closingEdge = loop.edges.back();
-    try {
-        std::size_t inputPortIdx = gr::absolutePortIndex<gr::PortDirection::INPUT>(closingEdge.destinationBlock(), closingEdge.destinationPortDefinition());
-        return closingEdge.destinationBlock()->primeInputPort(inputPortIdx, nSamples, location);
-    } catch (const gr::exception& e) {
-        return std::unexpected(Error(std::format("failed to prime loop: {}", e.what()), location));
+    const auto& closingEdge   = loop.edges.back();
+    auto        portIdxResult = gr::absolutePortIndex<gr::PortDirection::INPUT>(closingEdge.destinationBlock(), closingEdge.destinationPortDefinition());
+    if (!portIdxResult) {
+        return std::unexpected(Error(std::format("failed to prime loop: {}", portIdxResult.error().message), location));
     }
+    return closingEdge.destinationBlock()->primeInputPort(portIdxResult.value(), nSamples, location);
 }
 
 inline void printFeedbackLoop(const FeedbackLoop& loop, std::size_t loopIdx = 0UZ, std::source_location location = std::source_location::current()) {
@@ -1127,491 +1140,6 @@ struct std::formatter<gr::graph::AdjacencyList> {
 };
 
 namespace gr {
-
-/*******************************************************************************************************/
-/**************************** begin of SIMD-Merged Graph Implementation ********************************/
-/*******************************************************************************************************/
-
-template<typename TDesc>
-struct to_left_descriptor : TDesc {
-    template<typename TBlock>
-    static constexpr decltype(auto) getPortObject(TBlock&& obj) {
-        return TDesc::getPortObject(obj.left);
-    }
-};
-
-template<typename TDesc>
-struct to_right_descriptor : TDesc {
-    template<typename TBlock>
-    static constexpr decltype(auto) getPortObject(TBlock&& obj) {
-        return TDesc::getPortObject(obj.right);
-    }
-};
-
-/**
- * Concepts and class for Merging Blocks to Sub-Graph Functionality
- *
- * This code provides a way to merge blocks of processing units in a flow-graph for efficient computation.
- * The merging occurs at compile-time, enabling the execution performance to be much better than running
- * each constituent block individually.
- *
- * Concepts:
- *  - `SourceBlockLike`: Represents a source block with processing capability and at least one output port.
- *  - `SinkBlockLike`: Represents a sink block with processing capability and at least one input port.
- *
- * Key Features:
- *  - `Merge` class: Combines a source and sink block into a new unit, connecting them via specified
- *    output and input port names.
- *  - `MergeByIndex` class: Combines a source and sink block into a new unit, connecting them via specified
- *    output and input port indices.
- *  - The merged blocks can be efficiently optimized at compile-time.
- *  - Each `Merge` instance has a unique ID and name, aiding in debugging and identification.
- *  - The merging works seamlessly for blocks that have single or multiple output ports.
- *  - It allows for SIMD optimizations if the constituent blocks support it.
- *
- * Dependencies:
- *  - Relies on various traits and meta-programming utilities for type introspection and compile-time checks.
- *
- * Note:
- *  - The implementation of the actual processing logic (e.g., `processOne()`, `processOne_simd()`, etc.)
- *    and their SIMD variants is specific to the logic and capabilities of the blocks being merged.
- *
- * Limitations:
- *  - Currently, SIMD support for multiple output ports is not implemented.
- */
-
-/**
- * This type constructor can merge simple blocks that are defined via
- * a single `auto processOne(..)` to produce a new `merged` node,
- * bypassing the dynamic run-time buffers.
- *
- * Since the merged node can be highly optimised during compile-time, it's
- * execution performance is usually orders of magnitude more efficient than
- * executing a cascade of the same constituent blocks. See the benchmarks for
- * details.
- *
- * Example:
- * @code
- * // declare flow-graph: 2 x in -> adder -> scale-by-2 -> scale-by-minus1 -> output
- * auto merged = MergeByIndex<scale<int, -1>, 0, MergeByIndex<scale<int, 2>, 0, adder<int>, 0>, 0>();
- *
- * // execute graph
- * std::array<int, 4> a = { 1, 2, 3, 4 };
- * std::array<int, 4> b = { 10, 10, 10, 10 };
- *
- * int                r = 0;
- * for (std::size_t i = 0; i < 4; ++i) {
- *     r += merged.processOne(a[i], b[i]);
- * }
- * @endcode
- */
-
-template<BlockLike Left, std::size_t OutId, //
-    BlockLike Right, std::size_t InId>
-class MergeByIndex : public Block<MergeByIndex<Left, OutId, Right, InId>> {
-    // FIXME: How do we refuse connection to a vector<Port>?
-    static inline std::size_t _unique_id_counter{0UZ};
-
-    template<typename TDesc>
-    friend struct to_right_descriptor;
-
-    template<typename TDesc>
-    friend struct to_left_descriptor;
-
-public:
-    using OverridePortList = meta::concat<
-        // Left:
-        typename meta::concat<typename traits::block::all_port_descriptors<Left>::template filter<traits::port::is_message_port>, traits::block::stream_input_ports<Left>, meta::remove_at<OutId, traits::block::stream_output_ports<Left>>>::template transform<to_left_descriptor>,
-        // Right:
-        typename meta::concat<typename traits::block::all_port_descriptors<Right>::template filter<traits::port::is_message_port>, meta::remove_at<InId, traits::block::stream_input_ports<Right>>, traits::block::stream_output_ports<Right>>::template transform<to_right_descriptor>>;
-
-    using InputPortTypes = typename OverridePortList::template filter<traits::port::is_input_port, traits::port::is_stream_port>::template transform<traits::port::type>;
-
-    using ReturnType = typename OverridePortList::template filter<traits::port::is_output_port, traits::port::is_stream_port>::template transform<traits::port::type>::tuple_or_type;
-
-    GR_MAKE_REFLECTABLE(MergeByIndex);
-
-    // TODO: Add a comment why a unique ID is necessary for merged blocks but not for all other blocks. (I.e. unique_id
-    // already is a member of the Block base class, this is shadowing that member with a different value. No other block
-    // does this.)
-    const std::size_t unique_id   = gr::atomic_ref(_unique_id_counter).fetch_add(1UZ);
-    const std::string unique_name = std::format("MergeByIndex<{}:{},{}:{}>#{}", gr::meta::type_name<Left>(), OutId, gr::meta::type_name<Right>(), InId, unique_id);
-
-    MergeByIndex(const MergeByIndex& other)       = delete;
-    MergeByIndex& operator=(MergeByIndex& other)  = delete;
-    MergeByIndex& operator=(MergeByIndex&& other) = delete;
-
-    MergeByIndex(MergeByIndex&& other) : left(std::move(other.left)), right(std::move(other.right)) {}
-
-    // copy-paste from above, keep in sync
-    using base = Block<MergeByIndex<Left, OutId, Right, InId>>;
-
-    Left  left;
-    Right right;
-
-    // merged_work_chunk_size, that's what friends are for
-    friend base;
-
-    template<BlockLike, std::size_t, BlockLike, std::size_t>
-    friend class MergeByIndex;
-
-private:
-    // returns the minimum of all internal max_samples port template parameters
-    static constexpr std::size_t merged_work_chunk_size() noexcept {
-        constexpr std::size_t left_size = []() {
-            if constexpr (requires {
-                              { Left::merged_work_chunk_size() } -> std::same_as<std::size_t>;
-                          }) {
-                return Left::merged_work_chunk_size();
-            } else {
-                return std::dynamic_extent;
-            }
-        }();
-        constexpr std::size_t right_size = []() {
-            if constexpr (requires {
-                              { Right::merged_work_chunk_size() } -> std::same_as<std::size_t>;
-                          }) {
-                return Right::merged_work_chunk_size();
-            } else {
-                return std::dynamic_extent;
-            }
-        }();
-        return std::min({traits::block::stream_input_ports<Right>::template apply<traits::port::max_samples>::value, traits::block::stream_output_ports<Left>::template apply<traits::port::max_samples>::value, left_size, right_size});
-    }
-
-    template<std::size_t I>
-    constexpr auto apply_left(auto&& input_tuple) noexcept {
-        return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return left.processOne(std::get<Is>(std::forward<decltype(input_tuple)>(input_tuple))...); }(std::make_index_sequence<I>());
-    }
-
-    template<std::size_t I, std::size_t J>
-    constexpr auto apply_right(auto&& input_tuple, auto&& tmp) noexcept {
-        return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) {
-            constexpr std::size_t first_offset  = traits::block::stream_input_port_types<Left>::size;
-            constexpr std::size_t second_offset = traits::block::stream_input_port_types<Left>::size + sizeof...(Is);
-            static_assert(second_offset + sizeof...(Js) == std::tuple_size_v<std::remove_cvref_t<decltype(input_tuple)>>);
-            return right.processOne(std::get<first_offset + Is>(std::forward<decltype(input_tuple)>(input_tuple))..., std::forward<decltype(tmp)>(tmp), std::get<second_offset + Js>(input_tuple)...);
-        }(std::make_index_sequence<I>(), std::make_index_sequence<J>());
-    }
-
-public:
-    constexpr MergeByIndex(Left&& l, Right&& r) : left(std::move(l)), right(std::move(r)) {}
-    explicit constexpr MergeByIndex(gr::property_map init = {}) : left(init), right(init) {}
-
-    // if the left block (source) implements available_samples (a customization point), then pass the call through
-    friend constexpr std::size_t available_samples(const MergeByIndex& self) noexcept
-    requires requires(const Left& l) {
-        { available_samples(l) } -> std::same_as<std::size_t>;
-    }
-    {
-        return available_samples(self.left);
-    }
-
-    template<meta::any_simd... Ts>
-    requires traits::block::can_processOne_simd<Left> and traits::block::can_processOne_simd<Right>
-    constexpr vir::simdize<ReturnType, (0, ..., Ts::size())> processOne(const Ts&... inputs) {
-        static_assert(traits::block::stream_output_port_types<Left>::size == 1, "TODO: SIMD for multiple output ports not implemented yet");
-        return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::tie(inputs...), apply_left<traits::block::stream_input_port_types<Left>::size()>(std::tie(inputs...)));
-    }
-
-    constexpr auto processOne_simd(auto N)
-    requires traits::block::can_processOne_simd<Right>
-    {
-        if constexpr (requires(Left& l) {
-                          { l.processOne_simd(N) };
-                      }) {
-            return right.processOne(left.processOne_simd(N));
-        } else {
-            using LeftResult = typename traits::block::stream_return_type<Left>;
-            using V          = vir::simdize<LeftResult, N>;
-            alignas(stdx::memory_alignment_v<V>) LeftResult tmp[V::size()];
-            for (std::size_t i = 0UZ; i < V::size(); ++i) {
-                tmp[i] = left.processOne();
-            }
-            return right.processOne(V(tmp, stdx::vector_aligned));
-        }
-    }
-
-    template<typename... Ts>
-    // Nicer error messages for the following would be good, but not at the expense of breaking can_processOne_simd.
-    requires(InputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr ReturnType processOne(Ts&&... inputs) {
-        // if (sizeof...(Ts) == 0) we could call `return processOne_simd(integral_constant<size_t, width>)`. But if
-        // the caller expects to process *one* sample (no inputs for the caller to explicitly
-        // request simd), and we process more, we risk inconsistencies.
-        if constexpr (traits::block::stream_output_port_types<Left>::size == 1) {
-            // only the result from the right block needs to be returned
-            return apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), apply_left<traits::block::stream_input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...)));
-
-        } else {
-            // left produces a tuple
-            auto left_out  = apply_left<traits::block::stream_input_port_types<Left>::size()>(std::forward_as_tuple(std::forward<Ts>(inputs)...));
-            auto right_out = apply_right<InId, traits::block::stream_input_port_types<Right>::size() - InId - 1>(std::forward_as_tuple(std::forward<Ts>(inputs)...), std::move(std::get<OutId>(left_out)));
-
-            if constexpr (traits::block::stream_output_port_types<Left>::size == 2 && traits::block::stream_output_port_types<Right>::size == 1) {
-                return std::make_tuple(std::move(std::get<OutId ^ 1>(left_out)), std::move(right_out));
-
-            } else if constexpr (traits::block::stream_output_port_types<Left>::size == 2) {
-                return std::tuple_cat(std::make_tuple(std::move(std::get<OutId ^ 1>(left_out))), std::move(right_out));
-
-            } else if constexpr (traits::block::stream_output_port_types<Right>::size == 1) {
-                return [&]<std::size_t... Is, std::size_t... Js>(std::index_sequence<Is...>, std::index_sequence<Js...>) { return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(right_out)); }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>());
-
-            } else {
-                return [&]<std::size_t... Is, std::size_t... Js, std::size_t... Ks>(std::index_sequence<Is...>, std::index_sequence<Js...>, std::index_sequence<Ks...>) { return std::make_tuple(std::move(std::get<Is>(left_out))..., std::move(std::get<OutId + 1 + Js>(left_out))..., std::move(std::get<Ks>(right_out)...)); }(std::make_index_sequence<OutId>(), std::make_index_sequence<traits::block::stream_output_port_types<Left>::size - OutId - 1>(), std::make_index_sequence<Right::output_port_types::size>());
-            }
-        }
-    } // end:: processOne
-
-    // work::Result // TODO: ask Matthias if this is still needed or whether this can be simplified.
-    // work(std::size_t requested_work) noexcept {
-    //     return base::work(requested_work);
-    // }
-};
-
-namespace detail {
-template<meta::fixed_string PortName, typename PortsTypeList>
-consteval std::size_t checkedIndexForName() {
-    constexpr std::size_t Id = meta::indexForName<PortName, PortsTypeList>();
-    static_assert(Id != -1UZ);
-    return Id;
-}
-
-} // namespace detail
-
-/**
- * This type constructor can merge simple blocks that are defined via a single `auto processOne(..)` producing a
- * new `merged` node, bypassing the dynamic run-time buffers.
- * Since the merged node can be highly optimised during compile-time, it's execution performance is usually orders
- * of magnitude more efficient than executing a cascade of the same constituent blocks. See the benchmarks for details.
- * This function uses the connect-by-port-name API.
- *
- * Example:
- * @code
- * // declare flow-graph: 2 x in -> adder -> scale-by-2 -> output
- * auto merged = merge<scale<int, 2>, "scaled", adder<int>, "addend">();
- *
- * // execute graph
- * std::array<int, 4> a = { 1, 2, 3, 4 };
- * std::array<int, 4> b = { 10, 10, 10, 10 };
- *
- * int                r = 0;
- * for (std::size_t i = 0; i < 4; ++i) {
- *     r += merged.processOne(a[i], b[i]);
- * }
- * @endcode
- */
-template<BlockLike Left, meta::fixed_string OutName, BlockLike Right, meta::fixed_string InName>
-using Merge = MergeByIndex<Left, detail::checkedIndexForName<OutName, typename traits::block::stream_output_ports<Left>>(), //
-    Right, detail::checkedIndexForName<OutName, typename traits::block::stream_output_ports<Left>>()>;
-
-/*******************************************************************************************************/
-/**************************** end of SIMD-Merged Graph Implementation **********************************/
-/*******************************************************************************************************/
-
-/*******************************************************************************************************/
-/**************************** begin of FeedbackMerge Implementation ************************************/
-/*******************************************************************************************************/
-template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
-    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
-    std::size_t ForwardFeedbackInputPortIndex,                  //
-    typename Monitor>
-class FeedbackMergeBase {
-protected:
-    static inline std::size_t _unique_id_counter{0UZ};
-
-public:
-    static_assert(traits::block::stream_input_port_types<Feedback>::size == 1, "Feedback block needs to have only one input port");
-    static_assert(traits::block::stream_input_port_types<Forward>::size >= 2, "Forward block must have at least 2 input ports");
-
-    using MergeConnectionForwardOutputType = typename traits::block::stream_output_port_types<Forward>::template at<ForwardOutputPortIndex>;
-    using MergeConnectionFeedbackInputType = typename traits::block::stream_input_port_types<Feedback>::template at<0>;
-    static_assert(std::is_same_v<MergeConnectionForwardOutputType, MergeConnectionFeedbackInputType>, "The chosen output port of Forward block needs to have the same type as the Feedback input port type");
-
-    using FeedbackConnectionFeedbackOutputType = typename traits::block::stream_output_port_types<Feedback>::template at<FeedbackOutputPortIndex>;
-    using FeedbackConnectionForwardInputType   = typename traits::block::stream_input_port_types<Forward>::template at<ForwardFeedbackInputPortIndex>;
-    static_assert(std::is_same_v<FeedbackConnectionFeedbackOutputType, FeedbackConnectionForwardInputType>, "The chosen output port of Feedback block needs to have the same type as the chosen Forward input port type");
-
-    // The type of port connected inside of the feedback merge
-    using MergeConnectionPortType    = MergeConnectionForwardOutputType;
-    using FeedbackConnectionPortType = FeedbackConnectionFeedbackOutputType;
-
-    using SelfInputPortDescriptors  = meta::remove_at<ForwardFeedbackInputPortIndex, typename traits::block::stream_input_ports<Forward>>;
-    using SelfOutputPortDescriptors = typename traits::block::stream_output_ports<Forward>;
-    using OverridePortList          = meta::concat<SelfInputPortDescriptors, SelfOutputPortDescriptors>;
-
-    using SelfInputPortTypes  = meta::remove_at<ForwardFeedbackInputPortIndex, typename traits::block::stream_input_port_types<Forward>>;
-    using SelfOutputPortTypes = typename traits::block::stream_output_port_types<Forward>;
-    using ReturnType          = typename SelfOutputPortTypes::tuple_or_type;
-
-    FeedbackMergeBase(const FeedbackMergeBase&)            = delete;
-    FeedbackMergeBase& operator=(const FeedbackMergeBase&) = delete;
-    FeedbackMergeBase& operator=(FeedbackMergeBase&&)      = delete;
-
-    FeedbackMergeBase(FeedbackMergeBase&& other) : forward(std::move(other.forward)), feedback(std::move(other.feedback)), _state(std::move(other._state)) {}
-
-    constexpr FeedbackMergeBase(Forward&& fwd, Feedback&& fbk) : forward(std::move(fwd)), feedback(std::move(fbk)) {}
-
-    FeedbackMergeBase(gr::property_map init = {}) : forward(init), feedback(init) {}
-
-    template<typename... Ts>
-    requires(SelfInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr ReturnType processOne(Ts&&... inputs) {
-        auto forwardInputTuple = std::forward_as_tuple(std::forward<Ts>(inputs)...);
-
-        auto output = [&]<std::size_t... BeforeIdx, std::size_t... AfterIdx>(std::index_sequence<BeforeIdx...>, std::index_sequence<AfterIdx...>) {
-            constexpr std::size_t afterOffset = ForwardFeedbackInputPortIndex + 1;
-            return forward.processOne(std::get<BeforeIdx>(forwardInputTuple)..., _state, std::get<afterOffset + AfterIdx - 1>(forwardInputTuple)...);
-        }(std::make_index_sequence<ForwardFeedbackInputPortIndex>(), std::make_index_sequence<sizeof...(Ts) - ForwardFeedbackInputPortIndex>());
-
-        if constexpr (std::is_same_v<void, Monitor>) {
-            _state = feedback.processOne(output);
-        } else {
-            _state = feedback.processOne(monitor.processOne(output));
-        }
-        return output;
-    }
-
-    Forward                    forward;
-    Feedback                   feedback;
-    FeedbackConnectionPortType _state{};
-
-    [[no_unique_address]] std::conditional_t<std::is_same_v<void, Monitor>, detail::Empty, Monitor> monitor;
-};
-
-/**
- * Feedback merge for blocks that feed data previously generated
- * to one of the ports.
- *
- *           Forward
- *           adder       ┌─────────────────────> out of FeedbackMerge
- *           ┌────┐      │
- * ─────in1─>┤    │      │      Feedback
- *           │    ├─out─>┤      scale
- *    ┌─in2─>┤    │      │      ┌────┐
- *    │      └────┘      └──in─>┤    ├─out──┐
- *    │                         └────┘      │
- *    │                                     │
- *    │             ┌──────────┐            │
- *    └─────────────┤          │<───────────┘
- *                  └──────────┘
- *                  Monitor (optional)
- */
-template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
-    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
-    std::size_t ForwardFeedbackInputPortIndex,                  //
-    typename Monitor>
-class FeedbackMergeByIndex : public Block<FeedbackMergeByIndex<Forward, ForwardOutputPortIndex,    //
-                                 Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, //
-                                 Monitor>>,                                                        //
-                             public FeedbackMergeBase<Forward, ForwardOutputPortIndex,             //
-                                 Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, //
-                                 Monitor> {
-    using impl_t = FeedbackMergeBase<Forward, ForwardOutputPortIndex,     //
-        Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, //
-        Monitor>;
-
-public:
-    const std::size_t unique_id   = impl_t::_unique_id_counter++;
-    const std::string unique_name = std::format("FeedbackMergeByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
-
-    using OverridePortList = typename impl_t::OverridePortList;
-    using impl_t::impl_t;
-    using impl_t::processOne;
-
-    GR_MAKE_REFLECTABLE(FeedbackMergeByIndex);
-};
-
-template<BlockLike Forward, meta::fixed_string ForwardOutputPortName, //
-    BlockLike Feedback, meta::fixed_string FeedbackOutputPortName,    //
-    meta::fixed_string ForwardFeedbackInputPortName, typename Monitor = void>
-using FeedbackMerge = FeedbackMergeByIndex<                                                                                 //
-    Forward, detail::checkedIndexForName<ForwardOutputPortName, typename traits::block::stream_output_ports<Forward>>(),    //
-    Feedback, detail::checkedIndexForName<FeedbackOutputPortName, typename traits::block::stream_output_ports<Feedback>>(), //
-    detail::checkedIndexForName<ForwardFeedbackInputPortName, typename traits::block::stream_input_ports<Forward>>(), Monitor>;
-
-/*******************************************************************************************************/
-/**************************** end of FeedbackMerge Implementation **************************************/
-/*******************************************************************************************************/
-
-/*******************************************************************************************************/
-/**************************** begin of FeedbackMergeWithTap Implementation *****************************/
-/*******************************************************************************************************/
-
-/**
- * Feedback merge for blocks that feed data previously generated
- * to one of the ports, with splitOut port to allow connecting other
- * blocks to the output of the feedback block.
- *
- * FeedbackMergeWithTap<Adder, "out", Scale<0.2f>, "out", "in2">;
- *
- *           Forward
- *           adder       ┌──────────────────────> out of FeedbackMergeWithTap
- *           ┌────┐      │
- * ─────in1─>┤    │      │      Feedback
- *           │    ├─out─>┤      scale       ┌--─> splitOut
- *    ┌─in2─>┤    │      │      ┌────┐      │
- *    │      └────┘      └──in─>┤    ├─out─>┤
- *    │                         └────┘      │
- *    └──────────────────<──────────────────┘
- *
- */
-template<BlockLike Forward, std::size_t ForwardOutputPortIndex, //
-    BlockLike Feedback, std::size_t FeedbackOutputPortIndex,    //
-    std::size_t ForwardFeedbackInputPortIndex,                  //
-    typename Monitor>
-class FeedbackMergeWithTapByIndex : public Block<FeedbackMergeWithTapByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, Monitor>>, //
-                                    public FeedbackMergeBase<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, Monitor> {
-    using impl_t = FeedbackMergeBase<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, Monitor>;
-    using this_t = FeedbackMergeWithTapByIndex<Forward, ForwardOutputPortIndex, Feedback, FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, Monitor>;
-
-public:
-    gr::PortOut<typename impl_t::FeedbackConnectionPortType> splitOut;
-
-    GR_MAKE_REFLECTABLE(FeedbackMergeWithTapByIndex, splitOut);
-
-    const std::size_t unique_id   = impl_t::_unique_id_counter++;
-    const std::string unique_name = std::format("FeedbackMergeWithTapByIndex<{}:{},{}:{},feedback_to:{}>#{}", gr::meta::type_name<Forward>(), ForwardOutputPortIndex, gr::meta::type_name<Feedback>(), FeedbackOutputPortIndex, ForwardFeedbackInputPortIndex, unique_id);
-
-    using OverridePortList = meta::concat<typename impl_t::OverridePortList,             //
-        gr::meta::typelist<                                                              //
-            gr::detail::PortDescriptor<float, "splitOut",                                //
-                gr::PortType::STREAM, gr::PortDirection::OUTPUT, gr::detail::SinglePort, //
-                /*KindExtraData=*/0, /*MemberIdx=*/refl::data_member_count<Block<this_t>>>>>;
-
-    constexpr auto processOne() { return 0.0f; }
-
-    template<typename... Ts>
-    requires(impl_t::SelfInputPortTypes::template are_equal<std::remove_cvref_t<Ts>...>)
-    constexpr auto processOne(Ts&&... inputs) {
-        auto result = impl_t::processOne(std::forward<Ts>(inputs)...);
-
-        if constexpr (meta::is_instantiation_of<typename impl_t::ReturnType, std::tuple>) {
-            return std::tuple_cat(result, std::make_tuple(impl_t::_state));
-        } else {
-            return std::tuple(result, impl_t::_state);
-        }
-    }
-
-    using impl_t::impl_t;
-};
-
-template<BlockLike Forward, meta::fixed_string ForwardOutputPortName, //
-    BlockLike Feedback, meta::fixed_string FeedbackOutputPortName,    //
-    meta::fixed_string ForwardFeedbackInputPortName,
-    typename Monitor = void>
-using FeedbackMergeWithTap = FeedbackMergeWithTapByIndex<                                                                   //
-    Forward, detail::checkedIndexForName<ForwardOutputPortName, typename traits::block::stream_output_ports<Forward>>(),    //
-    Feedback, detail::checkedIndexForName<FeedbackOutputPortName, typename traits::block::stream_output_ports<Feedback>>(), //
-    detail::checkedIndexForName<ForwardFeedbackInputPortName, typename traits::block::stream_input_ports<Forward>>(),       //
-    Monitor>;
-
-/*******************************************************************************************************/
-/**************************** end of FeedbackMerge Implementation **************************************/
-/*******************************************************************************************************/
-
-// TODO: add nicer enum formatter
-inline std::ostream& operator<<(std::ostream& os, const ConnectionResult& value) { return os << static_cast<int>(value); }
 
 inline std::ostream& operator<<(std::ostream& os, const PortType& value) { return os << static_cast<int>(value); }
 

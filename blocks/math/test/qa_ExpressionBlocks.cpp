@@ -28,8 +28,8 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         auto& source    = graph.emplaceBlock<testing::ConstantSource<T>>({{"n_samples_max", 10U}, {"default_value", T(21)}});
         auto& exprBlock = graph.emplaceBlock<ExpressionSISO<T>>({{"expr_string", "a*x"}, {"param_a", T(2)}});
         auto& tagSink   = graph.emplaceBlock<testing::TagSink<T, USE_PROCESS_ONE>>({{"log_tags", true}, {"log_samples", true}});
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in">(source, exprBlock)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in">(exprBlock, tagSink)));
+        expect(graph.connect<"out", "in">(source, exprBlock).has_value());
+        expect(graph.connect<"out", "in">(exprBlock, tagSink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -50,9 +50,9 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         auto& source2   = graph.emplaceBlock<testing::ConstantSource<T>>({{"n_samples_max", 10U}, {"default_value", T(5)}});
         auto& exprBlock = graph.emplaceBlock<ExpressionDISO<T>>({{"expr_string", "z := a * (x + y + 2)"}, {"param_a", T(3)}});
         auto& tagSink   = graph.emplaceBlock<testing::TagSink<T, USE_PROCESS_ONE>>({{"log_tags", true}, {"log_samples", true}});
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in0">(source1, exprBlock)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in1">(source2, exprBlock)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in">(exprBlock, tagSink)));
+        expect(graph.connect<"out", "in0">(source1, exprBlock).has_value());
+        expect(graph.connect<"out", "in1">(source2, exprBlock).has_value());
+        expect(graph.connect<"out", "in">(exprBlock, tagSink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -75,8 +75,8 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         auto& exprBlock = graph.emplaceBlock<ExpressionBulk<T>>({{"expr_string", "vecOut := a * vecIn"}, {"param_a", T(2)}});
         auto& tagSink   = graph.emplaceBlock<testing::TagSink<T, USE_PROCESS_ONE>>({{"log_samples", true}});
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in">(source, exprBlock)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in">(exprBlock, tagSink)));
+        expect(graph.connect<"out", "in">(source, exprBlock).has_value());
+        expect(graph.connect<"out", "in">(exprBlock, tagSink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -103,8 +103,8 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         auto&             exprBlock = graph.emplaceBlock<ExpressionBulk<float>>({{"expr_string", exprStr}, {"runtime_checks", enableERuntimeChecks}});
         auto&             tagSink   = graph.emplaceBlock<testing::TagSink<float, USE_PROCESS_ONE>>({{"log_samples", true}});
 
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in">(source, exprBlock)));
-        expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out", "in">(exprBlock, tagSink)));
+        expect(graph.connect<"out", "in">(source, exprBlock).has_value());
+        expect(graph.connect<"out", "in">(exprBlock, tagSink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {

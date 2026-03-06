@@ -4,6 +4,7 @@
 #include <format>
 #include <print>
 
+#include <gnuradio-4.0/BlockMerging.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/config.hpp> // contains the project and compiler flags definitions

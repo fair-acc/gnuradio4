@@ -37,7 +37,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     "CustomSizePort"_test = [] {
         using T = int;
         PortOut<T, RequiredSamples<1, 16>, StreamBufferType<CircularBuffer<T, 32UZ>>> out;
-        expect(out.resizeBuffer(32UZ) == ConnectionResult::SUCCESS);
+        expect(out.resizeBuffer(32UZ).has_value());
 #if defined(__linux__) || defined(__gnu_linux__)
         expect(eq(out.buffer().streamBuffer.size(), static_cast<std::size_t>(getpagesize()) / sizeof(T)));
 #else
@@ -49,7 +49,7 @@ const boost::ut::suite<"Port"> _portTests = [] { // NOSONAR (N.B. lambda size)
     "ResizeBuffer is no-op for input"_test = [] {
         PortIn<int> in;
         auto        before = in.buffer().streamBuffer.size();
-        expect(ConnectionResult::SUCCESS == in.resizeBuffer(1234UZ));
+        expect(in.resizeBuffer(1234UZ).has_value());
         expect(eq(in.buffer().streamBuffer.size(), before));
     };
 
@@ -547,13 +547,13 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         DynamicPort  dynDst(dst, DynamicPort::non_owned_reference_tag{});
 
         expect(!dynSrc.isConnected());
-        expect(dynSrc.connect(dynDst) == ConnectionResult::SUCCESS);
+        expect(dynSrc.connect(dynDst).has_value());
         expect(dynSrc.isConnected());
         expect(dynDst.isConnected());
         expect(eq(dynSrc.nReaders(), 1UZ));
         expect(eq(dynDst.nWriters(), 1UZ));
 
-        expect(dynDst.disconnect() == ConnectionResult::SUCCESS);
+        expect(dynDst.disconnect().has_value());
         expect(!dynSrc.isConnected());
     };
 
@@ -562,9 +562,9 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
         PortOut<int> out;
         DynamicPort  dynIn(in, DynamicPort::non_owned_reference_tag{});
         DynamicPort  dynOut(out, DynamicPort::non_owned_reference_tag{});
-        expect(dynIn.resizeBuffer(2048UZ) == ConnectionResult::FAILED);
+        expect(!dynIn.resizeBuffer(2048UZ).has_value());
         const std::size_t before = out.buffer().streamBuffer.size();
-        expect(dynOut.resizeBuffer(before * 2UZ) == ConnectionResult::SUCCESS);
+        expect(dynOut.resizeBuffer(before * 2UZ).has_value());
         expect(eq(out.buffer().streamBuffer.size(), before * 2UZ));
     };
 
@@ -585,7 +585,6 @@ const boost::ut::suite<"DynamicPort"> _dyn = [] { // NOSONAR (N.B. lambda size)
 const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
     using namespace gr;
-    using enum gr::ConnectionResult;
 
     "direction/type mismatch -> FAILED"_test = [] {
         PortIn<int> inA;
@@ -593,22 +592,14 @@ const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N
         DynamicPort dynInA(inA, DynamicPort::non_owned_reference_tag{});
         DynamicPort dynInB(inB, DynamicPort::non_owned_reference_tag{});
         // input -> input: should not connect
-#if DEBUG // asserts when debugging
-        expect(throws<std::runtime_error>([&dynInA, &dynInB] { std::ignore = dynInA.connect(dynInB); }));
-#else
-        expect(dynInA.connect(dynInB) == FAILED);
-#endif
+        expect(!dynInA.connect(dynInB).has_value());
 
         MsgPortOut  msgOut;
         PortIn<int> streamIn;
         DynamicPort dynMsgOut(msgOut, DynamicPort::non_owned_reference_tag{});
         DynamicPort dynStreamIn(streamIn, DynamicPort::non_owned_reference_tag{});
         // message -> stream (value_type mismatch): should fail
-#if DEBUG // asserts when debugging
-        expect(throws<std::runtime_error>([&dynMsgOut, &dynStreamIn] { std::ignore = dynMsgOut.connect(dynStreamIn); }));
-#else
-        expect(dynMsgOut.connect(dynStreamIn) == FAILED);
-#endif
+        expect(!dynMsgOut.connect(dynStreamIn).has_value());
     };
 
     "double-connect idempotence & counts"_test = [] {
@@ -617,8 +608,8 @@ const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N
         DynamicPort  dynSrc(src, DynamicPort::non_owned_reference_tag{});
         DynamicPort  dynDst(dst, DynamicPort::non_owned_reference_tag{});
 
-        expect(dynSrc.connect(dynDst) == SUCCESS);
-        expect(dynSrc.connect(dynDst) == SUCCESS); // second time should be harmless
+        expect(dynSrc.connect(dynDst).has_value());
+        expect(dynSrc.connect(dynDst).has_value()); // second time should be harmless
         expect(eq(dynSrc.nReaders(), 1UZ));
         expect(eq(dynDst.nWriters(), 1UZ));
     };
@@ -631,13 +622,13 @@ const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N
         DynamicPort  dA(a, DynamicPort::non_owned_reference_tag{});
         DynamicPort  dB(b, DynamicPort::non_owned_reference_tag{});
 
-        expect(dynSrc.connect(dA) == SUCCESS);
-        expect(dynSrc.connect(dB) == SUCCESS);
+        expect(dynSrc.connect(dA).has_value());
+        expect(dynSrc.connect(dB).has_value());
         expect(dynSrc.nReaders() == 2UZ);
         expect(dA.nWriters() == 1UZ);
         expect(dB.nWriters() == 1UZ);
 
-        expect(dA.disconnect() == SUCCESS);
+        expect(dA.disconnect().has_value());
         expect(dynSrc.nReaders() == 1UZ);
         expect(dB.nWriters() == 1UZ);
     };
@@ -657,15 +648,14 @@ const boost::ut::suite<"DynamicPort edge/error"> _dyn_edges = [] { // NOSONAR (N
 const boost::ut::suite<"Buffer sizing & counts"> _buf = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
     using namespace gr;
-    using enum gr::ConnectionResult;
 
     "resize output twice reallocates & grows"_test = [] {
         PortOut<int> out;
         std::size_t  oldSize = out.buffer().streamBuffer.size();
-        expect(out.resizeBuffer(oldSize * 2) == SUCCESS);
+        expect(out.resizeBuffer(oldSize * 2).has_value());
         std::size_t midSize = out.buffer().streamBuffer.size();
         expect(eq(midSize, oldSize * 2UZ));
-        expect(out.resizeBuffer(midSize * 2) == SUCCESS);
+        expect(out.resizeBuffer(midSize * 2).has_value());
         expect(eq(out.buffer().streamBuffer.size(), midSize * 2UZ));
     };
 
@@ -674,10 +664,10 @@ const boost::ut::suite<"Buffer sizing & counts"> _buf = [] { // NOSONAR (N.B. la
         PortIn<int>  in;
         DynamicPort  dynOut(out, DynamicPort::non_owned_reference_tag{});
         DynamicPort  dynIn(in, DynamicPort::non_owned_reference_tag{});
-        expect(dynOut.connect(dynIn) == SUCCESS);
+        expect(dynOut.connect(dynIn).has_value());
 
         std::size_t before = in.buffer().streamBuffer.size();
-        expect(in.resizeBuffer(before + 1234UZ) == SUCCESS);
+        expect(in.resizeBuffer(before + 1234UZ).has_value());
         expect(eq(in.buffer().streamBuffer.size(), before));
     };
 };
@@ -685,14 +675,13 @@ const boost::ut::suite<"Buffer sizing & counts"> _buf = [] { // NOSONAR (N.B. la
 const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size)
     using namespace boost::ut;
     using namespace gr;
-    using enum gr::ConnectionResult;
 
     "basic MsgPort roundtrip"_test = [] { // NOSONAR (N.B. lambda size)
         MsgPortOut  out;
         MsgPortIn   in;
         DynamicPort dynOut(out, DynamicPort::non_owned_reference_tag{});
         DynamicPort dynIn(in, DynamicPort::non_owned_reference_tag{});
-        expect(dynOut.connect(dynIn) == SUCCESS);
+        expect(dynOut.connect(dynIn).has_value());
 
         auto reader1 = in.buffer().streamBuffer.new_reader(); // reader1 needs to exist before writing (can read/add read barriers to the writer then)
         {
@@ -723,13 +712,80 @@ const boost::ut::suite<"Message ports"> _msg = [] { // NOSONAR (N.B. lambda size
         DynamicPort dA(a, DynamicPort::non_owned_reference_tag{});
         DynamicPort dB(b, DynamicPort::non_owned_reference_tag{});
 
-        expect(dynSrc.connect(dA) == SUCCESS);
-        expect(dynSrc.connect(dB) == SUCCESS);
+        expect(dynSrc.connect(dA).has_value());
+        expect(dynSrc.connect(dB).has_value());
         expect(eq(dynSrc.nReaders(), 2UZ));
 
         auto before = src.buffer().streamBuffer.size();
-        expect(dynSrc.resizeBuffer(before * 2UZ) == SUCCESS);
+        expect(dynSrc.resizeBuffer(before * 2UZ).has_value());
         expect(eq(src.buffer().streamBuffer.size(), before * 2UZ));
+    };
+};
+
+struct TrackingResource : std::pmr::memory_resource {
+    std::pmr::memory_resource* _upstream;
+    std::atomic<std::size_t>   _allocCount{0};
+    std::atomic<std::size_t>   _bytesAllocated{0};
+
+    explicit TrackingResource(std::pmr::memory_resource* upstream = std::pmr::get_default_resource()) : _upstream(upstream) {}
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++_allocCount;
+        _bytesAllocated += bytes;
+        return _upstream->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { _upstream->deallocate(p, bytes, alignment); }
+
+    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+const boost::ut::suite<"PMR resource forwarding"> _pmr = [] { // NOSONAR (N.B. lambda size)
+    using namespace boost::ut;
+    using namespace gr;
+
+    "resizeBuffer with custom data resource"_test = [] {
+        TrackingResource dataTracker;
+        PortOut<float>   out;
+
+        expect(out.resizeBuffer(4096UZ, &dataTracker, nullptr).has_value());
+        expect(gt(dataTracker._allocCount.load(), 0UZ)) << "data resource should have been used";
+        expect(gt(dataTracker._bytesAllocated.load(), 0UZ));
+    };
+
+    "resizeBuffer with custom tag resource"_test = [] {
+        TrackingResource tagTracker;
+        PortOut<float>   out;
+
+        expect(out.resizeBuffer(4096UZ, nullptr, &tagTracker).has_value());
+        expect(gt(tagTracker._allocCount.load(), 0UZ)) << "tag resource should have been used";
+    };
+
+    "resizeBuffer with both custom resources"_test = [] {
+        TrackingResource dataTracker;
+        TrackingResource tagTracker;
+        PortOut<float>   out;
+
+        expect(out.resizeBuffer(4096UZ, &dataTracker, &tagTracker).has_value());
+        expect(gt(dataTracker._allocCount.load(), 0UZ)) << "data resource should have been used";
+        expect(gt(tagTracker._allocCount.load(), 0UZ)) << "tag resource should have been used";
+    };
+
+    "resizeBuffer with nullptr uses default allocator"_test = [] {
+        PortOut<float> out;
+        auto           sizeBefore = out.buffer().streamBuffer.size();
+
+        expect(out.resizeBuffer(sizeBefore * 2, nullptr, nullptr).has_value());
+        expect(eq(out.buffer().streamBuffer.size(), sizeBefore * 2));
+    };
+
+    "DynamicPort resizeBuffer forwards PMR resources"_test = [] {
+        TrackingResource dataTracker;
+        PortOut<float>   out;
+        DynamicPort      dynOut(out, DynamicPort::non_owned_reference_tag{});
+
+        expect(dynOut.resizeBuffer(4096UZ, &dataTracker, nullptr).has_value());
+        expect(gt(dataTracker._allocCount.load(), 0UZ)) << "data resource should have been forwarded through DynamicPort";
     };
 };
 

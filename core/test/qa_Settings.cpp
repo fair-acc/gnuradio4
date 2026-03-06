@@ -6,6 +6,7 @@
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockMerging.hpp>
 #include <gnuradio-4.0/Buffer.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
@@ -195,9 +196,9 @@ const boost::ut::suite SettingsTests = [] {
         block1.settings().updateActiveParameters();
 
         // src -> block1 -> block2 -> sink
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, block1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(block1, block2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(block2, sink)));
+        expect(testGraph.connect<"out", "in">(src, block1).has_value());
+        expect(testGraph.connect<"out", "in">(block1, block2).has_value());
+        expect(testGraph.connect<"out", "in">(block2, sink).has_value());
 
         expect(!src.settings().autoUpdateParameters().contains(gr::tag::SAMPLE_RATE.shortKey())) << "manual setting disable auto-update";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));
@@ -455,9 +456,9 @@ const boost::ut::suite SettingsTests = [] {
         expect(eq(block2.input_chunk_size, std::size_t(5)));
 
         // src -> block1 -> block2 -> sink
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, block1)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(block1, block2)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(block2, sink)));
+        expect(testGraph.connect<"out", "in">(src, block1).has_value());
+        expect(testGraph.connect<"out", "in">(block1, block2).has_value());
+        expect(testGraph.connect<"out", "in">(block2, sink).has_value());
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -878,10 +879,10 @@ const boost::ut::suite CtxSettingsTests = [] {
 
         //                                  -> sinkOne
         // src -> monitorBulk -> monitorOne -> sinkBulk
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, monitorBulk)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorBulk, monitorOne)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorOne, sinkBulk)));
-        expect(eq(ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(monitorOne, sinkOne)));
+        expect(testGraph.connect<"out", "in">(src, monitorBulk).has_value());
+        expect(testGraph.connect<"out", "in">(monitorBulk, monitorOne).has_value());
+        expect(testGraph.connect<"out", "in">(monitorOne, sinkBulk).has_value());
+        expect(testGraph.connect<"out", "in">(monitorOne, sinkOne).has_value());
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

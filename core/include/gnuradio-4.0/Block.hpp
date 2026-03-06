@@ -44,7 +44,7 @@ constexpr void simd_epilogue(auto kWidth, F&& fun) {
 
 template<std::ranges::contiguous_range... Ts, typename Flag = stdx::element_aligned_tag>
 constexpr auto simdize_tuple_load_and_apply(auto width, const std::tuple<Ts...>& rngs, auto offset, auto&& fun, Flag f = {}) {
-    using Tup = vir::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
+    using Tup = gr::meta::simdize<std::tuple<std::ranges::range_value_t<Ts>...>, width>;
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) { return fun(std::tuple_element_t<Is, Tup>(std::ranges::data(std::get<Is>(rngs)) + offset, f)...); }(std::make_index_sequence<sizeof...(Ts)>());
 }
 
@@ -755,7 +755,10 @@ public:
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
 protected:
-    Tag _mergedInputTag{};
+    alignas(kCacheLine) std::array<std::byte, 1024UZ> _mergedTagBuffer{};
+    std::pmr::monotonic_buffer_resource    _mergedTagUpstream{_mergedTagBuffer.data(), _mergedTagBuffer.size()};
+    std::pmr::unsynchronized_pool_resource _mergedTagPool{&_mergedTagUpstream};
+    Tag                                    _mergedInputTag{0UZ, property_map{&_mergedTagPool}};
 
     bool             _outputTagsChanged = false; // It is used to indicate that processOne published a Tag and want prematurely break a loop. Should be set to "true" in block implementation processOne().
     std::vector<Tag> _outputTags{};              // This std::vector is used to cache published Tags when block implements processOne method. The tags are then copied to output spans. Note: that for he processOne each tag is published for all output ports
@@ -837,19 +840,19 @@ public:
     }
 
     Block(Block&& other) noexcept
-        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                    //
-          BlockBase(std::move(other)),                                                                                                                           //
-          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                            //
-          stride(std::move(other.stride)),                                                                                                                       //
-          disconnect_on_done(other.disconnect_on_done),                                                                                                          //
-          compute_domain(std::move(other.compute_domain)),                                                                                                       //
-          strideCounter(other.strideCounter),                                                                                                                    //
-          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                         //
-          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                  //
-          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                        //
-          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                       //
-          _mergedInputTag(std::move(other._mergedInputTag)), _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), //
-          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                              //
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                      //
+          BlockBase(std::move(other)),                                                                                                                             //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                              //
+          stride(std::move(other.stride)),                                                                                                                         //
+          disconnect_on_done(other.disconnect_on_done),                                                                                                            //
+          compute_domain(std::move(other.compute_domain)),                                                                                                         //
+          strideCounter(other.strideCounter),                                                                                                                      //
+          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                           //
+          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                    //
+          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                          //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                         //
+          _mergedInputTag{0UZ, property_map{&_mergedTagPool}}, _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), //
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                                //
     {
         _blockSelf       = static_cast<void*>(this);
         other._blockSelf = nullptr;
@@ -1054,12 +1057,12 @@ public:
     constexpr auto invoke_processOne_simd(auto width, Ts&&... input_simds) {
         if constexpr (sizeof...(Ts) == 0) {
             if constexpr (traits::block::stream_output_ports<Derived>::size == 0) {
-                self().processOne_simd(width);
+                self().processOne(width);
                 return std::tuple{};
             } else if constexpr (traits::block::stream_output_ports<Derived>::size == 1) {
-                return std::tuple{self().processOne_simd(width)};
+                return std::tuple{self().processOne(width)};
             } else {
-                return self().processOne_simd(width);
+                return self().processOne(width);
             }
         } else {
             return invoke_processOne(std::forward<Ts>(input_simds)...);
@@ -1319,6 +1322,7 @@ protected:
     auto getNextTagAndEosPosition() {
         struct {
             bool        hasTag     = false;
+            bool        hasAnyTag  = false; // true if any tag exists in the tag buffer (not just at current position)
             std::size_t nextTag    = std::numeric_limits<std::size_t>::max();
             std::size_t nextEosTag = std::numeric_limits<std::size_t>::max();
             bool        asyncEoS   = false;
@@ -1332,6 +1336,7 @@ protected:
                     result.nextTag                    = std::min(result.nextTag, nSamplesUntilNextTag(port, 1).value_or(std::numeric_limits<std::size_t>::max()));
                     result.nextEosTag                 = std::min(result.nextEosTag, samples_to_eos_tag(port).value_or(std::numeric_limits<std::size_t>::max()));
                     const ReaderSpanLike auto tagData = port.tagReader().get();
+                    result.hasAnyTag                  = result.hasAnyTag || !tagData.empty();
                     result.hasTag                     = result.hasTag || (!tagData.empty() && tagData[0].index == port.streamReader().position() && !tagData[0].map.empty());
                 } else { // async port
                     if (samples_to_eos_tag(port).transform([&port](auto n) { return n <= port.min_samples; }).value_or(false)) {
@@ -1444,16 +1449,11 @@ protected:
     std::size_t getMergedBlockLimit() {
         if constexpr (Derived::blockCategory != block::Category::NormalBlock) {
             return 0UZ;
-        } else if constexpr (requires(const Derived& d) {
-                                 { available_samples(d) } -> std::same_as<std::size_t>;
-                             }) {
-            return available_samples(self());
         } else if constexpr (traits::block::stream_input_port_types<Derived>::size == 0UZ     // allow blocks that have neither input nor output ports
                              && traits::block::stream_output_port_types<Derived>::size == 0UZ // (by merging source to sink block) -> use internal buffer size
                              && requires { Derived::merged_work_chunk_size(); }) {            //
             constexpr gr::Size_t chunkSize = static_cast<gr::Size_t>(Derived::merged_work_chunk_size());
-            static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples or the non-member/hidden "
-                                                                             "friend function `available_samples(const BlockType&)` must be defined.");
+            static_assert(chunkSize != std::dynamic_extent && chunkSize > 0, "At least one internal port must define a maximum number of samples.");
             return chunkSize;
         } else {
             return std::numeric_limits<std::size_t>::max();
@@ -1621,7 +1621,6 @@ protected:
      *     - check whether there are available samples for any ASYNC port
      *     - limit to requestedWork
      *     - correctly consider Resampling and Stride
-     *     - deprecated: available_samples limits the amount of work to produce for source blocks
      * - perform work: processBulk/One/SIMD
      * - publishing
      *   - publish tags (done first so tags are guaranteed to be fully published for all available samples)
@@ -1671,16 +1670,16 @@ protected:
         std::size_t maxSyncAvailableOut = outputStreamCache.maxSyncAvailable();
         bool        hasAsyncOut         = outputStreamCache.hasASyncAvailable();
 
-        auto [hasTag, nextTag, nextEosTag, asyncEoS]      = getNextTagAndEosPosition();
-        std::size_t maxChunk                              = getMergedBlockLimit(); // handle special cases for merged blocks. TODO: evaluate if/how we can get rid of these
-        const auto  inputSkipBefore                       = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
-        const auto  nextTagLimit                          = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
-        const auto  ensureMinimalDecimation               = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
-        const auto  availableToProcess                    = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
-        const auto  availableToPublish                    = std::min({maxSyncOut, maxSyncAvailableOut});
-        auto [resampledIn, resampledOut, resampledStatus] = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
-        const auto nextEosTagSkipBefore                   = nextEosTag - inputSkipBefore;
-        const bool isEosTagPresent                        = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
+        auto [hasTag, hasAnyTag, nextTag, nextEosTag, asyncEoS] = getNextTagAndEosPosition();
+        std::size_t maxChunk                                    = getMergedBlockLimit();
+        const auto  inputSkipBefore                             = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
+        const auto  nextTagLimit                                = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
+        const auto  ensureMinimalDecimation                     = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
+        const auto  availableToProcess                          = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
+        const auto  availableToPublish                          = std::min({maxSyncOut, maxSyncAvailableOut});
+        auto [resampledIn, resampledOut, resampledStatus]       = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
+        const auto nextEosTagSkipBefore                         = nextEosTag - inputSkipBefore;
+        const bool isEosTagPresent                              = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
 
         if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
             auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
@@ -1710,9 +1709,10 @@ protected:
         auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
-        updateMergedInputTagAndApplySettings(inputSpans, processedIn);
-
-        applyChangedSettings();
+        if (hasAnyTag) {
+            updateMergedInputTagAndApplySettings(inputSpans, processedIn);
+            applyChangedSettings();
+        }
 
         // Actual publishing occurs when outputSpans go out of scope. If processedOut == 0, the Tags will not be published.
         publishCachedOutputTags(outputSpans);
@@ -1746,28 +1746,26 @@ protected:
             } else {
                 constexpr bool        kIsSourceBlock = TInputTypes::size() == 0;
                 constexpr std::size_t kMaxWidth      = stdx::simd_abi::max_fixed_size<double>;
-                // A block determines it's simd::size() via its input types. However, a source block doesn't have any
+                // A block determines its simd::size() via its input types. However, a source block doesn't have any
                 // input types and therefore wouldn't be able to produce simd output on processOne calls. To overcome
-                // this limitation, a source block can implement `processOne_simd(vir::constexpr_value auto width)`
-                // instead of `processOne()` and then return simd objects with simd::size() == width.
-                constexpr bool kIsSimdSourceBlock = kIsSourceBlock and requires(Derived& d) { d.processOne_simd(vir::cw<kMaxWidth>); };
-                if constexpr (HasConstProcessOneFunction<Derived>) { // processOne is const -> can process whole batch similar to SIMD-ised call
-                    if constexpr (kIsSimdSourceBlock or traits::block::can_processOne_simd<Derived>) {
-                        // SIMD loop
-                        constexpr auto kWidth = [&] {
-                            if constexpr (kIsSourceBlock) {
-                                return vir::cw<kMaxWidth>;
-                            } else {
-                                return vir::cw<std::min(kMaxWidth, vir::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
-                            }
-                        }();
+                // this limitation, a source block can implement `processOne(meta::constexpr_value auto width)`
+                // alongside `processOne()` and then return simd objects with simd::size() == width.
+                constexpr bool kIsSimdSourceBlock = kIsSourceBlock and requires(const Derived& d) { d.processOne(meta::cw<kMaxWidth>); };
+                if constexpr (kIsSimdSourceBlock) {
+                    // SIMD source — block opted into SIMD by providing processOne(width)
+                    constexpr auto kWidth = meta::cw<kMaxWidth>;
+                    invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
+                } else if constexpr (HasConstProcessOneFunction<Derived>) {
+                    if constexpr (traits::block::can_processOne_simd<Derived>) {
+                        // const processOne with SIMD-compatible inputs
+                        constexpr auto kWidth = meta::cw<std::min(kMaxWidth, meta::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
                         invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
                     } else { // Non-SIMD loop
                         invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
                     }
                 } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state
                          // after each sample
-                    static_assert(not kIsSimdSourceBlock and not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
+                    static_assert(not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
                     const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
                     userReturnStatus  = result.status;
                     processedIn       = result.processedIn;
@@ -1786,7 +1784,9 @@ protected:
 
         if (processedOut > 0) {
             publishCachedOutputTags(outputSpans);
-            _mergedInputTag.map.clear(); // clear temporary cached input tags after processing - won't be needed after this
+            if (!_mergedInputTag.map.empty()) {
+                _mergedInputTag.map.clear();
+            }
         } else {
             // if no data is published or consumed => do not publish any tags
             for_each_writer_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);

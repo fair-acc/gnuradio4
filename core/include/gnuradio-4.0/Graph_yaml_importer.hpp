@@ -270,7 +270,9 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
         auto dst = parseBlockPort(connection[2], connection[3]);
 
         if (connection.size() == 4) {
-            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = undefined_size, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location);
+            if (auto r = resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = undefined_size, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location); !r) {
+                throw gr::exception(std::format("connection failed: {}", r.error().message));
+            }
         } else {
             std::size_t minBufferSize{};
             pmt::ValueVisitor([&minBufferSize]<typename TValue>(const TValue& value) {
@@ -283,7 +285,9 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 }
             }).visit(connection[4]);
 
-            resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = minBufferSize, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location);
+            if (auto r = resultGraph.connect(src.block_it->second, src.port_definition, dst.block_it->second, dst.port_definition, EdgeParameters{.minBufferSize = minBufferSize, .weight = graph::defaultWeight, .name = graph::defaultEdgeName}, location); !r) {
+                throw gr::exception(std::format("connection failed: {}", r.error().message));
+            }
         }
     } // for connections
 }
@@ -344,23 +348,21 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
             Tensor<pmt::Value> seq;
             seq.reserve(7);
 
-            auto writePortDefinition = [&](const auto& definition) { //
-                std::visit(meta::overloaded(                         //
-                               [&](const PortDefinition::IndexBased& _definition) {
-                                   if (_definition.subIndex != meta::invalid_index) {
-                                       Tensor<pmt::Value> seqPort;
-                                       seqPort.reserve(2);
-                                       seqPort.push_back(std::int64_t(_definition.topLevel));
-                                       seqPort.push_back(std::int64_t(_definition.subIndex));
-                                       seq.push_back(std::move(seqPort));
-                                   } else {
-                                       seq.push_back(std::int64_t(_definition.topLevel));
-                                   }
-                               },                                                    //
-                               [&](const PortDefinition::StringBased& _definition) { //
-                                   seq.push_back(_definition.name);
-                               }),
-                    definition.definition);
+            auto writePortDefinition = [&](const auto& definition) {
+                if (auto* idx = std::get_if<PortDefinition::IndexBased>(&definition.definition)) {
+                    if (idx->subIndex != meta::invalid_index) {
+                        Tensor<pmt::Value> seqPort;
+                        seqPort.reserve(2);
+                        seqPort.push_back(std::int64_t(idx->topLevel));
+                        seqPort.push_back(std::int64_t(idx->subIndex));
+                        seq.push_back(std::move(seqPort));
+                    } else {
+                        seq.push_back(std::int64_t(idx->topLevel));
+                    }
+                } else {
+                    auto& str = std::get<PortDefinition::StringBased>(definition.definition);
+                    seq.push_back(str.name);
+                }
             };
 
             seq.push_back(edge.sourceBlock()->name());

@@ -23,8 +23,6 @@ using gr::meta::fixed_string;
 
 enum class PortDirection { INPUT, OUTPUT };
 
-enum class ConnectionResult { SUCCESS, FAILED };
-
 enum class PortType {
     STREAM,  /*!< used for single-producer-only ond usually synchronous one-to-one or one-to-many communications */
     MESSAGE, /*!< used for multiple-producer one-to-one, one-to-many, many-to-one, or many-to-many communications */
@@ -264,7 +262,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 };
 
 template<class T>
-concept PortLike = requires(T t, const std::size_t n_items, const std::any& newDefault) { // dynamic definitions
+concept PortLike = requires(T t, const std::size_t n_items, const std::any& newDefault, std::pmr::memory_resource* resource) { // dynamic definitions
     typename T::value_type;
     { t.defaultValue() } -> std::same_as<std::any>;
     { t.setDefaultValue(newDefault) } -> std::same_as<bool>;
@@ -273,9 +271,9 @@ concept PortLike = requires(T t, const std::size_t n_items, const std::any& newD
     { t.max_samples } -> std::convertible_to<std::size_t>;
     { t.metaInfo } -> std::convertible_to<gr::PortMetaInfo>;
     { t.domain() } -> std::same_as<std::string_view>;
-    { t.resizeBuffer(n_items) } -> std::same_as<ConnectionResult>;
+    { t.resizeBuffer(n_items, resource, resource) } -> std::same_as<std::expected<void, Error>>;
     { t.isConnected() } -> std::same_as<bool>;
-    { t.disconnect() } -> std::same_as<ConnectionResult>;
+    { t.disconnect() } -> std::same_as<std::expected<void, Error>>;
     { t.isSynchronous() } -> std::same_as<bool>;
     { t.isOptional() } -> std::same_as<bool>;
 };
@@ -538,7 +536,7 @@ struct Port {
     using BufferType        = AttributeTypeList::template find_or_default<is_stream_buffer_attribute, DefaultStreamBuffer<T>>::type;
     using TagBufferType     = AttributeTypeList::template find_or_default<is_tag_buffer_attribute, DefaultTagBuffer>::type;
 
-    static constexpr bool        kIsArithmeticLikeValueType = gr::arithmetic_or_complex_like<T> && sizeof(T) <= 16UZ;
+    static constexpr bool        kIsArithmeticLikeValueType = (gr::arithmetic_or_complex_like<T> || gr::UncertainValueLike<T>) && sizeof(T) <= 16UZ;
     static constexpr std::size_t kDefaultBufferSize         = 4096UZ; // TODO: limit initial max buffer size based on kIsArithmeticLikeValueType
 
     // constexpr members:
@@ -850,19 +848,28 @@ public:
         }
     }
 
-    [[nodiscard]] constexpr ConnectionResult resizeBuffer(std::size_t min_size) noexcept {
-        using enum gr::ConnectionResult;
+    [[nodiscard]] std::expected<void, Error> resizeBuffer(std::size_t min_size, std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) {
         if constexpr (kIsInput) {
-            return SUCCESS;
+            return {};
         } else {
             try {
-                _ioHandler    = BufferType(min_size).new_writer();
-                _tagIoHandler = TagBufferType(min_size).new_writer();
+                if (dataResource) {
+                    _ioHandler = BufferType(min_size, typename BufferType::Allocator(dataResource)).new_writer();
+                } else {
+                    _ioHandler = BufferType(min_size).new_writer();
+                }
+                if (tagResource) {
+                    _tagIoHandler = TagBufferType(min_size, typename TagBufferType::Allocator(tagResource)).new_writer();
+                } else {
+                    _tagIoHandler = TagBufferType(min_size).new_writer();
+                }
+            } catch (const std::exception& e) {
+                return std::unexpected(Error(std::format("failed to resize buffer to {}: {}", min_size, e.what())));
             } catch (...) {
-                return FAILED;
+                return std::unexpected(Error(std::format("failed to resize buffer to {}", min_size)));
             }
         }
-        return SUCCESS;
+        return {};
     }
 
     [[nodiscard]] auto buffer() {
@@ -924,21 +931,24 @@ public:
         return _tagIoHandler;
     }
 
-    [[nodiscard]] ConnectionResult disconnect() noexcept {
-        if (isConnected() == false) {
-            return ConnectionResult::FAILED;
+    [[nodiscard]] std::expected<void, Error> disconnect() {
+        if (!isConnected()) {
+            return std::unexpected(Error("port not connected"));
         }
         _ioHandler    = newIoHandler();
         _tagIoHandler = newTagIoHandler();
-        return ConnectionResult::SUCCESS;
+        return {};
     }
 
     template<typename Other>
-    [[nodiscard]] ConnectionResult connect(Other&& other) {
+    [[nodiscard]] std::expected<void, Error> connect(Other&& other) {
         static_assert(kIsOutput && std::remove_cvref_t<Other>::kIsInput);
         static_assert(std::is_same_v<value_type, typename std::remove_cvref_t<Other>::value_type>);
         auto src_buffer = writerHandlerInternal();
-        return std::forward<Other>(other).updateReaderInternal(src_buffer) ? ConnectionResult::SUCCESS : ConnectionResult::FAILED;
+        if (!std::forward<Other>(other).updateReaderInternal(src_buffer)) {
+            return std::unexpected(Error("failed to connect ports"));
+        }
+        return {};
     }
 
     template<SpanReleasePolicy spanReleasePolicy, bool consumeOnlyFirstTag = false>
@@ -1052,10 +1062,10 @@ private:
         [[nodiscard]] virtual bool             isSynchronous() noexcept                      = 0;
         [[nodiscard]] virtual bool             isOptional() noexcept                         = 0;
 
-        [[nodiscard]] virtual ConnectionResult resizeBuffer(std::size_t min_size) noexcept = 0;
-        [[nodiscard]] virtual bool             isConnected() const noexcept                = 0;
-        [[nodiscard]] virtual ConnectionResult disconnect() noexcept                       = 0;
-        [[nodiscard]] virtual ConnectionResult connect(DynamicPort& dst_port)              = 0;
+        [[nodiscard]] virtual std::expected<void, Error> resizeBuffer(std::size_t min_size, std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) = 0;
+        [[nodiscard]] virtual bool                       isConnected() const noexcept                                                                                                            = 0;
+        [[nodiscard]] virtual std::expected<void, Error> disconnect()                                                                                                                            = 0;
+        [[nodiscard]] virtual std::expected<void, Error> connect(DynamicPort& dst_port)                                                                                                          = 0;
 
         // internal runtime polymorphism access
         [[nodiscard]] virtual bool updateReaderInternal(InternalPortBuffers buffer_other) noexcept = 0;
@@ -1126,37 +1136,30 @@ private:
         [[nodiscard]] bool                       isSynchronous() noexcept override { return _value.isSynchronous(); }
         [[nodiscard]] bool                       isOptional() noexcept override { return _value.isOptional(); }
 
-        [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) noexcept override { return _value.resizeBuffer(min_size); }
-        [[nodiscard]] std::size_t      nReaders() const override { return _value.nReaders(); }
-        [[nodiscard]] std::size_t      nWriters() const override { return _value.nWriters(); }
-        [[nodiscard]] std::size_t      bufferSize() const override { return _value.bufferSize(); }
-        [[nodiscard]] bool             isConnected() const noexcept override { return _value.isConnected(); }
-        [[nodiscard]] ConnectionResult disconnect() noexcept override { return _value.disconnect(); }
+        [[nodiscard]] std::expected<void, Error> resizeBuffer(std::size_t min_size, std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) override { return _value.resizeBuffer(min_size, dataResource, tagResource); }
+        [[nodiscard]] std::size_t                nReaders() const override { return _value.nReaders(); }
+        [[nodiscard]] std::size_t                nWriters() const override { return _value.nWriters(); }
+        [[nodiscard]] std::size_t                bufferSize() const override { return _value.bufferSize(); }
+        [[nodiscard]] bool                       isConnected() const noexcept override { return _value.isConnected(); }
+        [[nodiscard]] std::expected<void, Error> disconnect() override { return _value.disconnect(); }
 
-        [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) override { // TODO: return signature: refactor to non-throwing std::expected<ConnectionResult, Error> return -> follow-up PR
-            using enum gr::ConnectionResult;
+        [[nodiscard]] std::expected<void, Error> connect(DynamicPort& dst_port) override {
             port::BitMask thisMask = portMaskInfo();
             port::BitMask other    = dst_port.portMaskInfo();
             if (port::decodePortType(thisMask) != port::decodePortType(other)) {
-#ifdef DEBUG
-                throw std::runtime_error(std::format("port type mismatch: {}::{} != {}::{}", _value.metaInfo.name, port::decodePortType(thisMask), dst_port.metaInfo.name, port::decodePortType(other)));
-#endif
-                return FAILED;
+                return std::unexpected(Error(std::format("port type mismatch: {}::{} != {}::{}", _value.metaInfo.name, port::decodePortType(thisMask), dst_port.metaInfo.name, port::decodePortType(other))));
             }
             if (_value.metaInfo.data_type != dst_port.metaInfo.data_type) {
-#ifdef DEBUG
-                throw std::runtime_error(std::format("port data type mismatch: {}::{} != {}::{}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name, dst_port.metaInfo.data_type));
-#endif
-                return FAILED;
+                return std::unexpected(Error(std::format("port data type mismatch: {}::{} != {}::{}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name, dst_port.metaInfo.data_type)));
             }
             if constexpr (T::kIsOutput) {
                 auto src_buffer = _value.writerHandlerInternal();
-                return dst_port.updateReaderInternal(src_buffer) ? SUCCESS : FAILED;
+                if (!dst_port.updateReaderInternal(src_buffer)) {
+                    return std::unexpected(Error(std::format("failed to connect {}::{} to {}", _value.metaInfo.name, _value.metaInfo.data_type, dst_port.metaInfo.name)));
+                }
+                return {};
             } else {
-#ifdef DEBUG
-                throw std::runtime_error("This works only on input ports");
-#endif
-                return FAILED;
+                return std::unexpected(Error("connect() works only on output ports"));
             }
         }
 
@@ -1220,11 +1223,11 @@ public:
 
     [[nodiscard]] bool isOptional() noexcept { return _accessor->isOptional(); }
 
-    [[nodiscard]] ConnectionResult resizeBuffer(std::size_t min_size) {
+    [[nodiscard]] std::expected<void, Error> resizeBuffer(std::size_t min_size, std::pmr::memory_resource* dataResource = nullptr, std::pmr::memory_resource* tagResource = nullptr) {
         if (port::decodeDirection(portMaskInfo()) == PortDirection::OUTPUT) {
-            return _accessor->resizeBuffer(min_size);
+            return _accessor->resizeBuffer(min_size, dataResource, tagResource);
         }
-        return ConnectionResult::FAILED;
+        return std::unexpected(Error("resizeBuffer() only applicable for output ports"));
     }
 
     [[nodiscard]] bool isConnected() const noexcept { return _accessor->isConnected(); }
@@ -1233,9 +1236,9 @@ public:
     [[nodiscard]] std::size_t nWriters() const { return _accessor->nWriters(); }
     [[nodiscard]] std::size_t bufferSize() const { return _accessor->bufferSize(); }
 
-    [[nodiscard]] ConnectionResult disconnect() noexcept { return _accessor->disconnect(); }
+    [[nodiscard]] std::expected<void, Error> disconnect() { return _accessor->disconnect(); }
 
-    [[nodiscard]] ConnectionResult connect(DynamicPort& dst_port) { return _accessor->connect(dst_port); }
+    [[nodiscard]] std::expected<void, Error> connect(DynamicPort& dst_port) { return _accessor->connect(dst_port); }
 };
 
 template<PortLike T, bool owning>

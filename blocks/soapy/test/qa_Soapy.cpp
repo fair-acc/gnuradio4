@@ -303,8 +303,8 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         });
         auto& monitor = flow.emplaceBlock<Copy<ValueType>>();
         auto& sink    = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", "in">(source, monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out", "in">(monitor, sink)));
+        expect(flow.connect<"out", "in">(source, monitor).has_value());
+        expect(flow.connect<"out", "in">(monitor, sink).has_value());
 
         scheduler sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -347,8 +347,8 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         });
         auto& sink1  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
         auto& sink2  = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out#0", "in">(source, sink1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out#1", "in">(source, sink2)));
+        expect(flow.connect<"out#0", "in">(source, sink1).has_value());
+        expect(flow.connect<"out#1", "in">(source, sink2).has_value());
 
         scheduler sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {

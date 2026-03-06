@@ -93,10 +93,10 @@ int main(int argc, char* argv[]) {
     auto connection_3 [[maybe_unused]] = testGraph.connect(block_multiply_2, 0, block_counter, 0);
     auto connection_4 [[maybe_unused]] = testGraph.connect(block_counter, 0, block_sink, 0);
 
-    assert(connection_1 == gr::ConnectionResult::SUCCESS);
-    assert(connection_2 == gr::ConnectionResult::SUCCESS);
-    assert(connection_3 == gr::ConnectionResult::SUCCESS);
-    assert(connection_4 == gr::ConnectionResult::SUCCESS);
+    assert(connection_1.has_value());
+    assert(connection_2.has_value());
+    assert(connection_3.has_value());
+    assert(connection_4.has_value());
 
     for (std::size_t i = 0; i < repeats; ++i) {
         std::ignore = block_source.work(std::numeric_limits<std::size_t>::max());

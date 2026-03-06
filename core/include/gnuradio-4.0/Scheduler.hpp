@@ -343,11 +343,13 @@ public:
         }
 
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
-        std::ignore            = _toChildMessagePort.connect(_graph->msgIn);
+        if (!_toChildMessagePort.connect(_graph->msgIn)) {
+            this->emitErrorMessage("connectBlockMessagePorts()", "Failed to connect scheduler input message port to graph msgIn");
+        }
         _graph->msgOut.setBuffer(toSchedulerBuffer.streamBuffer, toSchedulerBuffer.tagBuffer);
 
         graph::forEachBlock<TransparentBlockGroup>(*_graph, [this, &toSchedulerBuffer](auto& block) {
-            if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*block->msgIn)) {
+            if (!_toChildMessagePort.connect(*block->msgIn)) {
                 this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", block->uniqueName()));
             }
 
@@ -832,7 +834,7 @@ protected:
 
         auto& newBlock = targetGraph->emplaceBlock(type, properties);
 
-        if (ConnectionResult::SUCCESS != _toChildMessagePort.connect(*newBlock->msgIn)) {
+        if (!_toChildMessagePort.connect(*newBlock->msgIn)) {
             this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", newBlock->uniqueName()));
         }
 

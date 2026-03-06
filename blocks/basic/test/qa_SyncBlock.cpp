@@ -58,7 +58,7 @@ void runTest(const TestParams& par) {
 
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<int, ProcessFunction::USE_PROCESS_BULK>>(srcParams)));
         sources[i]->_tags = par.inTags[i];
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources[i], "out", syncBlock, "inputs#"s + std::to_string(i)));
+        expect(graph.connect(*sources[i], "out", syncBlock, "inputs#"s + std::to_string(i)).has_value());
     }
 
     for (std::size_t i = 0; i < nPorts; i++) {
@@ -67,7 +67,7 @@ void runTest(const TestParams& par) {
             sinkParams.insert_or_assign("log_samples", false);
         }
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>(sinkParams)));
-        expect(gr::ConnectionResult::SUCCESS == graph.connect(syncBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s));
+        expect(graph.connect(syncBlock, "outputs#"s + std::to_string(i), *sinks[i], "in"s).has_value());
     }
 
     gr::scheduler::Simple sched;

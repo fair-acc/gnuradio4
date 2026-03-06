@@ -20,7 +20,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& src  = g.emplaceBlock<NullSource<T>>();
         auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(eq(g.connect<"out", "in">(src, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -38,7 +38,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", start_value}, {"n_samples_max", N_total}});
         auto& sink = g.emplaceBlock<NullSink<T>>();
 
-        expect(eq(g.connect<"out", "in">(src, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -56,8 +56,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& copy = g.emplaceBlock<Copy<T>>();
         auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(eq(g.connect<"out", "in">(src, copy), ConnectionResult::SUCCESS));
-        expect(eq(g.connect<"out", "in">(copy, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, copy).has_value());
+        expect(g.connect<"out", "in">(copy, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -77,8 +77,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& head = g.emplaceBlock<HeadBlock<T>>(property_map{{"n_samples_max", N_head}});
         auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N_head}});
 
-        expect(eq(g.connect<"out", "in">(src, head), ConnectionResult::SUCCESS));
-        expect(eq(g.connect<"out", "in">(head, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, head).has_value());
+        expect(g.connect<"out", "in">(head, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -95,7 +95,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", T(99)}, {"n_samples_max", N}});
         auto& sink = g.emplaceBlock<NullSink<T>>();
 
-        expect(eq(g.connect<"out", "in">(src, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -111,7 +111,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& src  = g.emplaceBlock<SlowSource<T>>(property_map{{"default_value", T(77)}, {"delay", 10U}});
         auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(eq(g.connect<"out", "in">(src, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -129,8 +129,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", 0.0f}, {"busy_wait", true}});
         auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(eq(g.connect<"out", "in">(src, sim), ConnectionResult::SUCCESS));
-        expect(eq(g.connect<"out", "in">(sim, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, sim).has_value());
+        expect(g.connect<"out", "in">(sim, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -148,8 +148,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", 1.0f}, {"busy_wait", true}});
         auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(eq(g.connect<"out", "in">(src, sim), ConnectionResult::SUCCESS));
-        expect(eq(g.connect<"out", "in">(sim, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, sim).has_value());
+        expect(g.connect<"out", "in">(sim, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {
@@ -167,8 +167,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& sim  = g.emplaceBlock<SimCompute<T>>(property_map{{"complexity_order", 2.0f}, {"busy_wait", false}});
         auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(eq(g.connect<"out", "in">(src, sim), ConnectionResult::SUCCESS));
-        expect(eq(g.connect<"out", "in">(sim, sink), ConnectionResult::SUCCESS));
+        expect(g.connect<"out", "in">(src, sim).has_value());
+        expect(g.connect<"out", "in">(sim, sink).has_value());
 
         gr::scheduler::Simple sch;
         if (auto ret = sch.exchange(std::move(g)); !ret) {

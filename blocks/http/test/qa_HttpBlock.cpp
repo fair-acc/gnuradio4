@@ -80,8 +80,8 @@ const boost::ut::suite HttpBlocktests = [] {
 
         auto& sink = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
-        expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
+        expect(source.msgOut.connect(httpBlock.msgIn).has_value());
+        expect(graph.connect<"out", "in">(httpBlock, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -114,8 +114,8 @@ const boost::ut::suite HttpBlocktests = [] {
         auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>(property_map{{"url", gr::pmt::Value("http://localhost:8080")}, {"endpoint", gr::pmt::Value("/does-not-exist")}});
         auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
-        expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
+        expect(source.msgOut.connect(httpBlock.msgIn).has_value());
+        expect(graph.connect<"out", "in">(httpBlock, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -146,8 +146,8 @@ const boost::ut::suite HttpBlocktests = [] {
         auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url", gr::pmt::Value("http://localhost:8080")}, {"endpoint", gr::pmt::Value("/number")}, {"type", gr::pmt::Value("POST")}, {"parameters", gr::pmt::Value("param=42")}});
         auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
-        expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
+        expect(source.msgOut.connect(httpBlock.msgIn).has_value());
+        expect(graph.connect<"out", "in">(httpBlock, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -191,8 +191,8 @@ const boost::ut::suite HttpBlocktests = [] {
         auto&     httpBlock = graph.emplaceBlock<http::HttpBlock<uint8_t>>({{"url", gr::pmt::Value("http://localhost:8080")}, {"endpoint", gr::pmt::Value("/notify")}, {"type", gr::pmt::Value("SUBSCRIBE")}});
         auto&     sink      = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 
-        expect(eq(ConnectionResult::SUCCESS, source.msgOut.connect(httpBlock.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", "in">(httpBlock, sink)));
+        expect(source.msgOut.connect(httpBlock.msgIn).has_value());
+        expect(graph.connect<"out", "in">(httpBlock, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {

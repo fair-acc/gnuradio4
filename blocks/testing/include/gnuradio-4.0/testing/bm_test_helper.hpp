@@ -6,6 +6,7 @@
 
 #include <benchmark.hpp>
 
+#include <gnuradio-4.0/BlockMerging.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
@@ -19,26 +20,22 @@ template<typename T, std::size_t min = 0UZ, std::size_t count = N_MAX, bool use_
 struct source : public gr::Block<source<T, min, count>> {
     gr::PortOut<T> out;
 
-    gr::Size_t n_samples_max;
+    gr::Size_t n_samples_max = 0U;
 
     GR_MAKE_REFLECTABLE(source, out, n_samples_max);
 
-    friend constexpr std::size_t available_samples(const source& self) noexcept { return self.n_samples_max - n_samples_produced; }
+    void reset() { n_samples_produced = 0UZ; }
 
-    [[nodiscard]] constexpr auto processOne_simd(auto N) const noexcept -> vir::simdize<T, decltype(N)::value> {
-        n_samples_produced += N;
-        vir::simdize<T, N> x{};
-        benchmark::force_to_memory(x);
-        return x;
-    }
-
-    [[nodiscard]] constexpr T processOne() const noexcept {
+    [[nodiscard]] constexpr T processOne() noexcept {
         n_samples_produced++;
+        if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
+            this->requestStop();
+        }
         T x{};
         benchmark::force_to_memory(x);
         return x;
     }
-}; // namespace bm::test
+};
 
 inline static std::size_t n_samples_consumed = 0UZ;
 
@@ -49,6 +46,8 @@ struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     std::optional<std::size_t>                       _last_tag_position;
 
     GR_MAKE_REFLECTABLE(sink, in, should_receive_n_samples);
+
+    void reset() { n_samples_consumed = 0UZ; }
 
     [[nodiscard]] constexpr auto processOne(T a) noexcept {
         // optional user-level tag processing

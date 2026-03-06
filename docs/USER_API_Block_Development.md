@@ -288,6 +288,56 @@ into SIMD registers, calls `processOne` with the widened type, and scatters resu
 back to the output buffer — all transparently. A non-`const` or non-`noexcept`
 `processOne` falls back to scalar-only evaluation.
 
+### SIMD-aware source blocks
+
+Processing blocks receive SIMD-widened inputs from the framework, so SIMD support
+comes naturally via `t_or_simd<T>`. Source blocks have no inputs — they produce samples
+from internal state. To enable SIMD output, provide a second `processOne` overload that
+takes a compile-time width parameter:
+
+```cpp
+template<typename T>
+struct MySource : gr::Block<MySource<T>> {
+    gr::PortOut<T> out;
+    GR_MAKE_REFLECTABLE(MySource, out);
+
+    // scalar: produce one sample
+    [[nodiscard]] constexpr T processOne() const noexcept { return T{}; }
+
+    // SIMD: produce N samples at once (N is a compile-time constant)
+    [[nodiscard]] constexpr auto processOne(gr::meta::constexpr_value auto N) const noexcept {
+        return gr::meta::simdize<T, N>{};  // zero-filled SIMD vector
+    }
+};
+```
+
+The framework detects the width-accepting overload and calls it with the optimal SIMD
+width instead of invoking the scalar `processOne()` in a loop. The width parameter `N`
+is a `gr::meta::constexpr_value` — use it directly with `gr::meta::simdize<T, N>` to construct
+SIMD return types.
+
+The scalar `processOne()` (no arguments) is always required as the fallback — it is
+used for non-SIMD types and for the epilogue when the sample count is not a multiple
+of the SIMD width.
+
+A stateful source (non-`const` `processOne`) can also provide the SIMD overload:
+
+```cpp
+[[nodiscard]] constexpr T processOne() noexcept {
+    return static_cast<T>(count++);  // scalar fallback
+}
+
+[[nodiscard]] constexpr auto processOne(gr::meta::constexpr_value auto N) noexcept
+requires std::is_arithmetic_v<T>
+{
+    gr::meta::simdize<T, N> result;
+    for (std::size_t i = 0; i < result.size(); ++i) {
+        result[i] = static_cast<T>(count++);
+    }
+    return result;
+}
+```
+
 ### `work::Status`
 
 | Value                            | Meaning                               |

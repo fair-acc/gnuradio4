@@ -101,8 +101,8 @@ const boost::ut::suite MessagesTests = [] {
             TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
             gr::MsgPortIn  fromBlock;
 
-            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
-            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+            expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+            expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "w/o explicit serviceName"_test = [&] {
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kHeartbeat /* endpoint */, {{"myKey", "value"}} /* data  */);
@@ -169,8 +169,8 @@ const boost::ut::suite MessagesTests = [] {
             TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
             gr::MsgPortIn  fromBlock;
 
-            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
-            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+            expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+            expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "w/o explicit serviceName"_test = [&] {
                 sendMessage<Set>(toBlock, "" /* serviceName */, block::property::kEcho /* endpoint */, {{"myKey", "value"}} /* data  */);
@@ -247,8 +247,8 @@ const boost::ut::suite MessagesTests = [] {
             TestBlock<int> unitTestBlock(property_map{{"name", "UnitTestBlock"}});
             gr::MsgPortIn  fromBlock;
 
-            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
-            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+            expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+            expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "get - state"_test = [&] {
                 sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kLifeCycleState /* endpoint */, {} /* data  */, "client#42");
@@ -304,8 +304,8 @@ const boost::ut::suite MessagesTests = [] {
             std::ignore = unitTestBlock.settings().applyStagedParameters(); // call manually (N.B. normally initialised by Graph/Scheduler)
             gr::MsgPortIn fromBlock;
 
-            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
-            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+            expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+            expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "get - Settings"_test = [&] {
                 sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSetting /* endpoint */, {} /* data  */);
@@ -384,8 +384,8 @@ const boost::ut::suite MessagesTests = [] {
             unitTestBlock.init(unitTestBlock.progress);
             gr::MsgPortIn fromBlock;
 
-            expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock.msgIn)));
-            expect(eq(ConnectionResult::SUCCESS, unitTestBlock.msgOut.connect(fromBlock)));
+            expect(toBlock.connect(unitTestBlock.msgIn).has_value());
+            expect(unitTestBlock.msgOut.connect(fromBlock).has_value());
 
             "get all contexts default - w/o explicit serviceName"_test = [&] {
                 sendMessage<Get>(toBlock, "" /* serviceName */, block::property::kSettingsContexts /* endpoint */, {} /* data  */);
@@ -571,14 +571,14 @@ const boost::ut::suite MessagesTests = [] {
             expect(nothrow([&] { unitTestBlock2.processScheduledMessages(); })) << "manually execute processing of messages";
         };
 
-        expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock1.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, toBlock.connect(unitTestBlock2.msgIn)));
+        expect(toBlock.connect(unitTestBlock1.msgIn).has_value());
+        expect(toBlock.connect(unitTestBlock2.msgIn).has_value());
 
         // bug/missing connect API, second connect invalidates first unitTestBlock1.msgOut connections
-        // expect(eq(ConnectionResult::SUCCESS, unitTestBlock1.msgOut.connect(fromBlock)));
-        // expect(eq(ConnectionResult::SUCCESS, unitTestBlock2.msgOut.connect(fromBlock)));
+        // expect(unitTestBlock1.msgOut.connect(fromBlock).has_value());
+        // expect(unitTestBlock2.msgOut.connect(fromBlock).has_value());
         // workaround
-        expect(eq(ConnectionResult::SUCCESS, unitTestBlock1.msgOut.connect(fromBlock)));
+        expect(unitTestBlock1.msgOut.connect(fromBlock).has_value());
         auto buffer = fromBlock.buffer();
         // unitTestBlock1.msgOut.setBuffer(buffer.streamBuffer, buffer.tagBuffer);
         unitTestBlock2.msgOut.setBuffer(buffer.streamBuffer, buffer.tagBuffer);
@@ -614,8 +614,8 @@ const boost::ut::suite MessagesTests = [] {
         auto& process = flow.emplaceBlock<TestBlock<float>>({{"name", "UnitTestBlock"}});
         auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TestSink"}, {"log_samples", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out", "in">(source, process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out", "in">(process, sink)));
+        expect(flow.connect<"out", "in">(source, process).has_value());
+        expect(flow.connect<"out", "in">(process, sink).has_value());
 
         gr::MsgPortOut                                toScheduler;
         gr::MsgPortIn                                 fromScheduler;
@@ -624,8 +624,8 @@ const boost::ut::suite MessagesTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
 
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
         using namespace block;
         auto sendCommand = [&toScheduler](std::string_view msg, gr::message::Command cmd, std::string_view serviceName, std::string_view endPoint, property_map data) {
@@ -795,8 +795,8 @@ const boost::ut::suite MessagesTests = [] {
         auto& process = flow.emplaceBlock<TestBlock<float>>({{"name", "UnitTestBlock"}});
         auto& sink    = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TestSink"}, {"log_samples", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out", "in">(source, process)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out", "in">(process, sink)));
+        expect(flow.connect<"out", "in">(source, process).has_value());
+        expect(flow.connect<"out", "in">(process, sink).has_value());
 
         gr::MsgPortIn                                 fromScheduler;
         gr::MsgPortOut                                toScheduler;
@@ -804,8 +804,8 @@ const boost::ut::suite MessagesTests = [] {
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
-        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
         sendMessage<Command::Subscribe>(toScheduler, scheduler.unique_name, block::property::kLifeCycleState, {}, "TestClient#42");
 
         auto threadHandle = gr::test::thread_pool::executeScheduler("qa_Messages::scheduler", scheduler);
@@ -849,8 +849,8 @@ const boost::ut::suite MessagesTests = [] {
         auto& testBlock = flow.emplaceBlock<TestBlock<float>>({{"factor", 42.f}, {"ui_constraints", gr::property_map{{"x", 42.f}, {"y", 6.f}}}});
         auto& sink      = flow.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"log_samples", false}});
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out", "in">(source, testBlock)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"out", "in">(testBlock, sink)));
+        expect(flow.connect<"out", "in">(source, testBlock).has_value());
+        expect(flow.connect<"out", "in">(testBlock, sink).has_value());
 
         gr::scheduler::Simple<SchedulerPolicy::value> scheduler;
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
@@ -859,8 +859,8 @@ const boost::ut::suite MessagesTests = [] {
 
         gr::MsgPortIn  fromScheduler;
         gr::MsgPortOut toScheduler;
-        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
         sendMessage<Command::Subscribe>(toScheduler, "", block::property::kStagedSetting, {}, "TestClient");
 
         // dispatch client to IO pool: the client polls with sleep_for (IO-bound),

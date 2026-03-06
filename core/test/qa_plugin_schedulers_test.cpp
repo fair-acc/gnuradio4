@@ -37,7 +37,7 @@ const boost::ut::suite PluginSchedulerTests = [] {
         auto& sink   = testGraph.emplaceBlock("good::cout_sink<float64>", {});
 
         auto connection = testGraph.connect(source, 0, sink, 0);
-        expect(connection == gr::ConnectionResult::SUCCESS);
+        expect(connection.has_value());
 
         auto scheduler = context->loader.instantiateScheduler("good::GoodMathScheduler");
         scheduler->setGraph(std::move(testGraph));
