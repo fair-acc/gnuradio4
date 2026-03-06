@@ -1,5 +1,5 @@
 add_library(gr-http INTERFACE)
-target_link_libraries(gr-http INTERFACE gnuradio-core gnuradio-algorithm httplib::httplib)
+target_link_libraries(gr-http INTERFACE gnuradio-core gnuradio-algorithm)
 if(APPLE)
   target_link_libraries(gr-http INTERFACE "-framework CFNetwork")
 endif()
