@@ -632,7 +632,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake"
-  VERSION "${PROJECT_VERSION}"
+  VERSION "${GR4_PKG_VERSION}"
   COMPATIBILITY SameMajorVersion)
 
 install(
