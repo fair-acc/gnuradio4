@@ -107,9 +107,8 @@ struct FileIoSink : gr::Block<FileIoSink> {
     if (!detail::isHttpUri(uri)) {
         return std::unexpected(gr::Error{std::format("readAsyncEmscriptenHttpWorkerThread only http uri: {}", uri)});
     }
-    auto state = std::make_shared<ReaderState>(std::string(uri), config);
-    runHttpGetEmscripten<false>(state); // use worker thread, main has issues for unit test with `node`
-    return Reader{state};
+    config.emscriptenRunOnMainThread = false; // main has issues for unit test with `node`
+    return readAsync(uri, std::move(config));
 }
 
 [[nodiscard]] inline std::expected<gr::algorithm::fileio::Writer, gr::Error> writeAsyncEmscriptenHttpWorkerThread(std::string_view uri, std::span<const std::uint8_t> data, gr::algorithm::fileio::WriterConfig config = {}) {
@@ -118,10 +117,8 @@ struct FileIoSink : gr::Block<FileIoSink> {
     if (!detail::isHttpUri(uri)) {
         return std::unexpected(gr::Error{std::format("writeAsyncEmscriptenHttpWorkerThread only http uri: {}", uri)});
     }
-    auto state = std::make_shared<WriterState>(std::string(uri), config);
-    state->data.assign(data.begin(), data.end());
-    detail::runHttpPostEmscripten<false>(state); // use worker thread, main has issues for unit test with `node`
-    return Writer{state};
+    config.emscriptenRunOnMainThread = false; // main has issues for unit test with `node`
+    return writeAsync(uri, data, std::move(config));
 }
 #endif
 

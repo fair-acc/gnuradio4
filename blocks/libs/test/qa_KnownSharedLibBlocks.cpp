@@ -81,7 +81,8 @@ const boost::ut::suite TagTests = [] {
 #else
         expect(registry.contains("gr::electrical::PowerMetrics<float32, 3ul>"sv));
 #endif
-        expect(registry.contains("gr::http::HttpBlock<float32>"sv));
+        expect(registry.contains("gr::http::HttpSource"sv));
+        expect(registry.contains("gr::http::HttpSink"sv));
         expect(registry.contains("gr::filter::fir_filter<float32>"sv));
         expect(registry.contains("gr::blocks::fft::FFT<float32>"sv));
     };
