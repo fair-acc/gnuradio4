@@ -86,12 +86,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/gnuradio-4.0/config.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 install(
-  TARGETS gnuradio-core
-  EXPORT gnuradio4Targets
-  PUBLIC_HEADER DESTINATION include/gnuradio-4.0)
-
-install(
-  TARGETS gnuradio-blocklib-core
+  TARGETS gnuradio-core gnuradio-blocklib-core
   EXPORT gnuradio4Targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
