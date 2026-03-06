@@ -12,7 +12,6 @@ set(GR4_PKG_VERSION
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-# Mainly for FMT
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 # limit parallel compile/link jobs to prevent OOM with template-heavy TUs override with -DGR_BUILD_PARALLEL_LEVEL=<N>

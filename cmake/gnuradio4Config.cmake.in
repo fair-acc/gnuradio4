@@ -1,5 +1,17 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+
+# Optional transitive dependencies of exported targets.
+if(@ENABLE_TBB@)
+  find_dependency(TBB)
+endif()
+
+# gnuradio4::gnuradio-algorithm links cpr::cpr for native (non-Emscripten) HTTP support.
+if(@GR_HTTP_ENABLED@ AND NOT "@CMAKE_SYSTEM_NAME@" STREQUAL "Emscripten")
+  find_dependency(cpr CONFIG)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/gnuradio4Targets.cmake")
 
 check_required_components(gnuradio4)
