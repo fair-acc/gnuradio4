@@ -90,6 +90,9 @@
  *
  *  Emscripten implementation:
  *    - Uses emscripten_fetch + callbacks for GET/POST, with optional longPolling (recursive re-fetch).
+ *    - ReaderConfig::emscriptenRunOnMainThread / WriterConfig::emscriptenRunOnMainThread let callers force HTTP requests
+ *      onto a worker thread when the main runtime thread may be blocked by the caller. This is mainly a unit-test issue;
+ *      normal Emscripten applications should keep the default main-thread path.
  *    - Blocking wait() / write() is explicitly forbidden on the main WASM runtime thread; attempts are detected and return an error/warning.
  *    - download:/ URIs trigger a JS "download" in the browser.
  */
@@ -713,7 +716,10 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
                 context.get());
         }
     } else {
-        gr::thread_pool::Manager::defaultIoPool()->execute([ctx = context.get()]() mutable { runHttpGetEmscriptenImpl(ctx); });
+        // Primarily used in Emscripten unit tests.
+        // Launch from a dedicated detached thread: under Emscripten/Node + Server/Client, callbacks have been
+        // unreliable when emscripten_fetch() starts on a reusable pool worker. ReaderFetchContext owns the async lifetime.
+        std::thread([ctx = context.get()]() mutable { runHttpGetEmscriptenImpl(ctx); }).detach();
     }
 }
 
@@ -772,7 +778,11 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
         return Reader{state};
     } else if (uriKind == detail::UriKind::HttpUri) {
         auto state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
-        runHttpGetEmscripten(state);
+        if (state->config.emscriptenRunOnMainThread) {
+            runHttpGetEmscripten(state);
+        } else {
+            runHttpGetEmscripten<false>(state);
+        }
         return Reader{state};
     } else {
         return std::unexpected(gr::Error{std::format("Unsupported URI scheme for readAsync(): {}", uri)});
@@ -841,10 +851,11 @@ namespace detail {
 enum class WriteMode { overwrite, append };
 
 struct WriterConfig {
-    WriteMode                          mode             = WriteMode::overwrite;
-    std::uint64_t                      httpTimeoutNanos = 30'000'000'000; // 30 s time-out for http(s)
-    std::map<std::string, std::string> httpHeaders      = {};
-    bool                               tlsVerifyPeer    = true; // for native https
+    WriteMode                          mode                      = WriteMode::overwrite;
+    std::uint64_t                      httpTimeoutNanos          = 30'000'000'000; // 30 s time-out for http(s)
+    std::map<std::string, std::string> httpHeaders               = {};
+    bool                               tlsVerifyPeer             = true; // for native https
+    bool                               emscriptenRunOnMainThread = true; // primarily for unit tests
 };
 
 struct WriteResult {
@@ -1175,7 +1186,10 @@ inline void runHttpPostEmscripten(std::shared_ptr<WriterState> state) {
                 context.get());
         }
     } else {
-        gr::thread_pool::Manager::defaultIoPool()->execute([ctx = context.get()]() mutable { runHttpPostEmscriptenImpl(ctx); });
+        // Primarily used in Emscripten unit tests.
+        // Launch from a dedicated detached thread: under Emscripten/Node + Server/Client, callbacks have been
+        // unreliable when emscripten_fetch() starts on a reusable pool worker. WriterFetchContext owns the async lifetime.
+        std::thread([ctx = context.get()]() mutable { runHttpPostEmscriptenImpl(ctx); }).detach();
     }
 }
 
@@ -1262,7 +1276,11 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         }
         auto state = std::make_shared<WriterState>(std::string(uri), config);
         state->data.assign(data.begin(), data.end());
-        detail::runHttpPostEmscripten(state);
+        if (state->config.emscriptenRunOnMainThread) {
+            detail::runHttpPostEmscripten(state);
+        } else {
+            detail::runHttpPostEmscripten<false>(state);
+        }
         return Writer{state};
     } else if (uriKind == detail::UriKind::DownloadUri) {
         const auto filename = detail::stripDownloadUri(uri);

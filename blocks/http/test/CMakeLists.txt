@@ -1,6 +1,6 @@
 if(NOT APPLE)
   add_ut_test(qa_HttpBlock)
-  target_link_libraries(qa_HttpBlock PRIVATE gr-http)
+  target_link_libraries(qa_HttpBlock PRIVATE gr-http gr-testing httplib::httplib)
 
   if(EMSCRIPTEN)
     target_link_options(
