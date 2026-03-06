@@ -20,6 +20,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 set(GR_BUILD_PARALLEL_LEVEL
     "6"
     CACHE STRING "Maximum parallel compile/link jobs")
+option(GR4_USE_THIN_ARCHIVES "Build static archives as thin archives (non-relocatable when installed)" OFF)
+option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" OFF)
 if(CMAKE_GENERATOR MATCHES "Ninja")
   set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_pool=${GR_BUILD_PARALLEL_LEVEL} link_pool=2)
   set(CMAKE_JOB_POOL_COMPILE compile_pool)
@@ -45,8 +47,13 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -s")
   endif()
 
-  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> crT <TARGET> <LINK_FLAGS> <OBJECTS>")
-  set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> rT <TARGET> <LINK_FLAGS> <OBJECTS>")
+  if(GR4_USE_THIN_ARCHIVES)
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> crT <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> rT <TARGET> <LINK_FLAGS> <OBJECTS>")
+  else()
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> cr <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> r <TARGET> <LINK_FLAGS> <OBJECTS>")
+  endif()
 
   if(APPLE)
     # macOS ld uses -dead_strip instead of --gc-sections; -ffunction-sections/-fdata-sections are still valid for Clang
@@ -309,12 +316,14 @@ string(
           ALL_COMPILER_FLAGS
           "${ALL_COMPILER_FLAGS}")
 
-if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
-  if(NOT GR_USE_ADAPTIVE_CPP)
-    message(STATUS "Using plain Clang – enabling libc++")
+if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+  if(NOT GR_USE_ADAPTIVE_CPP AND GR4_USE_LIBCXX)
+    message(STATUS "Using plain Clang – enabling libc++ (GR4_USE_LIBCXX=ON)")
     add_compile_options(-stdlib=libc++ -Wno-unused-command-line-argument)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+  elseif(NOT GR_USE_ADAPTIVE_CPP)
+    message(STATUS "Using plain Clang – using default C++ standard library")
   else()
     message(STATUS "AdaptiveCpp detected – skipping libc++ settings")
   endif()
