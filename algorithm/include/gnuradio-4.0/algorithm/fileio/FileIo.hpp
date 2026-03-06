@@ -52,8 +52,8 @@
  *    - poll(cb, maxSize, doWait) delivers chunks or errors via PollResult, where cb is called with either data or an error, and a final message.
  *      maxSize should typically be set to number of free bytes in the caller’s output buffer. This guarantees that all data reported by a single poll()
  *      call can be written directly without intermediate storage. The default is std::numeric_limits<std::size_t>::max(), meaning "no explicit limit".
- *      The caller should ensure that ReaderConfig::chunkBytes <= maxSize; otherwise an error is returned, and if that error is not handled correctly in cb,
- *      user code may end up in an infinite loop.
+ *      If a queued chunk exceeds maxSize, PollResult::requiredOutputSize is set and the queued message is left unconsumed so the caller can retry later with
+ *      a larger output buffer. The caller should handle this condition explicitly; otherwise user code may end up in an infinite loop.
  *    - get() is a convenience: it blocks on a worker thread and concatenates all data into a single std::vector<uint8_t>.
  *    - cancel() requests a soft cancel; for Emscripten this is best-effort (we cannot synchronously abort emscripten_fetch on another thread).
  *
@@ -154,6 +154,7 @@ struct Reader {
     struct PollResult {
         std::expected<std::span<const std::uint8_t>, gr::Error> data = std::span<const std::uint8_t>{}; // span is valid only during callback
         bool                                                    isFinal{false};
+        std::optional<std::size_t>                              requiredOutputSize{}; // in poll (): if a queued chunk exceeds maxSize, PollResult::requiredOutputSize is set
     };
 
 private:
@@ -204,8 +205,8 @@ public:
         }
     }
 
-    // Note: The caller should ensure that ReaderConfig::chunkBytes <= maxSize; otherwise an error is returned,
-    // and if that error is not handled correctly in callback, user code may end up in an infinite loop.
+    // Note: If a queued chunk exceeds maxSize, PollResult::requiredOutputSize is set and the queued message is
+    // left unconsumed so the caller can retry later with a larger output buffer.
     template<typename TCallback>
     requires std::invocable<TCallback, PollResult> && std::same_as<std::invoke_result_t<TCallback, PollResult>, void>
     void poll(TCallback&& callback, std::size_t maxSize = std::numeric_limits<std::size_t>::max(), bool doWait = false) {
@@ -242,7 +243,8 @@ public:
                     std::ignore = span.consume(1);
                     return;
                 } else {
-                    res.data = std::unexpected{gr::Error{std::format("message data size ({}) exceeds max requested size ({})", bytes->size(), maxSize)}};
+                    res.requiredOutputSize = bytes->size();
+                    res.data               = std::unexpected{gr::Error{std::format("message data size ({}) exceeds max requested size ({})", bytes->size(), maxSize)}};
                     std::invoke(std::forward<TCallback>(callback), std::move(res));
                     std::ignore = span.consume(0);
                     return;

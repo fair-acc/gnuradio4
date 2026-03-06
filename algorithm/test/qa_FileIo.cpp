@@ -897,16 +897,22 @@ const boost::ut::suite<"FileIO error tests"> fileIoErrorTests = [] {
         auto                      readerExp = fileio::readAsync(std::span<const std::uint8_t>(bytes.data(), bytes.size()), config, "<memory:maxSize>");
         expect(readerExp.has_value());
         if (readerExp.has_value()) {
-            auto        sub          = std::move(readerExp.value());
-            bool        finished     = false;
-            std::size_t dataCounter  = 0;
-            std::size_t errorCounter = 0;
+            auto                       sub                   = std::move(readerExp.value());
+            bool                       finished              = false;
+            std::size_t                dataCounter           = 0;
+            std::size_t                errorCounter          = 0;
+            std::size_t                requiredOutputCounter = 0;
+            std::optional<std::size_t> lastRequiredOutputSize;
             while (!finished) {
                 const std::size_t maxSize = errorCounter < 5 ? 2uz : 1000uz;
 
                 sub.poll(
-                    [&finished, &dataCounter, &errorCounter](const auto& res) {
+                    [&finished, &dataCounter, &errorCounter, &requiredOutputCounter, &lastRequiredOutputSize](const auto& res) {
                         finished = res.isFinal;
+                        if (res.requiredOutputSize.has_value()) {
+                            requiredOutputCounter++;
+                            lastRequiredOutputSize = res.requiredOutputSize;
+                        }
                         if (res.data.has_value()) {
                             auto data = res.data.value();
                             if (!data.empty()) {
@@ -921,6 +927,11 @@ const boost::ut::suite<"FileIO error tests"> fileIoErrorTests = [] {
             }
             expect(eq(dataCounter, 1uz));
             expect(ge(errorCounter, 5uz));
+            expect(eq(requiredOutputCounter, errorCounter));
+            expect(lastRequiredOutputSize.has_value());
+            if (lastRequiredOutputSize.has_value()) {
+                expect(eq(*lastRequiredOutputSize, 190uz));
+            }
         }
     };
 };
