@@ -128,8 +128,9 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
 
         // Instantiate a built-in node in a static way
         gr::property_map block_multiply_1_params;
-        block_multiply_1_params["factor"] = 2.0;
-        auto& block_multiply_double       = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
+        block_multiply_1_params["factor"]  = 2.0;
+        auto& block_multiply_double_direct = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
+        auto  block_multiply_double        = gr::graph::findBlock(testGraph, block_multiply_double_direct);
 
         // Instantiate a built-in node via the plugin loader
         auto& block_multiply_float = testGraph.emplaceBlock("builtin_multiply<float32>", {});
@@ -144,8 +145,8 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto  block_sink_load            = context->loader.instantiate("good::cout_sink<float64>", block_sink_params);
         auto& block_sink                 = testGraph.addBlock(std::move(block_sink_load));
 
-        auto connection_1 = testGraph.connect(block_source, 0, block_multiply_double, 0);
-        auto connection_2 = testGraph.connect(block_multiply_double, 0, block_convert_to_float, 0);
+        auto connection_1 = testGraph.connect(block_source, 0, *block_multiply_double, 0);
+        auto connection_2 = testGraph.connect(*block_multiply_double, 0, block_convert_to_float, 0);
         auto connection_3 = testGraph.connect(block_convert_to_float, 0, block_multiply_float, 0);
         auto connection_4 = testGraph.connect(block_multiply_float, 0, block_convert_to_double, 0);
         auto connection_5 = testGraph.connect(block_convert_to_double, 0, block_sink, 0);
@@ -158,7 +159,7 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
 
         for (std::size_t i = 0; i < repeats; ++i) {
             std::ignore = block_source->work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_multiply_double.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_multiply_double.value()->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_convert_to_float->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_multiply_float->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_convert_to_double->work(std::numeric_limits<std::size_t>::max());

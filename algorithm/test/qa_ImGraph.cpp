@@ -52,9 +52,9 @@ inline static gr::Graph example_base1() {
     auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
 
     // Connect using the actual gr::Graph API
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0UZ>(add)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src2).to<"in1", 1UZ>(add)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(add).to<"in1", 0>(snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(src1, add)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#1">(src2, add)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(add, snk1)));
 
     return graph;
 }
@@ -69,9 +69,9 @@ inline static gr::Graph example_base2() {
     auto& snk1  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", "snk#1"}});
     auto& snk2  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 0, 0, 0>>({{"name", "snk#2"}});
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(src1).to<"in2", 0>(split)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(split).to<"in2", 0>(snk1)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 1>(split).to<"in2", 0>(snk2)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#0", "in2#0">(src1, split)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#0", "in2#0">(split, snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#1", "in2#0">(split, snk2)));
 
     return graph;
 }
@@ -88,12 +88,12 @@ inline static gr::Graph example_cyclic_A() {
     auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
     auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in2", 0>(sum))); // feedback
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(src1, sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#0", "in1#0">(sum, ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(ds, gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(gs, snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(gs, ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(ms, sum))); // feedback
 
     return graph;
 }
@@ -113,12 +113,12 @@ inline static gr::Graph example_cyclic_B() {
     auto& ms   = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
     auto& snk1 = graph.emplaceBlock<GenericBlock<float, 1, 0, 0, 0, 0, 0>>({{"name", "snk#1"}});
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in2", 0>(sum))); // feedback
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(src1, sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#0", "in1#0">(sum, ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(ds, gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(gs, snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(gs, ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(ms, sum))); // feedback
 
     return graph;
 }
@@ -138,12 +138,12 @@ inline static gr::Graph example_auto() {
     auto& ms = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M(s)"}});
     // setLayoutPref(std::shared_ptr<gr::BlockModel>(graph.findBlock(ms.unique_name).value()), LayoutPref::HORIZONTAL);
 
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in1", 1>(sum))); // feedback
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(src1, sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#0", "in1#0">(sum, ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(ds, gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(gs, snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(gs, ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#1">(ms, sum))); // feedback
 
     return graph;
 }
@@ -177,23 +177,23 @@ inline static gr::Graph example_large() {
     auto& m3s  = graph.emplaceBlock<GenericBlock<float, 0, 1, 0, 1, 0, 0>>({{"name", "M3(s)"}, {"ui_constraints", prop_auto}});
 
     // Main connections
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src1).to<"in1", 0>(sum)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(sum).to<"in1", 0>(ds)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ds).to<"in1", 0>(gs)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in1", 0>(snk1)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(gs).to<"in2", 0>(ms)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in2", 0>(sum))); // feedback
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(src1, sum)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#0", "in1#0">(sum, ds)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(ds, gs)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(gs, snk1)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(gs, ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(ms, sum))); // feedback
 
     // Micro feedback loop
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2", 0>(ms).to<"in1", 0>(m2s)));
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(m2s).to<"in2", 1>(ms)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out2#0", "in1#0">(ms, m2s)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#1">(m2s, ms)));
 
     // Second sub-graph
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(src2, gr::undefined_size, gr::graph::defaultWeight, "special edge").to<"in2", 0>(m3s))); // a noteworthy edge
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(m3s).to<"in1", 0>(snk2)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in2#0">(src2, m3s, gr::EdgeParameters{.minBufferSize = gr::undefined_size, .weight = gr::graph::defaultWeight, .name = "special edge"}))); // a noteworthy edge
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(m3s, snk2)));
 
     // Additional connection
-    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1", 0>(ms).to<"in1", 0>(snk3)));
+    expect(eq(gr::ConnectionResult::SUCCESS, graph.connect<"out1#0", "in1#0">(ms, snk3)));
 
     // test custom block, edge, port colouring
     gr::graph::colour(gr::graph::findBlock(graph, sum.unique_name).value(), gr::utf8::color::palette::Default::BrightGreen);

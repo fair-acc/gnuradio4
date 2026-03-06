@@ -362,16 +362,18 @@ inline const boost::ut::suite _constexpr_bm = [] {
     using namespace boost::ut;
     using namespace benchmark;
     using namespace gr;
-    using gr::mergeByIndex;
-    using gr::merge;
+    using gr::Merge;
 
     {
-        auto mergedBlock                                            = merge<"out", "in">(bm::test::source<float>({{"n_samples_max", N_SAMPLES}}), bm::test::sink<float>());
+        auto mergedBlock = Merge<bm::test::source<float> /*({{"n_samples_max", N_SAMPLES}})*/, "out", bm::test::sink<float>, "in">({{"n_samples_max", N_SAMPLES}});
+
         "merged src->sink work"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_work(mergedBlock); };
     }
 
     {
-        auto mergedBlock = merge<"out", "in">(merge<"out", "in">(bm::test::source<float>({{"n_samples_max", N_SAMPLES}}), copy<float>()), bm::test::sink<float>());
+        auto mergedBlock = Merge<                                                                                  //
+            Merge<bm::test::source<float> /*({{"n_samples_max", N_SAMPLES}}) */, "out", copy<float>, "in">, "out", //
+            bm::test::sink<float>, "in">({{"n_samples_max", N_SAMPLES}});
 #if !DISABLE_SIMD
         static_assert(gr::traits::block::can_processOne_simd<copy<float>>);
         // bm::test::sink cannot process SIMD because it wants to be non-const
@@ -382,31 +384,49 @@ inline const boost::ut::suite _constexpr_bm = [] {
     }
 
     {
-        auto mergedBlock                                                = merge<"out", "in">(merge<"out", "in">(bm::test::source<float>({{"n_samples_max", N_SAMPLES}}), bm::test::cascade<10, copy<float>>(copy<float>())), bm::test::sink<float>());
+        auto mergedBlock = Merge<                                                                                                            //
+            Merge<bm::test::source<float> /*({{"n_samples_max", N_SAMPLES}})*/, "out", bm::test::CascadeType<10, copy<float>>, "in">, "out", //
+            bm::test::sink<float>, "in">({{"n_samples_max", N_SAMPLES}});
+
         "merged src->copy^10->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     }
 
     {
-        auto mergedBlock                                                                                      = merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(merge<"out", "in">(bm::test::source<float, 1024, 1024>({{"n_samples_max", N_SAMPLES}}), copy<float, 1, 128>()), copy<float, 1, 1024>()), copy<float, 32, 128>()), bm::test::sink<float>());
+        auto mergedBlock = Merge<                                                                                                             //
+            Merge<                                                                                                                            //
+                Merge<                                                                                                                        //
+                    Merge<bm::test::source<float, 1024, 1024> /*({{"n_samples_max", N_SAMPLES}})*/, "out", copy<float, 1, 128>, "in">, "out", //
+                    copy<float, 1, 1024>, "in">,
+                "out", //
+                copy<float, 32, 128>, "in">,
+            "out", bm::test::sink<float>, "in">({{"n_samples_max", N_SAMPLES}});
+
         "merged src(N=1024)->b1(N≤128)->b2(N=1024)->b3(N=32...128)->sink"_benchmark.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     }
 
     constexpr auto templated_cascaded_test = []<typename T>(T factor, const char* test_name) {
-        auto gen_mult_block = [&factor] {
-            return merge<"out", "in">(MultiplyConst<T>({{{"value", factor}}}), //
-                merge<"out", "in">(DivideConst<T>({{{"factor", factor}}}), add<T, -1>()));
-        };
-        auto mergedBlock                                                 = merge<"out", "in">(merge<"out", "in">(bm::test::source<T>({{"n_samples_max", N_SAMPLES}}), gen_mult_block()), bm::test::sink<T>());
+        using gen_mult_block = Merge<MultiplyConst<T> /*({{{"value", factor}}})*/, "out", //
+            Merge<DivideConst<T> /*({{{"factor", factor}}})*/, "out", add<T, -1>, "in">, "in">;
+
+        auto mergedBlock = Merge<                                                                                //
+            Merge<bm::test::source<T> /*({{"n_samples_max", N_SAMPLES}})*/, "out", gen_mult_block, "in">, "out", //
+            bm::test::sink<T>, "in">({{"value", factor}, {"factor", factor}, {"n_samples_max", N_SAMPLES}});
+
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     };
     templated_cascaded_test(static_cast<float>(2.0), "merged src->mult(2.0)->DivideConst(2.0)->add(-1)->sink - float");
     templated_cascaded_test(static_cast<int>(2.0), "merged src->mult(2.0)->DivideConst(2.0)->add(-1)->sink - int");
 
     constexpr auto templated_cascaded_test_10 = []<typename T>(T factor, const char* test_name) {
-        auto gen_mult_block                                              = [&factor] { return merge<"out", "in">(MultiplyConst<T>({{{"value", factor}}}), merge<"out", "in">(DivideConst<T>({{{"factor", factor}}}), add<T, -1>())); };
-        auto mergedBlock                                                 = merge<"out", "in">(merge<"out", "in">(bm::test::source<T>({{"n_samples_max", N_SAMPLES}}), //
-                                                                                                  bm::test::cascade<10, decltype(gen_mult_block())>(gen_mult_block(), gen_mult_block)),
-                                                            bm::test::sink<T>());
+        using gen_mult_block = Merge<                            //
+            MultiplyConst<T> /*({{{"value", factor}}})*/, "out", //
+            Merge<DivideConst<T> /*({{{"factor", factor}}})*/, "out", add<T, -1>, "in">, "in">;
+
+        auto mergedBlock = Merge<                                                  //
+            Merge<bm::test::source<T> /*({{"n_samples_max", N_SAMPLES}})*/, "out", //
+                bm::test::CascadeType<10, gen_mult_block>, "in">,
+            "out", bm::test::sink<T>, "in">({{"value", factor}, {"factor", factor}, {"n_samples_max", N_SAMPLES}});
+
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&mergedBlock]() { loop_over_processOne(mergedBlock); };
     };
     templated_cascaded_test_10(static_cast<float>(2.0), "merged src->(mult(2.0)->div(2.0)->add(-1))^10->sink - float");
@@ -431,7 +451,7 @@ inline const boost::ut::suite _runtime_tests = [] {
         gr::Graph testGraph;
         auto&     src  = testGraph.emplaceBlock<bm::test::source<float>>({{"n_samples_max", N_SAMPLES}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -446,8 +466,8 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
         auto&     cpy  = testGraph.emplaceBlock<copy<float>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(cpy)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(cpy).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, cpy)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(cpy, sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -467,13 +487,13 @@ inline const boost::ut::suite _runtime_tests = [] {
             cpy[i] = std::addressof(testGraph.emplaceBlock<copy>({{"name", std::format("copy {} at {}", i, std::source_location::current())}}));
 
             if (i == 0) {
-                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*cpy[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, *cpy[i])));
             } else {
-                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*cpy[i - 1]).to<"in">(*cpy[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*cpy[i - 1], *cpy[i])));
             }
         }
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*cpy[cpy.size() - 1]).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*cpy[cpy.size() - 1], sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -490,10 +510,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto&     b3   = testGraph.emplaceBlock<copy<float, 32, 128>>();
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<float>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(b1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b1).to<"in">(b2)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b2).to<"in">(b3)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(b3).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, b1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(b1, b2)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(b2, b3)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(b3, sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -510,10 +530,10 @@ inline const boost::ut::suite _runtime_tests = [] {
         auto&     add1 = testGraph.emplaceBlock<add<T, -1>>();
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<T>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, mult)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(mult, div)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(div, add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(add1, sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -540,14 +560,14 @@ inline const boost::ut::suite _runtime_tests = [] {
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, *mult1[i])));
             } else {
-                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[i - 1]).template to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*add1[i - 1], *mult1[i])));
             }
-            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult1[i]).template to<"in">(*div1[i])));
-            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*div1[i]).template to<"in">(*add1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*mult1[i], *div1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*div1[i], *add1[i])));
         }
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*add1[add1.size() - 1], sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -577,10 +597,10 @@ inline const boost::ut::suite _simd_tests = [] {
         auto&     add1  = testGraph.emplaceBlock<add_SIMD<float>>({{"value", -1.0f}});
         auto&     sink  = testGraph.emplaceBlock<bm::test::sink<float>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(mult1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult1).to<"in">(mult2)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult2).to<"in">(add1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, mult1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(mult1, mult2)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(mult2, add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(add1, sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -611,14 +631,14 @@ inline const boost::ut::suite _simd_tests = [] {
 
         for (std::size_t i = 0; i < add1.size(); i++) {
             if (i == 0) {
-                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, *mult1[i])));
             } else {
-                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[i - 1]).to<"in">(*mult1[i])));
+                expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*add1[i - 1], *mult1[i])));
             }
-            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult1[i]).to<"in">(*mult2[i])));
-            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*mult2[i]).to<"in">(*add1[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*mult1[i], *mult2[i])));
+            expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*mult2[i], *add1[i])));
         }
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(*add1[add1.size() - 1]).to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(*add1[add1.size() - 1], sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -647,10 +667,10 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         auto&     add1 = testGraph.emplaceBlock<add<T, -1>>();
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<T>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, mult)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(mult, div)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(div, add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(add1, sink)));
 
         ::benchmark::benchmark<1LU>{test_name}.repeat<N_ITER>(N_SAMPLES) = [&testGraph]() {
             bm::test::n_samples_produced = 0LU;
@@ -675,10 +695,10 @@ inline const boost::ut::suite _sample_by_sample_vs_bulk_access_tests = [] {
         auto&     add1 = testGraph.emplaceBlock<add_bulk<T>>({{"value", static_cast<T>(-1.f)}});
         auto&     sink = testGraph.emplaceBlock<bm::test::sink<T>>();
 
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(src).template to<"in">(mult)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(mult).template to<"in">(div)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(div).template to<"in">(add1)));
-        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out">(add1).template to<"in">(sink)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(src, mult)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(mult, div)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(div, add1)));
+        expect(eq(gr::ConnectionResult::SUCCESS, testGraph.connect<"out", "in">(add1, sink)));
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {

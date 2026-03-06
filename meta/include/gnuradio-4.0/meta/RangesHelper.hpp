@@ -5,7 +5,7 @@
 #include <ranges>
 #include <vector>
 
-namespace gr {
+namespace gr::ranges {
 template<class R>
 concept ViewableForwardRange = std::ranges::viewable_range<R> && std::ranges::forward_range<std::views::all_t<R>>;
 
@@ -235,6 +235,6 @@ struct Merge : std::ranges::range_adaptor_closure<Merge<Comp>> {
 template<class Comp = std::ranges::less>
 Merge(Comp) -> Merge<Comp>;
 
-} // namespace gr
+} // namespace gr::ranges
 
 #endif // GNURADIO_RANGESHELPER_HPP
