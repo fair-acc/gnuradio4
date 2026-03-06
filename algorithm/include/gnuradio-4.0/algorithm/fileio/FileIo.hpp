@@ -676,8 +676,9 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
 //   DialogOpenCallback completes with exactly one terminal callback: completeWithMemory(...), completeWithFile(...), or fail(...).
 [[nodiscard]] inline std::expected<Reader, gr::Error> readAsync(std::string_view uri, ReaderConfig config = {}) {
     detail::normalizeReaderConfig(config);
+    const auto uriKind = detail::classifyUri(uri);
 
-    if (detail::isDialogUri(uri)) {
+    if (uriKind == detail::UriKind::DialogUri) {
         auto& dialogCallback = detail::dialogOpenCallback();
         if (!dialogCallback) {
             return std::unexpected(gr::Error{"dialog:/open used but no DialogOpenCallback registered"});
@@ -711,31 +712,31 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
     }
 
 #if __EMSCRIPTEN__
-    if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<ReaderState>(newPath.value(), std::move(config));
+        auto state = std::make_shared<ReaderState>(pathExp.value(), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
-    } else if (detail::isHttpUri(uri)) {
+    } else if (uriKind == detail::UriKind::HttpUri) {
         auto state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
         runHttpGetEmscripten(state);
         return Reader{state};
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for readAsync(): {}", uri)});
     }
 #else
-    if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<ReaderState>(newPath.value(), std::move(config));
+        auto state = std::make_shared<ReaderState>(pathExp.value(), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runReadLocalFile(state); });
         return Reader{state};
-    } else if (detail::isHttpUri(uri)) {
+    } else if (uriKind == detail::UriKind::HttpUri) {
 #if GR_HTTP_ENABLED
         auto state = std::make_shared<ReaderState>(std::string(uri), std::move(config));
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable { runHttpGetNative(state); });
@@ -744,7 +745,7 @@ void runHttpGetEmscripten(std::shared_ptr<ReaderState> state) {
         return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
 #endif
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for readAsync(): {}", uri)});
     }
 #endif
 }
@@ -1202,9 +1203,10 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #endif // __EMSCRIPTEN__
 
 [[nodiscard]] inline std::expected<Writer, gr::Error> writeAsync(std::string_view uri, std::span<const std::uint8_t> data, const WriterConfig& config = {}) {
+    const auto uriKind = detail::classifyUri(uri);
 
 #if __EMSCRIPTEN__
-    if (detail::isHttpUri(uri)) {
+    if (uriKind == detail::UriKind::HttpUri) {
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
         }
@@ -1212,7 +1214,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         state->data.assign(data.begin(), data.end());
         detail::runHttpPostEmscripten(state);
         return Writer{state};
-    } else if (detail::isDownloadUri(uri)) {
+    } else if (uriKind == detail::UriKind::DownloadUri) {
         const auto filename = detail::stripDownloadUri(uri);
         if (!filename.has_value()) {
             return std::unexpected(filename.error());
@@ -1224,12 +1226,12 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         detail::runDownloadEmscripten(state);
         return Writer{state};
 
-    } else if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    } else if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<WriterState>(newPath.value(), config);
+        auto state = std::make_shared<WriterState>(pathExp.value(), config);
         state->data.assign(data.begin(), data.end());
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
             auto r = runWriteLocalFile(state);
@@ -1240,11 +1242,11 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         });
         return Writer{state};
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for writeAsync(): {}", uri)});
     }
 #else
 
-    if (detail::isHttpUri(uri)) {
+    if (uriKind == detail::UriKind::HttpUri) {
 #if GR_HTTP_ENABLED
         if (config.mode != WriteMode::overwrite) {
             return std::unexpected(gr::Error{"append mode is not supported for HTTP(S) URIs"});
@@ -1259,7 +1261,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
 #else
         return std::unexpected(gr::Error{"HTTP(S) disabled at build time. See GR_HTTP_ENABLED for details."});
 #endif
-    } else if (detail::isDownloadUri(uri)) {
+    } else if (uriKind == detail::UriKind::DownloadUri) {
         const auto filenameExp = detail::stripDownloadUri(uri);
         if (!filenameExp.has_value()) {
             return std::unexpected(filenameExp.error());
@@ -1278,12 +1280,12 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         });
         return Writer{state};
 
-    } else if (detail::isFileUri(uri)) {
-        const auto newPath = detail::stripFileUri(uri);
-        if (!newPath.has_value()) {
-            return std::unexpected(newPath.error());
+    } else if (uriKind == detail::UriKind::LocalPath || uriKind == detail::UriKind::FileUri) {
+        const auto pathExp = detail::toLocalPath(uri);
+        if (!pathExp.has_value()) {
+            return std::unexpected(pathExp.error());
         }
-        auto state = std::make_shared<WriterState>(newPath.value(), config);
+        auto state = std::make_shared<WriterState>(pathExp.value(), config);
         state->data.assign(data.begin(), data.end());
         gr::thread_pool::Manager::defaultIoPool()->execute([state]() mutable {
             auto r = runWriteLocalFile(state);
@@ -1294,7 +1296,7 @@ inline void runDownloadEmscripten(std::shared_ptr<WriterState> state) {
         });
         return Writer{state};
     } else {
-        return std::unexpected(gr::Error{std::format("Something wrong with URI: {}", uri)});
+        return std::unexpected(gr::Error{std::format("Unsupported URI scheme for writeAsync(): {}", uri)});
     }
 #endif
 }

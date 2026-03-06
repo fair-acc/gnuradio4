@@ -181,7 +181,7 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
     struct LocalFileParams {
         // Note: Emscripten writes to MEMFS
         std::string uri            = "file:/tmp/gr4_fileio_test/TestFileIo.bin";
-        std::string localPath      = fileio::detail::stripFileUri(uri).value();
+        std::string localPath      = fileio::detail::toLocalPath(uri).value();
         std::string expectedString = createTestFile(localPath);
 
         void cleanup() {
@@ -294,7 +294,7 @@ const boost::ut::suite<"FileIO local - Native + Emscripten"> fileIoLocalTests = 
         std::println("FileIO - Writer local append begin");
 
         const std::string uri     = "file:/tmp/gr4_fileio_test/TestFileIoWriterOverwriteAppend.bin";
-        auto              pathExp = fileio::detail::stripFileUri(uri);
+        auto              pathExp = fileio::detail::toLocalPath(uri);
         expect(pathExp.has_value());
         const std::string     localPath = pathExp.value();
         std::filesystem::path path{localPath};
