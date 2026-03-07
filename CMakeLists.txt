@@ -508,6 +508,7 @@ target_include_directories(
   INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 install(TARGETS vir EXPORT gnuradio4Targets)
+install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # the script configure won't run on win32 without asking bash to do it
 if(WIN32)
