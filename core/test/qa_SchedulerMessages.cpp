@@ -11,6 +11,7 @@
 
 #include "magic_enum.hpp"
 #include "message_utils.hpp"
+#include <magic_enum/magic_enum.hpp>
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;

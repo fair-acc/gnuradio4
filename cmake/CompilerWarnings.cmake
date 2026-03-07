@@ -51,25 +51,28 @@ function(set_project_warnings project_name)
   )
 
   if(WARNINGS_AS_ERRORS)
-    set(CLANG_WARNINGS ${CLANG_WARNINGS} -Werror)  # avoid warnings since they are often indicative of immature API and/or potential sources of bugs
+    set(CLANG_WARNINGS ${CLANG_WARNINGS} -Werror) # avoid warnings since they are often indicative of immature API
+                                                  # and/or potential sources of bugs
     set(MSVC_WARNINGS ${MSVC_WARNINGS} /WX)
     message(STATUS "Setting compiler warning as errors: ${WARNINGS_AS_ERRORS}")
   endif()
 
   set(GCC_WARNINGS
-          ${CLANG_WARNINGS}
-          -Wno-dangling-reference # TODO: remove this once the fmt dangling reference bug is fixed
-          -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
-          -Wduplicated-cond # warn if if / else chain has duplicated conditions
-          -Wduplicated-branches # warn if if / else branches have duplicated code
-          -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
-          -Wuseless-cast # warn if you perform a cast to the same type
-          -Wno-interference-size # suppress ABI compatibility warnings for hardware inferred size
-          -Wno-maybe-uninitialized # false positives if asan is enabled: https://gcc.gnu.org/bugzilla//show_bug.cgi?id=1056h6
-          -Wno-tautological-compare # fmt has always true comparisons
-          -fconcepts-diagnostics-depth=3
-          -Wno-missing-field-initializers # confusing warning which is not what most users expect: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=96868#c3
-          )
+      ${CLANG_WARNINGS}
+      -Wno-dangling-reference # TODO: remove this once the fmt dangling reference bug is fixed
+      -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
+      -Wduplicated-cond # warn if if / else chain has duplicated conditions
+      -Wduplicated-branches # warn if if / else branches have duplicated code
+      -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
+      -Wuseless-cast # warn if you perform a cast to the same type
+      -Wno-interference-size # suppress ABI compatibility warnings for hardware inferred size
+      -Wno-maybe-uninitialized # false positives if asan is enabled:
+                               # https://gcc.gnu.org/bugzilla//show_bug.cgi?id=1056h6
+      -Wno-tautological-compare # fmt has always true comparisons
+      -fconcepts-diagnostics-depth=3
+      -Wno-missing-field-initializers # confusing warning which is not what most users expect:
+                                      # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=96868#c3
+  )
 
   if(MSVC)
     set(PROJECT_WARNINGS ${MSVC_WARNINGS})
@@ -82,9 +85,17 @@ function(set_project_warnings project_name)
   endif()
 
   # Replace semicolons with spaces in PROJECT_WARNINGS
-  string(REPLACE ";" " " PROJECT_WARNINGS_MOD "${PROJECT_WARNINGS}")
-  set(${output_var} "${PROJECT_WARNINGS}" PARENT_SCOPE)
-  set(ALL_COMPILER_FLAGS "${ALL_COMPILER_FLAGS}${PROJECT_WARNINGS_MOD}" PARENT_SCOPE)
+  string(
+    REPLACE ";"
+            " "
+            PROJECT_WARNINGS_MOD
+            "${PROJECT_WARNINGS}")
+  set(${output_var}
+      "${PROJECT_WARNINGS}"
+      PARENT_SCOPE)
+  set(ALL_COMPILER_FLAGS
+      "${ALL_COMPILER_FLAGS}${PROJECT_WARNINGS_MOD}"
+      PARENT_SCOPE)
 
   target_compile_options(${project_name} INTERFACE ${PROJECT_WARNINGS})
 

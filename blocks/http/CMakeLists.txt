@@ -5,9 +5,8 @@ if(APPLE)
 endif()
 target_include_directories(gr-http INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                              $<INSTALL_INTERFACE:include/>)
-install(
-  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/http"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/http"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 gr_add_block_library(
   GrHttpBlocks

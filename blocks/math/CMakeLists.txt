@@ -2,9 +2,8 @@ add_library(gr-math INTERFACE)
 target_link_libraries(gr-math INTERFACE gnuradio-core gnuradio-algorithm exprtk)
 target_include_directories(gr-math INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                              $<INSTALL_INTERFACE:include/>)
-install(
-  DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/math"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/math"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 gr_add_block_library(
   GrMathBlocks

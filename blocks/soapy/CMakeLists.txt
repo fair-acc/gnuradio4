@@ -4,9 +4,8 @@ if(TARGET SoapySDR)
   target_include_directories(gr-soapy INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                 $<INSTALL_INTERFACE:include/>)
   target_link_libraries(gr-soapy INTERFACE gnuradio-core SoapySDR)
-  install(
-    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/soapy"
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/soapy"
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
   if(ENABLE_EXAMPLES)
     add_subdirectory(src)

@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(gnuradio VERSION 4.0.0 LANGUAGES CXX)
+project(
+  gnuradio
+  VERSION 4.0.0
+  LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
@@ -402,9 +405,8 @@ endif()
 if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
   target_include_directories(
-    magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
-    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/magic_enum/>
-              $<INSTALL_INTERFACE:include>)
+    magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/magic_enum/>
+                                                        $<INSTALL_INTERFACE:include>)
 
   set(magic_enum_public_headers third_party/magic_enum/magic_enum.hpp third_party/magic_enum/magic_enum_utility.hpp)
   set_target_properties(magic_enum PROPERTIES PUBLIC_HEADER "${magic_enum_public_headers}")
@@ -503,10 +505,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
 endif()
 
 add_library(vir INTERFACE)
-target_include_directories(
-  vir
-  INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
+                                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 install(TARGETS vir EXPORT gnuradio4Targets)
 install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
@@ -626,10 +626,8 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTA
 
 set(GR_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/gnuradio4")
 
-configure_package_config_file(
-  cmake/gnuradio4Config.cmake.in
-  "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
-  INSTALL_DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+configure_package_config_file(cmake/gnuradio4Config.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
+                              INSTALL_DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake"
@@ -642,9 +640,8 @@ install(
   NAMESPACE gnuradio4::
   DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
-install(
-  FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake" "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake"
-  DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
 # print effective options
 message(STATUS "================================================")

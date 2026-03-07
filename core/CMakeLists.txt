@@ -62,15 +62,11 @@ target_link_libraries(
          vir)
 
 add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
-set(blocklib_public_headers
-    include/gnuradio-4.0/BlockRegistry.hpp
-    include/gnuradio-4.0/Plugin.hpp)
+set(blocklib_public_headers include/gnuradio-4.0/BlockRegistry.hpp include/gnuradio-4.0/Plugin.hpp)
 set_target_properties(gnuradio-blocklib-core PROPERTIES PUBLIC_HEADER "${blocklib_public_headers}")
 message(INFO "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
-target_include_directories(
-  gnuradio-blocklib-core
-  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/>
-         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_include_directories(gnuradio-blocklib-core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/>
+                                                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(gnuradio-blocklib-core PUBLIC gnuradio-core)
 if(WIN32)
   target_compile_definitions(gnuradio-core PUBLIC BUILDING_MYPLUGIN)
