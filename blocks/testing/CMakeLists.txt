@@ -2,6 +2,8 @@ add_library(gr-testing INTERFACE)
 target_link_libraries(gr-testing INTERFACE gnuradio-core ut-benchmark)
 target_include_directories(gr-testing INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                 $<INSTALL_INTERFACE:include/>)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/testing"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 gr_add_block_library(
   GrTestingBlocks
