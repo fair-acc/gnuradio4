@@ -499,6 +499,14 @@ endif()
 
 FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 
+# GNURadio builds with hidden visibility by default. For shared CPR builds this hides CPR API symbols and causes
+# undefined references in downstream link steps.
+if(GR_HTTP_ENABLED
+   AND NOT EMSCRIPTEN
+   AND TARGET cpr)
+  set_target_properties(cpr PROPERTIES CXX_VISIBILITY_PRESET default VISIBILITY_INLINES_HIDDEN OFF)
+endif()
+
 # Fetch SoapySDR -- needed since the distribution version is incompatible w.r.t. stdlibc++ vs. libc++
 if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
   find_package(SoapySDR CONFIG)
