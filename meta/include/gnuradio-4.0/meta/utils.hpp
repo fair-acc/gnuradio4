@@ -21,11 +21,11 @@
 
 #if __has_include(<stdfloat>) && !defined(__ADAPTIVECPP__)
 #include <stdfloat>
-#else
-#include <cstdint>
+#endif
 #include <limits>
 
-// Inject into std only if truly unavailable (nonstandard, but pragmatic for compatibility)
+#if !defined(__STDCPP_FLOAT32_T__) || !defined(__STDCPP_FLOAT64_T__)
+// Inject into std only when C++23 stdfloat typedefs are missing.
 namespace std {
 using float32_t = float;
 using float64_t = double;

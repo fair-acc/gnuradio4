@@ -1,12 +1,20 @@
 cmake_minimum_required(VERSION 3.27)
 
-project(gnuradio CXX)
+project(
+  gnuradio
+  VERSION 4.0.0
+  LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+set(GR4_PKG_VERSION
+    "${PROJECT_VERSION}-git"
+    CACHE STRING "Version string used in gnuradio4.pc")
 
-# Mainly for FMT
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
 # limit parallel compile/link jobs to prevent OOM with template-heavy TUs override with -DGR_BUILD_PARALLEL_LEVEL=<N>
@@ -14,6 +22,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 set(GR_BUILD_PARALLEL_LEVEL
     "6"
     CACHE STRING "Maximum parallel compile/link jobs")
+option(GR4_USE_THIN_ARCHIVES "Build static archives as thin archives (non-relocatable when installed)" OFF)
+option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" OFF)
 if(CMAKE_GENERATOR MATCHES "Ninja")
   set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_pool=${GR_BUILD_PARALLEL_LEVEL} link_pool=2)
   set(CMAKE_JOB_POOL_COMPILE compile_pool)
@@ -39,8 +49,13 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -s")
   endif()
 
-  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> crT <TARGET> <LINK_FLAGS> <OBJECTS>")
-  set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> rT <TARGET> <LINK_FLAGS> <OBJECTS>")
+  if(GR4_USE_THIN_ARCHIVES)
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> crT <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> rT <TARGET> <LINK_FLAGS> <OBJECTS>")
+  else()
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> cr <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> r <TARGET> <LINK_FLAGS> <OBJECTS>")
+  endif()
 
   if(APPLE)
     # macOS ld uses -dead_strip instead of --gc-sections; -ffunction-sections/-fdata-sections are still valid for Clang
@@ -233,6 +248,7 @@ include(cmake/CompilerWarnings.cmake)
 add_subdirectory(blocklib_generator)
 
 add_library(gnuradio-options INTERFACE)
+install(TARGETS gnuradio-options EXPORT gnuradio4Targets)
 
 message(
   STATUS
@@ -302,12 +318,14 @@ string(
           ALL_COMPILER_FLAGS
           "${ALL_COMPILER_FLAGS}")
 
-if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang") # set default C++ STL to Clang's libc++ when using Clang
-  if(NOT GR_USE_ADAPTIVE_CPP)
-    message(STATUS "Using plain Clang – enabling libc++")
+if(CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
+  if(NOT GR_USE_ADAPTIVE_CPP AND GR4_USE_LIBCXX)
+    message(STATUS "Using plain Clang – enabling libc++ (GR4_USE_LIBCXX=ON)")
     add_compile_options(-stdlib=libc++ -Wno-unused-command-line-argument)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+  elseif(NOT GR_USE_ADAPTIVE_CPP)
+    message(STATUS "Using plain Clang – using default C++ standard library")
   else()
     message(STATUS "AdaptiveCpp detected – skipping libc++ settings")
   endif()
@@ -386,12 +404,16 @@ endif()
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
 if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
-  target_include_directories(magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD}
-                             INTERFACE ${PROJECT_SOURCE_DIR}/third_party/magic_enum/)
+  target_include_directories(
+    magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/magic_enum/>
+                                                        $<INSTALL_INTERFACE:include>)
 
   set(magic_enum_public_headers third_party/magic_enum/magic_enum.hpp third_party/magic_enum/magic_enum_utility.hpp)
   set_target_properties(magic_enum PROPERTIES PUBLIC_HEADER "${magic_enum_public_headers}")
-  install(TARGETS magic_enum PUBLIC_HEADER DESTINATION include)
+  install(
+    TARGETS magic_enum
+    EXPORT gnuradio4Targets
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endif()
 
 # include exprtk header-only libraries available as a statically linked library to simplify/speed-up builds
@@ -483,7 +505,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
 endif()
 
 add_library(vir INTERFACE)
-target_include_directories(vir INTERFACE ${vir-simd_SOURCE_DIR}/)
+target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
+                                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+install(TARGETS vir EXPORT gnuradio4Targets)
+install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # the script configure won't run on win32 without asking bash to do it
 if(WIN32)
@@ -598,6 +623,25 @@ configure_file(cmake/gnuradio4.pc.in ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc @O
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gnuradio4.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig # Standard location
         # for .pc files
 )
+
+set(GR_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/gnuradio4")
+
+configure_package_config_file(cmake/gnuradio4Config.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
+                              INSTALL_DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake"
+  VERSION "${GR4_PKG_VERSION}"
+  COMPATIBILITY SameMajorVersion)
+
+install(
+  EXPORT gnuradio4Targets
+  FILE gnuradio4Targets.cmake
+  NAMESPACE gnuradio4::
+  DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
 
 # print effective options
 message(STATUS "================================================")
