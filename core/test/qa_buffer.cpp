@@ -1646,4 +1646,440 @@ const boost::ut::suite<"CursorCacheStaleness"> _cursorCacheTests = [] {
     };
 };
 
+const boost::ut::suite<"WrapAroundAndEdgeCases"> _wrapAroundTests = [] {
+    using namespace boost::ut;
+    using gr::CircularBuffer;
+    using gr::ProducerType;
+    using gr::SpanReleasePolicy;
+
+    auto writeAndPublish = [](auto& writer, std::size_t n, int fillValue = 0) {
+        auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(n);
+        if (!span.empty()) {
+            std::iota(span.begin(), span.end(), fillValue);
+            span.publish(n);
+        }
+        return !span.empty();
+    };
+
+    auto consumeAll = [](auto& reader, std::size_t n) {
+        auto in = reader.get(n);
+        return in.consume(n);
+    };
+
+    "single producer - 100 full wrap-around cycles with data verification"_test = [] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap       = buf.size();
+        const std::size_t nCycles   = 100;
+        int               fillValue = 0;
+
+        for (std::size_t cycle = 0; cycle < nCycles; ++cycle) {
+            {
+                auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(cap);
+                expect(!span.empty()) << "write failed at cycle " << cycle;
+                std::iota(span.begin(), span.end(), fillValue);
+                span.publish(cap);
+            }
+
+            {
+                auto in = reader.get(cap);
+                expect(eq(in.size(), cap));
+                for (std::size_t i = 0; i < cap; ++i) {
+                    expect(eq(in[i], fillValue + static_cast<int>(i))) << "data mismatch at cycle " << cycle << " index " << i;
+                }
+                expect(in.consume(cap));
+            }
+
+            fillValue += static_cast<int>(cap);
+        }
+
+        expect(eq(writer.available(), cap)) << "capacity wrong after " << nCycles << " cycles";
+        expect(eq(reader.available(), 0UZ));
+    };
+
+    "multi producer - 100 full wrap-around cycles with data verification"_test = [] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Multi>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap       = buf.size();
+        const std::size_t nCycles   = 100;
+        int               fillValue = 0;
+
+        for (std::size_t cycle = 0; cycle < nCycles; ++cycle) {
+            {
+                auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(cap);
+                expect(!span.empty()) << "write failed at cycle " << cycle;
+                std::iota(span.begin(), span.end(), fillValue);
+                span.publish(cap);
+            }
+
+            {
+                auto in = reader.get(cap);
+                expect(eq(in.size(), cap));
+                for (std::size_t i = 0; i < cap; ++i) {
+                    expect(eq(in[i], fillValue + static_cast<int>(i))) << "data mismatch at cycle " << cycle << " index " << i;
+                }
+                expect(in.consume(cap));
+            }
+
+            fillValue += static_cast<int>(cap);
+        }
+
+        expect(eq(writer.available(), cap));
+    };
+
+    "single producer - partial publish rolls back reserve cursor"_test = [] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        // reserve full buffer, publish only half
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(cap);
+            expect(!span.empty());
+            std::iota(span.begin(), span.end(), 0);
+            span.publish(cap / 2);
+        }
+
+        expect(eq(reader.available(), cap / 2)) << "reader should see only published half";
+        expect(eq(writer.available(), cap / 2)) << "writer should reclaim unpublished half";
+
+        // verify data integrity of published half
+        {
+            auto in = reader.get(cap / 2);
+            for (std::size_t i = 0; i < cap / 2; ++i) {
+                expect(eq(in[i], static_cast<int>(i)));
+            }
+            expect(in.consume(cap / 2));
+        }
+
+        // now reserve and publish full buffer again — proves rollback was clean
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(cap);
+            expect(!span.empty()) << "reserve failed after partial publish rollback";
+            std::iota(span.begin(), span.end(), 1000);
+            span.publish(cap);
+        }
+
+        {
+            auto in = reader.get(cap);
+            expect(eq(in[0], 1000)) << "data corruption after partial publish + re-reserve";
+            expect(in.consume(cap));
+        }
+    };
+
+    "single producer - publish 0 of N rolls back completely"_test = [] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap       = buf.size();
+        const std::size_t capBefore = writer.available();
+        const std::size_t posBefore = writer.position();
+
+        // reserve then publish 0 (explicit)
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(cap / 4);
+            expect(!span.empty());
+            span.publish(0);
+        }
+
+        expect(eq(writer.available(), capBefore)) << "capacity not restored after publish(0)";
+        expect(eq(writer.position(), posBefore)) << "publish cursor moved despite publish(0)";
+        expect(eq(reader.available(), 0UZ)) << "reader sees phantom data after publish(0)";
+    };
+
+    "single producer - repeated partial publishes across wrap boundary"_test = [] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap       = buf.size();
+        const std::size_t chunkSize = cap / 3; // not a divisor of cap → forces wrap
+        int               value     = 0;
+
+        for (int cycle = 0; cycle < 50; ++cycle) {
+            // reserve chunkSize, publish only half
+            const std::size_t toPublish = chunkSize / 2;
+            {
+                auto span = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(chunkSize);
+                if (span.empty()) {
+                    // buffer full — drain reader
+                    auto in = reader.get(reader.available());
+                    expect(in.consume(in.size()));
+                    continue;
+                }
+                std::iota(span.begin(), span.end(), value);
+                span.publish(toPublish);
+            }
+
+            value += static_cast<int>(toPublish);
+
+            // consume what's available
+            if (reader.available() >= toPublish) {
+                auto in = reader.get(toPublish);
+                expect(in.consume(toPublish));
+            }
+        }
+
+        // final drain — verify no data corruption by checking monotonicity
+        int lastValue = -1;
+        while (reader.available() > 0) {
+            auto in = reader.get(reader.available());
+            for (std::size_t i = 0; i < in.size(); ++i) {
+                expect(gt(in[i], lastValue)) << "non-monotonic data at value " << in[i];
+                lastValue = in[i];
+            }
+            expect(in.consume(in.size()));
+        }
+    };
+
+    "back-to-back tryReserve failures do not corrupt writer state"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        // fill buffer completely
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(cap);
+            expect(!span.empty());
+            std::iota(span.begin(), span.end(), 0);
+            span.publish(cap);
+        }
+
+        // multiple failed tryReserves
+        for (int i = 0; i < 100; ++i) {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(1);
+            expect(span.empty()) << "should fail on full buffer, attempt " << i;
+        }
+
+        // drain and verify writer recovers
+        expect(consumeAll(reader, cap));
+        expect(eq(writer.available(), cap)) << "writer state corrupted after repeated tryReserve failures";
+
+        // verify we can still write
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(cap);
+            expect(!span.empty()) << "write failed after recovery from tryReserve failures";
+            span.publish(cap);
+        }
+        expect(eq(reader.available(), cap));
+    };
+
+    "multi producer back-to-back tryReserve failures"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Multi>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        // fill buffer
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(cap);
+            expect(!span.empty());
+            std::iota(span.begin(), span.end(), 0);
+            span.publish(cap);
+        }
+
+        // repeated failures
+        for (int i = 0; i < 100; ++i) {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(1);
+            expect(span.empty()) << "should fail on full buffer, attempt " << i;
+        }
+
+        // drain and verify recovery
+        expect(consumeAll(reader, cap));
+        expect(eq(writer.available(), cap)) << "multi writer state corrupted after repeated failures";
+
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(cap);
+            expect(!span.empty());
+            std::iota(span.begin(), span.end(), 42);
+            span.publish(cap);
+        }
+
+        {
+            auto in = reader.get(cap);
+            expect(eq(in[0], 42));
+            expect(in.consume(cap));
+        }
+    };
+
+    "non-power-of-2 buffer - writes crossing wrap boundary"_test = [] {
+        // 384 is not power-of-2 → exercises modulo path in calculateIndex
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer                      buf(384);
+        auto                        writer    = buf.new_writer();
+        auto                        reader    = buf.new_reader();
+        [[maybe_unused]] const auto actualCap = buf.size(); // may be rounded up
+
+        const std::size_t chunkSize = 100; // doesn't divide actualCap evenly
+        int               value     = 0;
+
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            {
+                auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(chunkSize);
+                if (span.empty()) {
+                    auto in = reader.get(reader.available());
+                    expect(in.consume(in.size()));
+                    continue;
+                }
+                std::iota(span.begin(), span.end(), value);
+                span.publish(chunkSize);
+                value += static_cast<int>(chunkSize);
+            }
+
+            if (reader.available() >= chunkSize) {
+                auto in = reader.get(chunkSize);
+                expect(in.consume(chunkSize));
+            }
+        }
+
+        // drain and verify monotonicity
+        int lastValue = -1;
+        while (reader.available() > 0) {
+            auto in = reader.get(reader.available());
+            for (std::size_t i = 0; i < in.size(); ++i) {
+                if (in[i] <= lastValue) {
+                    expect(false) << "non-monotonic at value " << in[i] << " (prev " << lastValue << ")";
+                    break;
+                }
+                lastValue = in[i];
+            }
+            expect(in.consume(in.size()));
+        }
+    };
+
+    "non-power-of-2 buffer - multi producer wrap boundary"_test = [] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Multi>;
+        Buffer buf(384);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t chunkSize = 100;
+        int               value     = 0;
+
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            {
+                auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(chunkSize);
+                if (span.empty()) {
+                    auto in = reader.get(reader.available());
+                    expect(in.consume(in.size()));
+                    continue;
+                }
+                std::iota(span.begin(), span.end(), value);
+                span.publish(chunkSize);
+                value += static_cast<int>(chunkSize);
+            }
+
+            if (reader.available() >= chunkSize) {
+                auto in = reader.get(chunkSize);
+                expect(in.consume(chunkSize));
+            }
+        }
+
+        int lastValue = -1;
+        while (reader.available() > 0) {
+            auto in = reader.get(reader.available());
+            for (std::size_t i = 0; i < in.size(); ++i) {
+                if (in[i] <= lastValue) {
+                    expect(false) << "non-monotonic at value " << in[i];
+                    break;
+                }
+                lastValue = in[i];
+            }
+            expect(in.consume(in.size()));
+        }
+    };
+
+    "single producer - reader added during active streaming does not lose data"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer  = buf.new_writer();
+        auto   reader1 = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        // run 10 cycles with reader1 only
+        for (int i = 0; i < 10; ++i) {
+            expect(writeAndPublish(writer, cap, i * static_cast<int>(cap)));
+            expect(consumeAll(reader1, cap));
+        }
+
+        // add reader2 mid-stream
+        auto reader2 = buf.new_reader();
+
+        // write another batch — both readers should see it
+        expect(writeAndPublish(writer, cap, 9999));
+
+        // reader1 consumes, reader2 does not → writer should be blocked
+        expect(consumeAll(reader1, cap));
+        expect(eq(writer.available(), 0UZ)) << "writer should be blocked by reader2";
+
+        // now reader2 consumes
+        {
+            auto in = reader2.get(cap);
+            expect(eq(in[0], 9999)) << "reader2 sees wrong data";
+            expect(in.consume(cap));
+        }
+
+        expect(eq(writer.available(), cap)) << "writer not unblocked after both readers consumed";
+
+        // continue streaming with 2 readers — 10 more cycles
+        for (int i = 0; i < 10; ++i) {
+            expect(writeAndPublish(writer, cap, i * 100));
+            expect(consumeAll(reader1, cap));
+            expect(consumeAll(reader2, cap));
+        }
+
+        expect(eq(writer.available(), cap));
+    };
+
+    "single producer - three readers at different consume rates"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer  = buf.new_writer();
+        auto   reader1 = buf.new_reader();
+        auto   reader2 = buf.new_reader();
+        auto   reader3 = buf.new_reader();
+
+        const std::size_t cap   = buf.size();
+        const std::size_t chunk = cap / 4;
+
+        // write one chunk
+        expect(writeAndPublish(writer, chunk, 0));
+
+        // reader1 consumes all, reader2 consumes half, reader3 consumes nothing
+        expect(consumeAll(reader1, chunk));
+        expect(consumeAll(reader2, chunk / 2));
+
+        // writer available should be limited by reader3 (consumed 0)
+        expect(eq(writer.available(), cap - chunk)) << "writer not blocked by slowest reader";
+
+        // reader3 consumes its chunk
+        expect(consumeAll(reader3, chunk));
+
+        // writer available limited by reader2 (consumed only half)
+        expect(eq(writer.available(), cap - chunk / 2)) << "writer not tracking reader2 correctly";
+
+        // reader2 catches up
+        expect(consumeAll(reader2, chunk / 2));
+        expect(eq(writer.available(), cap)) << "capacity not restored after all readers caught up";
+    };
+};
+
 int main() { /* not needed for UT */ }
