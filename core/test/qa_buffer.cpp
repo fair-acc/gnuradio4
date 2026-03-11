@@ -1421,4 +1421,229 @@ const boost::ut::suite<"SingleProducerStrategy"> _singleProducerStrategy = [] {
     };
 };
 
+const boost::ut::suite<"CursorCacheStaleness"> _cursorCacheTests = [] {
+    using namespace boost::ut;
+    using gr::CircularBuffer;
+    using gr::ProducerType;
+    using gr::SpanReleasePolicy;
+
+    auto writeAndPublish = [](auto& writer, std::size_t n, int fillValue = 0) {
+        auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(n);
+        if (!span.empty()) {
+            std::iota(span.begin(), span.end(), fillValue);
+            span.publish(n);
+        }
+        return !span.empty();
+    };
+
+    auto consumeAll = [](auto& reader, std::size_t n) {
+        auto in = reader.get(n);
+        bool ok = in.consume(n);
+        return ok;
+    };
+
+    "single reader - burst fill then full drain then refill"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        expect(writeAndPublish(writer, cap, 0)) << "initial reserve must succeed";
+        expect(eq(writer.available(), 0UZ)) << "buffer must be full after burst";
+
+        expect(consumeAll(reader, cap));
+
+        expect(eq(writer.available(), cap)) << "stale cache: writer sees 0 after full drain";
+        expect(writeAndPublish(writer, cap, 1000)) << "stale cache prevented second burst";
+    };
+
+    "single reader - repeated burst/drain cycles"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        for (int cycle = 0; cycle < 200; ++cycle) {
+            expect(writeAndPublish(writer, cap, cycle * static_cast<int>(cap))) << "cycle " << cycle << ": tryReserve failed (stale cache?)";
+            expect(consumeAll(reader, cap));
+        }
+    };
+
+    "two readers at different rates - producer must track slowest"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer     = buf.new_writer();
+        auto   readerFast = buf.new_reader();
+        auto   readerSlow = buf.new_reader();
+
+        const std::size_t cap       = buf.size();
+        const std::size_t batchSize = cap / 4;
+
+        expect(writeAndPublish(writer, batchSize));
+
+        // fast reader consumes everything, slow reader consumes nothing
+        expect(consumeAll(readerFast, batchSize));
+
+        // writer capacity must reflect the slow reader
+        expect(le(writer.available(), cap - batchSize)) << "cache overestimates: ignores slow reader";
+
+        // slow reader catches up
+        expect(consumeAll(readerSlow, batchSize));
+
+        expect(eq(writer.available(), cap)) << "cache stale after slow reader consumed";
+    };
+
+    "reader added mid-stream - cache must not overestimate capacity"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer  = buf.new_writer();
+        auto   reader1 = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        // advance cursors well past zero
+        for (int i = 0; i < 50; ++i) {
+            expect(writeAndPublish(writer, cap, i * static_cast<int>(cap)));
+            expect(consumeAll(reader1, cap));
+        }
+
+        // add second reader — starts at current publish cursor
+        auto reader2 = buf.new_reader();
+        expect(eq(reader2.available(), 0UZ)) << "new reader should see 0 samples";
+
+        expect(writeAndPublish(writer, cap, 0));
+
+        // reader1 consumes all, reader2 does not
+        expect(consumeAll(reader1, cap));
+
+        // buffer must appear full — reader2 blocks the producer
+        expect(eq(writer.available(), 0UZ)) << "cache overestimate: ignored new slow reader";
+
+        // verify data integrity for reader2
+        {
+            auto in = reader2.get(cap);
+            expect(eq(in.size(), cap));
+            for (std::size_t i = 0; i < cap; ++i) {
+                expect(eq(in[i], static_cast<int>(i))) << "data corruption at index " << i;
+            }
+            expect(in.consume(cap));
+        }
+
+        expect(eq(writer.available(), cap)) << "should be fully free after both readers drained";
+    };
+
+    "reader removed mid-stream - producer must recover capacity"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer  = buf.new_writer();
+        auto   reader1 = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        expect(writeAndPublish(writer, cap));
+
+        // reader1 consumes half
+        {
+            auto in = reader1.get(cap / 2);
+            expect(in.consume(cap / 2));
+        }
+
+        {
+            // add reader2 at publish cursor (past all published data), then immediately remove
+            auto reader2 = buf.new_reader();
+            expect(eq(reader2.available(), 0UZ));
+        }
+
+        // capacity should reflect only reader1 (half consumed)
+        expect(eq(writer.available(), cap / 2)) << "stale cache after reader removal";
+
+        // reader1 consumes the rest
+        {
+            auto in = reader1.get(cap / 2);
+            expect(in.consume(cap / 2));
+        }
+
+        expect(eq(writer.available(), cap)) << "full capacity not restored after drain";
+    };
+
+    "tryReserve with ProcessNone does not corrupt cache"_test = [&] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap = buf.size();
+
+        expect(writeAndPublish(writer, cap / 2));
+
+        // tryReserve with ProcessNone → reserves but publishes 0 on destruction
+        {
+            auto span = writer.template tryReserve<SpanReleasePolicy::ProcessNone>(cap / 4);
+            expect(!span.empty());
+        }
+
+        // the "given back" slots must be visible to the writer again
+        expect(eq(writer.available(), cap / 2)) << "capacity lost after ProcessNone drop";
+
+        expect(writeAndPublish(writer, cap / 2)) << "cannot reserve after ProcessNone drop";
+        expect(eq(writer.available(), 0UZ));
+    };
+
+    "interleaved small writes and partial consumes"_test = [] {
+        using Buffer = CircularBuffer<int, std::dynamic_extent, ProducerType::Single>;
+        Buffer buf(1024);
+        auto   writer = buf.new_writer();
+        auto   reader = buf.new_reader();
+
+        const std::size_t cap        = buf.size();
+        std::size_t       produced   = 0;
+        std::size_t       consumed   = 0;
+        const std::size_t target     = cap * 100;
+        std::size_t       stallCount = 0;
+
+        while (produced < target) {
+            // try to produce one sample
+            bool wrote = false;
+            {
+                auto span = writer.template tryReserve<SpanReleasePolicy::ProcessAll>(1);
+                if (!span.empty()) {
+                    span[0] = static_cast<int>(produced);
+                    span.publish(1);
+                    ++produced;
+                    stallCount = 0;
+                    wrote      = true;
+                } else {
+                    ++stallCount;
+                    if (stallCount > cap + 10) {
+                        expect(false) << "producer stalled for " << stallCount << " iterations (livelock)";
+                        break;
+                    }
+                }
+            } // span destructed — publish committed
+
+            // consume one sample: every 2nd successful write, or always when stalled
+            const bool shouldConsume = !wrote || (produced % 2 == 0);
+            if (shouldConsume && reader.available() > 0) {
+                auto in = reader.get(1);
+                expect(eq(in[0], static_cast<int>(consumed)));
+                expect(in.consume(1));
+                ++consumed;
+            }
+        }
+
+        // final drain
+        while (reader.available() > 0) {
+            auto in = reader.get(reader.available());
+            consumed += in.size();
+            expect(in.consume(in.size()));
+        }
+
+        expect(eq(consumed, produced)) << "data lost or duplicated";
+    };
+};
+
 int main() { /* not needed for UT */ }

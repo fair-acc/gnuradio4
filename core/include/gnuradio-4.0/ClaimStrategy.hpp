@@ -36,7 +36,6 @@ concept ClaimStrategyLike = requires(T /*const*/ t, const std::size_t sequence, 
 template<std::size_t SIZE = std::dynamic_extent, WaitStrategyLike TWaitStrategy = BusySpinWaitStrategy>
 class alignas(kCacheLine) SingleProducerStrategy {
     const std::size_t   _size = SIZE;
-    mutable std::size_t _cachedMinReaderCursor{kInitialCursorValue};
     mutable std::size_t _cachedReaderCount{0UZ};
     mutable Sequence*   _cachedSingleReader{nullptr}; // fast path: direct pointer when ≤1 reader
 
@@ -60,7 +59,7 @@ public:
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
         SpinWait spinWait;
-        while (getRemainingCapacity(nSlotsToClaim) < nSlotsToClaim) {
+        while (getRemainingCapacity() < nSlotsToClaim) {
             if constexpr (hasSignalAllWhenBlocking<TWaitStrategy>) {
                 _waitStrategy.signalAllWhenBlocking();
             }
@@ -73,14 +72,14 @@ public:
     [[nodiscard]] std::optional<std::size_t> tryNext(const std::size_t nSlotsToClaim) noexcept {
         assert((nSlotsToClaim > 0 && nSlotsToClaim <= _size) && "nSlotsToClaim must be > 0 and <= bufferSize");
 
-        if (getRemainingCapacity(nSlotsToClaim) < nSlotsToClaim) {
+        if (getRemainingCapacity() < nSlotsToClaim) {
             return std::nullopt;
         }
         _reserveCursor += nSlotsToClaim;
         return _reserveCursor;
     }
 
-    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return getRemainingCapacity(1); }
+    [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept { return _size - (_reserveCursor - getMinReaderCursor()); }
 
     void publish(std::size_t offset, std::size_t nSlotsToClaim) {
         const auto sequence = offset + nSlotsToClaim;
@@ -92,21 +91,9 @@ public:
     }
 
 private:
-    [[nodiscard]] forceinline std::size_t getRemainingCapacity(std::size_t required) const noexcept {
-        if (_cachedReaderCount <= 2UZ) { // ≤2 readers: cache avoids scanning all cursors on every call
-            const std::size_t remaining = _size - (_reserveCursor - _cachedMinReaderCursor);
-            if (remaining >= required && remaining <= _size) [[likely]] {
-                return remaining;
-            }
-        }
-        // >2 readers or cache miss: rescan paces the producer, preventing coherence saturation on _publishCursor
-        _cachedMinReaderCursor = getMinReaderCursor();
-        return _size - (_reserveCursor - _cachedMinReaderCursor);
-    }
-
     [[nodiscard]] forceinline std::size_t getMinReaderCursor() const noexcept {
         if (_cachedSingleReader) {
-            return _cachedSingleReader->value();
+            return _cachedSingleReader->value(); // O(1): single atomic load, no shared_ptr indirection
         }
         if (_cachedReaderCount == 0UZ) {
             return kInitialCursorValue;
@@ -241,14 +228,9 @@ public:
     }
 
     [[nodiscard]] forceinline std::size_t getRemainingCapacity() const noexcept {
-        const std::size_t cachedMin = gr::atomic_ref(_cachedMinReaderCursor).load_relaxed();
-        const std::size_t used      = _reserveCursor.value() - cachedMin;
-        if (used < _size) [[likely]] {
-            return _size - used;
-        }
-        const std::size_t freshMin = getMinReaderCursor();
-        gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(freshMin);
-        return _size - (_reserveCursor.value() - freshMin);
+        const std::size_t minReader = getMinReaderCursor();
+        gr::atomic_ref(_cachedMinReaderCursor).store_relaxed(minReader); // keep cache warm for next()/tryNext()
+        return _size - (_reserveCursor.value() - minReader);
     }
 
     void publish(std::size_t offset, std::size_t nSlotsToClaim) {
