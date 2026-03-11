@@ -142,9 +142,19 @@ const boost::ut::suite ManagedSubGraph = [] {
         // but still updating children states
         expect(eq(subGraph->blocks().size(), 2UZ)) << "subGraph should have 2 blocks";
         expect(eq(scheduler.graph().blocks().size(), 3UZ)) << "Graph should contain source->(copy->copy)->sink";
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[0]->state() == lifecycle::State::RUNNING; })) << "block 0 is not running";
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[1]->state() == lifecycle::State::RUNNING; })) << "block 1 is not running";
 
+        auto allSubBlocksInState = [&subGraph](lifecycle::State target) {
+            return std::ranges::all_of(subGraph->blocks(), [target](const auto& b) { return b->state() == target; });
+        };
+        auto subBlockStates = [&subGraph] {
+            std::string result;
+            for (const auto& b : subGraph->blocks()) {
+                result += std::format("  {} -> {}\n", b->uniqueName(), magic_enum::enum_name(b->state()));
+            }
+            return result;
+        };
+
+        expect(awaitCondition(2s, [&] { return allSubBlocksInState(lifecycle::State::RUNNING); })) << std::format("not all sub-graph blocks are RUNNING:\n{}", subBlockStates());
         expect(subSchedulerBlock->state() == lifecycle::State::RUNNING) << "sub-scheduler is not running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.wrapper->uniqueName(), graph::property::kSubgraphExportPort, //
@@ -202,13 +212,11 @@ const boost::ut::suite ManagedSubGraph = [] {
         expect(scheduler.changeStateTo(lifecycle::State::REQUESTED_PAUSE).has_value()) << "could switch to REQUESTED_PAUSE?";
 
         expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::PAUSED; })) << std::format("scheduler should be paused - actual: {}", magic_enum::enum_name(scheduler.state()));
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[0]->state() == lifecycle::State::PAUSED; })) << "block 0 is not paused";
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[1]->state() == lifecycle::State::PAUSED; })) << "block 1 is not paused";
+        expect(awaitCondition(2s, [&] { return allSubBlocksInState(lifecycle::State::PAUSED); })) << std::format("not all sub-graph blocks are PAUSED:\n{}", subBlockStates());
 
         // Resume scheduler
         expect(scheduler.changeStateTo(lifecycle::State::RUNNING).has_value()) << "could switch to RUNNING?";
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[0]->state() == lifecycle::RUNNING; })) << "block 0 is not running";
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[1]->state() == lifecycle::State::RUNNING; })) << "block 1 is not running";
+        expect(awaitCondition(2s, [&] { return allSubBlocksInState(lifecycle::State::RUNNING); })) << std::format("not all sub-graph blocks are RUNNING after resume:\n{}", subBlockStates());
         expect(scheduler.state() == lifecycle::State::RUNNING) << std::format("scheduler should be running - actual: {}", magic_enum::enum_name(scheduler.state()));
         expect(subSchedulerBlock->state() == lifecycle::State::RUNNING) << std::format("sub-scheduler should be running - actual: {}", magic_enum::enum_name(subSchedulerBlock->state()));
 
@@ -225,15 +233,13 @@ const boost::ut::suite ManagedSubGraph = [] {
 
         expect(subSchedulerBlock->state() == lifecycle::State::STOPPED) << std::format("sub-scheduler should be stopped - actual: {}", magic_enum::enum_name(subSchedulerBlock->state()));
 
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[0]->state() == lifecycle::State::STOPPED; })) << "block 0 is not stopped";
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[1]->state() == lifecycle::State::STOPPED; })) << "block 1 is not stopped";
+        expect(awaitCondition(2s, [&] { return allSubBlocksInState(lifecycle::State::STOPPED); })) << std::format("not all sub-graph blocks are STOPPED:\n{}", subBlockStates());
 
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could not switch to INITIALISED?";
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
 
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[0]->state() == lifecycle::State::INITIALISED; })) << "block 0 is not initialized";
-        expect(awaitCondition(2s, [&subGraph] { return subGraph->blocks()[1]->state() == lifecycle::State::INITIALISED; })) << "block 1 is not initialized";
+        expect(awaitCondition(2s, [&] { return allSubBlocksInState(lifecycle::State::INITIALISED); })) << std::format("not all sub-graph blocks are INITIALISED:\n{}", subBlockStates());
         expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
         expect(subSchedulerBlock->state() == lifecycle::State::INITIALISED) << std::format("sub-scheduler should be stopped - actual: {}", magic_enum::enum_name(subSchedulerBlock->state()));
     };
