@@ -54,7 +54,7 @@ DemoSubSchedulerResult<T> createDemoSubScheduler() {
     gr::Graph                 graph;
     result.pass1 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.pass2 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
-    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, PortDefinition("out"), *result.pass2, PortDefinition("in"))));
+    expect(graph.connect(*result.pass1, "out", *result.pass2, "in").has_value());
     result.setGraph(std::move(graph));
     return result;
 }
@@ -66,7 +66,7 @@ DemoSubSchedulerResult<T> createDemoSubSchedulerWithSettings() {
     result.pass1            = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.pass2            = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.settingsRecorder = std::addressof(graph.template emplaceBlock<gr::testing::SettingsChangeRecorder<T>>());
-    expect(eq(ConnectionResult::SUCCESS, graph.connect(*result.pass1, PortDefinition("out"), *result.pass2, PortDefinition("in"))));
+    expect(graph.connect(*result.pass1, "out", *result.pass2, "in").has_value());
     result.setGraph(std::move(graph));
     return result;
 }
@@ -129,8 +129,8 @@ const boost::ut::suite ManagedSubGraph = [] {
 
         gr::MsgPortOut toScheduler;
         gr::MsgPortIn  fromScheduler;
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
         expect(scheduler.state() == lifecycle::State::IDLE) << std::format("scheduler state should be IDLE - actual: {}", magic_enum::enum_name(scheduler.state()));
 
@@ -263,8 +263,8 @@ const boost::ut::suite ExportPortsTests_ = [] {
         const auto&    graph = scheduler.graph();
         gr::MsgPortOut toScheduler;
         gr::MsgPortIn  fromScheduler;
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, scheduler.msgOut.connect(fromScheduler)));
+        expect(toScheduler.connect(scheduler.msgIn).has_value());
+        expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
         expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";

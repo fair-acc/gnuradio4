@@ -39,6 +39,7 @@ static_assert(std::numeric_limits<float64_t>::is_iec559 && sizeof(float64_t) * 8
 #pragma GCC diagnostic ignored "-Wshadow"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
 #include <vir/simd.h>
+#include <vir/simdize.h>
 #pragma GCC diagnostic pop
 
 #ifndef DISABLE_SIMD
@@ -667,6 +668,15 @@ concept any_simd = stdx::is_simd_v<V> && (std::same_as<T, void> || std::same_as<
 
 template<typename V, typename T>
 concept t_or_simd = std::same_as<V, T> || any_simd<V, T>;
+
+template<typename T, typename U = void>
+concept constexpr_value = vir::constexpr_value<T, U>;
+
+template<auto V>
+inline constexpr vir::constexpr_wrapper<V> cw{};
+
+template<typename T, int N = 0>
+using simdize = vir::simdize<T, N>;
 
 template<typename T>
 concept complex_like = std::is_same_v<T, std::complex<float>> || std::is_same_v<T, std::complex<double>>;

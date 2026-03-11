@@ -40,6 +40,24 @@ struct MultiPortTestSource : public gr::Block<MultiPortTestSource<T, nPorts>> {
     }
 };
 
+const boost::ut::suite<"New connection API tests"> connection_api_tests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "Graph connection buffer size test - default"_test = [] {
+        Graph graph;
+        auto& src  = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink).has_value());
+        graph.connectPendingEdges();
+
+        expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize(true)));
+        expect(eq(sink.in.bufferSize(), graph::defaultMinBufferSize(true)));
+    };
+};
+
 const boost::ut::suite<"GraphTests"> _1 = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -50,7 +68,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(sink)));
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = undefined_size}).has_value());
         graph.connectPendingEdges();
 
         expect(eq(src.out.bufferSize(), graph::defaultMinBufferSize(true)));
@@ -62,10 +80,9 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& src  = graph.emplaceBlock<NullSource<float>>();
         auto& sink = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 8000UZ).to<"in">(sink)));
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 8000UZ}).has_value());
         graph.connectPendingEdges();
 
-        // Note: the actual size is always power of 2 and aligned with page size, see std::bit_ceil
         expect(ge(src.out.bufferSize(), 8000UZ));
         expect(ge(sink.in.bufferSize(), 8000UZ));
     };
@@ -77,9 +94,9 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto& sink2 = graph.emplaceBlock<NullSink<float>>();
         auto& sink3 = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 2000UZ).to<"in">(sink1)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 10000UZ).to<"in">(sink2)));
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src, 8000UZ).to<"in">(sink3)));
+        expect(graph.connect<"out", "in">(src, sink1, {.minBufferSize = 2000UZ}).has_value());
+        expect(graph.connect<"out", "in">(src, sink2, {.minBufferSize = 10000UZ}).has_value());
+        expect(graph.connect<"out", "in">(src, sink3, {.minBufferSize = 8000UZ}).has_value());
 
         graph.connectPendingEdges();
 
@@ -102,7 +119,7 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
         auto&              sink1            = graph.emplaceBlock<NullSink<float>>();
 
         // only the first port is connected
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out", 0>(src, customBufferSize).to<"in">(sink1)));
+        expect(graph.connect(src, "out#0", sink1, "in", {.minBufferSize = customBufferSize}).has_value());
 
         scheduler::Simple<scheduler::ExecutionPolicy::multiThreaded> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
@@ -117,6 +134,77 @@ const boost::ut::suite<"GraphTests"> _1 = [] {
 
         expect(eq(src.out[1].bufferSize(), 4096UZ)); // port default buffer size
         expect(eq(src.out[2].bufferSize(), 4096UZ)); // port default buffer size
+    };
+};
+
+struct TrackingResource : std::pmr::memory_resource {
+    std::pmr::memory_resource* _upstream;
+    std::atomic<std::size_t>   _allocCount{0};
+
+    explicit TrackingResource(std::pmr::memory_resource* upstream = std::pmr::get_default_resource()) : _upstream(upstream) {}
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++_allocCount;
+        return _upstream->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override { _upstream->deallocate(p, bytes, alignment); }
+
+    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
+const boost::ut::suite<"EdgeParameters PMR forwarding"> _pmr = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "Graph connection forwards data PMR resource"_test = [] {
+        TrackingResource dataTracker;
+        Graph            graph;
+        auto&            src  = graph.emplaceBlock<NullSource<float>>();
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &dataTracker}).has_value());
+        graph.connectPendingEdges();
+
+        expect(gt(dataTracker._allocCount.load(), 0UZ)) << "data PMR resource should have been used for stream buffer";
+    };
+
+    "Graph connection forwards tag PMR resource"_test = [] {
+        TrackingResource tagTracker;
+        Graph            graph;
+        auto&            src  = graph.emplaceBlock<NullSource<float>>();
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .tagResource = &tagTracker}).has_value());
+        graph.connectPendingEdges();
+
+        expect(gt(tagTracker._allocCount.load(), 0UZ)) << "tag PMR resource should have been used for tag buffer";
+    };
+
+    "Graph connection forwards both PMR resources"_test = [] {
+        TrackingResource dataTracker;
+        TrackingResource tagTracker;
+        Graph            graph;
+        auto&            src  = graph.emplaceBlock<NullSource<float>>();
+        auto&            sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ, .dataResource = &dataTracker, .tagResource = &tagTracker}).has_value());
+        graph.connectPendingEdges();
+
+        expect(gt(dataTracker._allocCount.load(), 0UZ)) << "data PMR resource should have been used";
+        expect(gt(tagTracker._allocCount.load(), 0UZ)) << "tag PMR resource should have been used";
+    };
+
+    "Graph connection with default PMR resources still works"_test = [] {
+        Graph graph;
+        auto& src  = graph.emplaceBlock<NullSource<float>>();
+        auto& sink = graph.emplaceBlock<NullSink<float>>();
+
+        expect(graph.connect<"out", "in">(src, sink, {.minBufferSize = 4096UZ}).has_value());
+        graph.connectPendingEdges();
+
+        expect(ge(src.out.bufferSize(), 4096UZ));
     };
 };
 
@@ -186,7 +274,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         Graph              graph;
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
-        expect(eq(graph.connect<"out">(src).to<"in">(snk), ConnectionResult::SUCCESS));
+        expect(graph.connect<"out", "in">(src, snk).has_value());
 
         expect(graph.containsEdge(graph.edges().front()));
         graph.connectPendingEdges();
@@ -197,7 +285,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         Graph              graph;
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
-        expect(eq(graph.connect<"out">(src).to<"in">(snk), ConnectionResult::SUCCESS));
+        expect(graph.connect<"out", "in">(src, snk).has_value());
         graph.connectPendingEdges();
 
         const auto edge = graph.edges().front();
@@ -227,7 +315,7 @@ const boost::ut::suite<"GraphExtensionsTests"> _2 = [] {
         NullSource<float>& src = graph.emplaceBlock<NullSource<float>>();
         NullSink<float>&   snk = graph.emplaceBlock<NullSink<float>>();
 
-        expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(src).to<"in">(snk)));
+        expect(graph.connect<"out", "in">(src, snk, {.minBufferSize = undefined_size}).has_value());
         graph.connectPendingEdges();
 
         int count = 0;

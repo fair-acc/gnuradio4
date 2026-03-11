@@ -91,8 +91,12 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         assert(block_source != nullptr);
         auto block_sink = context->loader.instantiate("good::cout_sink<float64>");
         assert(block_sink != nullptr);
-        auto connection_1 = block_source->dynamicOutputPort(0).connect(block_sink->dynamicInputPort(0));
-        expect(connection_1 == gr::ConnectionResult::SUCCESS);
+        auto srcPort_1 = block_source->dynamicOutputPort(0);
+        auto dstPort_1 = block_sink->dynamicInputPort(0);
+        expect(srcPort_1.has_value()) << "source port lookup";
+        expect(dstPort_1.has_value()) << "destination port lookup";
+        auto connection_1 = srcPort_1.value()->connect(*dstPort_1.value());
+        expect(connection_1.has_value());
     };
 
     "LongerPipeline"_test = [&] {
@@ -107,11 +111,16 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         block_sink_params["total_count"] = gr::Size_t(100);
         auto block_sink                  = context->loader.instantiate("good::cout_sink<float64>");
 
-        auto connection_1 = block_source->dynamicOutputPort(0).connect(block_multiply->dynamicInputPort(0));
-        auto connection_2 = block_multiply->dynamicOutputPort(0).connect(block_sink->dynamicInputPort(0));
+        auto srcPort1 = block_source->dynamicOutputPort(0);
+        auto dstPort1 = block_multiply->dynamicInputPort(0);
+        auto srcPort2 = block_multiply->dynamicOutputPort(0);
+        auto dstPort2 = block_sink->dynamicInputPort(0);
+        expect(srcPort1.has_value() && dstPort1.has_value() && srcPort2.has_value() && dstPort2.has_value()) << "port lookups";
+        auto connection_1 = srcPort1.value()->connect(*dstPort1.value());
+        auto connection_2 = srcPort2.value()->connect(*dstPort2.value());
 
-        expect(connection_1 == gr::ConnectionResult::SUCCESS);
-        expect(connection_2 == gr::ConnectionResult::SUCCESS);
+        expect(connection_1.has_value());
+        expect(connection_2.has_value());
 
         for (std::size_t i = 0; i < repeats; ++i) {
             std::ignore = block_source->work(std::numeric_limits<std::size_t>::max());
@@ -128,8 +137,9 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
 
         // Instantiate a built-in node in a static way
         gr::property_map block_multiply_1_params;
-        block_multiply_1_params["factor"] = 2.0;
-        auto& block_multiply_double       = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
+        block_multiply_1_params["factor"]  = 2.0;
+        auto& block_multiply_double_direct = testGraph.emplaceBlock<builtin_multiply<double>>(block_multiply_1_params);
+        auto  block_multiply_double        = gr::graph::findBlock(testGraph, block_multiply_double_direct);
 
         // Instantiate a built-in node via the plugin loader
         auto& block_multiply_float = testGraph.emplaceBlock("builtin_multiply<float32>", {});
@@ -144,21 +154,21 @@ const boost::ut::suite BasicPluginBlocksConnectionTests = [] {
         auto  block_sink_load            = context->loader.instantiate("good::cout_sink<float64>", block_sink_params);
         auto& block_sink                 = testGraph.addBlock(std::move(block_sink_load));
 
-        auto connection_1 = testGraph.connect(block_source, 0, block_multiply_double, 0);
-        auto connection_2 = testGraph.connect(block_multiply_double, 0, block_convert_to_float, 0);
+        auto connection_1 = testGraph.connect(block_source, 0, *block_multiply_double, 0);
+        auto connection_2 = testGraph.connect(*block_multiply_double, 0, block_convert_to_float, 0);
         auto connection_3 = testGraph.connect(block_convert_to_float, 0, block_multiply_float, 0);
         auto connection_4 = testGraph.connect(block_multiply_float, 0, block_convert_to_double, 0);
         auto connection_5 = testGraph.connect(block_convert_to_double, 0, block_sink, 0);
 
-        expect(connection_1 == gr::ConnectionResult::SUCCESS);
-        expect(connection_2 == gr::ConnectionResult::SUCCESS);
-        expect(connection_3 == gr::ConnectionResult::SUCCESS);
-        expect(connection_4 == gr::ConnectionResult::SUCCESS);
-        expect(connection_5 == gr::ConnectionResult::SUCCESS);
+        expect(connection_1.has_value());
+        expect(connection_2.has_value());
+        expect(connection_3.has_value());
+        expect(connection_4.has_value());
+        expect(connection_5.has_value());
 
         for (std::size_t i = 0; i < repeats; ++i) {
             std::ignore = block_source->work(std::numeric_limits<std::size_t>::max());
-            std::ignore = block_multiply_double.work(std::numeric_limits<std::size_t>::max());
+            std::ignore = block_multiply_double.value()->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_convert_to_float->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_multiply_float->work(std::numeric_limits<std::size_t>::max());
             std::ignore = block_convert_to_double->work(std::numeric_limits<std::size_t>::max());

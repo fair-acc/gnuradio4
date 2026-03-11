@@ -46,8 +46,8 @@ public:
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         using namespace gr::testing;
-        expect(eq(ConnectionResult::SUCCESS, toScheduler.connect(scheduler_.msgIn)));
-        expect(eq(ConnectionResult::SUCCESS, scheduler_.msgOut.connect(fromScheduler)));
+        expect(toScheduler.connect(scheduler_.msgIn).has_value());
+        expect(scheduler_.msgOut.connect(fromScheduler).has_value());
 
         run();
     }
@@ -127,7 +127,7 @@ const boost::ut::suite TopologyGraphTests = [] {
         Graph flow(context->loader);
         auto& source = flow.emplaceBlock<NullSource<float>>();
         auto& sink   = flow.emplaceBlock<NullSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(sink)));
+        expect(flow.connect<"out", "in">(source, sink).has_value());
 
         TestScheduler scheduler(std::move(flow));
 
@@ -186,7 +186,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         "Remove an unknown block"_test = [&] {
             testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kRemoveBlock, //
-                {{"uniqueName", "this_block_is_unknown"}}, ReplyChecker{.expectedEndpoint = scheduler::property::kRemoveBlock, .expectedHasData = false});
+                {{"uniqueName", "this_block_is_unknown"}}, ReplyChecker{.expectedEndpoint = scheduler::property::kBlockRemoved, .expectedHasData = false});
 
             expect(eq(testGraph.blocks().size(), 3UZ));
         };
@@ -478,7 +478,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     gr::Graph graph(context->loader);
     auto&     source = graph.emplaceBlock<SlowSource<float>>();
     auto&     sink   = graph.emplaceBlock<CountingSink<float>>();
-    expect(eq(ConnectionResult::SUCCESS, graph.connect<"out">(source).to<"in">(sink)));
+    expect(graph.connect<"out", "in">(source, sink).has_value());
     expect(eq(graph.edges().size(), 1UZ)) << "edge registered with connect";
 
     TestScheduler scheduler(std::move(graph), /*addTestSourceAndSink=*/false);

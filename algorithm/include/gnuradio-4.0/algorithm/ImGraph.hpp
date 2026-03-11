@@ -475,10 +475,13 @@ inline std::size_t portsOnSide(const std::shared_ptr<gr::BlockModel>& block, Sid
 }
 
 template<gr::PortDirection direction>
-PortInfo getPortByDefinition(const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& portDef, std::source_location loc = std::source_location::current()) {
-    std::vector<PortInfo> infos   = getPortInfos<direction>(block);
-    std::size_t           portIdx = gr::absolutePortIndex<direction>(block, portDef, loc);
-    return infos[portIdx];
+std::optional<PortInfo> getPortByDefinition(const std::shared_ptr<gr::BlockModel>& block, const gr::PortDefinition& portDef, std::source_location loc = std::source_location::current()) {
+    std::vector<PortInfo> infos      = getPortInfos<direction>(block);
+    auto                  portResult = gr::absolutePortIndex<direction>(block, portDef, loc);
+    if (!portResult) {
+        return std::nullopt;
+    }
+    return infos[portResult.value()];
 }
 
 template<gr::arithmetic_or_complex_like T = std::size_t>
@@ -684,9 +687,12 @@ inline void colour(gr::Edge edge, Colour col) { style(edge, Style{.fg = {col}, .
 
 template<gr::PortDirection direction>
 void style(const std::shared_ptr<gr::BlockModel>& block, gr::PortDefinition portDefinition, Style style, std::source_location loc = std::source_location::current()) {
-    std::vector<PortInfo> infos   = getPortInfos<direction>(block);
-    std::size_t           portIdx = gr::absolutePortIndex<direction>(block, portDefinition, loc);
-    infos.at(portIdx).style(style);
+    std::vector<PortInfo> infos      = getPortInfos<direction>(block);
+    auto                  portResult = gr::absolutePortIndex<direction>(block, portDefinition, loc);
+    if (!portResult) {
+        return;
+    }
+    infos.at(portResult.value()).style(style);
 }
 
 template<gr::PortDirection direction>
@@ -722,10 +728,13 @@ void flipAllPortSides(std::shared_ptr<gr::BlockModel>& block, std::source_locati
 
 template<gr::arithmetic_or_complex_like T>
 T edgeCost(const gr::Edge& edge, std::source_location loc = std::source_location::current()) {
-    PortInfo srcPort = getPortByDefinition<gr::PortDirection::OUTPUT>(edge.sourceBlock(), edge.sourcePortDefinition(), loc);
-    PortInfo dstPort = getPortByDefinition<gr::PortDirection::INPUT>(edge.destinationBlock(), edge.destinationPortDefinition(), loc);
+    auto srcPort = getPortByDefinition<gr::PortDirection::OUTPUT>(edge.sourceBlock(), edge.sourcePortDefinition(), loc);
+    auto dstPort = getPortByDefinition<gr::PortDirection::INPUT>(edge.destinationBlock(), edge.destinationPortDefinition(), loc);
+    if (!srcPort || !dstPort) {
+        return T{};
+    }
 
-    return manhattanNorm(srcPort.exitPoint<T>(), dstPort.exitPoint<T>());
+    return manhattanNorm(srcPort->exitPoint<T>(), dstPort->exitPoint<T>());
 }
 
 template<gr::arithmetic_or_complex_like T>
@@ -1254,12 +1263,15 @@ inline static void layoutSpringModel(gr::Graph& graph, const LayoutPreference& c
 
             const std::shared_ptr<gr::BlockModel>& A       = graph.blocks()[u];
             const std::shared_ptr<gr::BlockModel>& B       = graph.blocks()[v];
-            PortInfo                               srcPort = getPortByDefinition<gr::PortDirection::OUTPUT>(A, edge.sourcePortDefinition(), loc);
-            PortInfo                               dstPort = getPortByDefinition<gr::PortDirection::INPUT>(B, edge.destinationPortDefinition(), loc);
-            const Point<double>                    from    = srcPort.anchorPoint<double>();
-            const Point<double>                    to      = dstPort.anchorPoint<double>();
-            const Point<double>                    d       = to - from;
-            double                                 r       = std::hypot(d.x, d.y);
+            auto                                   srcPort = getPortByDefinition<gr::PortDirection::OUTPUT>(A, edge.sourcePortDefinition(), loc);
+            auto                                   dstPort = getPortByDefinition<gr::PortDirection::INPUT>(B, edge.destinationPortDefinition(), loc);
+            if (!srcPort || !dstPort) {
+                continue;
+            }
+            const Point<double> from = srcPort->anchorPoint<double>();
+            const Point<double> to   = dstPort->anchorPoint<double>();
+            const Point<double> d    = to - from;
+            double              r    = std::hypot(d.x, d.y);
             if (r < eps) {
                 r = eps;
             }
@@ -2127,11 +2139,14 @@ std::vector<Point<T>> routeDijkstra(const gr::utf8::ImCanvasLike auto& canvas, c
         {{1, 0, 1.0}, {-1, 0, 1.0}, {0, 1, 1.0}, {0, -1, 1.0},                // horizontal moves
             {1, 1, sqrt2}, {-1, -1, sqrt2}, {1, -1, sqrt2}, {-1, 1, sqrt2}}}; // diagonal moves
 
-    PortInfo              srcPort   = getPortByDefinition<gr::PortDirection::OUTPUT>(edge.sourceBlock(), edge.sourcePortDefinition());
-    PortInfo              dstPort   = getPortByDefinition<gr::PortDirection::INPUT>(edge.destinationBlock(), edge.destinationPortDefinition());
+    auto srcPort = getPortByDefinition<gr::PortDirection::OUTPUT>(edge.sourceBlock(), edge.sourcePortDefinition());
+    auto dstPort = getPortByDefinition<gr::PortDirection::INPUT>(edge.destinationBlock(), edge.destinationPortDefinition());
+    if (!srcPort || !dstPort) {
+        return {};
+    }
     constexpr std::size_t DIR_COUNT = idxToMask.size();
     std::size_t const     total     = canvas.width() * canvas.height();
-    std::size_t const     dstCell   = toCellIndex(dstPort.exitPoint<T>());
+    std::size_t const     dstCell   = toCellIndex(dstPort->exitPoint<T>());
 
     // distance[cell][dirIdx] = best cost so far arriving along that direction
     std::vector<std::array<double, DIR_COUNT>> distance(total);
@@ -2150,18 +2165,18 @@ std::vector<Point<T>> routeDijkstra(const gr::utf8::ImCanvasLike auto& canvas, c
     std::priority_queue<State, std::vector<State>, decltype(cmp)> queue(cmp);
 
     // prime starting point
-    const Point<T>  srcPosition{srcPort.exitPoint<T>()};
-    const Direction srcExit{srcPort.exitDir()};
-    const Point<T>  dstPosition{dstPort.exitPoint<T>()};
-    const Direction dstExit{oppositeDirection(dstPort.exitDir())};
-    distance[toCellIndex(srcPosition)][index(srcPort.exitDir())] = 0.0;
+    const Point<T>  srcPosition{srcPort->exitPoint<T>()};
+    const Direction srcExit{srcPort->exitDir()};
+    const Point<T>  dstPosition{dstPort->exitPoint<T>()};
+    const Direction dstExit{oppositeDirection(dstPort->exitDir())};
+    distance[toCellIndex(srcPosition)][index(srcPort->exitDir())] = 0.0;
     queue.emplace(0.0, srcPosition, srcExit, /*steps*/ 0UZ);
 
     // Validate positions
     if (srcPosition == Point<T>::undefined() || dstPosition == Point<T>::undefined()) {
         std::println(stderr, "Warning: Invalid port positions for edge {}", edge);
-        std::println(stderr, "  Source: {} at {}", srcPort.name(), srcPosition);
-        std::println(stderr, "  Dest: {} at {}", dstPort.name(), dstPosition);
+        std::println(stderr, "  Source: {} at {}", srcPort->name(), srcPosition);
+        std::println(stderr, "  Dest: {} at {}", dstPort->name(), dstPosition);
         return {}; // Return empty path instead of crashing
     }
 

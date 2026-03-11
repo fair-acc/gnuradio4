@@ -26,10 +26,10 @@ void test_block(const TestParameters<T> p) {
     auto& block = graph.emplaceBlock<BlockUnderTest>({{"n_inputs", n_inputs}});
     for (Size_t i = 0; i < n_inputs; ++i) {
         auto& src = graph.emplaceBlock<TagSource<T>>({{"values", p.inputs[i]}, {"n_samples_max", static_cast<Size_t>(p.inputs[i].size())}});
-        expect(eq(graph.connect(src, "out"s, block, "in#"s + std::to_string(i)), ConnectionResult::SUCCESS)) << std::format("Failed to connect output port of src {} to input port 'in#{}' of block", i, i);
+        expect(graph.connect(src, "out"s, block, "in#"s + std::to_string(i)).has_value()) << std::format("Failed to connect output port of src {} to input port 'in#{}' of block", i, i);
     }
     auto& sink = graph.emplaceBlock<TagSink<T, ProcessFunction::USE_PROCESS_ONE>>();
-    expect(eq(graph.connect<"out">(block).template to<"in">(sink), ConnectionResult::SUCCESS)) << "Failed to connect output port 'out' of block to input port of sink";
+    expect(graph.connect(block, "out"s, sink, "in"s).has_value()) << "Failed to connect output port 'out' of block to input port of sink";
 
     // execute and confirm result
     gr::scheduler::Simple sched;

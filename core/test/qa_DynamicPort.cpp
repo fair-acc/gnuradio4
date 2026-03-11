@@ -150,20 +150,20 @@ const boost::ut::suite PortApiTests = [] {
 
         expect(!number.value.isConnected());
         expect(!scaled.original.isConnected());
-        expect(eq(ConnectionResult::SUCCESS, number.value.connect(scaled.original))) << "connect on a port-level-basis";
+        expect(number.value.connect(scaled.original).has_value()) << "connect on a port-level-basis";
         expect(number.value.isConnected());
         expect(scaled.original.isConnected());
 
-        expect(eq(ConnectionResult::SUCCESS, scaled.original.disconnect())) << "disconnect destination port";
+        expect(scaled.original.disconnect().has_value()) << "disconnect destination port";
         expect(!number.value.isConnected());
         expect(!scaled.original.isConnected());
 
-        expect(eq(ConnectionResult::SUCCESS, number.value.connect(scaled.original))) << "reconnect on a port-level-basis";
+        expect(number.value.connect(scaled.original).has_value()) << "reconnect on a port-level-basis";
         expect(number.value.isConnected());
         expect(scaled.original.isConnected());
 
         "disconnect source port"_test = [&number, &scaled] {
-            expect(eq(ConnectionResult::SUCCESS, number.value.disconnect())) << "disconnect source port";
+            expect(number.value.disconnect().has_value()) << "disconnect source port";
             expect(!number.value.isConnected());
             expect(!scaled.original.isConnected());
         };
@@ -186,11 +186,11 @@ const boost::ut::suite PortApiTests = [] {
         auto& added  = flow.emplaceBlock<adder<int>>();
         auto& out    = flow.emplaceBlock<cout_sink<int>>();
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value">(number).to<"original">(scaled)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"scaled">(scaled).to<"addend0">(added)));
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"value">(answer).to<"addend1">(added)));
+        expect(flow.connect<"value", "original">(number, scaled).has_value());
+        expect(flow.connect<"scaled", "addend0">(scaled, added).has_value());
+        expect(flow.connect<"value", "addend1">(answer, added).has_value());
 
-        expect(eq(ConnectionResult::SUCCESS, flow.connect<"sum">(added).to<"sink">(out)));
+        expect(flow.connect<"sum", "sink">(added, out).has_value());
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {

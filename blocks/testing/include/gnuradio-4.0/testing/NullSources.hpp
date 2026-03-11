@@ -22,6 +22,12 @@ Ideal for scenarios that require a simple, low-overhead source of consistent val
     GR_MAKE_REFLECTABLE(NullSource, out);
 
     [[nodiscard]] constexpr T processOne() const noexcept { return T{}; }
+
+    [[nodiscard]] constexpr auto processOne(meta::constexpr_value auto N) const noexcept
+    requires std::is_arithmetic_v<T>
+    {
+        return meta::simdize<T, N>{};
+    }
 };
 
 static_assert(gr::BlockLike<NullSource<float>>);
@@ -113,6 +119,21 @@ Commonly used for testing and simulations where consistent output and finite exe
         return static_cast<T>(default_value.value) + static_cast<T>(count);
 #pragma GCC diagnostic pop
     }
+
+    [[nodiscard]] constexpr auto processOne(meta::constexpr_value auto N) noexcept
+    requires std::is_arithmetic_v<T>
+    {
+        meta::simdize<T, N> result;
+        const auto          base = static_cast<T>(default_value.value);
+        for (std::size_t i = 0; i < result.size(); ++i) {
+            result[i] = base + static_cast<T>(count + 1 + i);
+        }
+        count += static_cast<gr::Size_t>(result.size());
+        if (n_samples_max > 0 && count >= n_samples_max) {
+            this->requestStop();
+        }
+        return result;
+    }
 };
 
 GR_REGISTER_BLOCK(gr::testing::Copy, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double>, std::string, gr::Packet<float>, gr::Packet<double>, gr::Tensor<float>, gr::Tensor<double>, gr::DataSet<float>, gr::DataSet<double> ])
@@ -191,11 +212,15 @@ Commonly used for testing scenarios and signal termination where output is unnec
 
     void reset() { count = 0U; }
 
-    void processOne(T) noexcept {
-        count++;
-        if (n_samples_max > 0 && count >= n_samples_max) {
-            this->requestStop();
+    [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input) noexcept {
+        const auto nAvailable = static_cast<gr::Size_t>(input.size());
+        if (n_samples_max > 0 && count + nAvailable >= n_samples_max) {
+            std::ignore = input.consume(static_cast<std::size_t>(n_samples_max - count));
+            count       = n_samples_max;
+            return gr::work::Status::DONE;
         }
+        count += nAvailable;
+        return gr::work::Status::OK;
     }
 };
 

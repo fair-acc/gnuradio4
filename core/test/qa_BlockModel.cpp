@@ -17,6 +17,12 @@
 using namespace boost::ut;
 using namespace std::string_literals;
 
+template<typename T, typename E>
+T expectValue(std::expected<T, E> result, std::source_location loc = std::source_location::current()) {
+    expect(result.has_value()) << std::format("expected value at {}:{}", loc.file_name(), loc.line());
+    return result.has_value() ? result.value() : T{};
+}
+
 namespace gr::test {
 
 struct SimpleBlock : Block<SimpleBlock, Resampling<2, 1, false>, Stride<4>> {
@@ -117,33 +123,37 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
         expect(eq(dynBlock.dynamicInputPortsSize(0), rawBlockRef->n_ports));
         expect(eq(dynBlock.dynamicOutputPortsSize(0), rawBlockRef->n_ports));
 
-        const DynamicPort& inputPort1ByString = dynBlock.dynamicInputPort("vin#1");
-        expect(eq(inputPort1ByString.metaInfo.name, "vin"s)); // user would probably expect 'vin#1'
+        auto inputPort1Result = dynBlock.dynamicInputPort("vin#1");
+        expect(inputPort1Result.has_value()) << "vin#1 lookup";
+        expect(eq(inputPort1Result.value()->metaInfo.name, "vin"s)); // user would probably expect 'vin#1'
 
-        const DynamicPort& outputPort2ByIndex = dynBlock.dynamicOutputPort(0, 2);
-        expect(eq(outputPort2ByIndex.metaInfo.name, "vout"s)); // user would probably expect 'vout#2'
+        auto outputPort2Result = dynBlock.dynamicOutputPort(0, 2);
+        expect(outputPort2Result.has_value()) << "output port by index";
+        expect(eq(outputPort2Result.value()->metaInfo.name, "vout"s)); // user would probably expect 'vout#2'
 
         PortDefinition outputDefIdx{0UZ, 0UZ};
         PortDefinition outputDefStr{"vout#0"};
-        expect(eq(dynBlock.dynamicOutputPort(outputDefIdx).metaInfo.name, "vout"s)); // user would probably expect 'vout#0'
-        expect(eq(dynBlock.dynamicOutputPort(outputDefStr).metaInfo.name, "vout"s)); // user would probably expect 'vout#0'
+        auto           outByIdxResult = dynBlock.dynamicOutputPort(outputDefIdx);
+        auto           outByStrResult = dynBlock.dynamicOutputPort(outputDefStr);
+        expect(outByIdxResult.has_value() && eq(outByIdxResult.value()->metaInfo.name, "vout"s)); // user would probably expect 'vout#0'
+        expect(outByStrResult.has_value() && eq(outByStrResult.value()->metaInfo.name, "vout"s)); // user would probably expect 'vout#0'
 
-        const std::size_t outIndex = dynBlock.dynamicOutputPortIndex("vout");
-        expect(eq(outIndex, 0UZ));
+        auto outIndexResult = dynBlock.dynamicOutputPortIndex("vout");
+        expect(outIndexResult.has_value() && eq(outIndexResult.value(), 0UZ));
 
-        const std::size_t inIndex = dynBlock.dynamicInputPortIndex("vin");
-        expect(eq(inIndex, 0UZ));
+        auto inIndexResult = dynBlock.dynamicInputPortIndex("vin");
+        expect(inIndexResult.has_value() && eq(inIndexResult.value(), 0UZ));
 
         expect(eq(BlockModel::portName(outputCollections[0]), "vout"s)) << "portName utility";
 
         // error paths
-        expect(throws([&dynBlock] { std::ignore = dynBlock.dynamicInputPort("does_not_exist"); })) << "invalid named port";
-        expect(throws([&dynBlock] { std::ignore = dynBlock.dynamicInputPort(1UZ, 0UZ); })) << "invalid input port index";
-        expect(throws([&dynBlock] { std::ignore = dynBlock.dynamicOutputPort(1UZ, 0UZ); })) << "invalid output port index";
-        expect(throws([&dynBlock] { std::ignore = dynBlock.dynamicInputPort(0UZ, 99UZ); })) << "invalid input port sub-index";
-        expect(throws([&dynBlock] { std::ignore = dynBlock.dynamicOutputPort(0UZ, 99UZ); })) << "invalid output port sub-index";
-        expect(throws([&dynBlock] { std::ignore = dynBlock.dynamicInputPort(42UZ); })) << "invalid input port sub-index";
-        expect(throws([&dynBlock] { std::ignore = dynBlock.dynamicOutputPort(42UZ); })) << "invalid output port sub-index";
+        expect(!dynBlock.dynamicInputPort("does_not_exist").has_value()) << "invalid named port";
+        expect(!dynBlock.dynamicInputPort(1UZ, 0UZ).has_value()) << "invalid input port index";
+        expect(!dynBlock.dynamicOutputPort(1UZ, 0UZ).has_value()) << "invalid output port index";
+        expect(!dynBlock.dynamicInputPort(0UZ, 99UZ).has_value()) << "invalid input port sub-index";
+        expect(!dynBlock.dynamicOutputPort(0UZ, 99UZ).has_value()) << "invalid output port sub-index";
+        expect(!dynBlock.dynamicInputPort(42UZ).has_value()) << "invalid input port sub-index";
+        expect(!dynBlock.dynamicOutputPort(42UZ).has_value()) << "invalid output port sub-index";
     };
 
     "ratios/stride, masks, async flags"_test = [] {
@@ -226,8 +236,8 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
         auto  middleBlockPtr = graph::findBlock(processingGraph, middleBlock).value();
         auto  sinkBlockPtr   = graph::findBlock(processingGraph, sinkBlock).value();
 
-        expect(processingGraph.connect<"out">(sourceBlock).to<"in">(middleBlock) == ConnectionResult::SUCCESS);
-        expect(processingGraph.connect<"out">(middleBlock).to<"in">(sinkBlock) == ConnectionResult::SUCCESS);
+        expect(processingGraph.connect<"out", "in">(sourceBlock, middleBlock).has_value());
+        expect(processingGraph.connect<"out", "in">(middleBlock, sinkBlock).has_value());
         expect(!processingGraph.blocks().empty());
 
         // Prime data into middle block input before any scheduler run
@@ -278,7 +288,7 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
 
         // FIXME: discuss how to connect from/to blocks in different (sub-)graphs
         skip / "connect source (in root graph) with sink (in nested graph)"_test = [&rootGraph, &sourceBlock, &sinkBlock, &wrappedRootGraph] {
-            expect(eq(rootGraph->connect<"out">(sourceBlock).to<"in">(sinkBlock), ConnectionResult::SUCCESS));
+            expect(rootGraph->connect<"out", "in">(sourceBlock, sinkBlock).has_value());
             rootGraph->connectPendingEdges();
             expect(!wrappedRootGraph->blocks().empty());
             expect(eq(wrappedRootGraph->edges().size(), 1UZ));
@@ -290,11 +300,11 @@ const suite<"BlockModel API"> _1 = [] { // NOSONAR (N.B. lambda size)
             // sub-graph#1
             auto& s1 = graph.emplaceBlock<gr::testing::NullSource<float>>();
             auto& m1 = graph.emplaceBlock<gr::testing::NullSink<float>>();
-            expect(graph.connect<"out">(s1).to<"in">(m1) == gr::ConnectionResult::SUCCESS);
+            expect(graph.connect<"out", "in">(s1, m1).has_value());
             // sub-graph#2
             auto& s2 = graph.emplaceBlock<gr::testing::NullSource<float>>();
             auto& m2 = graph.emplaceBlock<gr::testing::NullSink<float>>();
-            expect(graph.connect<"out">(s2).to<"in">(m2) == gr::ConnectionResult::SUCCESS);
+            expect(graph.connect<"out", "in">(s2, m2).has_value());
             // sub-graph#3 -- only one block, no connections
             std::ignore = graph.emplaceBlock<gr::testing::NullSource<float>>();
 
@@ -377,13 +387,13 @@ const suite<"PortIndexTests"> _2 = [] {
         auto      blockModel = gr::graph::findBlock(graph, block.unique_name).value();
 
         "input ports"_test = [&blockModel] {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ}), nPortsBefore + 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#0"}), nPortsBefore + 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ})), nPortsBefore + 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#0"})), nPortsBefore + 0UZ));
         };
 
         "output ports"_test = [&blockModel] {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{0UZ}), 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out1#0"}), 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{0UZ})), 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out1#0"})), 0UZ));
         };
     } | std::tuple<std::integral_constant<std::size_t, 0UZ>, std::integral_constant<std::size_t, 1UZ>, std::integral_constant<std::size_t, 2UZ>>{};
 
@@ -395,19 +405,19 @@ const suite<"PortIndexTests"> _2 = [] {
         auto      blockModel = gr::graph::findBlock(graph, block.unique_name).value();
 
         "input ports"_test = [&blockModel] {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 0UZ}), 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 1UZ}), 1UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 2UZ}), 2UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#0"}), 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#1"}), 1UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#2"}), 2UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 0UZ})), 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 1UZ})), 1UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 2UZ})), 2UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#0"})), 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#1"})), 1UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#2"})), 2UZ));
         };
 
         "output ports"_test = [&blockModel] {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 0UZ}), nPortsBefore + 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 1UZ}), nPortsBefore + 1UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#0"}), nPortsBefore + 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#1"}), nPortsBefore + 1UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 0UZ})), nPortsBefore + 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 1UZ})), nPortsBefore + 1UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#0"})), nPortsBefore + 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#1"})), nPortsBefore + 1UZ));
         };
     } | std::tuple<std::integral_constant<std::size_t, 0UZ>, std::integral_constant<std::size_t, 1UZ>, std::integral_constant<std::size_t, 2UZ>>{};
     ;
@@ -418,30 +428,30 @@ const suite<"PortIndexTests"> _2 = [] {
         auto      blockModel = gr::graph::findBlock(graph, block.unique_name).value();
 
         "input ports: 2 sync (in1), then 3 async (in2)"_test = [&blockModel] {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 0UZ}), 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 1UZ}), 1UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ, 0UZ}), 2UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ, 1UZ}), 3UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ, 2UZ}), 4UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 0UZ})), 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{0UZ, 1UZ})), 1UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ, 0UZ})), 2UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ, 1UZ})), 3UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{1UZ, 2UZ})), 4UZ));
         };
 
         "string-based"_test = [&blockModel] {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#0"}), 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#1"}), 1UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#0"}), 2UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#1"}), 3UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#2"}), 4UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#0"})), 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in1#1"})), 1UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#0"})), 2UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#1"})), 3UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"in2#2"})), 4UZ));
         };
 
         "output ports: 1 sync (out1), then 2 async (out2)"_test = [&blockModel] {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{0UZ, 0UZ}), 0UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 0UZ}), 1UZ));
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 1UZ}), 2UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{0UZ, 0UZ})), 0UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 0UZ})), 1UZ));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{1UZ, 1UZ})), 2UZ));
         };
 
-        expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out1#0"}), 0UZ));
-        expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#0"}), 1UZ));
-        expect(eq(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#1"}), 2UZ));
+        expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out1#0"})), 0UZ));
+        expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#0"})), 1UZ));
+        expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"out2#1"})), 2UZ));
     };
 
     "flattening invariant"_test = [] {
@@ -451,10 +461,10 @@ const suite<"PortIndexTests"> _2 = [] {
 
         // expected ordinals: in1#0=0, in1#1=1, in2#0=2, in2#1=3, in2#2=4
         for (std::size_t k = 0; k < 2; ++k) {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {0UZ, k}), k));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {0UZ, k})), k));
         }
         for (std::size_t k = 0; k < 3; ++k) {
-            expect(eq(gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {1UZ, k}), 2UZ + k));
+            expect(eq(expectValue(gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {1UZ, k})), 2UZ + k));
         }
     };
 
@@ -464,50 +474,49 @@ const suite<"PortIndexTests"> _2 = [] {
             auto&     block      = graph.emplaceBlock<GenericBlock<float, 1, 1, 1, 1, 1, 1>>({{"name", "edge_cases"}});
             auto      blockModel = gr::graph::findBlock(graph, block.unique_name).value();
 
-            expect(throws<gr::exception>([&blockModel] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"nonexistent"}); }));
-            expect(throws<gr::exception>([&blockModel] { std::ignore = gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"invalid_port"}); }));
-            expect(throws<gr::exception>([&blockModel] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{99UZ}); }));
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{"nonexistent"}).has_value()) << "nonexistent input port";
+            expect(!gr::absolutePortIndex<gr::PortDirection::OUTPUT>(blockModel, gr::PortDefinition{"invalid_port"}).has_value()) << "nonexistent output port";
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(blockModel, gr::PortDefinition{99UZ}).has_value()) << "toplevel index OOB";
         };
 
         "scalar hash OOB"_test = [] {
             gr::Graph g;
             auto&     b  = g.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "single"}});
             auto      bm = gr::graph::findBlock(g, b.unique_name).value();
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in1#1"}); }));
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {"out1#2"}); }));
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in1#1"}).has_value());
+            expect(!gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {"out1#2"}).has_value());
         };
 
         "collection missing subindex"_test = [] {
             gr::Graph g;
             auto&     b  = g.emplaceBlock<GenericBlock<float, 0, 3, 0, 0, 2, 0>>({{"name", "coll"}}); // in2 size 3, out2 size 2
             auto      bm = gr::graph::findBlock(g, b.unique_name).value();
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2"}); }));
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {"out2"}); }));
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2"}).has_value());
+            expect(!gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {"out2"}).has_value());
         };
 
         "indexbased subindex OOB"_test = [] {
             gr::Graph g;
             auto&     b  = g.emplaceBlock<GenericBlock<float, 0, 2, 0, 0, 1, 0>>({{"name", "oob"}}); // in2 size 2, out2 size 1
             auto      bm = gr::graph::findBlock(g, b.unique_name).value();
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {1UZ, 2UZ}); }));  // in2#2 OOB
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {1UZ, 1UZ}); })); // out2#1 OOB
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {1UZ, 2UZ}).has_value());  // in2#2 OOB
+            expect(!gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {1UZ, 1UZ}).has_value()); // out2#1 OOB
         };
 
         "indexbased toplevel OOB"_test = [] {
             gr::Graph g;
             auto&     b  = g.emplaceBlock<GenericBlock<float, 1, 0, 0, 1, 0, 0>>({{"name", "oob2"}});
             auto      bm = gr::graph::findBlock(g, b.unique_name).value();
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {42UZ}); }));
+            expect(!gr::absolutePortIndex<gr::PortDirection::OUTPUT>(bm, {42UZ}).has_value());
         };
 
         "invalid hash tail rejects"_test = [] {
             gr::Graph g;
             auto&     b  = g.emplaceBlock<GenericBlock<float, 0, 3, 0, 0, 0, 0>>({{"name", "coll"}});
             auto      bm = gr::graph::findBlock(g, b.unique_name).value();
-            // negative / non-numeric / trailing space should throw
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2#-1"}); }));
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2#abc"}); }));
-            expect(throws<gr::exception>([&] { std::ignore = gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2#1 "}); }));
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2#-1"}).has_value());
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2#abc"}).has_value());
+            expect(!gr::absolutePortIndex<gr::PortDirection::INPUT>(bm, {"in2#1 "}).has_value());
         };
     };
 };

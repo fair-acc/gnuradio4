@@ -28,9 +28,9 @@ const boost::ut::suite DynamicBlocktests = [] {
         std::vector<TagSource<double>*> sources;
         for (std::size_t i = 0; i < nInputs; ++i) {
             sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", nSamples}, {"mark_tag", false}})));
-            expect(gr::ConnectionResult::SUCCESS == graph.connect(*sources.back(), "out"s, adder, "in#"s + std::to_string(sources.size() - 1)));
+            expect(graph.connect(*sources.back(), "out"s, adder, "in#"s + std::to_string(sources.size() - 1)).has_value());
         }
-        expect(gr::ConnectionResult::SUCCESS == graph.connect<"out">(adder).to<"in">(sink));
+        expect(graph.connect<"out", "in">(adder, sink).has_value());
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {

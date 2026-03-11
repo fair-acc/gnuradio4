@@ -162,9 +162,9 @@ gr::Graph getGraphLinear(std::shared_ptr<Tracer> tracer) {
     sink.tracer        = tracer;
     sink.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 8 * count; };
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock2).to<"in">(sink)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock1).to<"original">(scaleBlock2)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock1)));
+    expect(flow.connect<"scaled", "in">(scaleBlock2, sink).has_value());
+    expect(flow.connect<"scaled", "original">(scaleBlock1, scaleBlock2).has_value());
+    expect(flow.connect<"out", "original">(source1, scaleBlock1).has_value());
 
     return flow;
 }
@@ -196,12 +196,12 @@ gr::Graph getGraphParallel(std::shared_ptr<Tracer> tracer) {
     sinkB.tracer        = tracer;
     sinkB.checker       = [](std::uint64_t count, std::uint64_t data) -> bool { return data == 15 * count; };
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock1a).to<"original">(scaleBlock2a)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock1b).to<"original">(scaleBlock2b)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock2b).to<"in">(sinkB)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock1a)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock2a).to<"in">(sinkA)));
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock1b)));
+    expect(flow.connect<"scaled", "original">(scaleBlock1a, scaleBlock2a).has_value());
+    expect(flow.connect<"scaled", "original">(scaleBlock1b, scaleBlock2b).has_value());
+    expect(flow.connect<"scaled", "in">(scaleBlock2b, sinkB).has_value());
+    expect(flow.connect<"out", "original">(source1, scaleBlock1a).has_value());
+    expect(flow.connect<"scaled", "in">(scaleBlock2a, sinkA).has_value());
+    expect(flow.connect<"out", "original">(source1, scaleBlock1b).has_value());
 
     return flow;
 }
@@ -245,10 +245,10 @@ gr::Graph getGraphScaledSum(std::shared_ptr<Tracer> tracer, std::source_location
     sink.tracer       = tracer;
     sink.checker      = [](std::uint64_t count, std::uint64_t data) -> bool { return data == (2 * count) + count; };
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scaleBlock)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scaleBlock).to<"addend0">(addBlock)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source2).to<"addend1">(addBlock)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(addBlock).to<"in">(sink)), loc);
+    expect(flow.connect<"out", "original">(source1, scaleBlock).has_value(), loc);
+    expect(flow.connect<"scaled", "addend0">(scaleBlock, addBlock).has_value(), loc);
+    expect(flow.connect<"out", "addend1">(source2, addBlock).has_value(), loc);
+    expect(flow.connect<"sum", "in">(addBlock, sink).has_value(), loc);
 
     return flow;
 }
@@ -272,13 +272,12 @@ gr::Graph getBasicFeedBackLoop(std::shared_ptr<Tracer> tracer, std::source_locat
     sink.tracer       = tracer;
     sink.checker      = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source1).to<"original">(scale1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale1).to<"addend0">(sum)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(sum).to<"in">(sink)), loc);
+    expect(flow.connect<"out", "original">(source1, scale1).has_value(), loc);
+    expect(flow.connect<"scaled", "addend0">(scale1, sum).has_value(), loc);
+    expect(flow.connect<"sum", "in">(sum, sink).has_value(), loc);
 
-    // feedback path
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(sum).to<"original">(scale2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale2).to<"addend1">(sum)), loc);
+    expect(flow.connect<"sum", "original">(sum, scale2).has_value(), loc);
+    expect(flow.connect<"scaled", "addend1">(scale2, sum).has_value(), loc);
 
     return flow;
 }
@@ -307,13 +306,12 @@ gr::Graph getResamplingFeedbackLoop(std::shared_ptr<Tracer> tracer, std::source_
     interpolator.tracer = tracer;
 
     // forward path: source → decimator → sum → sink
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"addend0">(adder)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder).to<"in">(decimator)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(sink)), loc);
+    expect(flow.connect<"out", "addend0">(source, adder).has_value(), loc);
+    expect(flow.connect<"sum", "in">(adder, decimator).has_value(), loc);
+    expect(flow.connect<"out", "in">(decimator, sink).has_value(), loc);
 
-    // feedback path: sum → interpolator → sum (closes the loop)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(decimator).to<"in">(interpolator)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(interpolator).to<"addend1">(adder)), loc);
+    expect(flow.connect<"out", "in">(decimator, interpolator).has_value(), loc);
+    expect(flow.connect<"out", "addend1">(interpolator, adder).has_value(), loc);
 
     return flow;
 }
@@ -349,19 +347,17 @@ gr::Graph getMultipleNestedFeedbackLoops(std::shared_ptr<Tracer> tracer, std::so
     sink.checker = [](std::uint64_t /*count*/, float /*data*/) -> bool { return true; };
 
     // forward path: src → scale1 → sum1 → scale3 → sum2 → snk
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"original">(scale1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale1).to<"addend0">(adder1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder1).to<"original">(scale3)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale3).to<"addend0">(adder2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder2).to<"in">(sink)), loc);
+    expect(flow.connect<"out", "original">(source, scale1).has_value(), loc);
+    expect(flow.connect<"scaled", "addend0">(scale1, adder1).has_value(), loc);
+    expect(flow.connect<"sum", "original">(adder1, scale3).has_value(), loc);
+    expect(flow.connect<"scaled", "addend0">(scale3, adder2).has_value(), loc);
+    expect(flow.connect<"sum", "in">(adder2, sink).has_value(), loc);
 
-    // feedback loop #1: sum1 → scale2 → sum1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder1).to<"original">(scale2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale2).to<"addend1">(adder1)), loc);
+    expect(flow.connect<"sum", "original">(adder1, scale2).has_value(), loc);
+    expect(flow.connect<"scaled", "addend1">(scale2, adder1).has_value(), loc);
 
-    // feedback loop #2: sum2 → scale4 → sum2
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(adder2).to<"original">(scale4)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(scale4).to<"addend1">(adder2)), loc);
+    expect(flow.connect<"sum", "original">(adder2, scale4).has_value(), loc);
+    expect(flow.connect<"scaled", "addend1">(scale4, adder2).has_value(), loc);
 
     return flow;
 }
@@ -423,39 +419,39 @@ gr::Graph getIIRFormII(std::shared_ptr<Tracer> tracer, std::source_location loc 
     outputSum2.tracer = tracer;
 
     // main path src -> sum (feedback branches) -> b0 -> sum (feed-forward branches) -> snk
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"addend0">(feedbackSum0)), loc); // src -> feedbackSum0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum0).to<"original">(b0)), loc);    // b0 * v(n)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b0).to<"addend0">(outputSum0)), loc);    // b0 -> outputSum0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(outputSum0).to<"in">(sink)), loc);          // outputSum0 -> snk
+    expect(flow.connect<"out", "addend0">(source, feedbackSum0).has_value(), loc); // src -> feedbackSum0
+    expect(flow.connect<"sum", "original">(feedbackSum0, b0).has_value(), loc);    // b0 * v(n)
+    expect(flow.connect<"scaled", "addend0">(b0, outputSum0).has_value(), loc);    // b0 -> outputSum0
+    expect(flow.connect<"sum", "in">(outputSum0, sink).has_value(), loc);          // outputSum0 -> snk
 
     // delay line: v(n) → v(n-1) → v(n-2) → v(n-3)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum0).to<"original">(d1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d1).to<"original">(d2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d2).to<"original">(d3)), loc);
+    expect(flow.connect<"sum", "original">(feedbackSum0, d1).has_value(), loc);
+    expect(flow.connect<"scaled", "original">(d1, d2).has_value(), loc);
+    expect(flow.connect<"scaled", "original">(d2, d3).has_value(), loc);
 
     // feedback path
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d1).to<"original">(a1)), loc); // -a1 * v(n-1)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d2).to<"original">(a2)), loc); // -a2 * v(n-2)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d3).to<"original">(a3)), loc); // -a3 * v(n-3)
+    expect(flow.connect<"scaled", "original">(d1, a1).has_value(), loc); // -a1 * v(n-1)
+    expect(flow.connect<"scaled", "original">(d2, a2).has_value(), loc); // -a2 * v(n-2)
+    expect(flow.connect<"scaled", "original">(d3, a3).has_value(), loc); // -a3 * v(n-3)
 
     // cascaded feedback summation: a3 + a2 -> feedbackSum2, then + a1 -> feedbackSum1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(a2).to<"addend0">(feedbackSum2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(a3).to<"addend1">(feedbackSum2)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(a1).to<"addend0">(feedbackSum1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum2).to<"addend1">(feedbackSum1)), loc);
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(feedbackSum1).to<"addend1">(feedbackSum0)), loc);
+    expect(flow.connect<"scaled", "addend0">(a2, feedbackSum2).has_value(), loc);
+    expect(flow.connect<"scaled", "addend1">(a3, feedbackSum2).has_value(), loc);
+    expect(flow.connect<"scaled", "addend0">(a1, feedbackSum1).has_value(), loc);
+    expect(flow.connect<"sum", "addend1">(feedbackSum2, feedbackSum1).has_value(), loc);
+    expect(flow.connect<"sum", "addend1">(feedbackSum1, feedbackSum0).has_value(), loc);
 
     // feed-forward path
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d1).to<"original">(b1)), loc); // b1 * v(n-1)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d2).to<"original">(b2)), loc); // b2 * v(n-2)
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(d3).to<"original">(b3)), loc); // b3 * v(n-3)
+    expect(flow.connect<"scaled", "original">(d1, b1).has_value(), loc); // b1 * v(n-1)
+    expect(flow.connect<"scaled", "original">(d2, b2).has_value(), loc); // b2 * v(n-2)
+    expect(flow.connect<"scaled", "original">(d3, b3).has_value(), loc); // b3 * v(n-3)
 
     // cascaded feed-forward summation: b3 + b2 -> outputSum1, then + b1 -> outputSum2
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b2).to<"addend0">(outputSum1)), loc);      // FIXED: b2 -> addend0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b3).to<"addend1">(outputSum1)), loc);      // b3 -> addend1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"scaled">(b1).to<"addend0">(outputSum2)), loc);      // FIXED: b1 -> addend0
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(outputSum1).to<"addend1">(outputSum2)), loc); // outputSum1 -> addend1
-    expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"sum">(outputSum2).to<"addend1">(outputSum0)), loc); // FIXED: complete chain to outputSum0
+    expect(flow.connect<"scaled", "addend0">(b2, outputSum1).has_value(), loc);      // FIXED: b2 -> addend0
+    expect(flow.connect<"scaled", "addend1">(b3, outputSum1).has_value(), loc);      // b3 -> addend1
+    expect(flow.connect<"scaled", "addend0">(b1, outputSum2).has_value(), loc);      // FIXED: b1 -> addend0
+    expect(flow.connect<"sum", "addend1">(outputSum1, outputSum2).has_value(), loc); // outputSum1 -> addend1
+    expect(flow.connect<"sum", "addend1">(outputSum2, outputSum0).has_value(), loc); // FIXED: complete chain to outputSum0
 
     return flow;
 }
@@ -886,7 +882,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
         auto& lifecycleSource = flow.emplaceBlock<LifecycleSource<float>>();
         auto& lifecycleBlock  = flow.emplaceBlock<LifecycleBlock<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(lifecycleSource).to<"in">(lifecycleBlock)));
+        expect(flow.connect<"out", "in">(lifecycleSource, lifecycleBlock).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -913,8 +909,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto& source  = flow.emplaceBlock<CountingSource<float>>();
         auto& monitor = flow.emplaceBlock<Copy<float>>();
         auto& sink    = flow.emplaceBlock<NullSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        expect(flow.connect<"out", "in">(source, monitor).has_value());
+        expect(flow.connect<"out", "in">(monitor, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -974,8 +970,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto& source  = flow.emplaceBlock<ConstantSource<float>>({{"n_samples_max", 1024U}});
         auto& monitor = flow.emplaceBlock<Copy<float>>();
         auto& sink    = flow.emplaceBlock<CountingSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        expect(flow.connect<"out", "in">(source, monitor).has_value());
+        expect(flow.connect<"out", "in">(monitor, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -999,8 +995,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto& source  = flow.emplaceBlock<NullSource<float>>();
         auto& monitor = flow.emplaceBlock<HeadBlock<float>>({{"n_samples_max", 1024U}});
         auto& sink    = flow.emplaceBlock<CountingSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        expect(flow.connect<"out", "in">(source, monitor).has_value());
+        expect(flow.connect<"out", "in">(monitor, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -1024,8 +1020,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto& source  = flow.emplaceBlock<NullSource<float>>();
         auto& monitor = flow.emplaceBlock<Copy<float>>();
         auto& sink    = flow.emplaceBlock<CountingSink<float>>({{"n_samples_max", 1024U}});
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        expect(flow.connect<"out", "in">(source, monitor).has_value());
+        expect(flow.connect<"out", "in">(monitor, sink).has_value());
 
         gr::scheduler::Simple<> sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -1049,8 +1045,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         auto& source  = flow.emplaceBlock<NullSource<float>>();
         auto& monitor = flow.emplaceBlock<BusyLoopBlock<float>>();
         auto& sink    = flow.emplaceBlock<NullSink<float>>();
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(source).to<"in">(monitor)));
-        expect(eq(gr::ConnectionResult::SUCCESS, flow.connect<"out">(monitor).to<"in">(sink)));
+        expect(flow.connect<"out", "in">(source, monitor).has_value());
+        expect(flow.connect<"out", "in">(monitor, sink).has_value());
 
         scheduler::Simple<scheduler::ExecutionPolicy::singleThreadedBlocking> scheduler;
         if (auto ret = scheduler.exchange(std::move(flow)); !ret) {
@@ -1121,8 +1117,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         TBlock& B = graph.emplaceBlock<TBlock>({{"name", "B"}});
         TBlock& C = graph.emplaceBlock<TBlock>({{"name", "C"}});
 
-        expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
-        expect(eq(graph.connect<"scaled">(B).to<"original">(C), ConnectionResult::SUCCESS));
+        expect(graph.connect<"scaled", "original">(A, B).has_value());
+        expect(graph.connect<"scaled", "original">(B, C).has_value());
 
         gr::Graph                                flat       = gr::graph::flatten(graph);
         gr::graph::AdjacencyList                 acencyList = gr::graph::computeAdjacencyList(flat);
@@ -1146,8 +1142,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         TBlock& B = graph.emplaceBlock<TBlock>({{"name", "B"}});
         TBlock& C = graph.emplaceBlock<TBlock>({{"name", "C"}});
 
-        expect(eq(graph.connect<"scaled">(A).to<"original">(B), ConnectionResult::SUCCESS));
-        expect(eq(graph.connect<"scaled">(A).to<"original">(C), ConnectionResult::SUCCESS));
+        expect(graph.connect<"scaled", "original">(A, B).has_value());
+        expect(graph.connect<"scaled", "original">(A, C).has_value());
 
         gr::Graph                                flat          = gr::graph::flatten(graph);
         gr::graph::AdjacencyList                 adjacencyList = gr::graph::computeAdjacencyList(flat);
@@ -1196,8 +1192,8 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
         TBlock& blockC = graph.emplaceBlock<TBlock>({{"name", "C"}});
         TBlock& blockD = graph.emplaceBlock<TBlock>({{"name", "D"}}); // isolated
 
-        expect(eq(graph.connect<"scaled">(blockA).to<"original">(blockB), ConnectionResult::SUCCESS));
-        expect(eq(graph.connect<"scaled">(blockB).to<"original">(blockC), ConnectionResult::SUCCESS));
+        expect(graph.connect<"scaled", "original">(blockA, blockB).has_value());
+        expect(graph.connect<"scaled", "original">(blockB, blockC).has_value());
 
         gr::Graph                flattened     = gr::graph::flatten(graph);
         gr::graph::AdjacencyList adjacencyList = gr::graph::computeAdjacencyList(flattened);
