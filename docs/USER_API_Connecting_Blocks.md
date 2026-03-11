@@ -118,7 +118,7 @@ in ──┬── Path0 ──┬── (+) ── out
 using FanOut = gr::SplitMergeCombine<Scale<float, 2>, Scale<float, 3>>;
 
 // three or more paths
-using FanOut3 = gr::SplitMergeCombine<PathA, PathB, PathC>;
+using FanOut3 = gr::SplitMergeCombine<Path0, Path1, Path2>;
 
 // with per-path output signs (negate path 1 before summation)
 using Diff = gr::SplitMergeCombine<gr::OutputSigns<+1.0f, -1.0f>, ScaleA, ScaleB>;
@@ -264,7 +264,7 @@ the circular stream and tag buffers for an edge. This is important for:
   shared memory, CUDA managed memory, SYCL USM) to avoid explicit data transfers
 
 ```cpp
-// arena allocator — all buffers from a single 1 MB pool
+// arena allocator — all sample buffers from a single 1 MB pool (tag buffers still use the default allocator)
 std::pmr::monotonic_buffer_resource arena(1 << 20);
 graph.connect<"out", "in">(source, sink, {
     .minBufferSize = 4096UZ,
