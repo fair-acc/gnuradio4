@@ -2082,4 +2082,23 @@ const boost::ut::suite<"WrapAroundAndEdgeCases"> _wrapAroundTests = [] {
     };
 };
 
+const boost::ut::suite<"CircularBuffer::Writer::resource"> writerResourceTests = [] {
+    using namespace boost::ut;
+
+    "Writer::resource returns non-null resource"_test = [] {
+        gr::CircularBuffer<float> buffer(1024);
+        auto                      writer = buffer.new_writer();
+        expect(writer.resource() != nullptr);
+    };
+
+    "Writer::resource returns custom resource when provided"_test = [] {
+        std::array<std::byte, 1 << 20>      arena{};
+        std::pmr::monotonic_buffer_resource customResource(arena.data(), arena.size(), std::pmr::null_memory_resource());
+
+        gr::CircularBuffer<float> buffer(1024, std::pmr::polymorphic_allocator<float>(&customResource));
+        auto                      writer = buffer.new_writer();
+        expect(eq(writer.resource(), static_cast<std::pmr::memory_resource*>(&customResource)));
+    };
+};
+
 int main() { /* not needed for UT */ }

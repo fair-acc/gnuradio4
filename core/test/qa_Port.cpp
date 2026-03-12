@@ -817,4 +817,64 @@ const boost::ut::suite<"tag-distance helpers"> _tagdist = [] { // NOSONAR (N.B. 
     };
 };
 
+const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+
+    "output port exposes tagResource and dataResource"_test = [] {
+        PortOut<float> out;
+        expect(out.tagResource() != nullptr) << "tagResource returns non-null";
+        expect(out.dataResource() != nullptr) << "dataResource returns non-null";
+    };
+
+    "output port exposes custom resources after resizeBuffer"_test = [] {
+        std::array<std::byte, 1 << 20>      tagArena{};
+        std::array<std::byte, 1 << 20>      dataArena{};
+        std::pmr::monotonic_buffer_resource tagMr(tagArena.data(), tagArena.size(), std::pmr::null_memory_resource());
+        std::pmr::monotonic_buffer_resource dataMr(dataArena.data(), dataArena.size(), std::pmr::null_memory_resource());
+
+        PortOut<float> out;
+        expect(out.resizeBuffer(1024, &dataMr, &tagMr).has_value());
+
+        expect(eq(out.tagResource(), static_cast<std::pmr::memory_resource*>(&tagMr)));
+        expect(eq(out.dataResource(), static_cast<std::pmr::memory_resource*>(&dataMr)));
+    };
+
+    "makeTagMap returns property_map using tag buffer resource"_test = [] {
+        PortOut<float> out;
+        auto           tagMap = out.makeTagMap();
+        expect(eq(tagMap.get_allocator().resource(), out.tagResource()));
+    };
+
+    "tag::put uses map allocator for keys and values"_test = [] {
+        PortOut<float> out;
+        auto           tagMap = out.makeTagMap();
+
+        tag::put(tagMap, "trigger_name", std::string("GPS_PPS"));
+        tag::put(tagMap, "trigger_time", std::uint64_t{42});
+
+        expect(tagMap.contains(std::pmr::string("trigger_name")));
+        expect(tagMap.contains(std::pmr::string("trigger_time")));
+
+        auto nameIt = tagMap.find(std::pmr::string("trigger_name"));
+        expect(nameIt != tagMap.end());
+        expect(eq(nameIt->second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
+    };
+
+    "tag::put with DefaultTag uses short key"_test = [] {
+        PortOut<float> out;
+        auto           tagMap = out.makeTagMap();
+
+        tag::put(tagMap, tag::TRIGGER_NAME, std::string("GPS_PPS"));
+        tag::put(tagMap, tag::TRIGGER_TIME, std::uint64_t{123456789});
+        tag::put(tagMap, tag::TRIGGER_OFFSET, 0.5f);
+
+        expect(tagMap.contains(std::pmr::string("trigger_name"))) << "short key used";
+        expect(tagMap.contains(std::pmr::string("trigger_time")));
+        expect(tagMap.contains(std::pmr::string("trigger_offset")));
+
+        expect(eq(tagMap[std::pmr::string("trigger_time")].value_or(std::uint64_t{0}), std::uint64_t{123456789}));
+    };
+};
+
 int main() { /* tests are statically executed */ }
