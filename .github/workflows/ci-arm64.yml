@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: LGPL-3.0-or-later
+name: ARM64 Linux CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: "arm64 | clang-20 | Release"
+    runs-on: ubuntu-24.04-arm
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CC: clang-20
+      CXX: clang++-20
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" | sudo tee /etc/apt/sources.list.d/llvm-20.list
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            clang-20 clang-tools-20 libc++-20-dev libc++abi-20-dev \
+            cmake ninja-build ccache \
+            libcurl4-openssl-dev
+
+      - name: Restore ccache
+        id: restore-ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-arm64-clang20-Release-${{ github.sha }}
+          restore-keys: |
+            ccache-arm64-clang20-Release
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=3G
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=depend_mode=true
+          ccache --set-config=hash_dir=false
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
+          ccache --show-stats
+
+      - name: Restore FetchContent
+        id: restore-fetchcontent
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/../build/_deps
+          key: fetchContent-arm64-clang20-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchContent-arm64-clang20
+
+      - name: Configure
+        run: |
+          cmake -S . -B ../build -G Ninja \
+            -DCMAKE_COLOR_DIAGNOSTICS=ON \
+            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_CCACHE=ON \
+            -DENABLE_COVERAGE=OFF \
+            -DADDRESS_SANITIZER=OFF \
+            -DGR4_USE_LIBCXX=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Build
+        run: cmake --build ../build -j"$(nproc)"
+
+      - name: Execute tests
+        env:
+          DISABLE_SENSITIVE_TESTS: 1
+        working-directory: ${{ github.workspace }}/../build
+        run: ctest --output-on-failure --timeout 120
+
+      - name: Execute native main binary
+        working-directory: ${{ github.workspace }}/../build
+        run: ./core/src/main
+
+      - name: Show final ccache and build directory stats
+        if: always()
+        continue-on-error: true
+        run: |
+          ccache --show-stats
+          echo "--- Build directory ---"
+          du -sh ../build
+          echo "--- Object files (.o) ---"
+          find ../build -name "*.o" -exec du -ch {} + | tail -1
+          echo "--- Archives (.a) ---"
+          find ../build -name "*.a" -exec du -ch {} + | tail -1
+
+      - name: Save ccache
+        if: always() && steps.restore-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ steps.restore-ccache.outputs.cache-primary-key }}
+
+      - name: Save FetchContent
+        if: always() && steps.restore-fetchcontent.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ github.workspace }}/../build/_deps
+          key: ${{ steps.restore-fetchcontent.outputs.cache-primary-key }}
