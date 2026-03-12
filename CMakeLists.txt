@@ -429,6 +429,11 @@ else()
   target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
 endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
+# exprtk uses virtual methods in final classes; Clang 21+ warns under -Wunnecessary-virtual-specifier. Version-guarded:
+# Clang 20 errors on unknown warning options under -Werror.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 21)
+  target_compile_options(exprtk PUBLIC -Wno-error=unnecessary-virtual-specifier)
+endif()
 # include exprtk header-only - END
 
 include(FetchContent)
