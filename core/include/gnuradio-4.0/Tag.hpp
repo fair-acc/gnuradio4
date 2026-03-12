@@ -214,6 +214,18 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream,
 
 inline constexpr std::array<std::string_view, 16> kDefaultTags = {"sample_rate", "signal_name", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "time", "reset_default", "store_default", "end_of_stream"};
 
+template<typename T>
+inline void put(property_map& map, std::string_view key, T&& value) {
+    auto* res                       = map.get_allocator().resource();
+    map[std::pmr::string(key, res)] = pmt::Value(std::forward<T>(value), res);
+}
+
+template<typename T, fixed_string Key, typename PMT_TYPE, fixed_string Unit, fixed_string Description>
+inline void put(property_map& map, const DefaultTag<Key, PMT_TYPE, Unit, Description>& /*tag*/, T&& value) {
+    auto* res                       = map.get_allocator().resource();
+    map[std::pmr::string(Key, res)] = pmt::Value(std::forward<T>(value), res);
+}
+
 } // namespace tag
 
 } // namespace gr

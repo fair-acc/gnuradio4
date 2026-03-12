@@ -517,10 +517,11 @@ private:
             return WriterSpan<U, policy>(this, index, sequence, nSamples);
         }
 
-        [[nodiscard]] constexpr std::size_t position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
-        [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer->_claimStrategy.getRemainingCapacity(); }
-        [[nodiscard]] constexpr bool        isPublishRequested() const noexcept { return _nRequestedSamplesToPublish != kNotPublished; }
-        [[nodiscard]] constexpr std::size_t nRequestedSamplesToPublish() const noexcept { return _nRequestedSamplesToPublish == kNotPublished ? 0UZ : _nRequestedSamplesToPublish; };
+        [[nodiscard]] constexpr std::size_t                position() const noexcept { return _buffer->_claimStrategy._publishCursor.value(); }
+        [[nodiscard]] constexpr std::size_t                available() const noexcept { return _buffer->_claimStrategy.getRemainingCapacity(); }
+        [[nodiscard]] constexpr std::pmr::memory_resource* resource() const noexcept { return _buffer->_allocator.resource(); }
+        [[nodiscard]] constexpr bool                       isPublishRequested() const noexcept { return _nRequestedSamplesToPublish != kNotPublished; }
+        [[nodiscard]] constexpr std::size_t                nRequestedSamplesToPublish() const noexcept { return _nRequestedSamplesToPublish == kNotPublished ? 0UZ : _nRequestedSamplesToPublish; };
 
     private:
         constexpr void checkIfCanReserveAndAbortIfNeeded() const noexcept {

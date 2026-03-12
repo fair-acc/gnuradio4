@@ -931,6 +931,21 @@ public:
         return _tagIoHandler;
     }
 
+    [[nodiscard]] constexpr std::pmr::memory_resource* tagResource() const noexcept {
+        static_assert(!kIsInput, "tagResource() not applicable for inputs (yet)");
+        return _tagIoHandler.resource();
+    }
+
+    [[nodiscard]] constexpr std::pmr::memory_resource* dataResource() const noexcept {
+        static_assert(!kIsInput, "dataResource() not applicable for inputs (yet)");
+        return _ioHandler.resource();
+    }
+
+    [[nodiscard]] property_map makeTagMap() const noexcept {
+        static_assert(!kIsInput, "makeTagMap() not applicable for inputs (yet)");
+        return property_map(tagResource());
+    }
+
     [[nodiscard]] std::expected<void, Error> disconnect() {
         if (!isConnected()) {
             return std::unexpected(Error("port not connected"));
