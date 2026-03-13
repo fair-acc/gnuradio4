@@ -6,6 +6,7 @@
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
 #include <format>
+#include <optional>
 
 namespace {
 using namespace std::chrono_literals;
@@ -28,6 +29,18 @@ auto createWatchdog(Scheduler& sched, std::chrono::seconds timeOut = 2s, std::ch
     });
 
     return std::make_pair(std::move(watchdogThread), externalInterventionNeeded);
+}
+
+template<typename Scheduler>
+std::expected<void, gr::Error> runSchedulerAndWait(Scheduler& sched) {
+#ifdef __EMSCRIPTEN__
+    std::optional<std::expected<void, gr::Error>> result;
+    std::thread                                   worker([&sched, &result]() { result = sched.runAndWait(); });
+    worker.join();
+    return std::move(*result);
+#else
+    return sched.runAndWait();
+#endif
 }
 
 template<typename DataType>
@@ -56,7 +69,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 2s);
-        expect(sched.runAndWait().has_value()) << testCaseName;
+        expect(runSchedulerAndWait(sched).has_value()) << testCaseName;
 
         if (watchdogThread.joinable()) {
             watchdogThread.join();
@@ -97,7 +110,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
-        expect(schedRead.runAndWait().has_value()) << testCaseName;
+        expect(runSchedulerAndWait(schedRead).has_value()) << testCaseName;
 
         if (watchdogThreadRead.joinable()) {
             watchdogThreadRead.join();
@@ -123,7 +136,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         auto [watchdogThreadRead, externalInterventionNeededRead] = createWatchdog(schedRead, 2s);
-        expect(schedRead.runAndWait().has_value()) << testCaseName;
+        expect(runSchedulerAndWait(schedRead).has_value()) << testCaseName;
 
         if (watchdogThreadRead.joinable()) {
             watchdogThreadRead.join();

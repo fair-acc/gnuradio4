@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <magic_enum.hpp>
 
@@ -80,11 +81,10 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     GR_MAKE_REFLECTABLE(BasicFileSink, in, file_name, mode, max_bytes_per_file);
 
-    std::size_t   _totalBytesWritten{0UZ};
-    std::size_t   _totalBytesWrittenFile{0UZ};
-    std::ofstream _file;
-    std::size_t   _fileCounter{0UZ};
-    std::string   _actualFileName;
+    std::size_t _totalBytesWritten{0UZ};
+    std::size_t _totalBytesWrittenFile{0UZ};
+    std::size_t _fileCounter{0UZ};
+    std::string _actualFileName;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
         if (lifecycle::isActive(this->state())) {
@@ -101,6 +101,9 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     void stop() { closeFile(); }
 
     [[nodiscard]] constexpr work::Status processBulk(InputSpanLike auto& dataIn) {
+        if (dataIn.empty()) {
+            return work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
         if (max_bytes_per_file.value != 0U && _totalBytesWrittenFile >= max_bytes_per_file.value) {
             closeFile();
             openNextFile();
@@ -110,13 +113,14 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         if (max_bytes_per_file.value != 0U) {
             nBytesMax = std::min(nBytesMax, static_cast<std::size_t>(max_bytes_per_file.value) - _totalBytesWrittenFile);
         }
-        _file.write(reinterpret_cast<const char*>(dataIn.data()), static_cast<std::streamsize>(nBytesMax));
+        const auto bytes          = std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(dataIn.data()), nBytesMax);
+        auto       writeResultExp = gr::algorithm::fileio::write(_actualFileName, bytes, gr::algorithm::fileio::WriterConfig{.mode = currentWriteMode()});
+
+        if (!writeResultExp.has_value()) {
+            throw gr::exception(writeResultExp.error().message, writeResultExp.error().sourceLocation);
+        }
         if (!dataIn.consume(nBytesMax / sizeof(T))) {
             throw gr::exception("could not consume input samples");
-        }
-
-        if (!_file) {
-            throw gr::exception(std::format("failed to write to file '{}'.", _actualFileName));
         }
 
         _totalBytesWritten += nBytesMax;
@@ -126,11 +130,10 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     }
 
 private:
-    void closeFile() {
-        if (_file.is_open()) {
-            _file.close();
-        }
-    }
+    [[nodiscard]] gr::algorithm::fileio::WriteMode currentWriteMode() const { return _totalBytesWrittenFile == 0UZ && mode.value != Mode::append ? gr::algorithm::fileio::WriteMode::overwrite : gr::algorithm::fileio::WriteMode::append; }
+
+    void closeFile() { _actualFileName.clear(); }
+
     void openNextFile() {
         closeFile();
         _totalBytesWrittenFile = 0UZ;
@@ -146,23 +149,21 @@ private:
         switch (mode) {
         case Mode::overwrite: {
             _actualFileName = file_name.value;
-            _file.open(_actualFileName, std::ios::binary | std::ios::trunc);
         } break;
         case Mode::append: {
             _actualFileName = file_name.value;
-            _file.open(_actualFileName, std::ios::binary | std::ios::app);
         } break;
         case Mode::multi: {
             // _fileCounter ensures that the filenames are unique and still sortable by date-time, with an additional counter to handle rapid successive file creation.
             _actualFileName = (filePath.parent_path() / (gr::time::getIsoTime() + "_" + std::to_string(_fileCounter++) + "_" + filePath.filename().string())).string();
-            _file.open(_actualFileName, std::ios::binary);
             break;
         }
         default: throw gr::exception("unsupported file mode.");
         }
 
-        if (!_file) {
-            throw gr::exception(std::format("failed to open file '{}'.", _actualFileName));
+        auto createResultExp = gr::algorithm::fileio::write(_actualFileName, std::span<const std::uint8_t>{}, gr::algorithm::fileio::WriterConfig{.mode = mode.value == Mode::append ? gr::algorithm::fileio::WriteMode::append : gr::algorithm::fileio::WriteMode::overwrite});
+        if (!createResultExp.has_value()) {
+            throw gr::exception(createResultExp.error().message, createResultExp.error().sourceLocation);
         }
     }
 };
@@ -184,24 +185,26 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     A<std::string, "file name", Doc<"Base filename, prefixed if necessary">, Visible>          file_name;
     A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>                mode         = Mode::overwrite;
     A<bool, "repeat", Doc<"true: repeat back-to-back">>                                        repeat       = false;
-    A<gr::Size_t, "offset", Doc<"file start offset in bytes">, Visible>                        offset       = 0U;
+    A<gr::Size_t, "offset", Doc<"file start offset in samples">, Visible>                      offset       = 0U;
     A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible> length       = 0U;
     A<std::string, "trigger name", Doc<"name of trigger added to each file chunk">>            trigger_name = "BasicFileSource::start";
 
     GR_MAKE_REFLECTABLE(BasicFileSource, out, file_name, mode, repeat, offset, length, trigger_name);
 
-    std::ifstream                      _file;
+    gr::algorithm::fileio::Reader      _reader;
     std::vector<std::filesystem::path> _filesToRead;
     bool                               _emittedStartTrigger = false;
+    bool                               _readerActive        = false;
     std::size_t                        _totalBytesRead      = 0UZ;
     std::size_t                        _totalBytesReadFile  = 0UZ;
     std::size_t                        _currentFileIndex    = 0UZ;
-    std::string                        _currentFileName;
 
     void start() {
         _currentFileIndex = 0UZ;
         _totalBytesRead   = 0UZ;
         _filesToRead.clear();
+        _reader       = {};
+        _readerActive = false;
 
         std::filesystem::path filePath(file_name.value);
         if (!std::filesystem::exists(filePath.parent_path())) {
@@ -224,17 +227,71 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
     void stop() { closeFile(); }
 
-    [[nodiscard]] constexpr work::Status processBulk(OutputSpanLike auto& dataOut) noexcept {
-        if (!_file.is_open()) {
-            return work::Status::DONE;
-        }
-        std::size_t nOutAvailable = dataOut.size() * sizeof(T);
-        if (length.value != 0U) {
-            nOutAvailable = std::min(nOutAvailable, (length.value * sizeof(T) - _totalBytesReadFile));
+    [[nodiscard]] work::Status processBulk(OutputSpanLike auto& dataOut) {
+        if (dataOut.empty()) {
+            return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
-        std::size_t bytesRead = static_cast<std::size_t>(_file.read(reinterpret_cast<char*>(dataOut.data()), static_cast<std::streamsize>(nOutAvailable)).gcount());
-        if (!_emittedStartTrigger && !trigger_name.value.empty()) {
+        std::size_t nSamplesToPublish = 0UZ;
+        if (!_readerActive) {
+            dataOut.publish(nSamplesToPublish);
+            return work::Status::DONE;
+        }
+        const std::size_t nOutAvailable = dataOut.size() * sizeof(T);
+        if (length.value != 0U) {
+            const std::size_t totalBytesToRead = static_cast<std::size_t>(length.value) * sizeof(T);
+            if (_totalBytesReadFile >= totalBytesToRead) {
+                dataOut.publish(nSamplesToPublish);
+                return finishCurrentFile();
+            }
+        }
+
+        std::optional<gr::Error>   error;
+        std::optional<std::size_t> requiredOutputSize;
+        bool                       finished = false;
+
+        _reader.poll(
+            [&](const auto& res) {
+                finished           = res.isFinal;
+                requiredOutputSize = res.requiredOutputSize;
+
+                if (res.data.has_value()) {
+                    const auto bytes = res.data.value();
+                    if (bytes.empty()) {
+                        return;
+                    }
+
+                    std::size_t bytesToPublish = bytes.size();
+                    if (length.value != 0U) {
+                        const std::size_t totalBytesToRead = static_cast<std::size_t>(length.value) * sizeof(T);
+                        bytesToPublish                     = std::min(bytesToPublish, totalBytesToRead - _totalBytesReadFile);
+                    }
+                    bytesToPublish -= bytesToPublish % sizeof(T);
+
+                    if (bytesToPublish == 0U) {
+                        return;
+                    }
+
+                    std::memcpy(dataOut.data(), bytes.data(), bytesToPublish);
+                    nSamplesToPublish = bytesToPublish / sizeof(T);
+                    _totalBytesRead += bytesToPublish;
+                    _totalBytesReadFile += bytesToPublish;
+                    return;
+                }
+
+                error = res.data.error();
+            },
+            nOutAvailable, true);
+
+        if (requiredOutputSize.has_value()) {
+            dataOut.publish(nSamplesToPublish);
+            return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
+        }
+        if (error.has_value()) {
+            throw gr::exception(error->message, error->sourceLocation);
+        }
+
+        if (nSamplesToPublish > 0U && !_emittedStartTrigger && !trigger_name.value.empty()) {
             dataOut.publishTag(
                 property_map{
                     {std::pmr::string(tag::TRIGGER_NAME.shortKey()), trigger_name.value},                                                     //
@@ -244,23 +301,10 @@ Important: this implementation assumes a host-order, CPU architecture specific b
                 0UZ);
             _emittedStartTrigger = true;
         }
+        dataOut.publish(nSamplesToPublish);
 
-        dataOut.publish(bytesRead / sizeof(T));
-        _totalBytesRead += bytesRead;
-        _totalBytesReadFile += bytesRead;
-
-        if (bytesRead < nOutAvailable || (length.value != 0U && (_totalBytesReadFile >= length.value * sizeof(T)))) {
-            closeFile();
-            if (_currentFileIndex < _filesToRead.size()) {
-                openNextFile();
-                return work::Status::OK;
-            } else if (repeat) {
-                _currentFileIndex = 0UZ;
-                openNextFile();
-                return work::Status::OK;
-            } else {
-                return work::Status::DONE;
-            }
+        if (finished || (length.value != 0U && _totalBytesReadFile >= static_cast<std::size_t>(length.value) * sizeof(T))) {
+            return finishCurrentFile();
         }
 
         return work::Status::OK;
@@ -268,10 +312,13 @@ Important: this implementation assumes a host-order, CPU architecture specific b
 
 private:
     void closeFile() {
-        if (_file.is_open()) {
-            _file.close();
+        if (_readerActive) {
+            _reader.cancel();
         }
+        _reader       = {};
+        _readerActive = false;
     }
+
     void openNextFile() {
         if (_currentFileIndex >= _filesToRead.size()) {
             return;
@@ -279,15 +326,37 @@ private:
         _totalBytesReadFile  = 0UZ;
         _emittedStartTrigger = false;
 
-        _currentFileName = _filesToRead[_currentFileIndex].string();
-        _file.open(_currentFileName, std::ios::binary);
-        if (!_file) {
-            throw gr::exception(std::format("failed to open file '{}'.", _currentFileName));
+        gr::algorithm::fileio::ReaderConfig config;
+        std::size_t                         chunkBytes = std::max<std::size_t>(sizeof(T), out.max_buffer_size() * sizeof(T));
+        if (length.value != 0U) {
+            chunkBytes = std::min(chunkBytes, static_cast<std::size_t>(length.value) * sizeof(T));
         }
-        if (offset.value != 0U) {
-            _file.seekg(offset.value * sizeof(T), std::ios::beg);
+
+        config.offset              = static_cast<std::size_t>(offset.value) * sizeof(T);
+        config.chunkBytes          = chunkBytes;
+        config.chunkAlignmentBytes = sizeof(T);
+
+        auto readerExp = gr::algorithm::fileio::readAsync(_filesToRead[_currentFileIndex].string(), std::move(config));
+        if (!readerExp.has_value()) {
+            throw gr::exception(readerExp.error().message, readerExp.error().sourceLocation);
         }
+        _reader       = std::move(readerExp.value());
+        _readerActive = true;
         _currentFileIndex++;
+    }
+
+    [[nodiscard]] work::Status finishCurrentFile() {
+        closeFile();
+        if (_currentFileIndex < _filesToRead.size()) {
+            openNextFile();
+            return work::Status::OK;
+        }
+        if (repeat && !_filesToRead.empty()) {
+            _currentFileIndex = 0UZ;
+            openNextFile();
+            return work::Status::OK;
+        }
+        return work::Status::DONE;
     }
 };
 
