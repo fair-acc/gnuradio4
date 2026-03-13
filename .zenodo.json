@@ -1,0 +1,75 @@
+{
+  "title": "GNU Radio 4.0",
+  "description": "GNU Radio 4.0 — a free, open-source signal-processing toolkit.",
+  "license": {
+    "id": "MIT"
+  },
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Steinhagen, Ralph J.",
+      "affiliation": "GSI Helmholtzzentrum für Schwerionenforschung / FAIR",
+      "orcid": "0009-0009-8537-7029"
+    },
+    {
+      "name": "Lebedev, Simon",
+      "affiliation": "GSI Helmholtzzentrum für Schwerionenforschung",
+      "orcid": "0009-0006-8329-990X"
+    },
+    {
+      "name": "Krimm, Alexander",
+      "affiliation": "GSI Helmholtzzentrum für Schwerionenforschung",
+      "orcid": "0000-0003-0804-756X"
+    },
+    {
+      "name": "Čukić, Ivan",
+      "affiliation": "KDAB",
+      "orcid": "0000-0001-5358-0828"
+    },
+    {
+      "name": "Kretz, Matthias",
+      "affiliation": "GSI Helmholtzzentrum für Schwerionenforschung",
+      "orcid": "0000-0002-0867-243X"
+    },
+    {
+      "name": "Estévez, Daniel",
+      "orcid": "0000-0002-3435-139X"
+    },
+    {
+      "name": "Klein, Dennis",
+      "affiliation": "GSI Helmholtzzentrum für Schwerionenforschung",
+      "orcid": "0000-0003-3891-4302"
+    },
+    {
+      "name": "Rode, Andrej",
+      "orcid": "0000-0002-6101-7485"
+    },
+    {
+      "name": "Niedermayer, Philipp",
+      "affiliation": "GSI Helmholtzzentrum für Schwerionenforschung",
+      "orcid": "0000-0002-4722-6619"
+    },
+    {
+      "name": "Flynn, Toby",
+      "orcid": "0000-0002-3282-8131"
+    },
+    {
+      "name": "Hensel, Tom",
+      "orcid": "0000-0002-0237-1652"
+    }
+  ],
+  "keywords": [
+    "signal processing",
+    "software-defined radio",
+    "SDR",
+    "C++23",
+    "GNU Radio"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/fair-acc/gnuradio4",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
