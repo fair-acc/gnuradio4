@@ -32,8 +32,35 @@
       "orcid": "0000-0002-0867-243X"
     },
     {
+      "name": "Osterfeld, Frank",
+      "affiliation": "KDAB"
+    },
+    {
+      "name": "Gorman, Chris"
+    },
+    {
+      "name": "Martins, Sergio",
+      "affiliation": "KDAB"
+    },
+    {
+      "name": "Nicoletti, Daniel",
+      "affiliation": "KDAB"
+    },
+    {
+      "name": "Groß, Magnus",
+      "affiliation": "KDAB"
+    },
+    {
       "name": "Estévez, Daniel",
       "orcid": "0000-0002-3435-139X"
+    },
+    {
+      "name": "Morman, Josh",
+      "affiliation": "GNU Radio Project"
+    },
+    {
+      "name": "Camuffo, Giulio",
+      "affiliation": "KDAB"
     },
     {
       "name": "Klein, Dennis",
@@ -45,6 +72,10 @@
       "orcid": "0000-0002-6101-7485"
     },
     {
+      "name": "Müller, Marcus",
+      "affiliation": "GNU Radio Project"
+    },
+    {
       "name": "Niedermayer, Philipp",
       "affiliation": "GSI Helmholtzzentrum für Schwerionenforschung",
       "orcid": "0000-0002-4722-6619"
@@ -54,8 +85,20 @@
       "orcid": "0000-0002-3282-8131"
     },
     {
-      "name": "Hensel, Tom",
-      "orcid": "0000-0002-0237-1652"
+      "name": "Ahmed, Waqar",
+      "affiliation": "KDAB"
+    },
+    {
+      "name": "McFarlane, Ian"
+    },
+    {
+      "name": "Campbell, Bailey"
+    },
+    {
+      "name": "Hensel, Tom"
+    },
+    {
+      "name": "Gupta, Krish"
     }
   ],
   "keywords": [
