@@ -31,9 +31,29 @@ authors:
     given-names: Matthias
     affiliation: "GSI Helmholtzzentrum für Schwerionenforschung"
     orcid: "https://orcid.org/0000-0002-0867-243X"
+  - family-names: Osterfeld
+    given-names: Frank
+    affiliation: "KDAB"
+  - family-names: Gorman
+    given-names: Chris
+  - family-names: Martins
+    given-names: Sergio
+    affiliation: "KDAB"
+  - family-names: Nicoletti
+    given-names: Daniel
+    affiliation: "KDAB"
+  - family-names: Groß
+    given-names: Magnus
+    affiliation: "KDAB"
   - family-names: Estévez
     given-names: Daniel
     orcid: "https://orcid.org/0000-0002-3435-139X"
+  - family-names: Morman
+    given-names: Josh
+    affiliation: "GNU Radio Project"
+  - family-names: Camuffo
+    given-names: Giulio
+    affiliation: "KDAB"
   - family-names: Klein
     given-names: Dennis
     affiliation: "GSI Helmholtzzentrum für Schwerionenforschung"
@@ -41,6 +61,9 @@ authors:
   - family-names: Rode
     given-names: Andrej
     orcid: "https://orcid.org/0000-0002-6101-7485"
+  - family-names: Müller
+    given-names: Marcus
+    affiliation: "GNU Radio Project"
   - family-names: Niedermayer
     given-names: Philipp
     affiliation: "GSI Helmholtzzentrum für Schwerionenforschung"
@@ -48,6 +71,14 @@ authors:
   - family-names: Flynn
     given-names: Toby
     orcid: "https://orcid.org/0000-0002-3282-8131"
+  - family-names: Ahmed
+    given-names: Waqar
+    affiliation: "KDAB"
+  - family-names: McFarlane
+    given-names: Ian
+  - family-names: Campbell
+    given-names: Bailey
   - family-names: Hensel
     given-names: Tom
-    orcid: "https://orcid.org/0000-0002-0237-1652"
+  - family-names: Gupta
+    given-names: Krish
