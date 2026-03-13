@@ -23,7 +23,7 @@ set(GR_BUILD_PARALLEL_LEVEL
     "6"
     CACHE STRING "Maximum parallel compile/link jobs")
 option(GR4_USE_THIN_ARCHIVES "Build static archives as thin archives (non-relocatable when installed)" OFF)
-option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" OFF)
+option(GR4_USE_LIBCXX "Force libc++ when compiling with Clang" ON)
 if(CMAKE_GENERATOR MATCHES "Ninja")
   set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_pool=${GR_BUILD_PARALLEL_LEVEL} link_pool=2)
   set(CMAKE_JOB_POOL_COMPILE compile_pool)

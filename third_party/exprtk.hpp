@@ -45,8 +45,10 @@
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
-#ifdef __EMSCRIPTEN__
+#ifdef __clang__
+#if __has_warning("-Wunnecessary-virtual-specifier")
 #pragma GCC diagnostic ignored "-Wunnecessary-virtual-specifier"
+#endif
 #endif
 #pragma GCC diagnostic ignored "-Wdouble-promotion"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
