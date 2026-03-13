@@ -206,7 +206,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
                 outSpan[0] = nGeneratedTags > 0 ? static_cast<T>(1) : static_cast<T>(0);
             } else {
                 for (std::size_t i = 0; i < nSamples; ++i) {
-                    outSpan[i] = static_cast<T>(_nSamplesProduced + i);
+                    outSpan[i] = static_cast<T>(_nSamplesProduced) + static_cast<T>(i);
                 }
             }
         }

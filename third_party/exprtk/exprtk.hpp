@@ -10269,12 +10269,12 @@ namespace exprtk
             return rp_;
          }
 
-         inline virtual std::string& ref()
+         inline /* virtual -- this is a final class */ std::string& ref()
          {
             return (*value_);
          }
 
-         inline virtual const std::string& ref() const
+         inline /* virtual -- this is a final class */ const std::string& ref() const
          {
             return (*value_);
          }
