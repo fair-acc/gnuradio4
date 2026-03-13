@@ -7,6 +7,7 @@ install(
   FILES include/gnuradio-4.0/GpsSource.hpp
         include/gnuradio-4.0/NMEADevice.hpp
         include/gnuradio-4.0/NMEAParser.hpp
+        include/gnuradio-4.0/PpsSource.hpp
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
 if(ENABLE_EXAMPLES)

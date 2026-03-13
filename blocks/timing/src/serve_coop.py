@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """HTTP server with COOP/COEP headers for SharedArrayBuffer (required for WASM pthreads)."""
+
 import http.server
 import os
 import socketserver
