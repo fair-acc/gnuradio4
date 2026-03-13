@@ -399,8 +399,7 @@ if(EMSCRIPTEN)
     "SHELL:-s FETCH=1"
     "SHELL:-s WASM=1" # output as web-assembly
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall']"
-    "SHELL:-s ENVIRONMENT=web,worker"
-  )
+    "SHELL:-s ENVIRONMENT=web,worker")
 endif()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet

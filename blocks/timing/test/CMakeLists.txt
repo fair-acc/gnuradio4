@@ -21,3 +21,7 @@ add_timing_test(qa_NMEADevice)
 if(NOT EMSCRIPTEN)
   add_timing_test(qa_GpsSource)
 endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN)
+  add_timing_test(qa_PpsSource)
+endif()
