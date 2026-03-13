@@ -65,6 +65,15 @@ Internally this uses FileIo.
     fileio::Reader _reader;
     bool           _emscriptenRunOnMainThread = true; // used in Emscripten unit-tests only
 
+    ~HttpSource() {
+        // cancel before ~Block() runs — derived members are destroyed before the CRTP base destructor
+        _reader.cancel();
+        if (lifecycle::isActive(this->state())) {
+            std::ignore = this->changeStateTo(lifecycle::State::REQUESTED_STOP);
+            std::ignore = this->changeStateTo(lifecycle::State::STOPPED);
+        }
+    }
+
     [[nodiscard]] static pmt::Value::Map makeResultValue(std::span<const std::uint8_t> rawData, int status = 200, std::string_view mimeType = "text/plain") {
         pmt::Value::Map result;
         result["mime-type"] = std::string(mimeType);
@@ -162,6 +171,16 @@ Internally this uses FileIo.
 
     std::optional<fileio::Writer> _writer;
     bool                          _emscriptenRunOnMainThread = true; // used in Emscripten unit-tests only
+
+    ~HttpSink() {
+        if (_writer.has_value()) {
+            _writer->cancel();
+        }
+        if (lifecycle::isActive(this->state())) {
+            std::ignore = this->changeStateTo(lifecycle::State::REQUESTED_STOP);
+            std::ignore = this->changeStateTo(lifecycle::State::STOPPED);
+        }
+    }
 
     [[nodiscard]] fileio::WriterConfig writerConfig() const {
         fileio::WriterConfig config;

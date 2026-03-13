@@ -492,12 +492,17 @@ elseif(GR_ENABLE_HTTP STREQUAL "OFF")
 endif()
 
 set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
+FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 
 if(GR_HTTP_ENABLED AND NOT EMSCRIPTEN)
-  list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS cpr)
+  # build cpr as a shared library to avoid ODR violations when multiple
+  # block shared libraries (e.g. GrFileIoBlocks, GrHttpBlocks) each
+  # statically link their own copy of cpr globals
+  set(_saved_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS ON)
+  FetchContent_MakeAvailable(cpr)
+  set(BUILD_SHARED_LIBS ${_saved_BUILD_SHARED_LIBS})
 endif()
-
-FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 
 # GNURadio builds with hidden visibility by default. For shared CPR builds this hides CPR API symbols and causes
 # undefined references in downstream link steps.
