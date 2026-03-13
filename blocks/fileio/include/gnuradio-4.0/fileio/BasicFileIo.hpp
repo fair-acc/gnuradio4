@@ -199,6 +199,15 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     std::size_t                        _totalBytesReadFile  = 0UZ;
     std::size_t                        _currentFileIndex    = 0UZ;
 
+    ~BasicFileSource() {
+        // cancel before ~Block() runs — derived members are destroyed before the CRTP base destructor
+        _reader.cancel();
+        if (lifecycle::isActive(this->state())) {
+            std::ignore = this->changeStateTo(lifecycle::State::REQUESTED_STOP);
+            std::ignore = this->changeStateTo(lifecycle::State::STOPPED);
+        }
+    }
+
     void start() {
         _currentFileIndex = 0UZ;
         _totalBytesRead   = 0UZ;
