@@ -388,7 +388,7 @@ if(EMSCRIPTEN)
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     "SHELL:-s ASSERTIONS=1"
     "SHELL:-s INITIAL_MEMORY=256MB"
-    "SHELL:-s STACK_SIZE=2097152"
+    "SHELL:-s STACK_SIZE=4194304"
     # "SHELL:-s SAFE_HEAP=1" # additional for debug "SHELL:-s ASSERTIONS=2" # additional for debug "SHELL:-s
     # STACK_OVERFLOW_CHECK=2" # additional for debug "SHELL:-g" # additional for debug "SHELL:-gsource-map" # additional
     # for debug "SHELL:--profiling-funcs" # additional for debug "SHELL:--emit-symbol-map" # additional for debug
@@ -399,7 +399,7 @@ if(EMSCRIPTEN)
     "SHELL:-s FETCH=1"
     "SHELL:-s WASM=1" # output as web-assembly
     "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall']"
-    "SHELL:-s ENVIRONMENT=web,worker")
+    "SHELL:-s ENVIRONMENT=web,worker,node")
 endif()
 
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
@@ -496,9 +496,8 @@ set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
 FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 
 if(GR_HTTP_ENABLED AND NOT EMSCRIPTEN)
-  # build cpr as a shared library to avoid ODR violations when multiple
-  # block shared libraries (e.g. GrFileIoBlocks, GrHttpBlocks) each
-  # statically link their own copy of cpr globals
+  # build cpr as a shared library to avoid ODR violations when multiple block shared libraries (e.g. GrFileIoBlocks,
+  # GrHttpBlocks) each statically link their own copy of cpr globals
   set(_saved_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   set(BUILD_SHARED_LIBS ON)
   FetchContent_MakeAvailable(cpr)

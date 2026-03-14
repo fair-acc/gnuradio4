@@ -828,13 +828,14 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
     };
 
     "output port exposes custom resources after resizeBuffer"_test = [] {
-        std::array<std::byte, 1 << 20>      tagArena{};
-        std::array<std::byte, 1 << 20>      dataArena{};
+        constexpr std::size_t               kArenaSize = 99'968; // ~100 kB, cache-line aligned (1562 × 64)
+        std::array<std::byte, kArenaSize>   tagArena{};
+        std::array<std::byte, kArenaSize>   dataArena{};
         std::pmr::monotonic_buffer_resource tagMr(tagArena.data(), tagArena.size(), std::pmr::null_memory_resource());
         std::pmr::monotonic_buffer_resource dataMr(dataArena.data(), dataArena.size(), std::pmr::null_memory_resource());
 
         PortOut<float> out;
-        expect(out.resizeBuffer(1024, &dataMr, &tagMr).has_value());
+        expect(out.resizeBuffer(32, &dataMr, &tagMr).has_value());
 
         expect(eq(out.tagResource(), static_cast<std::pmr::memory_resource*>(&tagMr)));
         expect(eq(out.dataResource(), static_cast<std::pmr::memory_resource*>(&dataMr)));
