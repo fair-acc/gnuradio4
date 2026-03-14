@@ -176,6 +176,7 @@ option(THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF)
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
+option(MIT_ONLY "Exclude modules with non-MIT/Apache-compatible licences (e.g. GPLv2+ librtlsdr)" OFF)
 set(GR_MAX_WASM_THREAD_COUNT
     60
     CACHE STRING "Max number of threads for WASM pthread pool")
@@ -383,7 +384,7 @@ set_project_warnings(gnuradio-options)
 
 if(EMSCRIPTEN)
   set(CMAKE_EXECUTABLE_SUFFIX ".js")
-  add_compile_options(-fwasm-exceptions -pthread -g)
+  add_compile_options(-fexceptions -pthread -g)
   add_link_options(
     "SHELL:-s ALLOW_MEMORY_GROWTH=1"
     "SHELL:-s ASSERTIONS=1"
@@ -392,7 +393,7 @@ if(EMSCRIPTEN)
     # "SHELL:-s SAFE_HEAP=1" # additional for debug "SHELL:-s ASSERTIONS=2" # additional for debug "SHELL:-s
     # STACK_OVERFLOW_CHECK=2" # additional for debug "SHELL:-g" # additional for debug "SHELL:-gsource-map" # additional
     # for debug "SHELL:--profiling-funcs" # additional for debug "SHELL:--emit-symbol-map" # additional for debug
-    -fwasm-exceptions
+    -fexceptions
     -pthread
     "SHELL:-s PTHREAD_POOL_SIZE=${GR_MAX_WASM_THREAD_COUNT}"
     "SHELL:-s PTHREAD_POOL_SIZE_STRICT=2"
@@ -494,6 +495,23 @@ endif()
 
 set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
 FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
+
+if(EMSCRIPTEN AND TARGET ut)
+  # Boost.UT upstream adds -fwasm-exceptions which conflicts with our -fexceptions (JS exceptions). JS-based exceptions
+  # are required for Asyncify compatibility. Remove and replace.
+  get_target_property(_ut_copts ut INTERFACE_COMPILE_OPTIONS)
+  get_target_property(_ut_lopts ut INTERFACE_LINK_OPTIONS)
+  if(_ut_copts)
+    list(REMOVE_ITEM _ut_copts -fwasm-exceptions)
+    list(APPEND _ut_copts -fexceptions)
+    set_target_properties(ut PROPERTIES INTERFACE_COMPILE_OPTIONS "${_ut_copts}")
+  endif()
+  if(_ut_lopts)
+    list(REMOVE_ITEM _ut_lopts -fwasm-exceptions)
+    list(APPEND _ut_lopts -fexceptions)
+    set_target_properties(ut PROPERTIES INTERFACE_LINK_OPTIONS "${_ut_lopts}")
+  endif()
+endif()
 
 if(GR_HTTP_ENABLED AND NOT EMSCRIPTEN)
   # build cpr as a shared library to avoid ODR violations when multiple block shared libraries (e.g. GrFileIoBlocks,
@@ -675,6 +693,7 @@ message(STATUS "ENABLE_TESTING               : ${ENABLE_TESTING}")
 message(STATUS "ENABLE_COVERAGE              : ${ENABLE_COVERAGE}")
 message(STATUS "GR_MAX_WASM_THREAD_COUNT     : ${GR_MAX_WASM_THREAD_COUNT}")
 message(STATUS "GR_ENABLE_HTTP               : ${GR_ENABLE_HTTP}")
+message(STATUS "MIT_ONLY                     : ${MIT_ONLY}")
 message(STATUS "------------------------------------------------")
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _BT)
