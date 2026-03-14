@@ -41,6 +41,16 @@ struct USBDeviceInfo {
     bool          accessible = false;
 };
 
+namespace detail {
+
+inline std::uint16_t parseHex16(std::string_view s) {
+    std::uint16_t result = 0;
+    std::from_chars(s.data(), s.data() + s.size(), result, 16);
+    return result;
+}
+
+} // namespace detail
+
 #if defined(__linux__)
 
 namespace detail {
@@ -54,12 +64,6 @@ inline std::string readSysfsAttr(const std::filesystem::path& path) {
         }
     }
     return content;
-}
-
-inline std::uint16_t parseHex16(std::string_view s) {
-    std::uint16_t result = 0;
-    std::from_chars(s.data(), s.data() + s.size(), result, 16);
-    return result;
 }
 
 inline std::uint8_t parseDec8(std::string_view s) {

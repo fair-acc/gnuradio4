@@ -14,7 +14,9 @@
 
 #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
 #include <gnuradio-4.0/GpsSource.hpp>
+#if defined(__linux__)
 #include <gnuradio-4.0/PpsSource.hpp>
+#endif
 #if defined(__APPLE__)
 #include <util.h>
 #else
@@ -79,6 +81,8 @@ void printNoiseStats(std::span<const T> samples, double sampleRate) {
     }
 }
 
+#if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
+
 bool hasRtlDevice() {
     gr::blocks::sdr::RTL2832Device probe;
     bool                           found = probe.open(0).has_value();
@@ -87,8 +91,6 @@ bool hasRtlDevice() {
     }
     return found;
 }
-
-#if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
 
 struct PtyPair {
     int         master = -1;
@@ -594,6 +596,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
     };
 
 #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
+#if defined(__linux__)
     "PpsSource → RTL2832Source clock integration"_test = [] {
         if (!hasRtlDevice()) {
             std::println("  [SKIP] no RTL2832 device detected");
@@ -668,6 +671,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             expect(true) << "wallclock fallback is valid";
         }
     };
+#endif // __linux__
 
     "GpsSource (PTY mock) → RTL2832Source clock integration"_test = [] {
         if (!hasRtlDevice()) {

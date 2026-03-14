@@ -86,10 +86,10 @@ inline std::string lookupDescription(std::uint16_t vid, std::uint16_t pid) {
 
 inline bool isNMEALine(std::string_view line) { return line.size() >= 6 && line[0] == '$' && std::isalpha(static_cast<unsigned char>(line[1])) && std::isalpha(static_cast<unsigned char>(line[2])); }
 
-// ── Linux ──────────────────────────────────────────────────────────────────────
+using gr::blocks::common::detail::parseHex16;
+
 #if defined(__linux__)
 
-using gr::blocks::common::detail::parseHex16;
 using gr::blocks::common::detail::readSysfsAttr;
 
 inline std::optional<std::filesystem::path> findUSBDeviceDir(const std::filesystem::path& ttyDeviceDir) {
