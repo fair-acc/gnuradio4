@@ -43,17 +43,17 @@ Operating modes:
     gr::PortIn<std::uint8_t, Optional> clk_in;
     gr::PortOut<T>                     out;
 
-    Annotated<double, "center_frequency", Unit<"Hz">, Visible>                          center_frequency = 100.0e6;
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>>        sample_rate      = 2.048e6f;
-    Annotated<float, "gain", Unit<"dB">, Visible>                                       gain             = 40.f;
-    Annotated<bool, "auto_gain", Visible>                                               auto_gain        = true;
-    Annotated<std::uint32_t, "device_index">                                            device_index     = 0U;
-    Annotated<std::string, "device_name", Visible>                                      device_name;
-    Annotated<std::int32_t, "ppm_correction">                                           ppm_correction   = 0;
-    Annotated<std::uint32_t, "polling period ms", Unit<"ms">, Doc<"IO polling period">> polling_period   = 10U;
-    Annotated<std::string, "trigger_name", Doc<"tag name for free-running mode">>       trigger_name     = std::string("SDR_WALLCLOCK");
-    Annotated<bool, "emit_timing_tags", Doc<"emit timing tags on every chunk">>         emit_timing_tags = true;
-    Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in tags">>     emit_meta_info   = true;
+    Annotated<double, "center_frequency", Unit<"Hz">, Visible>                                                    center_frequency = 100.0e6;
+    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>>                                  sample_rate      = 2.048e6f;
+    Annotated<float, "gain", Unit<"dB">, Visible>                                                                 gain             = 40.f;
+    Annotated<bool, "auto_gain", Visible>                                                                         auto_gain        = true;
+    Annotated<std::uint32_t, "device_index">                                                                      device_index     = 0U;
+    Annotated<std::string, "device_name", Visible>                                                                device_name;
+    Annotated<std::int32_t, "ppm_correction">                                                                     ppm_correction   = 0;
+    Annotated<std::uint32_t, "polling period ms", Unit<"ms">, Doc<"IO polling period">>                           polling_period   = 10U;
+    Annotated<std::string, "trigger_name", Doc<"tag name for free-running mode">>                                 trigger_name     = std::string("SDR_WALLCLOCK");
+    Annotated<bool, "emit_timing_tags", Doc<"emit timing tags on every chunk">>                                   emit_timing_tags = true;
+    Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in tags">>                               emit_meta_info   = true;
     Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between wallclock tags (0 = every chunk)">> tag_interval     = 1.0f;
 
     GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, center_frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval);
