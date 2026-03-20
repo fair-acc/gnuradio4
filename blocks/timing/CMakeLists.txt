@@ -14,6 +14,6 @@ if(ENABLE_EXAMPLES)
   add_subdirectory(src)
 endif()
 
-if(ENABLE_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
+if (ENABLE_TESTING)
   add_subdirectory(test)
 endif()

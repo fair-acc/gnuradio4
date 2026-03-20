@@ -54,11 +54,11 @@ While there is no legal obligation to do so, it is there if you want to honour
 the years of reverse-engineering by the Osmocom community that produced the
 register-level knowledge all RTL-SDR software builds on. Their library work is
 GPLv2+-licensed and we respect that choice. This implementation is not based
-on the Osmocom but webrtlsdr typescript implementation.
+on the Osmocom code but on the [webrtlsdr](https://github.com/jtarrio/webrtlsdr)
+TypeScript implementation (Apache-2.0).
 
-GR4 targets browser and embedded deployment where (L)GPLv3 distribution obligations
-are [legally unresolved](https://www.gnu.org/licenses/gpl-faq.en.html#UnreleasedMods)
-or impractical. MIT keeps the code usable everywhere GR4 runs.
+GR4 targets browser and embedded deployment where (L)GPL distribution obligations
+can be difficult to satisfy in practice. MIT keeps the code usable everywhere GR4 runs.
 
 ## Acknowledgements
 

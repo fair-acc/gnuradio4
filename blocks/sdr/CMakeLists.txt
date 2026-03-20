@@ -10,10 +10,10 @@ else()
   message(STATUS "MIT_ONLY=ON: skipping RTL2832 source block, tests, and examples")
 endif()
 
-if(ENABLE_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
+if (ENABLE_TESTING)
   add_subdirectory(test)
 endif()
 
-if(ENABLE_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/CMakeLists.txt")
+if (ENABLE_EXAMPLES)
   add_subdirectory(src)
 endif()

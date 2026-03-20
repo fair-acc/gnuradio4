@@ -26,10 +26,10 @@ endif()
 install(FILES include/gnuradio-4.0/rtlsdr/RtlSdrDevice.hpp include/gnuradio-4.0/rtlsdr/RtlSdrSource.hpp
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/rtlsdr")
 
-if(ENABLE_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt")
+if (ENABLE_TESTING)
   add_subdirectory(test)
 endif()
 
-if(ENABLE_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/CMakeLists.txt")
+if (ENABLE_EXAMPLES)
   add_subdirectory(src)
 endif()

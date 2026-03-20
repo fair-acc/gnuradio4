@@ -1,6 +1,5 @@
 if(NOT MIT_ONLY)
   add_executable(qa_RTL2832Source qa_RTL2832Source.cpp)
-  target_include_directories(qa_RTL2832Source PRIVATE ${CMAKE_BINARY_DIR}/include)
   target_link_libraries(
     qa_RTL2832Source
     PRIVATE gnuradio-options

@@ -1,7 +1,7 @@
 // RTL2832 capture example — works on both native (Linux) and WASM (WebUSB).
 //
-// Native:  cmake --build build --target ex_RTL2832_capture && ./build/.../ex_RTL2832_capture
-// WASM:    emcmake cmake ... → cmake --build → serve → open in Chrome/Edge → click "Connect RTL2832"
+// Native:  cmake --build build --target ex_RTL2832_capture && ./build/blocks/sdr/src/ex_RTL2832_capture
+// WASM:    emcmake cmake -S . -B build-wasm && cmake --build build-wasm --target serve_rtl2832
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
