@@ -54,8 +54,9 @@ Operating modes:
     Annotated<std::string, "trigger_name", Doc<"tag name for free-running mode">>       trigger_name     = std::string("SDR_WALLCLOCK");
     Annotated<bool, "emit_timing_tags", Doc<"emit timing tags on every chunk">>         emit_timing_tags = true;
     Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in tags">>     emit_meta_info   = true;
+    Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between wallclock tags (0 = every chunk)">> tag_interval     = 1.0f;
 
-    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, center_frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info);
+    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, center_frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval);
 
     RTL2832Device _device;
     bool          _ioThreadDone     = true;
@@ -68,6 +69,7 @@ Operating modes:
     bool          _prevAutoGain   = false;
     std::string   _prevDeviceName;
     bool          _firstEmission = true;
+    std::uint64_t _lastTagTimeNs = 0UL;
 
     struct IoThreadGuard {
         bool& done;
@@ -80,6 +82,7 @@ Operating modes:
         _clockOffsetValid = false;
         _clockTriggerName.clear();
         _firstEmission = true;
+        _lastTagTimeNs = 0UL;
         gr::atomic_ref(_ioThreadDone).store_release(false);
         thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
     }
@@ -155,6 +158,7 @@ Operating modes:
                 _device.setFreqCorrection(ppm_correction);
                 _device.resetBuffer();
                 _firstEmission = true;
+                _lastTagTimeNs = 0UL;
                 this->emitMessage("ioReadLoop()", {{"state", "streaming"}, {"device", device_name.value}});
                 std::println("[RTL2832] streaming: {}", device_name.value);
             }
@@ -251,7 +255,11 @@ Operating modes:
         }
 
         if (emit_timing_tags) {
-            emitTimingTag(nOutputSamples, tWallNs);
+            auto intervalNs = static_cast<std::uint64_t>(tag_interval.value * 1e9f);
+            if (intervalNs == 0UL || _lastTagTimeNs == 0UL || (tWallNs - _lastTagTimeNs) >= intervalNs) {
+                emitTimingTag(nOutputSamples, tWallNs);
+                _lastTagTimeNs = tWallNs;
+            }
         }
 
         span.publish(nOutputSamples);

@@ -412,6 +412,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             {"sample_rate", kSampleRate},
             {"auto_gain", true},
             {"trigger_name", std::string("TEST_TRIGGER")},
+            {"tag_interval", 0.f}, // emit every chunk for testing
         });
         auto& sink = testGraph.emplaceBlock<TagSink<std::complex<float>, ProcessFunction::USE_PROCESS_BULK>>({
             {"log_samples", false},
