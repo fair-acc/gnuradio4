@@ -453,6 +453,11 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG v0.18.1)
 
+FetchContent_Declare(
+  miniaudio
+  GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+  GIT_TAG 0.11.25)
+
 set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
 if(NOT
@@ -492,7 +497,11 @@ elseif(GR_ENABLE_HTTP STREQUAL "OFF")
   set(GR_HTTP_ENABLED FALSE)
 endif()
 
-set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
+set(GR_FETCH_MAKE_AVAILABLE_DEPS
+    ut
+    vir-simd
+    cpp-httplib
+    miniaudio)
 FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
 
 if(GR_HTTP_ENABLED AND NOT EMSCRIPTEN)
@@ -522,6 +531,14 @@ target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR
                                          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 install(TARGETS vir EXPORT gnuradio4Targets)
 install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+add_library(gr-miniaudio STATIC "${miniaudio_SOURCE_DIR}/miniaudio.c")
+set_source_files_properties("${miniaudio_SOURCE_DIR}/miniaudio.c" PROPERTIES LANGUAGE CXX)
+target_include_directories(
+  gr-miniaudio ${CMAKE_EXT_DEP_WARNING_GUARD} PUBLIC $<BUILD_INTERFACE:${miniaudio_SOURCE_DIR}>
+                                                     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+install(TARGETS gr-miniaudio EXPORT gnuradio4Targets)
+install(FILES ${miniaudio_SOURCE_DIR}/miniaudio.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # the script configure won't run on win32 without asking bash to do it
 if(WIN32)

@@ -3,6 +3,7 @@ if(NOT EMSCRIPTEN AND TARGET GrBasicBlocksShared)
   target_link_libraries(
     qa_KnownSharedLibBlocks
     PRIVATE gnuradio-core
+            GrAudioBlocksShared
             GrTestingBlocksShared
             GrFileIoBlocksShared
             GrBasicBlocksShared
