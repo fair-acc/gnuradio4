@@ -14,6 +14,6 @@ if(ENABLE_EXAMPLES)
   add_subdirectory(src)
 endif()
 
-if (ENABLE_TESTING)
+if(ENABLE_TESTING)
   add_subdirectory(test)
 endif()

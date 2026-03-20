@@ -10,10 +10,10 @@ else()
   message(STATUS "MIT_ONLY=ON: skipping RTL2832 source block, tests, and examples")
 endif()
 
-if (ENABLE_TESTING)
+if(ENABLE_TESTING)
   add_subdirectory(test)
 endif()
 
-if (ENABLE_EXAMPLES)
+if(ENABLE_EXAMPLES)
   add_subdirectory(src)
 endif()
