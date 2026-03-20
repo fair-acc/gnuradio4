@@ -454,6 +454,17 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
   GIT_TAG v0.18.1)
 
+if(NOT EMSCRIPTEN)
+  set(libsoundio_patch_command git apply --ignore-space-change --ignore-whitespace
+                               "${CMAKE_CURRENT_SOURCE_DIR}/patches/libsoundio-cmake4.diff")
+
+  FetchContent_Declare(
+    libsoundio
+    GIT_REPOSITORY https://github.com/andrewrk/libsoundio.git
+    GIT_TAG 49a1f78b50eb0f5a49d096786a95a93874a2592a
+    PATCH_COMMAND ${libsoundio_patch_command} || true)
+endif()
+
 set(GR_HTTP_ENABLED TRUE) # Fetch API is always available
 # Native HTTP support using CPR and libCurl
 if(NOT
@@ -494,7 +505,62 @@ elseif(GR_ENABLE_HTTP STREQUAL "OFF")
 endif()
 
 set(GR_FETCH_MAKE_AVAILABLE_DEPS ut vir-simd cpp-httplib)
+
+if(NOT EMSCRIPTEN)
+  list(APPEND GR_FETCH_MAKE_AVAILABLE_DEPS libsoundio)
+
+  set(BUILD_STATIC_LIBS
+      ON
+      CACHE BOOL "" FORCE)
+  set(BUILD_DYNAMIC_LIBS
+      OFF
+      CACHE BOOL "" FORCE)
+  set(BUILD_EXAMPLE_PROGRAMS
+      OFF
+      CACHE BOOL "" FORCE)
+  set(BUILD_TESTS
+      OFF
+      CACHE BOOL "" FORCE)
+  set(ENABLE_JACK
+      OFF
+      CACHE BOOL "" FORCE)
+endif()
+
 FetchContent_MakeAvailable(${GR_FETCH_MAKE_AVAILABLE_DEPS})
+
+if(NOT EMSCRIPTEN)
+  target_include_directories(
+    libsoundio_static ${CMAKE_EXT_DEP_WARNING_GUARD} PUBLIC $<BUILD_INTERFACE:${libsoundio_SOURCE_DIR}>
+                                                            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  if(APPLE)
+    find_library(GR_LIBSOUNDIO_COREAUDIO_LIBRARY CoreAudio REQUIRED)
+    find_library(GR_LIBSOUNDIO_COREFOUNDATION_LIBRARY CoreFoundation REQUIRED)
+    find_library(GR_LIBSOUNDIO_AUDIOUNIT_LIBRARY AudioUnit REQUIRED)
+    target_link_libraries(
+      libsoundio_static PUBLIC ${GR_LIBSOUNDIO_COREAUDIO_LIBRARY} ${GR_LIBSOUNDIO_COREFOUNDATION_LIBRARY}
+                               ${GR_LIBSOUNDIO_AUDIOUNIT_LIBRARY})
+  endif()
+  if(DEFINED ALSA_LIBRARY
+     AND NOT
+         ALSA_LIBRARY
+         MATCHES
+         "NOTFOUND")
+    target_link_libraries(libsoundio_static PUBLIC ${ALSA_LIBRARY})
+  endif()
+  if(DEFINED PULSEAUDIO_LIBRARY
+     AND NOT
+         PULSEAUDIO_LIBRARY
+         MATCHES
+         "NOTFOUND")
+    target_link_libraries(libsoundio_static PUBLIC ${PULSEAUDIO_LIBRARY})
+  endif()
+
+  install(TARGETS libsoundio_static EXPORT gnuradio4Targets)
+
+  add_library(gr-libsoundio INTERFACE)
+  target_link_libraries(gr-libsoundio INTERFACE libsoundio_static)
+  install(TARGETS gr-libsoundio EXPORT gnuradio4Targets)
+endif()
 
 if(EMSCRIPTEN AND TARGET ut)
   # Boost.UT upstream adds -fwasm-exceptions which conflicts with our -fexceptions (JS exceptions). JS-based exceptions
