@@ -12,6 +12,9 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
+#include <gnuradio-4.0/algorithm/SampleRateEstimator.hpp>
+#include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
+
 #include <gnuradio-4.0/sdr/RTL2832Device.hpp>
 
 namespace gr::blocks::sdr {
@@ -33,7 +36,7 @@ GR_REGISTER_BLOCK("gr::blocks::sdr::RTL2832Source", gr::blocks::sdr::RTL2832Sour
 
 template<typename T>
 struct RTL2832Source : gr::Block<RTL2832Source<T>> {
-    using Description = Doc<R"(RTL2832U SDR source using USB dongles (RTL2832U + R820T/R828D/E4000).
+    using Description = Doc<R"(RTL2832U SDR source for USB dongles with the R820T/R820T2/R860, R828D, and E4000 tuners.
 Native: Linux USB ioctl (zero-dependency). WASM: WebUSB via thin JS shims.
 
 Operating modes:
@@ -43,33 +46,48 @@ Operating modes:
     gr::PortIn<std::uint8_t, Optional> clk_in;
     gr::PortOut<T>                     out;
 
-    Annotated<double, "center_frequency", Unit<"Hz">, Visible>                                                    center_frequency = 100.0e6;
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>>                                  sample_rate      = 2.048e6f;
-    Annotated<float, "gain", Unit<"dB">, Visible>                                                                 gain             = 40.f;
-    Annotated<bool, "auto_gain", Visible>                                                                         auto_gain        = true;
-    Annotated<std::uint32_t, "device_index">                                                                      device_index     = 0U;
-    Annotated<std::string, "device_name", Visible>                                                                device_name;
-    Annotated<std::int32_t, "ppm_correction">                                                                     ppm_correction   = 0;
-    Annotated<std::uint32_t, "polling period ms", Unit<"ms">, Doc<"IO polling period">>                           polling_period   = 10U;
-    Annotated<std::string, "trigger_name", Doc<"tag name for free-running mode">>                                 trigger_name     = std::string("SDR_WALLCLOCK");
-    Annotated<bool, "emit_timing_tags", Doc<"emit timing tags on every chunk">>                                   emit_timing_tags = true;
-    Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in tags">>                               emit_meta_info   = true;
-    Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between wallclock tags (0 = every chunk)">> tag_interval     = 1.0f;
+    Annotated<double, "center_frequency", Unit<"Hz">, Visible, Doc<"tuner LO frequency">>                      center_frequency = 100.0e6;
+    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>, Doc<"ADC sample rate">>       sample_rate      = 2.048e6f;
+    Annotated<float, "gain", Unit<"dB">, Visible, Doc<"tuner gain (manual mode)">>                             gain             = 40.f;
+    Annotated<bool, "auto_gain", Visible, Doc<"enable hardware AGC">>                                          auto_gain        = true;
+    Annotated<std::uint32_t, "device_index", Doc<"USB device index (0 = first dongle)">>                       device_index     = 0U;
+    Annotated<std::string, "device_name", Visible, Doc<"detected USB product name (read-only)">>               device_name;
+    Annotated<std::int32_t, "ppm_correction", Doc<"crystal ppm correction applied to hardware PLL">>           ppm_correction     = 0;
+    Annotated<std::uint32_t, "polling_period", Unit<"ms">, Doc<"IO thread sleep between USB reads">>           polling_period     = 10U;
+    Annotated<std::string, "trigger_name", Doc<"tag trigger_name for free-running wallclock mode">>            trigger_name       = std::string("SDR_WALLCLOCK");
+    Annotated<bool, "emit_timing_tags", Doc<"emit timing + ppm tags on every chunk">>                          emit_timing_tags   = true;
+    Annotated<bool, "emit_meta_info", Doc<"include device/clock metadata in timing tags">>                     emit_meta_info     = true;
+    Annotated<float, "tag_interval", Unit<"s">, Doc<"minimum interval between timing tags (0 = every chunk)">> tag_interval       = 1.0f;
+    Annotated<bool, "dc_blocker_enabled", Doc<"IIR high-pass to remove DC offset (complex<float> only)">>      dc_blocker_enabled = true;
+    Annotated<float, "dc_blocker_cutoff", Unit<"Hz">, Doc<"DC blocker high-pass cutoff frequency">>            dc_blocker_cutoff  = 10.f;
+    Annotated<float, "ppm_estimator_cutoff", Unit<"Hz">, Doc<"LP cutoff for sample-rate estimator">>           ppm_estimator_cutoff =
+#if defined(__EMSCRIPTEN__)
+        0.01f; // WASM: performance.now() has ~1 ms jitter, needs heavier smoothing
+#else
+        0.1f; // native: USB transfer timestamps have ~100 us jitter
+#endif
+    Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">> ppm_tag_threshold = 0.1f;
 
-    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, center_frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval);
+    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, center_frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
-    RTL2832Device _device;
-    bool          _ioThreadDone     = true;
-    std::int64_t  _clockOffsetNs    = 0;
-    bool          _clockOffsetValid = false;
-    std::string   _clockTriggerName;
-    double        _prevCenterFreq = 0.0;
-    float         _prevSampleRate = 0.f;
-    float         _prevGain       = 0.f;
-    bool          _prevAutoGain   = false;
-    std::string   _prevDeviceName;
-    bool          _firstEmission = true;
-    std::uint64_t _lastTagTimeNs = 0UL;
+    RTL2832Device                  _device;
+    bool                           _ioThreadDone     = true;
+    std::int64_t                   _clockOffsetNs    = 0;
+    bool                           _clockOffsetValid = false;
+    std::string                    _clockTriggerName;
+    double                         _prevCenterFreq = 0.0;
+    float                          _prevSampleRate = 0.f;
+    float                          _prevGain       = 0.f;
+    bool                           _prevAutoGain   = false;
+    std::string                    _prevDeviceName;
+    bool                           _firstEmission          = true;
+    std::uint64_t                  _lastTagTimeNs          = 0UL;
+    bool                           _retuneRequested        = false;
+    std::uint8_t                   _postRetuneDiscardCount = 0;
+    filter::Filter<float>          _dcFilterI;
+    filter::Filter<float>          _dcFilterQ;
+    algorithm::SampleRateEstimator _rateEstimator;
+    float                          _ppmLastEmitted = 0.0f;
 
     struct IoThreadGuard {
         bool& done;
@@ -81,8 +99,13 @@ Operating modes:
         _clockOffsetNs    = 0;
         _clockOffsetValid = false;
         _clockTriggerName.clear();
-        _firstEmission = true;
-        _lastTagTimeNs = 0UL;
+        _firstEmission          = true;
+        _lastTagTimeNs          = 0UL;
+        _retuneRequested        = false;
+        _postRetuneDiscardCount = 0;
+        _ppmLastEmitted         = 0.0f;
+        rebuildDcFilter();
+        rebuildRateEstimator();
         gr::atomic_ref(_ioThreadDone).store_release(false);
         thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
     }
@@ -99,12 +122,15 @@ Operating modes:
         return {requestedWork, 1UZ, work::Status::OK};
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
+    void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {
         if (!_device.isOpen()) {
             return;
         }
         if (newSettings.contains("center_frequency")) {
             _device.setCenterFrequency(center_frequency);
+            _retuneRequested = true;
+            forwardSettings.insert_or_assign(std::pmr::string("frequency"), center_frequency.value);
+            forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
         }
         if (newSettings.contains("gain") || newSettings.contains("auto_gain")) {
             if (auto_gain) {
@@ -116,16 +142,25 @@ Operating modes:
         }
         if (newSettings.contains("sample_rate")) {
             _device.setSampleRate(sample_rate);
+            rebuildDcFilter();
+            rebuildRateEstimator();
+            forwardSettings.insert_or_assign(std::pmr::string("sample_rate"), sample_rate.value);
         }
         if (newSettings.contains("ppm_correction")) {
             _device.setFreqCorrection(ppm_correction);
+        }
+        if (newSettings.contains("dc_blocker_cutoff_hz") || newSettings.contains("dc_blocker_enabled")) {
+            rebuildDcFilter();
+        }
+        if (newSettings.contains("ppm_estimator_cutoff_hz")) {
+            _rateEstimator.filter_cutoff_hz = ppm_estimator_cutoff;
+            _rateEstimator.rebuildFilter();
         }
     }
 
     void ioReadLoop() {
         thread_pool::thread::setThreadName(std::format("rtl2832:{}", this->name.value));
 
-        // cache reader/writer references for the entire IO loop lifetime (start → stop)
         auto& outWriter = out.streamWriter();
         auto& clkReader = clk_in.streamReader();
         auto& clkTagRdr = clk_in.tagReader();
@@ -136,6 +171,14 @@ Operating modes:
 
         while (lifecycle::isActive(this->state())) {
             this->applyChangedSettings();
+
+            if (_retuneRequested) {
+                _retuneRequested        = false;
+                _postRetuneDiscardCount = 3;
+                _dcFilterI.reset();
+                _dcFilterQ.reset();
+                _rateEstimator.resetPhase();
+            }
 
             if (!_device.isOpen()) {
                 auto result = _device.open(device_index);
@@ -157,17 +200,17 @@ Operating modes:
                 }
                 _device.setFreqCorrection(ppm_correction);
                 _device.resetBuffer();
-                _firstEmission = true;
-                _lastTagTimeNs = 0UL;
+                _firstEmission  = true;
+                _lastTagTimeNs  = 0UL;
+                _ppmLastEmitted = 0.0f;
+                rebuildRateEstimator();
                 this->emitMessage("ioReadLoop()", {{"state", "streaming"}, {"device", device_name.value}});
-                std::println("[RTL2832] streaming: {}", device_name.value);
             }
 
             auto result = _device.readBulk(readBuf.data(), readBuf.size());
             if (!result) {
                 _device.close();
                 this->emitErrorMessage("ioReadLoop()", std::format("device error: {}", result.error()));
-                std::println(stderr, "[RTL2832] device error: {} — will retry", result.error());
                 std::this_thread::sleep_for(minDelay);
                 continue;
             }
@@ -176,7 +219,16 @@ Operating modes:
                 continue;
             }
 
-            auto tWallNs = detail::wallClockNs();
+            if (_postRetuneDiscardCount > 0) {
+                --_postRetuneDiscardCount;
+                continue;
+            }
+
+            auto        tWallNs        = detail::wallClockNs();
+            std::size_t nOutputSamples = std::is_same_v<T, std::uint8_t> ? *result : *result / 2UZ;
+            double      tObsSeconds    = static_cast<double>(tWallNs) * 1e-9;
+            _rateEstimator.update(tObsSeconds, nOutputSamples);
+
             drainClockInput(clkReader, clkTagRdr);
             publishSamples(outWriter, readBuf.data(), *result, tWallNs);
         }
@@ -204,7 +256,6 @@ Operating modes:
                 if (auto* timePtr = it->second.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
 
-                    // prefer local_time from trigger_meta_info for accurate offset
                     std::int64_t localNs      = 0;
                     bool         hasLocalTime = false;
 
@@ -235,7 +286,6 @@ Operating modes:
 
         std::ignore = tagData.consume(nTagsConsumed);
 
-        // consume data samples (we only care about tags, not clock sample values)
         auto clkSpan = clkReader.get(nAvailable);
         std::ignore  = clkSpan.consume(nAvailable);
     }
@@ -252,6 +302,9 @@ Operating modes:
             std::memcpy(span.data(), data, nBytes);
         } else if constexpr (std::is_same_v<T, std::complex<float>>) {
             detail::convertToComplex(data, span.data(), nOutputSamples);
+            if (dc_blocker_enabled) {
+                applyDcBlocker(span.data(), nOutputSamples);
+            }
         }
 
         if (emit_timing_tags) {
@@ -268,7 +321,6 @@ Operating modes:
     }
 
     void emitTimingTag(std::size_t nSamples, std::uint64_t tWallNs) {
-        // tWallNs ≈ time of last sample; compute UTC time of first sample
         auto tUtcLastNs      = static_cast<std::int64_t>(tWallNs) + _clockOffsetNs;
         auto chunkDurationNs = static_cast<std::int64_t>(static_cast<double>(nSamples - 1) / static_cast<double>(sample_rate.value) * 1e9);
         auto tUtcFirstNs     = static_cast<std::uint64_t>(std::max(std::int64_t{0}, tUtcLastNs - chunkDurationNs));
@@ -295,6 +347,14 @@ Operating modes:
             tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
         }
 
+        if (_rateEstimator._initialised) {
+            float ppmNow = _rateEstimator.estimatedPpm();
+            tag::put(tagMap, "sample_rate", static_cast<float>(_rateEstimator.estimatedRate()));
+            tag::put(tagMap, "frequency", center_frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6));
+            tag::put(tagMap, "ppm_error", ppmNow);
+            _ppmLastEmitted = ppmNow;
+        }
+
         out.publishTag(std::move(tagMap), 0UZ);
     }
 
@@ -304,7 +364,7 @@ Operating modes:
             _prevDeviceName = device_name.value;
         }
         if (_firstEmission || _prevSampleRate != sample_rate.value) {
-            tag::put(metaInfo, "sample_rate", sample_rate.value);
+            tag::put(metaInfo, "sample_rate", static_cast<double>(sample_rate.value));
             _prevSampleRate = sample_rate.value;
         }
         if (_firstEmission || _prevCenterFreq != center_frequency.value) {
@@ -320,6 +380,52 @@ Operating modes:
             _prevAutoGain = auto_gain.value;
         }
         _firstEmission = false;
+    }
+
+    void emitPpmTagIfNeeded() {
+        if (!_rateEstimator._initialised) {
+            return;
+        }
+        float ppmNow = _rateEstimator.estimatedPpm();
+        if (std::abs(ppmNow - _ppmLastEmitted) < ppm_tag_threshold) {
+            return;
+        }
+
+        float  correctedRate = static_cast<float>(_rateEstimator.estimatedRate());
+        double correctedFreq = center_frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6);
+
+        auto tagMap = out.makeTagMap();
+        tag::put(tagMap, "sample_rate", correctedRate);
+        tag::put(tagMap, "frequency", correctedFreq);
+        tag::put(tagMap, "ppm_error", ppmNow);
+        out.publishTag(std::move(tagMap), 0UZ);
+
+        _ppmLastEmitted = ppmNow;
+    }
+
+    void rebuildRateEstimator() {
+        double nomRate                  = static_cast<double>(sample_rate.value);
+        double updateHz                 = (nomRate > 0.0) ? (nomRate / (64.0 * 1024.0 / (std::is_same_v<T, std::uint8_t> ? 1.0 : 2.0))) : 250.0;
+        _rateEstimator.filter_cutoff_hz = ppm_estimator_cutoff;
+        _rateEstimator.reset(nomRate, updateHz);
+    }
+
+    void rebuildDcFilter() {
+        if constexpr (std::is_same_v<T, std::complex<float>>) {
+            if (dc_blocker_enabled && dc_blocker_cutoff > 0.f && sample_rate > 0.f) {
+                auto coeffs = filter::iir::designFilter<float>(filter::Type::HIGHPASS, filter::FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(dc_blocker_cutoff), .fs = static_cast<double>(sample_rate)}, filter::iir::Design::BUTTERWORTH);
+                _dcFilterI  = filter::Filter<float>(coeffs);
+                _dcFilterQ  = filter::Filter<float>(coeffs);
+            }
+        }
+    }
+
+    void applyDcBlocker(std::complex<float>* samples, std::size_t nSamples) {
+        for (std::size_t i = 0; i < nSamples; ++i) {
+            float filteredI = _dcFilterI.processOne(samples[i].real());
+            float filteredQ = _dcFilterQ.processOne(samples[i].imag());
+            samples[i]      = {filteredI, filteredQ};
+        }
     }
 };
 

@@ -2,12 +2,15 @@
 #define GNURADIO_RTL2832_DEVICE_HPP
 
 /**
- * @brief Hardware abstraction for the Realtek RTL2832U + Rafael Micro R820T/R828D USB dongle.
+ * @brief Hardware abstraction for the Realtek RTL2832U and R820T/R828D/R860 and E4000 tuner SDR dongles.
  *
- * Programs the RTL2832U demodulator and R820T/R828D tuner via USB->I2C passthrough of
- * the vendor control interface.
- * Register addresses and initialisation sequences are hardware facts documented in:
+ * Programs the RTL2832U demodulator and attached tuner via USB->I2C passthrough of vendor control transfers.
+ * Native: Linux USB ioctl (zero-dependency). WASM: WebUSB via thin JS shims.
  *
+ * This implementation is based on information from and TypeScript to C++23 translation of:
+ * https://github.com/jtarrio/webrtlsdr
+ *
+ * Datasheet references:
  *   - RTL2832U Datasheet v1.4 (Realtek, 2010)
  *     https://homepages.uni-regensburg.de/~erc24492/SDR/Data_rtl2832u.pdf
  *   - R820T Datasheet (Rafael Micro, 2011)
@@ -17,13 +20,9 @@
  *   - Elonics E4000 — Low-Power CMOS Multi-Band Tuner, DS-E4000-DS001, v4.0, Aug 2010
  *     https://www.nooelec.com/files/e4000datasheet.pdf
  *
- * This is an independent Linux-only C++ reimplementation derived from
- * jtarrio/webrtlsdr (Apache-2.0, https://github.com/jtarrio/webrtlsdr),
- * which itself continues google/radioreceiver
- * (Apache-2.0, https://github.com/google/radioreceiver).
+ * N.B. the FC0012/FC0013/FC2580 family of tuners are not supported (more complex HW, quirks, no datasheet).
  *
- * No source code from osmocom/rtl-sdr or any GPL-licensed project has been
- * incorporated. See README.md for full provenance and acknowledgements.
+ * See Readme.md for full provenance and acknowledgements.
  */
 
 #include <algorithm>
@@ -47,55 +46,58 @@
 
 namespace gr::blocks::sdr {
 
-// ── RTL2832U hardware constants (datasheet section 10-11) ───────────────────
+// RTL2832U demodulator constants
+// ref: RTL2832U Datasheet v1.4 (Realtek, 2010), https://homepages.uni-regensburg.de/~erc24492/SDR/Data_rtl2832u.pdf
 
 inline constexpr std::uint32_t kXtalFreq     = 28'800'000; // default crystal, Hz
 inline constexpr std::uint32_t kIfFreq       = 3'570'000;  // R820T/R828D default IF, Hz
 inline constexpr std::uint8_t  kBulkEndpoint = 0x81;
-inline constexpr std::uint8_t  kWriteFlag    = 0x10;    // wIndex bit [4] for write ops
+inline constexpr std::uint8_t  kWriteFlag    = 0x10;    // wIndex bit[4] for write ops (Table 28, p. 43)
 inline constexpr std::uint16_t kCtrlTimeout  = 300;     // ms
 inline constexpr std::uint8_t  kVendorOut    = 0x40;    // USB vendor request, host→device
 inline constexpr std::uint8_t  kVendorIn     = 0xC0;    // USB vendor request, device→host
 inline constexpr std::size_t   kBulkReadSize = 131'072; // 128 KB per transfer
 
-// USB control transfer block IDs (datasheet section 11, Table 28)
+// USB vendor command block IDs (Table 27, p. 42; wIndex encoding in Table 28, p. 43)
 inline constexpr std::uint16_t kBlockUsb = 0x0100; // USB-side registers
 inline constexpr std::uint16_t kBlockSys = 0x0200; // system / 8051 registers
 inline constexpr std::uint16_t kBlockIic = 0x0600; // I2C master
 
-// RTL2832U USB block registers (section 11, Tables 30-34)
+// USB SIE registers (Table 29, p. 44; bit fields in Tables 30-33, p. 45-46)
 inline constexpr std::uint16_t kUsbSysctl    = 0x2000; // USB system control
 inline constexpr std::uint16_t kUsbEpaCtl    = 0x2148; // endpoint A control
 inline constexpr std::uint16_t kUsbEpaMaxpkt = 0x2158; // endpoint A max packet size
 
-// RTL2832U system registers (section 10, Table 24)
+// system registers (Table 14, p. 33; bit fields in Table 15, p. 35)
 inline constexpr std::uint16_t kDemodCtl  = 0x3000; // PLL enable, ADC enable, hardware reset
 inline constexpr std::uint16_t kDemodCtl1 = 0x300B; // IR wakeup, low-current crystal
 
-// DEMOD_CTL bit field values (section 10.1, Table 24)
+// DEMOD_CTL bit fields (Table 15, p. 35)
 inline constexpr std::uint8_t kDemodCtlPowerOn = 0xE8; // PLL_EN | ADC_I_EN | SOFT_RST_RELEASE | ADC_Q_EN
 inline constexpr std::uint8_t kDemodCtl1Init   = 0x22; // IR wakeup + low-current crystal
 
-// EPA_CTL values
+// EPA_CTL bit fields (Table 32, p. 46)
 inline constexpr std::uint16_t kEpaCtlReset   = 0x1002; // stall + FIFO flush
 inline constexpr std::uint16_t kEpaCtlRelease = 0x0000;
-inline constexpr std::uint16_t kEpaMaxpkt512  = 0x0002; // 512-byte max packet
+inline constexpr std::uint16_t kEpaMaxpkt512  = 0x0002; // 512-byte max packet (Table 33, p. 46)
 
-// I2C repeater gate (datasheet section 8.3, page 1, offset 0x01)
+// I2C repeater gate (Table 3, p. 21; demod page 1, offset 0x01, bit[3])
 inline constexpr std::uint8_t kI2cRepeaterEnable  = 0x18; // IIC_repeat = 1
 inline constexpr std::uint8_t kI2cRepeaterDisable = 0x10; // IIC_repeat = 0
 
-// R820T/R828D I2C addresses and identification (R820T2 datasheet section 7.1)
-inline constexpr std::uint8_t kR820tI2cAddr = 0x34;
-inline constexpr std::uint8_t kR828dI2cAddr = 0x74;
-inline constexpr std::uint8_t kTunerIdR820t = 0x69; // reg 0x00 after bit reversal
+// R820T/R828D tuner constants
+// ref: R820T2 Register Description (Rafael Micro, 2012),
+//      https://www.rtl-sdr.com/wp-content/uploads/2016/12/R820T2_Register_Description.pdf
 
-// R820T/R828D shadow register range
-inline constexpr std::uint8_t kRegShadowStart = 0x05;
+inline constexpr std::uint8_t kR820tI2cAddr = 0x34; // 8-bit write address (Table 1-1, p. 2)
+inline constexpr std::uint8_t kR828dI2cAddr = 0x74; // R828D dual-tuner I2C address
+inline constexpr std::uint8_t kTunerIdR820t = 0x69; // reg R0 value 0x96 bit-reversed (p. 4-5)
+
+inline constexpr std::uint8_t kRegShadowStart = 0x05; // writable register range (Table 1-2, p. 5)
 inline constexpr std::uint8_t kRegShadowEnd   = 0x1F;
 inline constexpr std::size_t  kNumShadowRegs  = kRegShadowEnd - kRegShadowStart + 1; // 27
 
-// PLL constants (R820T2 datasheet section 9)
+// PLL constants (Table 1-3, R16/R20-R22, p. 9)
 inline constexpr std::uint32_t kVcoMin      = 1'770'000'000;
 inline constexpr std::uint32_t kPllCalFreq  = 56'000'000;
 inline constexpr std::uint8_t  kVcoPowerRef = 2; // R820T reference; R828D uses 1
@@ -106,67 +108,27 @@ inline constexpr std::array kKnownRTL2832Ids{
     common::USBDeviceId{0x0BDA, 0x2840, "RTL2840"},
 };
 
-// R820T/R828D initial shadow registers 0x05-0x1F (27 bytes, section 8)
+// clang-format off
+// R820T/R828D initial shadow registers 0x05-0x1F (27 bytes; operating configuration for SDR use)
 inline constexpr std::array<std::uint8_t, kNumShadowRegs> kR8xxInitRegs{
-    0x83, 0x32,
-    0x75, // R5-R7:   LNA, power detector, mixer
-    0xC0, 0x40, 0xD6,
-    0x6C, // R8-R11:  mixer buf, IF filter, channel filter, BW/HPF
-    0xF5, 0x63, 0x75,
-    0x68, // R12-R15: VGA, LNA AGC, mixer AGC, clock control
-    0x6C, 0x83, 0x80,
-    0x00, // R16-R19: PLL div, LDO_A, VCO/SDM, reserved
-    0x0F, 0x00, 0xC0,
-    0x30, // R20-R23: integer div, SDM low, SDM high, LDO_D
-    0x48, 0xCC, 0x60,
-    0x00, // R24-R27: reserved, RF filter, RF mux, tracking filter
-    0x54, 0xAE, 0x4A,
-    0xC0, // R28-R31: PDET3, PDET1/2, PDET_CLK, LT attenuation
+    0x83, 0x32, 0x75, // R5-R7:   LNA, power detector, mixer
+    0xC0, 0x40, 0xD6, 0x6C, // R8-R11:  mixer buf, IF filter, channel filter, BW/HPF
+    0xF5, 0x63, 0x75, 0x68, // R12-R15: VGA, LNA AGC, mixer AGC, clock control
+    0x6C, 0x83, 0x80, 0x00, // R16-R19: PLL div, LDO_A, VCO/SDM, reserved
+    0x0F, 0x00, 0xC0, 0x30, // R20-R23: integer div, SDM low, SDM high, LDO_D
+    0x48, 0xCC, 0x60, 0x00, // R24-R27: reserved, RF filter, RF mux, tracking filter
+    0x54, 0xAE, 0x4A, 0xC0, // R28-R31: PDET3, PDET1/2, PDET_CLK, LT attenuation
 };
 
-// RTL2832U FIR coefficients (symmetric 32-tap, packed into 20 bytes, section 4)
+// RTL2832U LPF coefficients (symmetric 32-tap, packed into 20 bytes, demod page 1, 0x1C-0x2F)
 inline constexpr std::array<std::uint8_t, 20> kFirCoefficients{
-    0xCA,
-    0xDC,
-    0xD7,
-    0xD8,
-    0xE0,
-    0xF2,
-    0x0E,
-    0x35, // coefficients 0-7 (int8)
-    0x06,
-    0x50,
-    0x9C,
-    0x0D,
-    0x71,
-    0x11,
-    0x14,
-    0x71, // coefficients 8-15 (int12, packed)
-    0x74,
-    0x19,
-    0x41,
-    0xA5,
+    0xCA, 0xDC, 0xD7, 0xD8, 0xE0, 0xF2, 0x0E, 0x35, // coefficients 0-7 (int8)
+    0x06, 0x50, 0x9C, 0x0D, 0x71, 0x11, 0x14, 0x71, // coefficients 8-15 (int12, packed)
+    0x74, 0x19, 0x41, 0xA5,
 };
 
-// nibble bit-reversal LUT for R820T register reads (section 7.3)
-inline constexpr std::array<std::uint8_t, 16> kBitRevLut{
-    0x0,
-    0x8,
-    0x4,
-    0xC,
-    0x2,
-    0xA,
-    0x6,
-    0xE,
-    0x1,
-    0x9,
-    0x5,
-    0xD,
-    0x3,
-    0xB,
-    0x7,
-    0xF,
-};
+// nibble bit-reversal LUT for R820T register reads (LSB-first transmission, p. 4)
+inline constexpr std::array<std::uint8_t, 16> kBitRevLut{ 0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE, 0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF,};
 
 struct MuxConfig {
     std::uint32_t freqMhz;
@@ -175,7 +137,7 @@ struct MuxConfig {
     std::uint8_t  tfC;       // R27    TF_NCH + TF_LP
 };
 
-// frequency-dependent RF frontend mux configuration (R820T characterisation, section 11)
+// frequency-dependent RF frontend mux configuration (R26/R27 fields, Table 1-3, p. 10)
 inline constexpr std::array kMuxConfigs{
     MuxConfig{0, 0x08, 0x02, 0xDF},
     MuxConfig{50, 0x08, 0x02, 0xBE},
@@ -200,54 +162,46 @@ inline constexpr std::array kMuxConfigs{
     MuxConfig{650, 0x00, 0x40, 0x00},
 };
 
-// ── E4000 tuner constants (Elonics E4000 datasheet v4.0, S-E4000-DS001) ─────
-//
-// The E4000 is a zero-IF CMOS tuner covering 52–2200 MHz with a gap near 1100 MHz.
-// Register addresses and hardware constants below are silicon-defined facts from the
-// publicly available Elonics datasheet. The PLL algorithm uses standard fractional-N
-// synthesis applied to the E4000's documented VCO divider architecture.
-//
-// Reference:
-//   Elonics E4000 — Low-Power CMOS Multi-Band Tuner, DS-E4000-DS001, v4.0, Aug 2010
-//   https://www.nooelec.com/files/e4000datasheet.pdf
+// E4000 tuner constants
+// ref: Elonics E4000 datasheet v4.0 (DS-E4000-DS001), https://www.nooelec.com/files/e4000datasheet.pdf
 
-inline constexpr std::uint8_t kE4kI2cAddr = 0xC8; // 8-bit write address (7-bit: 0x64)
-inline constexpr std::uint8_t kE4kChipId  = 0x40; // register 0x02 identification
+inline constexpr std::uint8_t kE4kI2cAddr = 0xC8; // 8-bit write address, 7-bit: 0x64 (Table 1, p. 23)
+inline constexpr std::uint8_t kE4kChipId  = 0x40; // register 0x02 'Master3' (register map, p. 17)
 
-// synthesizer registers (datasheet section 6, register map)
+// synthesizer registers (register map, p. 17-18; sections 1.3-1.7, p. 25-26)
 inline constexpr std::uint8_t kE4kRegSynth1 = 0x07; // PLL lock [0], band [2:1]
 inline constexpr std::uint8_t kE4kRegSynth3 = 0x09; // integer divider Z
 inline constexpr std::uint8_t kE4kRegSynth4 = 0x0A; // fractional X [7:0]
 inline constexpr std::uint8_t kE4kRegSynth5 = 0x0B; // fractional X [15:8]
 inline constexpr std::uint8_t kE4kRegSynth7 = 0x0D; // VCO divider select + 3-phase
 
-// filter registers
+// filter registers (register map, p. 18; Tables 21-24, p. 43-46)
 inline constexpr std::uint8_t kE4kRegFilt1 = 0x10; // RF filter [3:0]
 inline constexpr std::uint8_t kE4kRegFilt2 = 0x11; // mixer BW [7:4], RC BW [3:0]
 inline constexpr std::uint8_t kE4kRegFilt3 = 0x12; // channel BW [4:0]
 
-// gain registers
+// gain registers (register map, p. 18; Table 6, p. 31; section 1.15-1.17, p. 34-35)
 inline constexpr std::uint8_t kE4kRegGain1 = 0x14; // LNA [3:0]
 inline constexpr std::uint8_t kE4kRegGain2 = 0x15; // mixer [0]: 0=4dB, 1=12dB
 inline constexpr std::uint8_t kE4kRegGain3 = 0x16; // IF stages 1–4
 inline constexpr std::uint8_t kE4kRegGain4 = 0x17; // IF stages 5–6
 
-// AGC registers
+// AGC registers (register map, p. 19; Table 5, p. 30; section 1.15.2, p. 35)
 inline constexpr std::uint8_t kE4kRegAgc1 = 0x1A; // AGC mode [3:0]
 inline constexpr std::uint8_t kE4kRegAgc7 = 0x20; // mixer gain auto [0]
 
-// DC offset calibration
+// DC offset calibration (register map, p. 19-20; sections 1.25-1.27, p. 48-49)
 inline constexpr std::uint8_t kE4kRegDc1 = 0x29; // cal trigger [0]
 inline constexpr std::uint8_t kE4kRegDc5 = 0x2D; // LUT enable flags
 
-// miscellaneous
+// miscellaneous (register map, p. 21; section 1.28, p. 52)
 inline constexpr std::uint8_t kE4kRegBias       = 0x78;
 inline constexpr std::uint8_t kE4kRegClkoutPwdn = 0x7A;
 
 // E4000 frequency bands
 enum class E4kBand : std::uint8_t { vhf2 = 0, vhf3 = 1, uhf = 2, lBand = 3 };
 
-// PLL VCO divider lookup table (datasheet table 7)
+// PLL VCO output divider lookup table (Table 2, p. 26)
 // the E4000 VCO output is divided by 'mul' to produce f_LO
 struct E4kPllEntry {
     std::uint32_t maxFreqKhz; // upper bound of this entry
@@ -268,66 +222,23 @@ inline constexpr std::array kE4kPllLut{
     E4kPllEntry{1'200'000, 0x01, 4},
 };
 
-// RF filter center frequencies per band (datasheet table 9)
+// RF filter centre frequencies per band (Table 21, p. 43)
 // UHF and L-band use nearest-match selection; VHF uses a fixed filter (index 0)
 inline constexpr std::array<std::uint32_t, 16> kE4kRfFilterUhfMhz{
-    360,
-    380,
-    405,
-    425,
-    450,
-    475,
-    505,
-    540,
-    575,
-    615,
-    670,
-    720,
-    760,
-    840,
-    890,
-    970,
+    360, 380, 405, 425, 450, 475, 505, 540, 575, 615, 670, 720, 760, 840, 890, 970,
 };
 inline constexpr std::array<std::uint32_t, 16> kE4kRfFilterLbandMhz{
-    1300,
-    1320,
-    1360,
-    1410,
-    1445,
-    1460,
-    1490,
-    1530,
-    1560,
-    1590,
-    1640,
-    1660,
-    1680,
-    1700,
-    1720,
-    1750,
+    1300, 1320, 1360, 1410, 1445, 1460, 1490, 1530, 1560, 1590, 1640, 1660, 1680, 1700, 1720, 1750,
 };
 
-// LNA gain per GAIN1 register index (tenths of dB, datasheet table 11)
+// LNA gain per GAIN1 register index (tenths of dB, Table 6, p. 31)
 // indices 2–3 are undocumented intermediate steps
 inline constexpr std::array<std::int16_t, 15> kE4kLnaGainTenths{
-    -50,
-    -25,
-    0,
-    0,
-    0,
-    25,
-    50,
-    75,
-    100,
-    125,
-    150,
-    175,
-    200,
-    250,
-    300,
+    -50, -25, 0, 0, 0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300,
 };
+// clang-format on
 
-// ── WASM: inlined JS shims ──────────────────────────────────────────────────
+// WASM: inlined JS shims
 
 #if defined(__EMSCRIPTEN__)
 
@@ -532,9 +443,14 @@ EMSCRIPTEN_KEEPALIVE inline int            rtl2832_getQueueMask() { return stati
 
 #endif // __EMSCRIPTEN__
 
-// ── device abstraction ──────────────────────────────────────────────────────
+// device abstraction
 
-enum class TunerType : std::uint8_t { none, r820t, r828d, e4000 };
+enum class TunerType : std::uint8_t {
+    none,
+    r820t, // R820T/R820T2/R860 single-tuner family (register-compatible)
+    r828d, // R828D dual-tuner variant (I2C addr 0x74, VCO power ref 1)
+    e4000  // Elonics E4000 zero-IF tuner
+};
 
 struct RTL2832Device {
     using Result      = std::expected<void, std::string>;
@@ -572,7 +488,7 @@ struct RTL2832Device {
 
     [[nodiscard]] bool isOpen() const { return _open.load(std::memory_order_acquire); }
 
-    // ── lifecycle ───────────────────────────────────────────────────────────
+    // lifecycle
 
     Result open([[maybe_unused]] std::uint32_t deviceIndex = 0) {
 #if !defined(__EMSCRIPTEN__)
@@ -628,7 +544,7 @@ struct RTL2832Device {
         _tunerI2cAddr = 0;
     }
 
-    // ── configuration ───────────────────────────────────────────────────────
+    // configuration
 
     ValueResult setSampleRate(float rate) {
         auto   ratio    = static_cast<std::uint32_t>((static_cast<double>(kXtalFreq) * (1 << 22)) / static_cast<double>(rate)) & 0x0FFFFFFCU;
@@ -643,7 +559,6 @@ struct RTL2832Device {
             !r) {
             return std::unexpected(r.error());
         }
-        std::println("[RTL2832] sample rate: {:.0f} Hz", realRate);
         return realRate;
     }
 
@@ -660,7 +575,6 @@ struct RTL2832Device {
             if (auto r = writeDemodBatch({{1, 0x19, 0x00}, {1, 0x1A, 0x00}, {1, 0x1B, 0x00}}); !r) { // pset_iffreq = 0 (zero-IF)
                 return std::unexpected(r.error());
             }
-            std::println("[RTL2832] center freq: {:.0f} Hz", *pllResult);
             return *pllResult;
         }
 
@@ -685,7 +599,6 @@ struct RTL2832Device {
             !r) {
             return std::unexpected(r.error());
         }
-        std::println("[RTL2832] center freq: {:.0f} Hz", actualFreq);
         return actualFreq;
     }
 
@@ -781,7 +694,7 @@ struct RTL2832Device {
         return {};
     }
 
-    // ── data transfer ───────────────────────────────────────────────────────
+    // data transfer
 
     std::expected<std::size_t, std::string> readBulk(std::uint8_t* dst, std::size_t maxLen) {
 #if !defined(__EMSCRIPTEN__)
@@ -808,7 +721,7 @@ struct RTL2832Device {
 #endif
     }
 
-    // ── USB transport (the ONLY platform boundary) ──────────────────────────
+    // USB transport (the ONLY platform boundary)
 
     Result ctrlTransferOut(std::uint16_t wValue, std::uint16_t wIndex, std::span<const std::uint8_t> data) {
 #if !defined(__EMSCRIPTEN__)
@@ -836,7 +749,7 @@ struct RTL2832Device {
 #endif
     }
 
-    // ── RTL2832U register access (platform-agnostic) ────────────────────────
+    // RTL2832U register access (platform-agnostic)
 
     Result setUsbReg(std::uint16_t addr, std::uint32_t value, std::uint8_t len) {
         std::array<std::uint8_t, 2> data{};
@@ -868,7 +781,7 @@ struct RTL2832Device {
         return ctrlTransferIn(0x0120, 0x0A, 1).transform([](auto&&) {}); // read-back confirmation
     }
 
-    // ── I2C access ──────────────────────────────────────────────────────────
+    // I2C access
 
     Result openI2C() { return setDemodReg(1, 0x01, kI2cRepeaterEnable, 1); }
     Result closeI2C() { return setDemodReg(1, 0x01, kI2cRepeaterDisable, 1); }
@@ -920,7 +833,7 @@ struct RTL2832Device {
         return ctrlTransferIn(i2cAddr, kBlockIic, len);
     }
 
-    // ── R820T tuner register access ─────────────────────────────────────────
+    // R820T tuner register access
 
     [[nodiscard]] static constexpr std::uint8_t bitRev(std::uint8_t b) { return static_cast<std::uint8_t>((kBitRevLut[b & 0xF] << 4) | kBitRevLut[b >> 4]); }
 
@@ -984,7 +897,7 @@ struct RTL2832Device {
         return best;
     }
 
-    // ── init sequences ──────────────────────────────────────────────────────
+    // init sequences
 
     Result initDevice() {
         if (auto r = initDemod(); !r) {
@@ -1105,10 +1018,13 @@ struct RTL2832Device {
                 !r) {
                 return r;
             }
-            std::println("[RTL2832] found {} tuner", _tunerType == TunerType::r820t ? "R820T" : "R828D");
+            std::println("[RTL2832] found {} tuner", _tunerType == TunerType::r820t ? "R820T/R820T2/R860" : "R828D");
         } else if (_tunerType == TunerType::e4000) {
             // E4000: zero-IF — keep initDemod() defaults (both ADCs, no spectrum inversion)
             std::println("[RTL2832] found E4000 tuner");
+        } else {
+            std::println(stderr, "[RTL2832] no supported tuner found");
+            return std::unexpected(std::string("no supported tuner found"));
         }
         return {};
     }
@@ -1168,7 +1084,7 @@ struct RTL2832Device {
         });
     }
 
-    // ── PLL programming (R820T2 datasheet section 9) ────────────────────────
+    // PLL programming (R820T2 Table 1-3, R16/R20-R22, p. 9)
 
     ValueResult setPll(double freq) {
         std::uint32_t pllRef = kXtalFreq;
@@ -1250,7 +1166,7 @@ struct RTL2832Device {
         return actualFreq;
     }
 
-    // ── mux configuration (section 11) ──────────────────────────────────────
+    // mux configuration (section 11)
 
     Result setMux(double freq) {
         auto        freqMhz = static_cast<std::uint32_t>(freq / 1e6);
@@ -1277,7 +1193,7 @@ struct RTL2832Device {
         });
     }
 
-    // ── E4000 tuner support (Elonics E4000 datasheet v4.0) ─────────────────
+    // E4000 tuner support (Elonics E4000 datasheet v4.0)
 
     Result writeE4kReg(std::uint8_t reg, std::uint8_t value) { return setI2CReg(kE4kI2cAddr, reg, value); }
 
@@ -1323,7 +1239,6 @@ struct RTL2832Device {
         if (auto r = calibrateE4kDcOffset(); !r) {
             return r;
         }
-        std::println("[RTL2832] E4000 tuner initialized");
         return {};
     }
 
@@ -1387,14 +1302,14 @@ struct RTL2832Device {
 
         // verify PLL lock (SYNTH1[0])
         if (auto lock = readE4kReg(kE4kRegSynth1); lock && !(*lock & 0x01)) {
-            std::println("[RTL2832] E4000 PLL did not lock at {:.0f} Hz", freq);
+            std::println(stderr, "[RTL2832] E4000 PLL did not lock at {:.0f} Hz", freq);
         }
         // gate closes I2C on return
 
         return static_cast<double>(kXtalFreq) * (z + static_cast<double>(x) / 65536.0) / entry->mul;
     }
 
-    // RF input filter band selection (datasheet table 9)
+    // RF input filter band selection (E4000 Table 21, p. 43)
     Result setE4kBandFilter(double freq) {
         auto         freqMhz   = static_cast<std::uint32_t>(freq / 1e6);
         std::uint8_t filterIdx = 0;
@@ -1418,7 +1333,7 @@ struct RTL2832Device {
         return {};
     }
 
-    // DC offset calibration at each mixer/IF1 gain combination (datasheet section 10)
+    // DC offset calibration at each mixer/IF1 gain combination (E4000 sections 1.25-1.27, p. 48-49)
     Result calibrateE4kDcOffset() {
         constexpr std::array<std::pair<std::uint8_t, std::uint8_t>, 4> kGainCombos{{
             {0x00, 0x00}, // mixer=4dB,  IF1=-3dB
