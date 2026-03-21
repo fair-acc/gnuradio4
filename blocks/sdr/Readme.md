@@ -14,7 +14,7 @@ via [SoapySDR](https://github.com/pothosware/SoapySDR)(Boost-1.0))) — though f
 links against librtlsdr (GPLv2+),
 making the direct implementation here the only fully permissive native route to the hardware.
 
-License: MIT "(see License section for the `-DMIT_ONLY=ON` opt-out)"
+License: MIT
 
 ## What it does
 
@@ -48,17 +48,8 @@ The R860 tuner found in recent dongles is electrically identical to the R820T2.
 
 MIT — same as the rest of GR4.
 
-The CMake flag `-DMIT_ONLY=ON` suppresses this block entirely.
-
-While there is no legal obligation to do so, it is there if you want to honour
-the years of reverse-engineering by the Osmocom community that produced the
-register-level knowledge all RTL-SDR software builds on. Their library work is
-GPLv2+-licensed and we respect that choice. This implementation is not based
-on the Osmocom code but on the [webrtlsdr](https://github.com/jtarrio/webrtlsdr)
-TypeScript implementation (Apache-2.0).
-
-GR4 targets browser and embedded deployment where (L)GPL distribution obligations
-can be difficult to satisfy in practice. MIT keeps the code usable everywhere GR4 runs.
+This is a clean reimplementation based on the [webrtlsdr](https://github.com/jtarrio/webrtlsdr)
+TypeScript implementation (Apache-2.0), not on the Osmocom GPLv2+ code.
 
 ## Acknowledgements
 
