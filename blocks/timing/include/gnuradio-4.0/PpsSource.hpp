@@ -18,6 +18,8 @@
 #include <linux/pps.h>
 #include <linux/ptp_clock.h>
 
+#include <gnuradio-4.0/common/ScopedFd.hpp>
+
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
@@ -102,25 +104,6 @@ inline constexpr std::string_view leapStatusName(std::uint8_t status) {
     }
 }
 
-struct ScopedFd {
-    int fd     = -1;
-    ScopedFd() = default;
-    explicit ScopedFd(int f) : fd(f) {}
-    ~ScopedFd() {
-        if (fd >= 0) {
-            ::close(fd);
-        }
-    }
-    ScopedFd(const ScopedFd&)            = delete;
-    ScopedFd& operator=(const ScopedFd&) = delete;
-    ScopedFd(ScopedFd&& o) noexcept : fd(std::exchange(o.fd, -1)) {}
-    ScopedFd& operator=(ScopedFd&& o) noexcept {
-        std::swap(fd, o.fd);
-        return *this;
-    }
-    [[nodiscard]] int release() noexcept { return std::exchange(fd, -1); }
-};
-
 } // namespace detail
 
 struct PpsSource : gr::Block<PpsSource> {
@@ -141,12 +124,12 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
 
     GR_MAKE_REFLECTABLE(PpsSource, out, clock_mode, ptp_device_index, pps_device_index, trigger_name, context, emit_mode, sample_rate, emit_meta_info);
 
-    ClockMode        _resolvedMode = ClockMode::NTP;
-    clockid_t        _clockId      = CLOCK_REALTIME;
-    detail::ScopedFd _ptpFd;
-    detail::ScopedFd _ppsFd;
-    std::uint64_t    _seq          = 0;
-    bool             _ioThreadDone = true;
+    ClockMode                    _resolvedMode = ClockMode::NTP;
+    clockid_t                    _clockId      = CLOCK_REALTIME;
+    gr::blocks::common::ScopedFd _ptpFd;
+    gr::blocks::common::ScopedFd _ppsFd;
+    std::uint64_t                _seq          = 0;
+    bool                         _ioThreadDone = true;
 
     struct IoThreadGuard {
         bool& done;
@@ -231,7 +214,7 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             auto ptpPath = std::format("/dev/ptp{}", ptp_device_index);
             int  fd      = ::open(ptpPath.c_str(), O_RDONLY);
             if (fd >= 0) {
-                _ptpFd        = detail::ScopedFd(fd);
+                _ptpFd        = gr::blocks::common::ScopedFd(fd);
                 _resolvedMode = ClockMode::PTP;
                 _clockId      = detail::fdToClockId(_ptpFd.fd);
                 return {};
@@ -248,7 +231,7 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             if (fd < 0) {
                 return std::unexpected(std::format("cannot open {}: {}", ptpPath, std::strerror(errno)));
             }
-            _ptpFd        = detail::ScopedFd(fd);
+            _ptpFd        = gr::blocks::common::ScopedFd(fd);
             _resolvedMode = ClockMode::PTP;
             _clockId      = detail::fdToClockId(_ptpFd.fd);
             return {};
@@ -260,7 +243,7 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             if (fd < 0) {
                 return std::unexpected(std::format("cannot open {}: {}", ppsPath, std::strerror(errno)));
             }
-            _ppsFd        = detail::ScopedFd(fd);
+            _ppsFd        = gr::blocks::common::ScopedFd(fd);
             _resolvedMode = ClockMode::HwPps;
             _clockId      = CLOCK_REALTIME; // wall clock for timestamps
             return {};

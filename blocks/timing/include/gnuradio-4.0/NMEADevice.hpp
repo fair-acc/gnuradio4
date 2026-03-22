@@ -10,7 +10,6 @@
 #include <expected>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <ranges>
 #include <span>
 #include <string>
@@ -20,6 +19,8 @@
 #include <vector>
 
 #include <gnuradio-4.0/common/DeviceRegistry.hpp>
+#include <gnuradio-4.0/common/ScopedFd.hpp>
+#include <gnuradio-4.0/common/USBDevice.hpp>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
@@ -46,25 +47,21 @@ namespace gr::timing {
 
 enum class BaudRate : std::uint32_t { Baud4800 = 4800, Baud9600 = 9600, Baud19200 = 19200, Baud38400 = 38400, Baud57600 = 57600, Baud115200 = 115200, Baud230400 = 230400 };
 
-struct UsbDeviceId {
-    std::uint16_t    vendorId;
-    std::uint16_t    productId;
-    std::string_view description;
-};
+using gr::blocks::common::USBDeviceId;
 
 inline constexpr std::array kKnownGpsReceiverIds{
-    UsbDeviceId{0x1546, 0x01a7, "u-blox 7"},
-    UsbDeviceId{0x1546, 0x01a8, "u-blox 8"},
-    UsbDeviceId{0x1546, 0x01a9, "u-blox M8"},
-    UsbDeviceId{0x1546, 0x0502, "u-blox M9/M10"},
-    UsbDeviceId{0x1546, 0x01a6, "u-blox 6"},
-    UsbDeviceId{0x067b, 0x2303, "Prolific PL2303 (common GPS bridge)"},
-    UsbDeviceId{0x0681, 0x0002, "SiRF GPS"},
-    UsbDeviceId{0x1199, 0x0120, "Sierra Wireless GPS"},
-    UsbDeviceId{0x10c4, 0xea60, "CP210x (common GPS bridge)"},
-    UsbDeviceId{0x0403, 0x6001, "FTDI FT232R (common GPS bridge)"},
-    UsbDeviceId{0x0403, 0x6015, "FTDI FT-X (common GPS bridge)"},
-    UsbDeviceId{0x1a86, 0x7523, "CH340 (common GPS bridge)"},
+    USBDeviceId{0x1546, 0x01a7, "u-blox 7"},
+    USBDeviceId{0x1546, 0x01a8, "u-blox 8"},
+    USBDeviceId{0x1546, 0x01a9, "u-blox M8"},
+    USBDeviceId{0x1546, 0x0502, "u-blox M9/M10"},
+    USBDeviceId{0x1546, 0x01a6, "u-blox 6"},
+    USBDeviceId{0x067b, 0x2303, "Prolific PL2303 (common GPS bridge)"},
+    USBDeviceId{0x0681, 0x0002, "SiRF GPS"},
+    USBDeviceId{0x1199, 0x0120, "Sierra Wireless GPS"},
+    USBDeviceId{0x10c4, 0xea60, "CP210x (common GPS bridge)"},
+    USBDeviceId{0x0403, 0x6001, "FTDI FT232R (common GPS bridge)"},
+    USBDeviceId{0x0403, 0x6015, "FTDI FT-X (common GPS bridge)"},
+    USBDeviceId{0x1a86, 0x7523, "CH340 (common GPS bridge)"},
 };
 
 struct NMEADeviceInfo {
@@ -87,31 +84,15 @@ inline std::string lookupDescription(std::uint16_t vid, std::uint16_t pid) {
     return it != kKnownGpsReceiverIds.end() ? std::string(it->description) : std::string{};
 }
 
-inline std::uint16_t parseHex16(std::string_view s) {
-    std::uint16_t result = 0;
-    std::from_chars(s.data(), s.data() + s.size(), result, 16);
-    return result;
-}
-
-inline std::string readTextFile(const std::filesystem::path& path) {
-    std::ifstream file(path);
-    std::string   content;
-    if (file && std::getline(file, content)) {
-        if (auto pos = content.find_last_not_of("\n\r "); pos != std::string::npos) {
-            content.erase(pos + 1);
-        } else {
-            content.clear();
-        }
-    }
-    return content;
-}
-
 inline bool isNMEALine(std::string_view line) { return line.size() >= 6 && line[0] == '$' && std::isalpha(static_cast<unsigned char>(line[1])) && std::isalpha(static_cast<unsigned char>(line[2])); }
 
-// ── Linux ──────────────────────────────────────────────────────────────────────
+using gr::blocks::common::detail::parseHex16;
+
 #if defined(__linux__)
 
-inline std::optional<std::filesystem::path> findUsbDeviceDir(const std::filesystem::path& ttyDeviceDir) {
+using gr::blocks::common::detail::readSysfsAttr;
+
+inline std::optional<std::filesystem::path> findUSBDeviceDir(const std::filesystem::path& ttyDeviceDir) {
     namespace fs = std::filesystem;
     std::error_code ec;
     auto            current = fs::canonical(ttyDeviceDir, ec);
@@ -141,17 +122,17 @@ inline std::optional<NMEADeviceInfo> readLinuxDeviceInfo(std::string_view ttyNam
         return std::nullopt;
     }
 
-    auto usbDir = findUsbDeviceDir(sysPath);
+    auto usbDir = findUSBDeviceDir(sysPath);
     if (!usbDir) {
         return std::nullopt;
     }
 
     NMEADeviceInfo info;
     info.devicePath     = std::format("/dev/{}", ttyName);
-    info.vendorId       = parseHex16(readTextFile(*usbDir / "idVendor"));
-    info.productId      = parseHex16(readTextFile(*usbDir / "idProduct"));
-    info.vendor         = readTextFile(*usbDir / "manufacturer");
-    info.model          = readTextFile(*usbDir / "product");
+    info.vendorId       = parseHex16(readSysfsAttr(*usbDir / "idVendor"));
+    info.productId      = parseHex16(readSysfsAttr(*usbDir / "idProduct"));
+    info.vendor         = readSysfsAttr(*usbDir / "manufacturer");
+    info.model          = readSysfsAttr(*usbDir / "product");
     info.knownGpsDevice = isKnownGpsDevice(info.vendorId, info.productId);
     return info;
 }
@@ -174,7 +155,7 @@ inline std::string findProcessHoldingDevice(std::string_view devicePath) {
         for (const auto& fdEntry : fs::directory_iterator(procEntry.path() / "fd", fdEc)) {
             auto target = fs::read_symlink(fdEntry.path(), fdEc);
             if (!fdEc && fs::canonical(target, fdEc) == deviceCanon) {
-                std::string comm = readTextFile(procEntry.path() / "comm");
+                std::string comm = readSysfsAttr(procEntry.path() / "comm");
                 return std::format("PID {} ({})", pidName, comm.empty() ? "unknown" : comm);
             }
         }
@@ -332,27 +313,6 @@ inline constexpr speed_t toTermiosSpeed(BaudRate rate) {
     }
     return B9600;
 }
-
-struct ScopedFd {
-    int fd     = -1;
-    ScopedFd() = default;
-    explicit ScopedFd(int f) : fd(f) {}
-    ~ScopedFd() {
-        if (fd >= 0) {
-            ::close(fd);
-        }
-    }
-
-    ScopedFd(const ScopedFd&)            = delete;
-    ScopedFd& operator=(const ScopedFd&) = delete;
-    ScopedFd(ScopedFd&& o) noexcept : fd(std::exchange(o.fd, -1)) {}
-    ScopedFd& operator=(ScopedFd&& o) noexcept {
-        std::swap(fd, o.fd);
-        return *this;
-    }
-
-    [[nodiscard]] int release() noexcept { return std::exchange(fd, -1); }
-};
 
 #endif // POSIX
 
@@ -527,6 +487,24 @@ EM_JS(int, js_getPortProductId, (int index), {
     }
     var info = ports[index].getInfo();
     return info.usbProductId || 0;
+});
+
+EM_ASYNC_JS(int, js_webserialWrite, (int portIndex, const uint8_t* dataPtr, int dataLen), {
+    var ws = window.__gr_webserial;
+    if (!ws || portIndex < 0 || portIndex >= ws.ports.length) return -1;
+    var entry = ws.ports[portIndex];
+    if (!entry || !entry.isOpen || !entry.port || !entry.port.writable) return -1;
+    try {
+        var data = new Uint8Array(dataLen);
+        for (var i = 0; i < dataLen; i++) data[i] = HEAPU8[dataPtr + i];
+        var writer = entry.port.writable.getWriter();
+        await writer.write(data);
+        writer.releaseLock();
+        return dataLen;
+    } catch (e) {
+        console.error('[WebSerial] write error:', e.message);
+        return -1;
+    }
 });
 // clang-format on
 
@@ -772,7 +750,7 @@ inline std::expected<std::intptr_t, std::string> openSerialPort(const std::strin
         return std::unexpected(std::format("failed to open '{}': {}", devicePath, std::strerror(err)));
     }
 
-    detail::ScopedFd guard(fd);
+    gr::blocks::common::ScopedFd guard(fd);
 
     // advisory lock — detect if another process already holds the device
     if (::flock(guard.fd, LOCK_EX | LOCK_NB) < 0) {
@@ -819,11 +797,11 @@ inline std::expected<bool, std::string> probeForNMEA(const std::string& devicePa
         return std::unexpected(fdResult.error());
     }
 
-    detail::ScopedFd        guard(static_cast<int>(fdResult.value()));
-    std::string             buffer;
-    std::array<char, 256UZ> temp{};
-    constexpr auto          kPollInterval = milliseconds{100};
-    auto                    elapsed       = milliseconds::zero();
+    gr::blocks::common::ScopedFd guard(static_cast<int>(fdResult.value()));
+    std::string                  buffer;
+    std::array<char, 256UZ>      temp{};
+    constexpr auto               kPollInterval = milliseconds{100};
+    auto                         elapsed       = milliseconds::zero();
 
     while (elapsed < timeout) {
         pollfd pfd = {guard.fd, POLLIN, 0};
@@ -1077,8 +1055,8 @@ struct SerialPort {
             return 0;
         }
 #if defined(__EMSCRIPTEN__)
-        // TODO(WASM): bridge WebSerial write path via WebSerialDevice
-        return 0;
+        int ret = js_webserialWrite(static_cast<int>(_handle), reinterpret_cast<const uint8_t*>(data.data()), static_cast<int>(data.size()));
+        return ret > 0 ? static_cast<std::size_t>(ret) : 0;
 
 #elif defined(_WIN32)
         HANDLE hSerial      = toWinHandle(_handle);
