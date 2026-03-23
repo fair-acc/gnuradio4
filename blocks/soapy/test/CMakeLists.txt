@@ -6,6 +6,7 @@ target_link_libraries(
           gnuradio-core
           gnuradio-blocklib-core
           gr-soapy
+          gr-common
           gr-testing
           ut)
 add_test(NAME qa_Soapy COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_Soapy)
