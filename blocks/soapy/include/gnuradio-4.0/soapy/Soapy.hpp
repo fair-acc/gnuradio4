@@ -4,28 +4,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-W#warnings"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcpp"
-#endif
-#include <SoapySDR/Device.hpp> // needed for existing C++ return types that are ABI stable (i.e. header-only defined), to note: not compatible with GCC15
-#include <SoapySDR/Formats.h>
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
-#include <map>
-#include <string>
-#include <vector>
-
-#include <gnuradio-4.0/meta/formatter.hpp>
-
-#include "SoapyRaiiWrapper.hpp" // using SoapySDR's C-API as intermediate interface to mitigate ABI-issues between stdlibc++ and libc++
+#include "SoapyRaiiWrapper.hpp"
 
 namespace gr::blocks::soapy {
 
@@ -77,6 +56,10 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
     gr::Size_t                      _overFlowCount = 0U;
 
     void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
+        if (!_device.get()) {
+            return;
+        }
+
         bool needReinit = false;
         if ((newSettings.contains("device") && (oldSettings.at("device") != newSettings.at("device")))                   //
             || (newSettings.contains("rx_channels") && (oldSettings.at("rx_channels") != newSettings.at("rx_channels"))) //
@@ -95,14 +78,24 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         }
 
         if (needReinit && lifecycle::isActive(this->state())) {
-            // only force re-init if running and/or paused
             reinitDevice();
         }
     }
 
     void start() { reinitDevice(); }
-    void pause() { _rxStream.deactivate(); }
-    void resume() { _rxStream.activate(); }
+
+    void pause() {
+        if (auto r = _rxStream.deactivate(); !r) {
+            this->emitErrorMessage("pause()", r.error());
+        }
+    }
+
+    void resume() {
+        if (auto r = _rxStream.activate(); !r) {
+            this->emitErrorMessage("resume()", r.error());
+        }
+    }
+
     void stop() { _device.reset(); }
 
     constexpr work::Status processBulk(OutputSpanLike auto& output)
@@ -162,25 +155,44 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
 
     void reinitDevice() {
         _rxStream.reset();
-        _device = Device(SoapySDR::Kwargs{{"driver", device.value}});
+        auto devResult = Device::make(Kwargs{{"driver", device.value}});
+        if (!devResult) {
+            this->emitErrorMessage("reinitDevice()", devResult.error());
+            this->requestStop();
+            return;
+        }
+        _device = std::move(*devResult);
 
         std::size_t nChannelMax = _device.getNumChannels(SOAPY_SDR_RX);
         if (nChannelMax < rx_channels->size() || (nPorts != std::dynamic_extent && nChannelMax != rx_channels->size())) {
-            throw gr::exception(std::format("device {} max channel mismatch: specified: {} vs max. {}", device.value, rx_channels->size(), nChannelMax));
+            this->emitErrorMessage("reinitDevice()", std::format("channel mismatch: specified {} vs max {}", rx_channels->size(), nChannelMax));
+            this->requestStop();
+            return;
         }
 
         setSampleRate();
         setAntennae();
         setCenterFrequency();
         setGains();
-        _rxStream = _device.setupStream<T, SOAPY_SDR_RX>(rx_channels.value);
-        _rxStream.activate();
+        auto streamResult = _device.setupStream<T, SOAPY_SDR_RX>(rx_channels.value);
+        if (!streamResult) {
+            this->emitErrorMessage("reinitDevice()", streamResult.error());
+            this->requestStop();
+            return;
+        }
+        _rxStream = std::move(*streamResult);
+        if (auto r = _rxStream.activate(); !r) {
+            this->emitErrorMessage("reinitDevice()", r.error());
+            this->requestStop();
+        }
     }
 
     void setSampleRate() {
         std::size_t nChannels = rx_channels->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            _device.setSampleRate(SOAPY_SDR_RX, rx_channels->at(i), static_cast<double>(sample_rate));
+            if (auto r = _device.setSampleRate(SOAPY_SDR_RX, rx_channels->at(i), static_cast<double>(sample_rate)); !r) {
+                this->emitErrorMessage("setSampleRate()", r.error());
+            }
         }
 
         std::vector<double> actualSampleRates;
@@ -189,7 +201,7 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         }
 
         if (!detail::equalWithinOnePercent(actualSampleRates, std::vector<double>(nChannels, static_cast<double>(sample_rate)))) {
-            throw gr::exception(std::format("sample rate mismatch:\nSet: {} vs. Actual: {}\n", sample_rate, gr::join(actualSampleRates, ", ")));
+            this->emitErrorMessage("setSampleRate()", std::format("mismatch: set {} vs actual {}", sample_rate, gr::join(actualSampleRates, ", ")));
         }
     }
 
@@ -197,12 +209,14 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         if (rx_antennae->empty()) {
             return;
         }
-        std::size_t nChannels  = rx_channels->size();
-        std::size_t nAntaennae = rx_antennae->size();
+        std::size_t nChannels = rx_channels->size();
+        std::size_t nAntennae = rx_antennae->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            const std::string& antenna = rx_antennae->at(std::min(i, nAntaennae - 1UZ));
+            const std::string& antenna = rx_antennae->at(std::min(i, nAntennae - 1UZ));
             if (!antenna.empty()) {
-                _device.setAntenna(SOAPY_SDR_RX, rx_channels->at(i), antenna);
+                if (auto r = _device.setAntenna(SOAPY_SDR_RX, rx_channels->at(i), antenna); !r) {
+                    this->emitErrorMessage("setAntennae()", r.error());
+                }
             }
         }
     }
@@ -211,23 +225,27 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         std::size_t nChannels  = rx_channels->size();
         std::size_t nFrequency = rx_center_frequency->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            _device.setCenterFrequency(SOAPY_SDR_RX, rx_channels->at(i), rx_center_frequency->at(std::min(i, nFrequency - 1UZ)));
+            if (auto r = _device.setCenterFrequency(SOAPY_SDR_RX, rx_channels->at(i), rx_center_frequency->at(std::min(i, nFrequency - 1UZ))); !r) {
+                this->emitErrorMessage("setCenterFrequency()", r.error());
+            }
         }
-        std::vector<double> rx_center_frequency_actual;
+        std::vector<double> actualFreqs;
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            rx_center_frequency_actual.push_back(_device.getCenterFrequency(SOAPY_SDR_RX, rx_channels->at(i)));
+            actualFreqs.push_back(_device.getCenterFrequency(SOAPY_SDR_RX, rx_channels->at(i)));
         }
 
-        if (!detail::equalWithinOnePercent(rx_center_frequency_actual, rx_center_frequency.value)) {
-            throw gr::exception(std::format("center frequency mismatch:\nSet: {} vs. Actual: {}\n", gr::join(rx_center_frequency.value, ", "), gr::join(rx_center_frequency_actual, ", ")));
+        if (!detail::equalWithinOnePercent(actualFreqs, rx_center_frequency.value)) {
+            this->emitErrorMessage("setCenterFrequency()", std::format("mismatch: set {} vs actual {}", gr::join(rx_center_frequency.value, ", "), gr::join(actualFreqs, ", ")));
         }
     }
 
     void setBandwidth() {
-        std::size_t nChannels  = rx_channels->size();
-        std::size_t nFrequency = rx_bandwdith->size();
+        std::size_t nChannels = rx_channels->size();
+        std::size_t nBw       = rx_bandwdith->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            _device.setBandwidth(SOAPY_SDR_RX, rx_channels->at(i), rx_bandwdith->at(std::min(i, nFrequency - 1UZ)));
+            if (auto r = _device.setBandwidth(SOAPY_SDR_RX, rx_channels->at(i), rx_bandwdith->at(std::min(i, nBw - 1UZ))); !r) {
+                this->emitErrorMessage("setBandwidth()", r.error());
+            }
         }
     }
 
@@ -235,35 +253,44 @@ This block supports multiple output ports and was tested against the 'rtlsdr' an
         std::size_t nChannels = rx_channels->size();
         std::size_t nGains    = rx_gains->size();
         for (std::size_t i = 0UZ; i < nChannels; i++) {
-            _device.setGain(SOAPY_SDR_RX, rx_channels->at(i), rx_gains->at(std::min(i, nGains - 1UZ)));
+            if (auto r = _device.setGain(SOAPY_SDR_RX, rx_channels->at(i), rx_gains->at(std::min(i, nGains - 1UZ))); !r) {
+                this->emitErrorMessage("setGains()", r.error());
+            }
         }
     }
+
     work::Status handleDeviceStreamingErrors(int ret, int flags) {
         if (ret >= 0) {
-            if (max_fragment_count > 0 && flags & SOAPY_SDR_MORE_FRAGMENTS) {
+            if (max_fragment_count > 0 && (flags & SOAPY_SDR_MORE_FRAGMENTS)) {
                 _fragmentCount++;
             } else {
                 _fragmentCount = 0U;
             }
             _overFlowCount = 0U;
             if (max_fragment_count > 0 && _fragmentCount > max_fragment_count) {
-                throw gr::exception(std::format("SOAPY_SDR_MORE_FRAGMENTS for Block {} Device {}: reached {} of requested max {} -> DAQ read-out/Scheduler/graph is too slow", this->name, device, _fragmentCount, max_fragment_count));
+                this->emitErrorMessage("handleDeviceStreamingErrors()", std::format("MORE_FRAGMENTS: {} of max {}", _fragmentCount, max_fragment_count));
+                this->requestStop();
+                return work::Status::ERROR;
             }
         } else {
             switch (ret) {
             case SOAPY_SDR_TIMEOUT: return work::Status::OK;
-            case SOAPY_SDR_OVERFLOW: {
+            case SOAPY_SDR_OVERFLOW:
                 _overFlowCount++;
                 if (max_overflow_count > 0 && _overFlowCount > max_overflow_count) {
-                    throw gr::exception(std::format("SOAPY_SDR_OVERFLOW for Block {} Device {}: reached {} of requested max {}", this->name, device, _overFlowCount, max_overflow_count));
+                    this->emitErrorMessage("handleDeviceStreamingErrors()", std::format("OVERFLOW: {} of max {}", _overFlowCount, max_overflow_count));
+                    this->requestStop();
+                    return work::Status::ERROR;
                 }
                 return work::Status::OK;
-            }
-            case SOAPY_SDR_CORRUPTION: {
-                throw gr::exception(std::format("SOAPY_SDR_CORRUPTION for Block {} Device {}", this->name, device));
+            case SOAPY_SDR_CORRUPTION:
+                this->emitErrorMessage("handleDeviceStreamingErrors()", "CORRUPTION");
+                this->requestStop();
                 return work::Status::ERROR;
-            }
-            default: throw gr::exception(std::format("unknown SoapySDR return type: {}", ret));
+            default:
+                this->emitErrorMessage("handleDeviceStreamingErrors()", std::format("unknown error: {}", ret));
+                this->requestStop();
+                return work::Status::ERROR;
             }
         }
         return work::Status::OK;
