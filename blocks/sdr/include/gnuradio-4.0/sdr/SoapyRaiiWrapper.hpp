@@ -31,7 +31,7 @@
 
 #include <gnuradio-4.0/meta/formatter.hpp>
 
-namespace gr::blocks::soapy {
+namespace gr::blocks::sdr::soapy {
 
 using Range      = SoapySDRRange;
 using Kwargs     = std::map<std::string, std::string>;
@@ -51,9 +51,6 @@ struct ArgInfo { // redeclare to be trivially constructable and ABI compatible
 
 namespace detail {
 
-/**
- * @brief RAII Wrapper for SoapySDRKwargs
- */
 class KwargsWrapper {
     SoapySDRKwargs _cArgs;
     bool           _valid = true;
@@ -135,29 +132,6 @@ public:
 
     return argInfoList;
 }
-
-// Mock function to simulate SoapySDRDevice_getSettingInfo
-inline std::vector<ArgInfo> getMockDeviceSettingInfo() {
-    // Simulating SoapySDRArgInfo array
-    SoapySDRArgInfo* infos = new SoapySDRArgInfo[6];
-    for (int i = 0; i < 6; ++i) {
-        infos[i].key         = strdup("key");
-        infos[i].value       = strdup("value");
-        infos[i].name        = strdup("name");
-        infos[i].description = strdup("description");
-        infos[i].units       = strdup("units");
-        infos[i].type        = SoapySDRArgInfoType::SOAPY_SDR_ARG_INFO_STRING;
-        infos[i].range       = SoapySDRRange{0.0, 10.0, 1.0};
-        infos[i].numOptions  = 3;
-        infos[i].options     = new char*[3];
-        infos[i].optionNames = new char*[3];
-        for (int j = 0; j < 3; ++j) {
-            infos[i].options[j]     = strdup("option");
-            infos[i].optionNames[j] = strdup("optionName");
-        }
-    }
-    return convertToCpp(infos, 6);
-};
 
 template<typename T>
 constexpr const char* toSoapySDRFormat() {
@@ -241,23 +215,12 @@ class Device {
     std::shared_ptr<SoapySDRDevice> _device{nullptr};
 
 public:
-    /**
-     * Enumerate a list of available devices on the system.
-     * \param args device construction key/value argument filters
-     * \return a list of argument maps, each unique to a device
-     */
     static KwargsList enumerate(const Kwargs& args = Kwargs()) {
         std::size_t     length  = 0UZ;
         SoapySDRKwargs* results = SoapySDRDevice_enumerate(detail::KwargsWrapper(args), &length);
         return detail::convertToCpp(results, length);
     }
 
-    /**
-     * Enumerate a list of available devices on the system.
-     * Markup format for args: "keyA=valA, keyB=valB".
-     * \param args a markup string of key/value argument filters
-     * \return a list of argument maps, each unique to a device
-     */
     static KwargsList enumerate(const std::string& args) {
         Kwargs            kwargs;
         std::stringstream ss(args);
@@ -273,13 +236,6 @@ public:
         return enumerate(kwargs);
     }
 
-    /**
-     * N.B. The device pointer will be internal to SoapySDR stored in a table
-     * so subsequent calls with the same arguments will produce the same device.
-     * This RAII wrapper ensures the requires matched call to unmake.
-     *
-     * \param args device construction key/value argument map
-     */
     Device() = default;
 
     Device(const Kwargs& args, std::source_location location = std::source_location::current()) {
@@ -335,10 +291,6 @@ public:
     void            reset() { _device.reset(); }
     SoapySDRDevice* get() const { return _device.get(); }
 
-    /*******************************************************************
-     * Antenna API
-     ******************************************************************/
-
     std::vector<std::string> listAvailableAntennas(int direction, std::size_t channel) const {
         std::size_t length   = 0UZ;
         char**      antennas = SoapySDRDevice_listAntennas(_device.get(), direction, channel, &length);
@@ -358,10 +310,6 @@ public:
         free(value);
         return result;
     }
-
-    /*******************************************************************
-     * Gain API
-     ******************************************************************/
 
     std::vector<std::string> listAvailableGainElements(int direction, std::size_t channel) const {
         std::size_t length = 0UZ;
@@ -395,10 +343,6 @@ public:
         return SoapySDRDevice_getGainElement(_device.get(), direction, channel, gainElement.data());
     }
 
-    /*******************************************************************
-     * Bandwidth API
-     ******************************************************************/
-
     std::vector<double> listAvailableBandwidths(int direction, std::size_t channel) const {
         std::size_t         length     = 0UZ;
         double*             bandwidths = SoapySDRDevice_listBandwidths(_device.get(), direction, channel, &length);
@@ -416,10 +360,6 @@ public:
 
     double getBandwidth(int direction, std::size_t channel) const { return SoapySDRDevice_getBandwidth(_device.get(), direction, channel); }
 
-    /*******************************************************************
-     * Frequency API
-     ******************************************************************/
-
     std::vector<Range> getOverallFrequencyRange(int direction, std::size_t channel) const {
         std::size_t    count;
         SoapySDRRange* ranges = SoapySDRDevice_getFrequencyRange(_device.get(), direction, channel, &count);
@@ -434,35 +374,6 @@ public:
         return rangeList;
     }
 
-    /**
-     * Set the center frequency of the chain.
-     *  - For RX, this specifies the down-conversion frequency.
-     *  - For TX, this specifies the up-conversion frequency.
-     *
-     * The default implementation of setFrequency() will tune the "RF"
-     * component as close as possible to the requested center frequency.
-     * Tuning inaccuracies will be compensated for with the "BB" component.
-     *
-     * The args can be used to augment the tuning algorithm.
-     *  - Use "OFFSET" to specify an "RF" tuning offset,
-     *    usually with the intention of moving the LO out of the passband.
-     *    The offset will be compensated for using the "BB" component.
-     *  - Use the name of a component for the key and a frequency in Hz
-     *    as the value (any format) to enforce a specific frequency.
-     *    The other components will be tuned with compensation
-     *    to achieve the specified overall frequency.
-     *  - Use the name of a component for the key and the value "IGNORE"
-     *    so that the tuning algorithm will avoid altering the component.
-     *  - Vendor specific implementations can also use the same args to augment
-     *    tuning in other ways such as specifying fractional vs integer N tuning.
-     *
-     * \param device a pointer to a device instance
-     * \param direction the channel direction RX or TX
-     * \param channel an available channel on the device
-     * \param frequency the center frequency in Hz
-     * \param args optional tuner arguments
-     * \page location optional source location
-     */
     std::expected<void, std::string> setCenterFrequency(int direction, std::size_t channel, double frequency, const Kwargs& args = Kwargs()) {
         if (int error = SoapySDRDevice_setFrequency(_device.get(), direction, channel, frequency, detail::KwargsWrapper(args)); error) {
             return std::unexpected(std::format("setCenterFrequency({}, {}, {}) error({}): {}", direction, channel, frequency, error, SoapySDR_errToStr(error)));
@@ -471,10 +382,6 @@ public:
     }
 
     double getCenterFrequency(int direction, std::size_t channel) const { return SoapySDRDevice_getFrequency(_device.get(), direction, channel); }
-
-    /*******************************************************************
-     * Sample Rate API
-     ******************************************************************/
 
     std::vector<double> listSampleRates(int direction, std::size_t channel) const {
         std::size_t         length = 0UZ;
@@ -492,10 +399,6 @@ public:
     }
 
     double getSampleRate(int direction, std::size_t channel) const { return SoapySDRDevice_getSampleRate(_device.get(), direction, channel); }
-
-    /*******************************************************************
-     * Time API
-     ******************************************************************/
 
     std::vector<std::string> listAvailableTimeSources() const {
         std::size_t length  = 0UZ;
@@ -526,10 +429,6 @@ public:
         return {};
     }
 
-    /**
-     * Get the master clock rate of the device.
-     * \return the clock rate in Hz
-     */
     double getMasterClockRate() const { return SoapySDRDevice_getMasterClockRate(_device.get()); }
 
     template<typename TValueType, int direction>
@@ -578,21 +477,6 @@ public:
             _stream.reset();
         }
 
-        /**
-         * Activate a stream.
-         * Call activate to prepare a stream before using read/write().
-         * The implementation control switches or stimulate data flow.
-         *
-         * The timeNs is only valid when the flags have SOAPY_SDR_HAS_TIME.
-         * The numElems count can be used to request a finite burst size.
-         * The SOAPY_SDR_END_BURST flag can signal end on the finite burst.
-         * Not all implementations will support the full range of options.
-         * In this case, the implementation returns SOAPY_SDR_NOT_SUPPORTED.
-         *
-         * \param flags optional flag indicators about the stream
-         * \param timeNs optional activation time in nanoseconds
-         * \param numElems optional element count for burst control
-         */
         std::expected<void, std::string> activate(int flags = 0, long long timeNs = 0, std::size_t numElems = 0UZ) {
             int ret = SoapySDRDevice_activateStream(_device.get(), _stream.get(), flags, timeNs, numElems);
             if (ret != 0) {
@@ -601,19 +485,6 @@ public:
             return {};
         }
 
-        /**
-         * Deactivate a stream.
-         * Call deactivate when not using using read/write().
-         * The implementation control switches or halt data flow.
-         *
-         * The timeNs is only valid when the flags have SOAPY_SDR_HAS_TIME.
-         * Not all implementations will support the full range of options.
-         * In this case, the implementation returns SOAPY_SDR_NOT_SUPPORTED.
-         *
-         * \param flags optional flag indicators about the stream
-         * \param timeNs optional deactivation time in nanoseconds
-         * \return 0 for success or error code on failure
-         */
         std::expected<void, std::string> deactivate(int flags = 0, long long timeNs = 0) {
             int ret = SoapySDRDevice_deactivateStream(_device.get(), _stream.get(), flags, timeNs);
             if (ret != 0) {
@@ -622,23 +493,6 @@ public:
             return {};
         }
 
-        /*!
-         * Read elements from a stream for reception.
-         * This is a multi-channel call, and buffs should be an array of void *,
-         * where each pointer will be filled with data from a different channel.
-         *
-         * **Client code compatibility:**
-         * The readStream() call should be well defined at all times,
-         * including prior to activation and after deactivation.
-         * When inactive, readStream() should implement the timeout
-         * specified by the caller and return SOAPY_SDR_TIMEOUT.
-         *
-         * \param ioBuffers a collection of collection<TValueType> cast (that is eventually cast to void* buffers x num chans)
-         * \param [out] flags optional flag indicators about the result
-         * \param [out] timeNs the buffer's timestamp in nanoseconds
-         * \param timeOutUs the timeout in microseconds
-         * \return the number of elements read per buffer or error code
-         */
         template<typename... TBuffers>
         requires(Direction == SOAPY_SDR_RX && sizeof...(TBuffers) > 0UZ)
         [[maybe_unused]] int readStream(int& flags, long long& timeNs, std::uint32_t timeOutUs, TBuffers&&... ioBuffers) {
@@ -655,23 +509,6 @@ public:
             }
         }
 
-        /**
-         * Read elements from a stream for reception.
-         * This is a multi-channel call, and buffs should be an array of void *,
-         * where each pointer will be filled with data from a different channel.
-         *
-         * **Client code compatibility:**
-         * The readStream() call should be well defined at all times,
-         * including prior to activation and after deactivation.
-         * When inactive, readStream() should implement the timeout
-         * specified by the caller and return SOAPY_SDR_TIMEOUT.
-         *
-         * \param [out] flags optional flag indicators about the result
-         * \param [out] timeNs the buffer's timestamp in nanoseconds
-         * \param timeOutUs the timeout in microseconds
-         * \param ioBuffers a collection of collection<TValueType> cast (that is eventually cast to void* buffers x num chans)
-         * \return the number of elements read per buffer or error code
-         */
         template<typename TCollection>
         requires(Direction == SOAPY_SDR_RX && requires(TCollection c) { c.begin()->data(); })
         [[maybe_unused]] int readStreamIntoBufferList(int& flags, long long& timeNs, long timeOutUs, TCollection&& ioBuffers) {
@@ -687,59 +524,6 @@ public:
         SoapySDRStream* get() const { return _stream.get(); }
     };
 
-    /**
-     * Initialize a stream given a list of channels and stream arguments.
-     * The implementation may change switches or power-up components.
-     * All stream API calls should be usable with the new stream object
-     * after setupStream() is complete, regardless of the activity state.
-     *
-     * The API allows any number of simultaneous TX and RX streams, but many dual-channel
-     * devices are limited to one stream in each direction, using either one or both channels.
-     * This call will return an error if an unsupported combination is requested,
-     * or if a requested channel in this direction is already in use by another stream.
-     *
-     * When multiple channels are added to a stream, they are typically expected to have
-     * the same sample rate. See SoapySDRDevice_setSampleRate().
-     *
-     * \param device a pointer to a device instance
-     * \return the opaque pointer to a stream handle.
-     * \parblock
-     *
-     * The returned stream is not required to have internal locking, and may not be used
-     * concurrently from multiple threads.
-     * \endparblock
-     *
-     * \param direction the channel direction (`SOAPY_SDR_RX` or `SOAPY_SDR_TX`)
-     * \param format A string representing the desired buffer format in read/writeStream()
-     * \parblock
-     *
-     * The first character selects the number type:
-     *   - "C" means complex
-     *   - "F" means floating point
-     *   - "S" means signed integer
-     *   - "U" means unsigned integer
-     *
-     * The type character is followed by the number of bits per number (complex is 2x this size per sample)
-     *
-     *  Example format strings:
-     *   - "CF32" -  complex float32 (8 bytes per element)
-     *   - "CS16" -  complex int16 (4 bytes per element)
-     *   - "CS12" -  complex int12 (3 bytes per element)
-     *   - "CS4" -  complex int4 (1 byte per element)
-     *   - "S32" -  int32 (4 bytes per element)
-     *   - "U8" -  uint8 (1 byte per element)
-     *
-     * \endparblock
-     * \param channels a list of channels or empty for automatic
-     * \param numChans the number of elements in the channels array
-     * \param args stream args or empty for defaults
-     * \parblock
-     *
-     *   Recommended keys to use in the args dictionary:
-     *    - "WIRE" - format of the samples between device and host
-     * \endparblock
-     * \return the stream pointer or nullptr for failure
-     */
     template<typename TValueType, int direction, typename TContainer = std::vector<std::size_t>>
     std::expected<Stream<TValueType, direction>, std::string> setupStream(const TContainer& channels = {0}) {
         if (!_device) {
@@ -756,21 +540,12 @@ public:
         return Stream<TValueType, direction>(_device, stream);
     }
 
-    /**
-     * Describe the allowed keys and values used for settings.
-     * \return a list of argument info structures
-     */
     std::vector<ArgInfo> getSettingInfo() const {
         std::size_t      length = 0UZ;
         SoapySDRArgInfo* infos  = SoapySDRDevice_getSettingInfo(_device.get(), &length);
         return detail::convertToCpp(infos, length);
     }
 
-    /**
-     * Write an arbitrary setting on the device.
-     * \param key the setting identifier
-     * \param value the setting value
-     */
     std::expected<void, std::string> writeSetting(const std::string& key, const std::string& value) {
         int ret = SoapySDRDevice_writeSetting(_device.get(), key.c_str(), value.c_str());
         if (ret != 0) {
@@ -779,21 +554,12 @@ public:
         return {};
     }
 
-    /**
-     * Read an arbitrary setting on the device.
-     * \param key the setting identifier
-     * \return the setting value
-     */
     std::string readSetting(const std::string& key) const {
         char*       value = SoapySDRDevice_readSetting(_device.get(), key.c_str());
         std::string result(value);
         free(value);
         return result;
     }
-
-    /*******************************************************************
-     * Channels API
-     ******************************************************************/
 
     std::vector<ArgInfo> getChannelSettingInfo(int direction, std::size_t channel) const {
         std::size_t      length;
@@ -842,14 +608,14 @@ public:
 static_assert(std::is_default_constructible_v<Device>, "Device not default constructible");
 static_assert(std::is_default_constructible_v<Device::Stream<float, SOAPY_SDR_RX>>, "Stream not default constructible");
 
-} // namespace gr::blocks::soapy
+} // namespace gr::blocks::sdr::soapy
 
 template<>
 struct std::formatter<SoapySDRRange> {
     constexpr auto parse(std::format_parse_context& ctx) const noexcept { return ctx.begin(); }
 
     template<typename FormatContext>
-    auto format(const gr::blocks::soapy::Range& range, FormatContext& ctx) const noexcept {
+    auto format(const gr::blocks::sdr::soapy::Range& range, FormatContext& ctx) const noexcept {
         return std::format_to(ctx.out(), "Range{{min: {}, max: {}, step: {}}}", range.minimum, range.maximum, range.step);
     }
 };
