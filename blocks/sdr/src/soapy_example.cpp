@@ -9,28 +9,28 @@
 
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/fileio/BasicFileIo.hpp>
-#include <gnuradio-4.0/soapy/Soapy.hpp>
+#include <gnuradio-4.0/sdr/SoapySource.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
 gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t maxFileSize, float sampleRate, double rxCenterFrequency, double bandwidth, double rxGains) {
     using namespace boost::ut;
     using namespace gr;
-    using namespace gr::blocks::soapy;
+    using namespace gr::blocks::sdr;
     using namespace gr::blocks::fileio;
 
     Graph flow;
     using TDataType = std::complex<float>;
 
-    auto& source = flow.emplaceBlock<SoapyBlock<TDataType, 2UZ>>({
-        {"device", "lime"},                                                         //
-        {"sample_rate", sampleRate},                                                //
-        {"rx_channels", std::vector<gr::Size_t>{0U, 1U}},                           //
-        {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}},                  //
-        {"rx_center_frequency", std::vector{rxCenterFrequency, rxCenterFrequency}}, //
-        {"rx_bandwdith", std::vector{bandwidth, bandwidth}},                        //
+    auto& source = flow.emplaceBlock<SoapySource<TDataType, 2UZ>>({
+        {"device", "lime"},                                               //
+        {"sample_rate", sampleRate},                                      //
+        {"num_channels", std::vector<gr::Size_t>{0U, 1U}},                //
+        {"rx_antennae", std::vector<std::string>{"LNAW", "LNAW"}},        //
+        {"frequency", std::vector{rxCenterFrequency, rxCenterFrequency}}, //
+        {"rx_bandwidths", std::vector{bandwidth, bandwidth}},             //
         {"rx_gains", std::vector{rxGains, rxGains}},
     });
-    std::println("set parameter:\n   sample_rate: {} SP/s\n   rx_center_frequency: {} Hz\n   rx_bandwdith: {} Hz\n   rx_gains: {} [dB]", //
+    std::println("set parameter:\n   sample_rate: {} SP/s\n   frequency: {} Hz\n   rx_bandwidths: {} Hz\n   rx_gains: {} [dB]", //
         sampleRate, rxCenterFrequency, bandwidth, rxGains);
 
     if (fileName1.contains("null")) {
@@ -46,11 +46,11 @@ gr::Graph createGraph(std::string fileName1, std::string fileName2, gr::Size_t m
     if (fileName2.contains("null")) {
         std::println("write channel1 to NullSink");
         auto& fileSink2 = flow.emplaceBlock<testing::NullSink<TDataType>>();
-        expect(flow.connect<"out#0", "in">(source, fileSink2).has_value()) << "error connecting NullSink2";
+        expect(flow.connect<"out#1", "in">(source, fileSink2).has_value()) << "error connecting NullSink2";
     } else {
         std::println("write to fileName2: {}", fileName2);
         auto& fileSink2 = flow.emplaceBlock<BasicFileSink<TDataType>>({{"file_name", fileName2}, {"mode", "multi"}, {"max_bytes_per_file", maxFileSize}});
-        expect(flow.connect<"out#0", "in">(source, fileSink2).has_value()) << "error connecting BasicFileSink2";
+        expect(flow.connect<"out#1", "in">(source, fileSink2).has_value()) << "error connecting BasicFileSink2";
     }
 
     return flow;
@@ -61,7 +61,7 @@ std::optional<std::tuple<std::string, std::string, gr::Size_t, float, double, do
 int main(int argc, char* argv[]) {
     using namespace boost::ut;
     using namespace gr;
-    using namespace gr::blocks::soapy;
+    using namespace gr::blocks::sdr;
     using namespace gr::blocks::fileio;
 
     constexpr gr::Size_t defaultMaxFileSize       = 100 * 1UZ << 20; // 100 MB
@@ -80,7 +80,7 @@ Usage:
 
   {0} <fileName1> <fileName2>
   {0} <fileName1> <fileName2> <maxFileSize [bytes]>
-  {0} <fileName1> <fileName2> <maxFileSize [bytes]> <sample_rate [SP/s]> <rx_center_frequency [Hz]> <BW [Hz]> <rx_gains [dB]>
+  {0} <fileName1> <fileName2> <maxFileSize [bytes]> <sample_rate [SP/s]> <frequency [Hz]> <BW [Hz]> <rx_gains [dB]>
 
 Default:
   If no arguments are provided, fileName1 defaults to test_ch0.bin and fileName2 defaults to test_ch1.bin
@@ -96,10 +96,14 @@ Default:
 
     gr::scheduler::Simple<> sched;
     if (auto ret = sched.exchange(std::move(flow)); !ret) {
-        throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        std::println(stderr, "failed to initialize scheduler: {}", ret.error());
+        return 1;
     }
     auto retVal = sched.runAndWait();
-    expect(retVal.has_value()) << std::format("scheduler execution error: {}", retVal.error());
+    if (!retVal) {
+        std::println(stderr, "scheduler execution error: {}", retVal.error());
+        return 1;
+    }
 
     return 0;
 }
@@ -131,7 +135,7 @@ std::optional<std::tuple<std::string, std::string, gr::Size_t, float, double, do
         fileName1 = argv[1];
         fileName2 = argv[2];
         if (!isNumber(argv[3])) {
-            std::cerr << "Error: maxFileSize must be a number." << std::endl;
+            std::println(stderr, "error: maxFileSize must be a number");
             return std::nullopt;
         }
         maxFileSize = static_cast<gr::Size_t>(std::stoull(argv[3]));
@@ -140,7 +144,7 @@ std::optional<std::tuple<std::string, std::string, gr::Size_t, float, double, do
         fileName1 = argv[1];
         fileName2 = argv[2];
         if (!isNumber(argv[3])) {
-            std::cerr << "Error: maxFileSize must be a number." << std::endl;
+            std::println(stderr, "error: maxFileSize must be a number");
             return std::nullopt;
         }
         maxFileSize       = static_cast<gr::Size_t>(std::stoull(argv[3]));
@@ -150,11 +154,11 @@ std::optional<std::tuple<std::string, std::string, gr::Size_t, float, double, do
         rxGains           = std::stod(argv[7]);
         break;
     case 1: break; // Use defaults
-    default: std::cerr << "Usage: " << argv[0] << " <baseName> | <fileName1> <fileName2> | <fileName1> <fileName2> <maxFileSize> | <fileName1> <fileName2> <maxFileSize> <sample_rate> <rx_center_frequency> <BW> <rx_gains>" << std::endl; return std::nullopt;
+    default: std::println(stderr, "Usage: {} <baseName> | <fileName1> <fileName2> | ... <sample_rate> <frequency> <BW> <rx_gains>", argv[0]); return std::nullopt;
     }
 
     if (fileName1 == fileName2) {
-        std::cerr << "Error: fileName1 and fileName2 must be different." << std::endl;
+        std::println(stderr, "error: fileName1 and fileName2 must be different");
         return std::nullopt;
     }
 
