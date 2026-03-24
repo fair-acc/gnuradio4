@@ -6,6 +6,12 @@ target_link_libraries(gr-sdr INTERFACE gnuradio-core gr-common gnuradio-algorith
 install(FILES include/gnuradio-4.0/sdr/RTL2832Device.hpp include/gnuradio-4.0/sdr/RTL2832Source.hpp
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/sdr")
 
+if(TARGET SoapySDR)
+  target_link_libraries(gr-sdr INTERFACE SoapySDR)
+  install(FILES include/gnuradio-4.0/sdr/SoapyRaiiWrapper.hpp include/gnuradio-4.0/sdr/SoapySource.hpp
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/sdr")
+endif()
+
 if(ENABLE_TESTING)
   add_subdirectory(test)
 endif()

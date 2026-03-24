@@ -46,11 +46,11 @@ Operating modes:
     gr::PortIn<std::uint8_t, Optional> clk_in;
     gr::PortOut<T>                     out;
 
-    Annotated<double, "center_frequency", Unit<"Hz">, Visible, Doc<"tuner LO frequency">>                      center_frequency = 100.0e6;
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>, Doc<"ADC sample rate">>       sample_rate      = 2.048e6f;
-    Annotated<float, "gain", Unit<"dB">, Visible, Doc<"tuner gain (manual mode)">>                             gain             = 40.f;
-    Annotated<bool, "auto_gain", Visible, Doc<"enable hardware AGC">>                                          auto_gain        = true;
-    Annotated<std::uint32_t, "device_index", Doc<"USB device index (0 = first dongle)">>                       device_index     = 0U;
+    Annotated<double, "frequency", Unit<"Hz">, Visible, Doc<"tuner LO frequency">>                             frequency    = 100.0e6;
+    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Limits<225e3f, 3.2e6f>, Doc<"ADC sample rate">>       sample_rate  = 2.048e6f;
+    Annotated<float, "gain", Unit<"dB">, Visible, Doc<"tuner gain (manual mode)">>                             gain         = 40.f;
+    Annotated<bool, "auto_gain", Visible, Doc<"enable hardware AGC">>                                          auto_gain    = true;
+    Annotated<std::uint32_t, "device_index", Doc<"USB device index (0 = first dongle)">>                       device_index = 0U;
     Annotated<std::string, "device_name", Visible, Doc<"detected USB product name (read-only)">>               device_name;
     Annotated<std::int32_t, "ppm_correction", Doc<"crystal ppm correction applied to hardware PLL">>           ppm_correction     = 0;
     Annotated<std::uint32_t, "polling_period", Unit<"ms">, Doc<"IO thread sleep between USB reads">>           polling_period     = 10U;
@@ -68,14 +68,14 @@ Operating modes:
 #endif
     Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">> ppm_tag_threshold = 0.1f;
 
-    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, center_frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
+    GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
     RTL2832Device                  _device;
     bool                           _ioThreadDone     = true;
     std::int64_t                   _clockOffsetNs    = 0;
     bool                           _clockOffsetValid = false;
     std::string                    _clockTriggerName;
-    double                         _prevCenterFreq = 0.0;
+    double                         _prevFrequency  = 0.0;
     float                          _prevSampleRate = 0.f;
     float                          _prevGain       = 0.f;
     bool                           _prevAutoGain   = false;
@@ -126,10 +126,10 @@ Operating modes:
         if (!_device.isOpen()) {
             return;
         }
-        if (newSettings.contains("center_frequency")) {
-            _device.setCenterFrequency(center_frequency);
+        if (newSettings.contains("frequency")) {
+            _device.setCenterFrequency(frequency);
             _retuneRequested = true;
-            forwardSettings.insert_or_assign(std::pmr::string("frequency"), center_frequency.value);
+            forwardSettings.insert_or_assign(std::pmr::string("frequency"), frequency.value);
             forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
         }
         if (newSettings.contains("gain") || newSettings.contains("auto_gain")) {
@@ -189,7 +189,7 @@ Operating modes:
                 }
                 device_name = _device._deviceName;
                 _device.setSampleRate(sample_rate);
-                _device.setCenterFrequency(center_frequency);
+                _device.setCenterFrequency(frequency);
                 if (auto_gain) {
                     _device.setGainMode(true);
                     _device.setAgcMode(true);
@@ -350,7 +350,7 @@ Operating modes:
         if (_rateEstimator._initialised) {
             float ppmNow = _rateEstimator.estimatedPpm();
             tag::put(tagMap, "sample_rate", static_cast<float>(_rateEstimator.estimatedRate()));
-            tag::put(tagMap, "frequency", center_frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6));
+            tag::put(tagMap, "frequency", frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6));
             tag::put(tagMap, "ppm_error", ppmNow);
             _ppmLastEmitted = ppmNow;
         }
@@ -367,9 +367,9 @@ Operating modes:
             tag::put(metaInfo, "sample_rate", static_cast<double>(sample_rate.value));
             _prevSampleRate = sample_rate.value;
         }
-        if (_firstEmission || _prevCenterFreq != center_frequency.value) {
-            tag::put(metaInfo, "center_frequency", center_frequency.value);
-            _prevCenterFreq = center_frequency.value;
+        if (_firstEmission || _prevFrequency != frequency.value) {
+            tag::put(metaInfo, "frequency", frequency.value);
+            _prevFrequency = frequency.value;
         }
         if (_firstEmission || _prevGain != gain.value) {
             tag::put(metaInfo, "gain", gain.value);
@@ -392,7 +392,7 @@ Operating modes:
         }
 
         float  correctedRate = static_cast<float>(_rateEstimator.estimatedRate());
-        double correctedFreq = center_frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6);
+        double correctedFreq = frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6);
 
         auto tagMap = out.makeTagMap();
         tag::put(tagMap, "sample_rate", correctedRate);

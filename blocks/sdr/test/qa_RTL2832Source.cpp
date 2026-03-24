@@ -154,7 +154,7 @@ void sendNMEASequence(const PtyPair& pty, int startSecond, int count, int delayM
 const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
     "RTL2832Source<uint8_t> is constructible with timing defaults"_test = [] {
         gr::blocks::sdr::RTL2832Source<std::uint8_t> block(gr::property_map{});
-        expect(eq(block.center_frequency.value, 100.0e6));
+        expect(eq(block.frequency.value, 100.0e6));
         expect(eq(block.sample_rate.value, 2.048e6f));
         expect(block.auto_gain.value);
         expect(eq(block.device_index.value, 0U));
@@ -165,7 +165,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
 
     "RTL2832Source<complex<float>> is constructible"_test = [] {
         gr::blocks::sdr::RTL2832Source<std::complex<float>> block(gr::property_map{});
-        expect(eq(block.center_frequency.value, 100.0e6));
+        expect(eq(block.frequency.value, 100.0e6));
         expect(eq(block.trigger_name.value, std::string("SDR_WALLCLOCK")));
     };
 
@@ -179,7 +179,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
     "RTL2832Source settings via emplaceBlock"_test = [] {
         Graph testGraph;
         auto& block = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({
-            {"center_frequency", 433.92e6},
+            {"frequency", 433.92e6},
             {"sample_rate", 1.024e6f},
             {"gain", 20.f},
             {"auto_gain", false},
@@ -189,7 +189,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             {"emit_timing_tags", false},
             {"emit_meta_info", false},
         });
-        expect(eq(block.center_frequency.value, 433.92e6));
+        expect(eq(block.frequency.value, 433.92e6));
         expect(eq(block.sample_rate.value, 1.024e6f));
         expect(eq(block.gain.value, 20.f));
         expect(!block.auto_gain.value);
@@ -301,7 +301,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         }
 
         constexpr float  kSampleRate      = 2.048e6f;
-        constexpr double kCenterFrequency = 100.0e6; // FM broadcast band
+        constexpr double kFrequency       = 100.0e6; // FM broadcast band
         constexpr auto   kCaptureDuration = std::chrono::seconds(2);
         constexpr auto   kExpectedSamples = static_cast<std::size_t>(kSampleRate * 2);
 
@@ -310,7 +310,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({
-            {"center_frequency", kCenterFrequency},
+            {"frequency", kFrequency},
             {"sample_rate", kSampleRate},
             {"auto_gain", true},
         });
@@ -355,12 +355,12 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         }
 
         constexpr float  kSampleRate      = 1.024e6f;
-        constexpr double kCenterFrequency = 433.92e6; // ISM band
+        constexpr double kFrequency       = 433.92e6; // ISM band
         constexpr auto   kCaptureDuration = std::chrono::seconds(3);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::uint8_t>>({
-            {"center_frequency", kCenterFrequency},
+            {"frequency", kFrequency},
             {"sample_rate", kSampleRate},
             {"gain", 30.f},
             {"auto_gain", false},
@@ -403,12 +403,12 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         }
 
         constexpr float  kSampleRate      = 2.048e6f;
-        constexpr double kCenterFrequency = 100.0e6;
+        constexpr double kFrequency       = 100.0e6;
         constexpr auto   kCaptureDuration = std::chrono::seconds(1);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({
-            {"center_frequency", kCenterFrequency}, {"sample_rate", kSampleRate}, {"auto_gain", true}, {"trigger_name", std::string("TEST_TRIGGER")}, {"tag_interval", 0.f}, // emit every chunk for testing
+            {"frequency", kFrequency}, {"sample_rate", kSampleRate}, {"auto_gain", true}, {"trigger_name", std::string("TEST_TRIGGER")}, {"tag_interval", 0.f}, // emit every chunk for testing
         });
         auto& sink = testGraph.emplaceBlock<TagSink<std::complex<float>, ProcessFunction::USE_PROCESS_BULK>>({
             {"log_samples", false},
@@ -470,7 +470,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
                 expect(metaMap->contains(std::pmr::string("clock_source")));
                 expect(metaMap->contains(std::pmr::string("device_name")));
                 expect(metaMap->contains(std::pmr::string("sample_rate")));
-                expect(metaMap->contains(std::pmr::string("center_frequency")));
+                expect(metaMap->contains(std::pmr::string("frequency")));
                 expect(metaMap->contains(std::pmr::string("gain")));
                 expect(metaMap->contains(std::pmr::string("auto_gain")));
             }
@@ -515,12 +515,12 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         }
 
         constexpr float  kSampleRate      = 2.048e6f;
-        constexpr double kCenterFrequency = 100.0e6;
+        constexpr double kFrequency       = 100.0e6;
         constexpr auto   kCaptureDuration = std::chrono::seconds(1);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({
-            {"center_frequency", kCenterFrequency},
+            {"frequency", kFrequency},
             {"sample_rate", kSampleRate},
             {"emit_timing_tags", false},
         });
@@ -555,12 +555,12 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         }
 
         constexpr float  kSampleRate      = 2.048e6f;
-        constexpr double kCenterFrequency = 100.0e6;
+        constexpr double kFrequency       = 100.0e6;
         constexpr auto   kCaptureDuration = std::chrono::seconds(1);
 
         Graph testGraph;
         auto& src  = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({
-            {"center_frequency", kCenterFrequency},
+            {"frequency", kFrequency},
             {"sample_rate", kSampleRate},
             {"emit_meta_info", false},
         });
@@ -602,7 +602,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         }
 
         constexpr float  kSampleRate      = 2.048e6f;
-        constexpr double kCenterFrequency = 100.0e6;
+        constexpr double kFrequency       = 100.0e6;
         constexpr auto   kCaptureDuration = std::chrono::milliseconds(2500);
 
         Graph testGraph;
@@ -610,7 +610,7 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             {"clock_mode", std::string("NTP")},
         });
         auto& rtl  = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({
-            {"center_frequency", kCenterFrequency},
+            {"frequency", kFrequency},
             {"sample_rate", kSampleRate},
             {"auto_gain", true},
         });
@@ -683,15 +683,15 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
             return;
         }
 
-        constexpr float  kSampleRate      = 2.048e6f;
-        constexpr double kCenterFrequency = 100.0e6;
+        constexpr float  kSampleRate = 2.048e6f;
+        constexpr double kFrequency  = 100.0e6;
 
         Graph testGraph;
         auto& gps  = testGraph.emplaceBlock<gr::timing::GpsSource>({
             {"device_path", std::string(pty->slaveName)},
         });
         auto& rtl  = testGraph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({
-            {"center_frequency", kCenterFrequency},
+            {"frequency", kFrequency},
             {"sample_rate", kSampleRate},
             {"auto_gain", true},
         });
