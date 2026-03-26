@@ -221,7 +221,7 @@ const boost::ut::suite TagTests = [] {
         for (const auto& sig : signals) {
             expect(funcGen.settings().activateContext(SettingsCtx{now, static_cast<int>(sig)}) != std::nullopt);
             const auto applyResult = funcGen.settings().applyStagedParameters();
-            expect(expect(eq(applyResult.forwardParameters.size(), 6UZ))) << std::format("incorrect number of to be forwarded settings. forward keys: {}\n", gr::join(mismatchedKey(applyResult.forwardParameters), ", "));
+            expect(expect(eq(applyResult.forwardParameters.size(), 7UZ))) << std::format("incorrect number of to be forwarded settings. forward keys: {}\n", gr::join(mismatchedKey(applyResult.forwardParameters), ", "));
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
