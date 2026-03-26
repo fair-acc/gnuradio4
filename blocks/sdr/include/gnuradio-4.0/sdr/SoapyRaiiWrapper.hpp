@@ -524,6 +524,12 @@ public:
         SoapySDRStream* get() const { return _stream.get(); }
     };
 
+    std::vector<std::string> getStreamFormats(int direction, std::size_t channel) const {
+        std::size_t length  = 0UZ;
+        char**      formats = SoapySDRDevice_getStreamFormats(_device.get(), direction, channel, &length);
+        return detail::convertToCpp(formats, length);
+    }
+
     template<typename TValueType, int direction, typename TContainer = std::vector<std::size_t>>
     std::expected<Stream<TValueType, direction>, std::string> setupStream(const TContainer& channels = {0}) {
         if (!_device) {

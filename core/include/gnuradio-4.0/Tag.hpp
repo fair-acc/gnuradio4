@@ -213,7 +213,7 @@ inline EM_CONSTEXPR_STATIC DefaultTag<"reset_default", bool, "", "reset block st
 inline EM_CONSTEXPR_STATIC DefaultTag<"store_default", bool, "", "store block settings as default"> STORE_DEFAULTS;
 inline EM_CONSTEXPR_STATIC DefaultTag<"end_of_stream", bool, "", "end of stream, receiver should change to DONE state"> END_OF_STREAM;
 
-inline constexpr std::array<std::string_view, 17> kDefaultTags = {"sample_rate", "signal_name", "num_channels", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "time", "reset_default", "store_default", "end_of_stream"};
+inline constexpr std::array<std::string_view, 19> kDefaultTags = {"sample_rate", "frequency", "signal_name", "num_channels", "signal_quantity", "signal_unit", "signal_min", "signal_max", "n_dropped_samples", "rx_overflow", "trigger_name", "trigger_time", "trigger_offset", "trigger_meta_info", "context", "time", "reset_default", "store_default", "end_of_stream"};
 
 template<typename T>
 inline void put(property_map& map, std::string_view key, T&& value) {

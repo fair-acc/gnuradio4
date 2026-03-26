@@ -130,7 +130,7 @@ Operating modes:
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        return {requestedWork, 0UZ, work::Status::OK};
+        return {requestedWork, 1UZ, work::Status::OK};
     }
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {

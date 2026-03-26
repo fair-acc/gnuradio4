@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <gnuradio-4.0/sdr/SoapyRaiiWrapper.hpp>
 
@@ -21,6 +22,7 @@ template<typename T, std::size_t nPorts = std::dynamic_extent>
 struct SoapySource : Block<SoapySource<T, nPorts>> {
     using Description = Doc<R"(SoapySDR source block for SDR hardware.
 Supports single and multi-channel RX via SoapySDR's device-agnostic API.
+Uses a dedicated IO thread to decouple USB/hardware latency from the scheduler.
 Tested with RTL-SDR and LimeSDR drivers.)">;
 
     using TSizeChecker = Limits<0U, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
@@ -43,22 +45,25 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     Annotated<std::uint32_t, "max_time_out_us", Unit<"us">, Doc<"SoapySDR polling timeout">>                         max_time_out_us    = 1'000;
     Annotated<gr::Size_t, "max_overflow_count", Doc<"max consecutive overflows before stop (0 = disable)">>          max_overflow_count = 10U;
     Annotated<gr::Size_t, "max_fragment_count", Doc<"max consecutive fragments before stop (0 = disable)">>          max_fragment_count = 100U;
+    Annotated<bool, "verbose_overflow", Doc<"log each overflow event">>                                              verbose_overflow   = false;
 
-    GR_MAKE_REFLECTABLE(SoapySource, out, device, device_parameter, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count);
+    GR_MAKE_REFLECTABLE(SoapySource, out, device, device_parameter, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count, verbose_overflow);
 
     soapy::Device                          _device{};
     soapy::Device::Stream<T, SOAPY_SDR_RX> _rxStream{};
+    bool                                   _ioThreadDone = true;
+    std::atomic<gr::Size_t>                _overFlowCount{0U};
     gr::Size_t                             _fragmentCount = 0U;
-    gr::Size_t                             _overFlowCount = 0U;
 
-    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
+    struct IoThreadGuard {
+        bool& done;
+        ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
+    };
+    IoThreadGuard _ioGuard{_ioThreadDone};
+
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         if (!_device.get()) {
             return;
-        }
-
-        bool needReinit = false;
-        if ((newSettings.contains("device") && (oldSettings.at("device") != newSettings.at("device"))) || (newSettings.contains("num_channels") && (oldSettings.at("num_channels") != newSettings.at("num_channels"))) || (newSettings.contains("sample_rate"))) {
-            needReinit = true;
         }
 
         if (newSettings.contains("rx_antennae")) {
@@ -70,70 +75,138 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         if (newSettings.contains("rx_gains")) {
             applyGain();
         }
-
-        if (needReinit && lifecycle::isActive(this->state())) {
-            reinitDevice();
-        }
     }
 
-    void start() { reinitDevice(); }
-
-    void pause() {
-        if (auto r = _rxStream.deactivate(); !r) {
-            this->emitErrorMessage("pause()", r.error());
+    void start() {
+        _overFlowCount.store(0U, std::memory_order_relaxed);
+        _fragmentCount = 0U;
+        reinitDevice();
+        if (!_device.get()) {
+            return;
         }
+        gr::atomic_ref(_ioThreadDone).store_release(false);
+        thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
     }
 
-    void resume() {
-        if (auto r = _rxStream.activate(); !r) {
-            this->emitErrorMessage("resume()", r.error());
-        }
+    void stop() {
+        gr::atomic_ref(_ioThreadDone).wait(false);
+        _rxStream.reset();
+        _device.reset();
     }
 
-    void stop() { _device.reset(); }
-
-    constexpr work::Status processBulk(OutputSpanLike auto& output)
-    requires(nPorts == 1)
-    {
-        const auto maxSamples = std::min(std::size_t{max_chunk_size.value}, output.size());
-
-        int       flags   = 0;
-        long long time_ns = 0;
-        int       ret     = _rxStream.readStream(flags, time_ns, max_time_out_us, std::span<T>(output).subspan(0, maxSamples));
-
-        auto status = handleStreamErrors(ret, flags);
-        if (ret >= 0 && status == work::Status::OK) {
-            output.publish(static_cast<std::size_t>(ret));
-            return work::Status::OK;
+    work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
+        if (!lifecycle::isActive(this->state())) {
+            return {requestedWork, 0UZ, work::Status::DONE};
         }
-        output.publish(0UZ);
-        return status;
+        if (this->disconnect_on_done && this->hasNoDownStreamConnectedChildren()) {
+            this->requestStop();
+            return {requestedWork, 0UZ, work::Status::DONE};
+        }
+        return {requestedWork, 1UZ, work::Status::OK};
     }
 
-    template<OutputSpanLike TOutputBuffer>
-    constexpr work::Status processBulk(std::span<TOutputBuffer>& outputs)
-    requires(nPorts > 1)
-    {
-        auto maxSamples = std::min(static_cast<std::uint32_t>(outputs[0].size()), max_chunk_size.value);
+    void ioReadLoop() {
+        thread_pool::thread::setThreadName(std::format("soapy:{}", this->name.value));
 
-        int       flags   = 0;
-        int       ret     = SOAPY_SDR_TIMEOUT;
-        long long time_ns = 0;
-        {
-            std::vector<std::span<T>> output(num_channels);
-            for (std::size_t i = 0UZ; i < static_cast<std::size_t>(num_channels); ++i) {
-                output[i] = std::span<T>(outputs[i]).subspan(0, maxSamples);
+        constexpr std::size_t kReadSize = 512UZ * 16UZ;
+        std::size_t           nCh       = static_cast<std::size_t>(num_channels.value);
+
+        if constexpr (nPorts == 1U) {
+            std::vector<T> readBuf(kReadSize);
+            auto&          outWriter = out.streamWriter();
+
+            while (lifecycle::isActive(this->state())) {
+                this->applyChangedSettings();
+
+                int       flags   = 0;
+                long long time_ns = 0;
+                int       ret     = _rxStream.readStream(flags, time_ns, max_time_out_us, std::span<T>(readBuf));
+
+                if (ret == SOAPY_SDR_TIMEOUT) {
+                    continue;
+                }
+                if (ret < 0) {
+                    if (!handleStreamError(ret)) {
+                        break;
+                    }
+                    continue;
+                }
+                if (ret == 0) {
+                    continue;
+                }
+
+                handleStreamFlags(flags);
+                auto nSamples = static_cast<std::size_t>(ret);
+
+                auto span = outWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(nSamples);
+                if (span.empty()) {
+                    continue;
+                }
+                std::memcpy(span.data(), readBuf.data(), nSamples * sizeof(T));
+                span.publish(nSamples);
+
+                this->progress->incrementAndGet();
+                this->progress->notify_all();
             }
-            ret = _rxStream.readStreamIntoBufferList(flags, time_ns, static_cast<long int>(max_time_out_us), output);
+        } else {
+            std::vector<std::vector<T>> readBufs(nCh, std::vector<T>(kReadSize));
+            // cache per-channel writer references
+            using WriterType = std::remove_reference_t<decltype(out[0].streamWriter())>;
+            std::vector<std::reference_wrapper<WriterType>> outWriters;
+            for (std::size_t ch = 0UZ; ch < nCh && ch < out.size(); ++ch) {
+                outWriters.push_back(std::ref(out[ch].streamWriter()));
+            }
+
+            while (lifecycle::isActive(this->state())) {
+                this->applyChangedSettings();
+
+                int       flags   = 0;
+                long long time_ns = 0;
+
+                std::vector<std::span<T>> spans;
+                spans.reserve(nCh);
+                for (auto& buf : readBufs) {
+                    spans.push_back(std::span<T>(buf));
+                }
+                int ret = _rxStream.readStreamIntoBufferList(flags, time_ns, static_cast<long>(max_time_out_us.value), spans);
+
+                if (ret == SOAPY_SDR_TIMEOUT) {
+                    continue;
+                }
+                if (ret < 0) {
+                    if (!handleStreamError(ret)) {
+                        break;
+                    }
+                    continue;
+                }
+                if (ret == 0) {
+                    continue;
+                }
+
+                handleStreamFlags(flags);
+                auto nSamples = static_cast<std::size_t>(ret);
+
+                bool allAvailable = std::ranges::all_of(outWriters, [nSamples](auto& w) { return w.get().available() >= nSamples; });
+                if (!allAvailable) {
+                    continue; // backpressure on any channel — retry entire read
+                }
+                for (std::size_t ch = 0UZ; ch < outWriters.size(); ++ch) {
+                    auto span = outWriters[ch].get().template tryReserve<SpanReleasePolicy::ProcessNone>(nSamples);
+                    std::memcpy(span.data(), readBufs[ch].data(), nSamples * sizeof(T));
+                    span.publish(nSamples);
+                }
+
+                this->progress->incrementAndGet();
+                this->progress->notify_all();
+            }
         }
 
-        auto status = handleStreamErrors(ret, flags);
-        if (ret >= 0 && status == work::Status::OK) {
-            std::ranges::for_each(outputs, [ret](auto& output) { output.publish(static_cast<std::size_t>(ret)); });
-            return work::Status::OK;
+        if (auto r = _rxStream.deactivate(); !r) {
+            this->emitErrorMessage("ioReadLoop()", r.error());
         }
-        std::ranges::for_each(outputs, [](auto& output) { output.publish(0UZ); });
-        return status;
+
+        gr::atomic_ref(_ioThreadDone).store_release(true);
+        gr::atomic_ref(_ioThreadDone).notify_all();
     }
 
     void reinitDevice() {
@@ -160,11 +233,19 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         applyBandwidth();
         applyGain();
 
+        auto        supportedFormats = _device.getStreamFormats(SOAPY_SDR_RX, 0);
+        const char* requestedFormat  = soapy::detail::toSoapySDRFormat<T>();
+        if (!supportedFormats.empty() && std::ranges::find(supportedFormats, std::string(requestedFormat)) == supportedFormats.end()) {
+            this->emitErrorMessage("reinitDevice()", std::format("format '{}' not supported by device (available: {})", requestedFormat, gr::join(supportedFormats, ", ")));
+            this->requestStop();
+            return;
+        }
+
         std::vector<gr::Size_t> channelIndices(num_channels);
         std::iota(channelIndices.begin(), channelIndices.end(), gr::Size_t{0});
         auto streamResult = _device.setupStream<T, SOAPY_SDR_RX>(channelIndices);
         if (!streamResult) {
-            this->emitErrorMessage("reinitDevice()", streamResult.error());
+            this->emitErrorMessage("reinitDevice()", std::format("{} (requested: {})", streamResult.error(), requestedFormat));
             this->requestStop();
             return;
         }
@@ -238,41 +319,64 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         }
     }
 
-    work::Status handleStreamErrors(int ret, int flags) {
-        if (ret >= 0) {
-            if (max_fragment_count > 0 && (flags & SOAPY_SDR_MORE_FRAGMENTS)) {
-                _fragmentCount++;
-            } else {
-                _fragmentCount = 0U;
-            }
-            _overFlowCount = 0U;
-            if (max_fragment_count > 0 && _fragmentCount > max_fragment_count) {
-                this->emitErrorMessage("handleStreamErrors()", std::format("MORE_FRAGMENTS: {} of max {}", _fragmentCount, max_fragment_count));
-                this->requestStop();
-                return work::Status::ERROR;
-            }
+    void emitOverflowTag() {
+        if constexpr (nPorts == 1U) {
+            auto tagMap = out.makeTagMap();
+            tag::put(tagMap, "rx_overflow", true);
+            out.publishTag(std::move(tagMap), 0UZ);
         } else {
-            switch (ret) {
-            case SOAPY_SDR_TIMEOUT: return work::Status::OK;
-            case SOAPY_SDR_OVERFLOW:
-                _overFlowCount++;
-                if (max_overflow_count > 0 && _overFlowCount > max_overflow_count) {
-                    this->emitErrorMessage("handleStreamErrors()", std::format("OVERFLOW: {} of max {}", _overFlowCount, max_overflow_count));
-                    this->requestStop();
-                    return work::Status::ERROR;
-                }
-                return work::Status::OK;
-            case SOAPY_SDR_CORRUPTION:
-                this->emitErrorMessage("handleStreamErrors()", "CORRUPTION");
-                this->requestStop();
-                return work::Status::ERROR;
-            default:
-                this->emitErrorMessage("handleStreamErrors()", std::format("unknown error: {}", ret));
-                this->requestStop();
-                return work::Status::ERROR;
+            for (std::size_t ch = 0UZ; ch < out.size(); ++ch) {
+                auto tagMap = out[ch].makeTagMap();
+                tag::put(tagMap, "rx_overflow", true);
+                out[ch].publishTag(std::move(tagMap), 0UZ);
             }
         }
-        return work::Status::OK;
+    }
+
+    bool handleStreamError(int ret) {
+        switch (ret) {
+        case SOAPY_SDR_OVERFLOW: {
+            auto count = _overFlowCount.fetch_add(1U, std::memory_order_relaxed) + 1U;
+            if (verbose_overflow) {
+                std::println(stderr, "[SoapySource] OVERFLOW #{}", count);
+            }
+            emitOverflowTag();
+            if (max_overflow_count > 0 && count >= max_overflow_count) {
+                this->emitErrorMessage("ioReadLoop()", std::format("OVERFLOW: {} of max {}", count, max_overflow_count));
+                this->requestStop();
+                return false;
+            }
+            if (auto r = _rxStream.deactivate(); !r) {
+                this->emitErrorMessage("ioReadLoop()", r.error());
+            }
+            if (auto r = _rxStream.activate(); !r) {
+                this->emitErrorMessage("ioReadLoop()", r.error());
+                this->requestStop();
+                return false;
+            }
+            return true;
+        }
+        case SOAPY_SDR_CORRUPTION:
+            this->emitErrorMessage("ioReadLoop()", "CORRUPTION");
+            this->requestStop();
+            return false;
+        default:
+            this->emitErrorMessage("ioReadLoop()", std::format("stream error: {}", ret));
+            this->requestStop();
+            return false;
+        }
+    }
+
+    void handleStreamFlags(int flags) {
+        if (max_fragment_count > 0 && (flags & SOAPY_SDR_MORE_FRAGMENTS)) {
+            _fragmentCount++;
+            if (_fragmentCount > max_fragment_count) {
+                this->emitErrorMessage("ioReadLoop()", std::format("MORE_FRAGMENTS: {} of max {}", _fragmentCount, max_fragment_count));
+                this->requestStop();
+            }
+        } else {
+            _fragmentCount = 0U;
+        }
     }
 
     template<typename U>
