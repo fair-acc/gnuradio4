@@ -51,7 +51,7 @@ inline void resetRtlSdrUsbDevices() {
         }
     }
     if (!devices.empty()) {
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 #endif
 }
@@ -261,6 +261,7 @@ const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
             };
 
             std::println("Basic API test - deviceDriver '{}' -- DONE", deviceDriver);
+            device.reset();
         } //
         | availableDeviceDriver;
 };
@@ -311,17 +312,15 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
 
         constexpr gr::Size_t nSamples = 1e5;
 
-        auto& source  = flow.emplaceBlock<SoapySource<ValueType, 1UZ>>({
+        auto& source = flow.emplaceBlock<SoapySource<ValueType, 1UZ>>({
             //
             {"device", "rtlsdr"},              //
             {"sample_rate", float(1e6)},       //
             {"frequency", std::vector{107e6}}, //
             {"rx_gains", std::vector{20.}},
         });
-        auto& monitor = flow.emplaceBlock<Copy<ValueType>>();
-        auto& sink    = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
-        expect(flow.connect<"out", "in">(source, monitor).has_value());
-        expect(flow.connect<"out", "in">(monitor, sink).has_value());
+        auto& sink   = flow.emplaceBlock<CountingSink<ValueType>>({{"n_samples_max", nSamples}});
+        expect(flow.connect<"out", "in">(source, sink).has_value());
 
         scheduler sched;
         if (auto ret = sched.exchange(std::move(flow)); !ret) {
@@ -336,7 +335,8 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         if (watchdogThread.joinable()) {
             watchdogThread.join();
         }
-        expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
+
+        expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
         expect(eq(sink.count, nSamples));
 
         std::println("N.B. 'basic RTL soapy data generation test' test finished");
@@ -379,8 +379,9 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         if (watchdogThread.joinable()) {
             watchdogThread.join();
         }
-        expect(!externalInterventionNeeded->load(std::memory_order_relaxed));
+
         expect(eq(sink1.count, nSamples));
+        expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
         expect(eq(sink2.count, nSamples));
 
         std::println("N.B. 'basic LimeSDR soapy data generation test' test finished");

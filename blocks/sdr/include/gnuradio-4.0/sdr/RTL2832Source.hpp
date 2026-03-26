@@ -119,6 +119,10 @@ Operating modes:
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
+        if (this->disconnect_on_done && this->hasNoDownStreamConnectedChildren()) {
+            this->requestStop();
+            return {requestedWork, 0UZ, work::Status::DONE};
+        }
         return {requestedWork, 1UZ, work::Status::OK};
     }
 
