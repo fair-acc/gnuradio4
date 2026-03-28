@@ -50,7 +50,7 @@
 <div>
     <button onclick="(async function(){
         try {
-            await Module.ccall('rtl2832RequestPermission', null, [], [], {async: true});
+            await Module.ccall('gr_requestAllPermissions', null, [], [], {async: true});
             var ret = await Module.ccall('rtl2832Connect', 'number', [], [], {async: true});
             if (ret < 0) { Module.print('[RTL2832] failed to open device'); return; }
             Module._startRTL2832Capture();

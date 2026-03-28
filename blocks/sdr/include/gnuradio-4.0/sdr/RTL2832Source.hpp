@@ -28,8 +28,6 @@ inline void convertToComplex(const std::uint8_t* raw, std::complex<float>* out, 
     }
 }
 
-inline std::uint64_t wallClockNs() { return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); }
-
 } // namespace detail
 
 GR_REGISTER_BLOCK("gr::blocks::sdr::RTL2832Source", gr::blocks::sdr::RTL2832Source, [T], [ uint8_t, std::complex<float> ])
@@ -91,6 +89,11 @@ Operating modes:
 
     struct IoThreadGuard {
         bool& done;
+        explicit IoThreadGuard(bool& d) : done(d) {}
+        IoThreadGuard(const IoThreadGuard&)            = delete;
+        IoThreadGuard& operator=(const IoThreadGuard&) = delete;
+        IoThreadGuard(IoThreadGuard&&)                 = delete;
+        IoThreadGuard& operator=(IoThreadGuard&&)      = delete;
         ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
     };
     IoThreadGuard _ioGuard{_ioThreadDone};
@@ -149,10 +152,10 @@ Operating modes:
         if (newSettings.contains("ppm_correction")) {
             _device.setFreqCorrection(ppm_correction);
         }
-        if (newSettings.contains("dc_blocker_cutoff_hz") || newSettings.contains("dc_blocker_enabled")) {
+        if (newSettings.contains("dc_blocker_cutoff") || newSettings.contains("dc_blocker_enabled")) {
             rebuildDcFilter();
         }
-        if (newSettings.contains("ppm_estimator_cutoff_hz")) {
+        if (newSettings.contains("ppm_estimator_cutoff")) {
             _rateEstimator.filter_cutoff_hz = ppm_estimator_cutoff;
             _rateEstimator.rebuildFilter();
         }
@@ -224,7 +227,7 @@ Operating modes:
                 continue;
             }
 
-            auto        tWallNs        = detail::wallClockNs();
+            auto        tWallNs        = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
             std::size_t nOutputSamples = std::is_same_v<T, std::uint8_t> ? *result : *result / 2UZ;
             double      tObsSeconds    = static_cast<double>(tWallNs) * 1e-9;
             _rateEstimator.update(tObsSeconds, nOutputSamples);
@@ -246,22 +249,27 @@ Operating modes:
             return;
         }
 
+        static constexpr std::string_view kTriggerTimeKey = tag::TRIGGER_TIME.shortKey();
+        static constexpr std::string_view kMetaInfoKey    = tag::TRIGGER_META_INFO.shortKey();
+        static constexpr std::string_view kTriggerNameKey = tag::TRIGGER_NAME.shortKey();
+        static constexpr std::string_view kLocalTimeKey   = "local_time";
+
         auto        tagData       = clkTagRdr.get(clkTagRdr.available());
         std::size_t nTagsConsumed = 0;
 
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
 
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_TIME.shortKey())); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(kTriggerTimeKey); it != clkTag.map.end()) {
                 if (auto* timePtr = it->second.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
 
                     std::int64_t localNs      = 0;
                     bool         hasLocalTime = false;
 
-                    if (auto metaIt = clkTag.map.find(std::pmr::string(tag::TRIGGER_META_INFO.shortKey())); metaIt != clkTag.map.end()) {
+                    if (auto metaIt = clkTag.map.find(kMetaInfoKey); metaIt != clkTag.map.end()) {
                         if (auto* metaMap = metaIt->second.template get_if<property_map>()) {
-                            if (auto ltIt = metaMap->find(std::pmr::string("local_time")); ltIt != metaMap->end()) {
+                            if (auto ltIt = metaMap->find(kLocalTimeKey); ltIt != metaMap->end()) {
                                 if (auto* ltPtr = ltIt->second.template get_if<std::uint64_t>()) {
                                     localNs      = static_cast<std::int64_t>(*ltPtr);
                                     hasLocalTime = true;
@@ -270,12 +278,13 @@ Operating modes:
                         }
                     }
 
-                    _clockOffsetNs    = hasLocalTime ? (triggerUtcNs - localNs) : (triggerUtcNs - static_cast<std::int64_t>(detail::wallClockNs()));
+                    auto nowNs        = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+                    _clockOffsetNs    = hasLocalTime ? (triggerUtcNs - localNs) : (triggerUtcNs - static_cast<std::int64_t>(nowNs));
                     _clockOffsetValid = true;
                 }
             }
 
-            if (auto it = clkTag.map.find(std::pmr::string(tag::TRIGGER_NAME.shortKey())); it != clkTag.map.end()) {
+            if (auto it = clkTag.map.find(kTriggerNameKey); it != clkTag.map.end()) {
                 if (auto* namePtr = it->second.template get_if<std::pmr::string>()) {
                     if (!namePtr->empty()) {
                         _clockTriggerName = std::string(*namePtr);
@@ -312,6 +321,8 @@ Operating modes:
             if (intervalNs == 0UL || _lastTagTimeNs == 0UL || (tWallNs - _lastTagTimeNs) >= intervalNs) {
                 emitTimingTag(nOutputSamples, tWallNs);
                 _lastTagTimeNs = tWallNs;
+            } else {
+                emitPpmTagIfNeeded();
             }
         }
 
@@ -387,6 +398,9 @@ Operating modes:
             return;
         }
         float ppmNow = _rateEstimator.estimatedPpm();
+        if (std::abs(ppmNow) > 1000.f) {
+            return; // estimator still in warm-up — real crystal drift is < ~100 ppm
+        }
         if (std::abs(ppmNow - _ppmLastEmitted) < ppm_tag_threshold) {
             return;
         }

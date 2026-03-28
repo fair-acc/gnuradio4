@@ -48,6 +48,8 @@ struct DeviceRegistry {
         return registry;
     }
 
+    // all add() calls must complete before any concurrent find()/isGranted() access
+    // (enforced by static-init ordering: AutoRegister runs before main())
     void add(std::shared_ptr<DeviceBase> device) {
         for (const auto& d : _devices) {
             if (d->id() == device->id()) {
