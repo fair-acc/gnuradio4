@@ -42,6 +42,7 @@
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
 #include <emscripten/threading.h>
+#include <gnuradio-4.0/common/DeviceRegistry.hpp>
 #endif
 
 namespace gr::blocks::sdr {
@@ -282,17 +283,13 @@ inline SpscByteQueue& iqQueue() {
     return q;
 }
 
-// signals that the main-thread button handler has opened the WebUSB device (user gesture required)
-inline std::atomic<bool>& wasmDeviceReady() {
-    static std::atomic<bool> ready{false};
-    return ready;
-}
-
 } // namespace detail
 
 // clang-format off
 
 // thin WebUSB shims -- only raw USB primitives, no protocol logic
+
+EM_JS(int, js_rtl_check_usb_api_available, (), { return !!(navigator && navigator.usb) ? 1 : 0; });
 
 EM_ASYNC_JS(int, js_rtl_request_device, (), {
     if (!navigator || !navigator.usb) return -1;
@@ -441,6 +438,43 @@ EMSCRIPTEN_KEEPALIVE inline int            rtl2832_getQueueCapacity() { return s
 EMSCRIPTEN_KEEPALIVE inline int            rtl2832_getQueueMask() { return static_cast<int>(detail::SpscByteQueue::kMask); }
 } // extern "C"
 
+struct WebUSBDevice : gr::blocks::common::DeviceBase {
+    std::atomic<bool> _apiAvailable{false};
+    std::atomic<int>  _grantedCount{0};
+    std::string       _lastError;
+
+    [[nodiscard]] std::string_view id() const noexcept override { return "usb"; }
+    [[nodiscard]] std::string_view displayName() const noexcept override { return "RTL-SDR (WebUSB)"; }
+
+    void init() override { _apiAvailable.store(js_rtl_check_usb_api_available() != 0, std::memory_order_release); }
+
+    [[nodiscard]] bool isApiAvailable() const noexcept override { return _apiAvailable.load(std::memory_order_acquire); }
+    [[nodiscard]] int  grantedCount() const noexcept override { return _grantedCount.load(std::memory_order_acquire); }
+
+    void requestPermission() override { js_rtl_request_device(); }
+
+    [[nodiscard]] std::expected<int, std::string> connect(int portIndex, int /*unused*/) override {
+        int ret = js_rtl_open_device(portIndex);
+        if (ret < 0) {
+            _lastError = "WebUSB open failed";
+            return std::unexpected(_lastError);
+        }
+        _lastError.clear();
+        return ret;
+    }
+
+    void disconnect(int /*handle*/) override {
+        js_rtl_close_device();
+        _grantedCount.store(0, std::memory_order_release);
+    }
+
+    void deviceReady() { _grantedCount.store(1, std::memory_order_release); }
+
+    [[nodiscard]] std::string lastError() const override { return _lastError; }
+};
+
+inline gr::blocks::common::AutoRegister autoRegWebUSB(std::make_shared<WebUSBDevice>());
+
 #endif // __EMSCRIPTEN__
 
 // device abstraction
@@ -513,7 +547,7 @@ struct RTL2832Device {
         std::println("[RTL2832] opened: {}", _deviceName);
         return {};
 #else
-        if (!detail::wasmDeviceReady().load(std::memory_order_acquire)) {
+        if (!gr::blocks::common::DeviceRegistry::instance().isGranted("usb")) {
             return std::unexpected("device not yet authorized -- click Connect");
         }
         _open.store(true, std::memory_order_release);

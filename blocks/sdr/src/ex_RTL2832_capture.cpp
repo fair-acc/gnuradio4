@@ -17,6 +17,7 @@
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
+#include <gnuradio-4.0/common/DeviceRegistry.hpp>
 #endif
 
 using namespace gr;
@@ -108,7 +109,7 @@ std::atomic<bool> graphRunning{false};
 
 extern "C" {
 
-EMSCRIPTEN_KEEPALIVE void rtl2832RequestPermission() { gr::blocks::sdr::js_rtl_request_device(); }
+EMSCRIPTEN_KEEPALIVE void gr_requestAllPermissions() { gr::blocks::common::DeviceRegistry::instance().requestAllPermissions(); }
 
 EMSCRIPTEN_KEEPALIVE int rtl2832Connect() {
     // runs on main thread — Asyncify works here
@@ -131,8 +132,9 @@ EMSCRIPTEN_KEEPALIVE int rtl2832Connect() {
     mainDevice.setAgcMode(true);
     mainDevice.resetBuffer();
     mainDevice.startBulkRead();
-    // signal IO thread that device is ready
-    gr::blocks::sdr::detail::wasmDeviceReady().store(true, std::memory_order_release);
+    if (auto* dev = gr::blocks::common::DeviceRegistry::instance().findAs<gr::blocks::sdr::WebUSBDevice>("usb")) {
+        dev->deviceReady();
+    }
     std::println("[RTL2832] device ready — IO thread can start reading");
     return 0;
 }
@@ -155,6 +157,7 @@ EMSCRIPTEN_KEEPALIVE void stopRTL2832Capture() { stopRequested.store(true, std::
 } // extern "C"
 
 int main() {
+    gr::blocks::common::DeviceRegistry::instance().init();
     std::println("[RTL2832] WASM loaded. Click 'Connect RTL2832' to grant USB permission.");
     return 0;
 }

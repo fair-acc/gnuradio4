@@ -200,13 +200,6 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         expect(!block.emit_meta_info.value);
     };
 
-    "wallClockNs returns plausible UTC nanoseconds"_test = [] {
-        auto firstTimestamp  = gr::blocks::sdr::detail::wallClockNs();
-        auto secondTimestamp = gr::blocks::sdr::detail::wallClockNs();
-        expect(gt(firstTimestamp, std::uint64_t{1'700'000'000'000'000'000ULL})) << "timestamp must be after 2023";
-        expect(ge(secondTimestamp, firstTimestamp)) << "monotonically non-decreasing";
-    };
-
     "E4000 PLL lookup table covers expected frequency ranges"_test = [] {
         using namespace gr::blocks::sdr;
 

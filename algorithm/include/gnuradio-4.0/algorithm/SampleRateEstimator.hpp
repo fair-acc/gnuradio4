@@ -62,9 +62,8 @@ struct SampleRateEstimator {
         }
 
         if (!_hasPrev) {
-            _tPrev       = tObs;
-            _hasPrev     = true;
-            _initialised = true;
+            _tPrev   = tObs;
+            _hasPrev = true;
             return;
         }
 
@@ -77,6 +76,7 @@ struct SampleRateEstimator {
 
         double measuredPeriod = dt / static_cast<double>(nSamples);
         _periodEst            = _lpFilter.processOne(measuredPeriod);
+        _initialised          = true;
     }
 
     [[nodiscard]] double estimatedRate() const noexcept {
