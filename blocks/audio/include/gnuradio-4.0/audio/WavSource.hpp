@@ -368,6 +368,12 @@ depending on the block type. Publishes sample rate, channel count, and signal na
             }
         }
 
+        if (_headerParsed && _dataBytesRemaining == 0U && _partialSampleSize > 0U) {
+            fail("WavSource::processBulk()", gr::Error("WAV data ended mid-sample"));
+            outSpan.publish(0U);
+            return gr::work::Status::ERROR;
+        }
+
         if (published > 0U && _formatTagPending) {
             publishFormatTag(outSpan, 0U);
             _formatTagPending = false;
@@ -380,11 +386,6 @@ depending on the block type. Publishes sample rate, channel count, and signal na
         }
 
         if (_headerParsed && _dataBytesRemaining == 0U) {
-            if (_partialSampleSize > 0U) {
-                fail("WavSource::processBulk()", gr::Error("WAV data ended mid-sample"));
-                outSpan.publish(0U);
-                return gr::work::Status::ERROR;
-            }
             return gr::work::Status::DONE;
         }
 
