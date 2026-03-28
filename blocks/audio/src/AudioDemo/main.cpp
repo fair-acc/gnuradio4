@@ -254,6 +254,8 @@ EMSCRIPTEN_KEEPALIVE void gr_requestAllPermissions() { gr::blocks::common::Devic
 
 EMSCRIPTEN_KEEPALIVE int gr_isAudioGranted() { return gr::blocks::common::DeviceRegistry::instance().isGranted("audio") ? 1 : 0; }
 
+EMSCRIPTEN_KEEPALIVE void gr_resumeAudioContexts() { gr::audio::detail::gr_webaudio_resume_all_contexts(); }
+
 } // extern "C"
 
 int main() {

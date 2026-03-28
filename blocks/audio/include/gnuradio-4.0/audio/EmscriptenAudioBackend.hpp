@@ -199,6 +199,23 @@ inline void startCreateWorkletNodeOnMainThread(void* opaque) {
     }
     state->runtime.sampleRate = static_cast<std::uint32_t>(std::max(1, emscripten_audio_context_sample_rate(state->runtime.audioContext)));
 
+    // resume immediately on main thread — catches any user gesture window still open
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
+#endif
+    EM_ASM(
+        {
+            var ctx = emscriptenGetAudioObject($0);
+            if (ctx && ctx.resume) {
+                ctx.resume();
+            }
+        },
+        state->runtime.audioContext);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
     state->runtime.workletStack = memalign(16, kAudioWorkletStackSize);
     if (state->runtime.workletStack == nullptr) {
         finishPendingInit(state, InitStatus::failed, "WebAudio AudioWorklet stack allocation failed");
@@ -557,6 +574,43 @@ inline void gr_webaudio_register_context(std::uintptr_t opaque, EMSCRIPTEN_WEBAU
     runOnMainThread(&registerContextOnMainThread, &task);
 }
 
+// clang-format off
+inline void gr_webaudio_resume_all_contexts() {
+    runOnMainThread([](void*) {
+        EM_ASM({
+            // resume from __grAudioWeb registry
+            if (globalThis.__grAudioWeb) {
+                const devices = Object.values(globalThis.__grAudioWeb.devices);
+                for (let i = 0; i < devices.length; ++i) {
+                    const state = devices[i];
+                    if (state && !state.destroyed && state.context && state.context.state !== 'running' && state.context.resume) {
+                        state.context.resume().then(function() {
+                            console.log('[Audio] AudioContext resumed via registry, state:', state.context.state);
+                        }).catch(function(e) {
+                            console.error('[Audio] resume failed:', e);
+                        });
+                    }
+                }
+            }
+            // also try to resume any AudioContext created by Emscripten
+            if (typeof emscriptenGetAudioObject === 'function') {
+                // iterate over known audio objects (Emscripten tracks them internally)
+                for (let handle = 1; handle < 100; ++handle) {
+                    try {
+                        var obj = emscriptenGetAudioObject(handle);
+                        if (obj && obj.resume && obj.state !== 'running') {
+                            obj.resume().then(function() {
+                                console.log('[Audio] AudioContext handle', handle, 'resumed, state:', obj.state);
+                            }).catch(function() {});
+                        }
+                    } catch(e) {}
+                }
+            }
+        });
+    }, nullptr);
+}
+// clang-format on
+
 inline int gr_webaudio_capture_attach(std::uintptr_t opaque, EMSCRIPTEN_AUDIO_WORKLET_NODE_T workletNode, int channelCount, const char* deviceId = nullptr) {
     MainThreadJsTask task{
         .opaque       = opaque,
@@ -665,6 +719,9 @@ struct EmscriptenAudioWorkletSinkBackend {
 
     void requestStop() { _state.stopRequested.store(true, std::memory_order_release); }
 
+    [[nodiscard]] bool   isStreamActive() const { return _runtime.audioContext != 0; }
+    [[nodiscard]] double softwareLatency() const { return 0.0; }
+
     template<typename InputSpan>
     [[nodiscard]] std::size_t writeFromInput(const InputSpan& inSpan, std::size_t channelCount) {
         return _state.writeFromInput(inSpan, channelCount);
@@ -686,10 +743,14 @@ private:
         const std::size_t channelCount = static_cast<std::size_t>(firstOutput.numberOfChannels);
         const std::size_t sampleCount  = frameCount * channelCount;
 
-        if (self == nullptr || self->_channelCount == 0U || self->_channelCount != channelCount) {
+        if (self == nullptr || self->_channelCount == 0U) {
             std::fill_n(firstOutput.data, static_cast<std::ptrdiff_t>(sampleCount), 0.0f);
         } else {
-            self->_state.readPlanarFloat(firstOutput.data, frameCount, channelCount);
+            self->_state.readPlanarFloat(firstOutput.data, frameCount, self->_channelCount);
+            for (std::size_t ch = self->_channelCount; ch < channelCount; ++ch) {
+                const std::size_t srcCh = ch % self->_channelCount;
+                std::copy_n(firstOutput.data + static_cast<std::ptrdiff_t>(srcCh * frameCount), static_cast<std::ptrdiff_t>(frameCount), firstOutput.data + static_cast<std::ptrdiff_t>(ch * frameCount));
+            }
         }
 
         for (int outputIndex = 1; outputIndex < numOutputs; ++outputIndex) {
@@ -771,6 +832,9 @@ struct EmscriptenAudioWorkletSourceBackend {
     }
 
     void requestStop() { _state.stopRequested.store(true, std::memory_order_release); }
+
+    [[nodiscard]] bool   isStreamActive() const { return _runtime.audioContext != 0; }
+    [[nodiscard]] double softwareLatency() const { return 0.0; }
 
     [[nodiscard]] std::size_t readToOutput(std::span<T> output, std::size_t channelCount) { return _state.readToOutput(output, channelCount); }
 

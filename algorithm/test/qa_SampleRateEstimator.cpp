@@ -155,4 +155,109 @@ const boost::ut::suite<"SampleRateEstimator"> tests = [] {
     };
 };
 
+const boost::ut::suite<"Drift Compensator">  driftCompensatorTests = [] {
+    using namespace boost::ut;
+    using gr::algorithm::DriftCompensator;
+
+    "insert when source is fast"_test = [] {
+        DriftCompensator<float> comp;
+        std::array<float, 10>  buf{1.f, 2.f, 3.f, 4.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+
+        std::size_t n = 4U;
+        for (int i = 0; i < 300; ++i) {
+            n = comp.compensateSource(std::span(buf), 4U, 48000.0 * 1.0001, 48000.0, 1U);
+        }
+        expect(ge(n, 4UZ));
+    };
+
+    "drop when source is slow"_test = [] {
+        DriftCompensator<float> comp;
+        std::array<float, 10>  buf{1.f, 2.f, 3.f, 4.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+
+        std::size_t n = 4U;
+        for (int i = 0; i < 300; ++i) {
+            n = comp.compensateSource(std::span(buf), 4U, 48000.0 * 0.9999, 48000.0, 1U);
+        }
+        expect(le(n, 4UZ));
+    };
+
+    "interpolation on insert produces midpoint"_test = [] {
+        DriftCompensator<float> comp;
+        std::array<float, 10>  buf{};
+        comp.fractionalAccumulator = 0.99;
+        buf[0]                     = 1.0f;
+        buf[1]                     = 3.0f;
+
+        auto n = comp.compensateSource(std::span(buf), 2U, 48000.0 * 1.01, 48000.0, 1U);
+        if (n == 3U) {
+            expect(approx(buf[2], 2.0f, 0.5f)) << "inserted sample should be midpoint";
+        }
+    };
+
+    "drop blends splice boundary"_test = [] {
+        DriftCompensator<float> comp;
+        std::array<float, 10>  buf{0.f, 10.f, 20.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+        comp.fractionalAccumulator = -0.99;
+
+        auto n = comp.compensateSource(std::span(buf), 3U, 48000.0 * 0.99, 48000.0, 1U);
+        if (n == 2U) {
+            // last frame (20) dropped, splice point buf[1] blended: lerp(10, 20, 0.5) = 15
+            expect(approx(buf[1], 15.0f, 1.0f)) << "splice boundary should be blended";
+        }
+    };
+
+    "stereo insert preserves interleaving"_test = [] {
+        DriftCompensator<float> comp;
+        std::array<float, 20>  buf{};
+        buf[0] = 1.f;
+        buf[1] = 2.f;
+        buf[2] = 3.f;
+        buf[3] = 4.f;
+
+        comp.fractionalAccumulator = 0.99;
+        auto n = comp.compensateSource(std::span(buf), 4U, 48000.0 * 1.01, 48000.0, 2U);
+        if (n == 6U) {
+            expect(approx(buf[4], 2.0f, 0.5f)) << "inserted L";
+            expect(approx(buf[5], 3.0f, 0.5f)) << "inserted R";
+        }
+    };
+
+    "accumulator clamps after gap"_test = [] {
+        DriftCompensator<float> comp;
+        std::array<float, 10>  buf{1.f, 2.f, 3.f, 4.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+
+        // drive accumulator way past normal bounds
+        for (int i = 0; i < 10000; ++i) {
+            comp.compensateSource(std::span(buf), 4U, 48000.0 * 1.001, 48000.0, 1U);
+        }
+        expect(le(comp.fractionalAccumulator, DriftCompensator<float>::kMaxAccumulator)) << "should be clamped";
+        expect(ge(comp.fractionalAccumulator, -DriftCompensator<float>::kMaxAccumulator)) << "should be clamped";
+    };
+
+    "sink insert and drop"_test = [] {
+        DriftCompensator<float> comp;
+        std::array<float, 10>  input{1.f, 2.f, 3.f, 4.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+        std::array<float, 12>  adjusted{};
+
+        comp.fractionalAccumulator = 0.99;
+        auto n = comp.compensateSink(std::span<const float>(input.data(), 4U), std::span(adjusted), 4U, 48000.0 * 0.99, 48000.0, 1U);
+        expect(ge(n, 4UZ)) << "sink should insert";
+
+        comp.fractionalAccumulator = -0.99;
+        n = comp.compensateSink(std::span<const float>(input.data(), 4U), std::span(adjusted), 4U, 48000.0 * 1.01, 48000.0, 1U);
+        expect(le(n, 4UZ)) << "sink should drop";
+    };
+
+    "works with int16_t"_test = [] {
+        DriftCompensator<std::int16_t> comp;
+        std::array<std::int16_t, 10>   buf{1000, 2000, 3000, 4000, 0, 0, 0, 0, 0, 0};
+
+        comp.fractionalAccumulator = 0.99;
+        auto n = comp.compensateSource(std::span(buf), 4U, 48000.0 * 1.01, 48000.0, 1U);
+        if (n == 5U) {
+            expect(gt(buf[4], std::int16_t{0})) << "inserted int16 sample should be positive";
+        }
+    };
+};
+
 int main() { return 0; }

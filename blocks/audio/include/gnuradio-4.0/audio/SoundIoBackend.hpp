@@ -205,6 +205,9 @@ struct SoundIoSinkBackend {
 
     void requestStop() { _state.stopRequested.store(true, std::memory_order_release); }
 
+    [[nodiscard]] bool   isStreamActive() const { return _outstream != nullptr; }
+    [[nodiscard]] double softwareLatency() const { return _outstream != nullptr ? _outstream->software_latency : 0.0; }
+
     template<typename InputSpan>
     [[nodiscard]] std::size_t writeFromInput(const InputSpan& inSpan, std::size_t channelCount) {
         return _state.writeFromInput(inSpan, channelCount);
@@ -413,6 +416,9 @@ struct SoundIoSourceBackend {
     }
 
     void requestStop() { _state.stopRequested.store(true, std::memory_order_release); }
+
+    [[nodiscard]] bool   isStreamActive() const { return _instream != nullptr; }
+    [[nodiscard]] double softwareLatency() const { return _instream != nullptr ? _instream->software_latency : 0.0; }
 
     [[nodiscard]] std::size_t readToOutput(std::span<T> output, std::size_t channelCount) { return _state.readToOutput(output, channelCount); }
 

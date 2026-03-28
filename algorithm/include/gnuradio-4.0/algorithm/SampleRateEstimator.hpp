@@ -1,7 +1,10 @@
 #ifndef GNURADIO_SAMPLE_RATE_ESTIMATOR_HPP
 #define GNURADIO_SAMPLE_RATE_ESTIMATOR_HPP
 
+#include <algorithm>
 #include <cstddef>
+#include <span>
+#include <type_traits>
 
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 
@@ -100,6 +103,102 @@ struct SampleRateEstimator {
             auto   coeffs = filter::iir::designFilter<double>(filter::Type::LOWPASS, filter::FilterParameters{.order = filter_order, .fLow = cutoff, .fs = _updateRate}, filter::iir::Design::BUTTERWORTH);
             _lpFilter     = filter::Filter<double>(coeffs);
             _lpFilter.reset(_periodEst);
+        }
+    }
+};
+
+/**
+ * @brief Compensates small clock drift between two domains by inserting or dropping
+ * individual frames with linear interpolation at the splice boundary.
+ *
+ * Tracks a fractional sample accumulator. Each call adds the drift error for the
+ * current chunk. When the accumulator crosses ±1.0, one frame is inserted (interpolated
+ * midpoint of the two boundary frames) or dropped (with lerp blend at the splice point).
+ * The accumulator is clamped to prevent burst corrections after silence gaps.
+ */
+template<typename T>
+    requires std::is_arithmetic_v<T>
+struct DriftCompensator {
+    static constexpr double kMaxAccumulator = 2.0;
+
+    double fractionalAccumulator{0.0};
+
+    void reset() { fractionalAccumulator = 0.0; }
+
+    std::size_t compensateSource(std::span<T> output, std::size_t nProduced, double estimatedRate, double nominalRate, std::size_t channelCount) {
+        if (estimatedRate <= 0.0 || nominalRate <= 0.0 || nProduced == 0U || channelCount == 0U) {
+            return nProduced;
+        }
+
+        const double ratio = estimatedRate / nominalRate;
+        fractionalAccumulator += static_cast<double>(nProduced / channelCount) * (ratio - 1.0);
+        fractionalAccumulator = std::clamp(fractionalAccumulator, -kMaxAccumulator, kMaxAccumulator);
+
+        if (fractionalAccumulator >= 1.0 && nProduced + channelCount <= output.size()) {
+            const std::size_t insertAt = nProduced;
+            for (std::size_t ch = 0U; ch < channelCount; ++ch) {
+                const T prev          = nProduced >= 2U * channelCount ? output[nProduced - 2U * channelCount + ch] : T{};
+                const T curr          = nProduced >= channelCount ? output[nProduced - channelCount + ch] : T{};
+                output[insertAt + ch] = linearInterpolate(prev, curr, 0.5f);
+            }
+            fractionalAccumulator -= 1.0;
+            return nProduced + channelCount;
+        }
+
+        if (fractionalAccumulator <= -1.0 && nProduced >= 2U * channelCount) {
+            for (std::size_t ch = 0U; ch < channelCount; ++ch) {
+                const T kept    = output[nProduced - 2U * channelCount + ch];
+                const T dropped = output[nProduced - channelCount + ch];
+                output[nProduced - 2U * channelCount + ch] = linearInterpolate(kept, dropped, 0.5f);
+            }
+            fractionalAccumulator += 1.0;
+            return nProduced - channelCount;
+        }
+
+        return nProduced;
+    }
+
+    std::size_t compensateSink(std::span<const T> input, std::span<T> adjusted, std::size_t nAvailable, double estimatedRate, double nominalRate, std::size_t channelCount) {
+        if (estimatedRate <= 0.0 || nominalRate <= 0.0 || nAvailable == 0U || channelCount == 0U) {
+            std::copy_n(input.begin(), static_cast<std::ptrdiff_t>(nAvailable), adjusted.begin());
+            return nAvailable;
+        }
+
+        const double ratio = nominalRate / estimatedRate;
+        fractionalAccumulator += static_cast<double>(nAvailable / channelCount) * (ratio - 1.0);
+        fractionalAccumulator = std::clamp(fractionalAccumulator, -kMaxAccumulator, kMaxAccumulator);
+
+        std::copy_n(input.begin(), static_cast<std::ptrdiff_t>(nAvailable), adjusted.begin());
+
+        if (fractionalAccumulator >= 1.0 && nAvailable + channelCount <= adjusted.size()) {
+            for (std::size_t ch = 0U; ch < channelCount; ++ch) {
+                const T prev              = nAvailable >= 2U * channelCount ? adjusted[nAvailable - 2U * channelCount + ch] : T{};
+                const T curr              = nAvailable >= channelCount ? adjusted[nAvailable - channelCount + ch] : T{};
+                adjusted[nAvailable + ch] = linearInterpolate(prev, curr, 0.5f);
+            }
+            fractionalAccumulator -= 1.0;
+            return nAvailable + channelCount;
+        }
+
+        if (fractionalAccumulator <= -1.0 && nAvailable >= 2U * channelCount) {
+            for (std::size_t ch = 0U; ch < channelCount; ++ch) {
+                const T kept    = adjusted[nAvailable - 2U * channelCount + ch];
+                const T dropped = adjusted[nAvailable - channelCount + ch];
+                adjusted[nAvailable - 2U * channelCount + ch] = linearInterpolate(kept, dropped, 0.5f);
+            }
+            fractionalAccumulator += 1.0;
+            return nAvailable - channelCount;
+        }
+
+        return nAvailable;
+    }
+
+private:
+    [[nodiscard]] static T linearInterpolate(T a, T b, float t) {
+        if constexpr (std::is_floating_point_v<T>) {
+            return static_cast<T>(static_cast<double>(a) + (static_cast<double>(b) - static_cast<double>(a)) * static_cast<double>(t));
+        } else {
+            return static_cast<T>(static_cast<float>(a) + (static_cast<float>(b) - static_cast<float>(a)) * t);
         }
     }
 };

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
@@ -41,6 +42,8 @@ struct AudioDeviceInfo {
     std::string name;
     std::string id;
 };
+
+[[nodiscard]] inline std::uint64_t wallClockNs() { return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()); }
 
 [[nodiscard]] inline bool caseInsensitiveContains(std::string_view haystack, std::string_view needle) {
     if (needle.empty() || needle.size() > haystack.size()) {
@@ -95,10 +98,12 @@ struct AudioStateBase {
     using SampleWriter = decltype(std::declval<SampleBuffer&>().new_writer());
     using SampleReader = decltype(std::declval<SampleBuffer&>().new_reader());
 
-    std::atomic<bool> stopRequested{false};
-    SampleBuffer      buffer{1U};
-    SampleWriter      writer{buffer.new_writer()};
-    SampleReader      reader{buffer.new_reader()};
+    std::atomic<bool>        stopRequested{false};
+    std::atomic<std::size_t> overflowCount{0U};
+    std::atomic<std::size_t> underrunCount{0U};
+    SampleBuffer             buffer{1U};
+    SampleWriter             writer{buffer.new_writer()};
+    SampleReader             reader{buffer.new_reader()};
 
     [[nodiscard]] static std::size_t bufferCapacitySamples(std::size_t numChannels, std::size_t bufferFrames) { return std::max<std::size_t>(1U, numChannels) * std::max<std::size_t>(1U, bufferFrames); }
 
@@ -106,6 +111,8 @@ struct AudioStateBase {
         buffer = SampleBuffer(std::max<std::size_t>(1U, capacitySamples));
         writer = buffer.new_writer();
         reader = buffer.new_reader();
+        overflowCount.store(0U, std::memory_order_relaxed);
+        underrunCount.store(0U, std::memory_order_relaxed);
     }
 };
 
@@ -188,6 +195,9 @@ struct AudioSinkState : AudioStateBase<T> {
             std::ignore = read.consume(nRead);
         }
 
+        if (readFrames < frameCount) {
+            this->underrunCount.fetch_add(1U, std::memory_order_relaxed);
+        }
         for (std::size_t channel = 0U; channel < alignedChannelCount; ++channel) {
             std::fill_n(output + static_cast<std::ptrdiff_t>(channel * frameCount + readFrames), static_cast<std::ptrdiff_t>(frameCount - readFrames), 0.0f);
         }
@@ -220,8 +230,12 @@ struct AudioSourceState : AudioStateBase<T> {
 
         const std::size_t alignedOutputChannels = std::max<std::size_t>(1U, outputChannels);
         const std::size_t alignedAvailable      = wholeFrameSamples(writer.available(), alignedOutputChannels);
-        const std::size_t nSamplesToWrite       = std::min(frameCount * alignedOutputChannels, alignedAvailable);
+        const std::size_t requested             = frameCount * alignedOutputChannels;
+        const std::size_t nSamplesToWrite       = std::min(requested, alignedAvailable);
         if (nSamplesToWrite == 0U) {
+            if (requested > 0U) {
+                this->overflowCount.fetch_add(1U, std::memory_order_relaxed);
+            }
             return 0U;
         }
 
