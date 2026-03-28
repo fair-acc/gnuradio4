@@ -122,7 +122,15 @@ Operating modes:
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        return {requestedWork, 1UZ, work::Status::OK};
+        if (this->disconnect_on_done && this->hasNoDownStreamConnectedChildren()) {
+            this->requestStop();
+            return {requestedWork, 0UZ, work::Status::DONE};
+        }
+        if (gr::atomic_ref(_ioThreadDone).load_acquire()) {
+            this->requestStop();
+            return {requestedWork, 0UZ, work::Status::DONE};
+        }
+        return {requestedWork, 0UZ, work::Status::OK};
     }
 
     void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& forwardSettings) {
@@ -234,6 +242,11 @@ Operating modes:
 
             drainClockInput(clkReader, clkTagRdr);
             publishSamples(outWriter, readBuf.data(), *result, tWallNs);
+        }
+
+        this->publishEoS();
+        if (clk_in.isConnected()) {
+            std::ignore = clk_in.disconnect();
         }
 
         gr::atomic_ref(_ioThreadDone).store_release(true);
