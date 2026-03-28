@@ -1,6 +1,9 @@
 # /usr/bin/python3
 # serve.py
+import argparse
+from functools import partial
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from pathlib import Path
 
 
 def make_test_string() -> str:
@@ -43,5 +46,14 @@ class CORSHTTPRequestHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print("Serving on http://localhost:8080")
-    HTTPServer(("localhost", 8080), CORSHTTPRequestHandler).serve_forever()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dir", default=".", help="Directory to serve")
+    args = parser.parse_args()
+
+    serve_dir = Path(args.dir)
+    if not serve_dir.is_dir():
+        parser.error(f"--dir does not exist or is not a directory: {args.dir}")
+
+    print(f"Serving {serve_dir} on http://localhost:8080")
+    handler = partial(CORSHTTPRequestHandler, directory=str(serve_dir))
+    HTTPServer(("localhost", 8080), handler).serve_forever()
