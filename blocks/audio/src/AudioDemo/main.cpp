@@ -6,6 +6,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIoEmscriptenHelper.hpp>
 #include <gnuradio-4.0/audio/AudioBlocks.hpp>
+#include <gnuradio-4.0/common/DeviceRegistry.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 #include <array>
@@ -137,15 +138,15 @@ void runGraph(Scheduler& scheduler, gr::Graph&& graph) {
     }
 }
 
-void runPlaybackGraph(std::string uri) {
+void runPlaybackGraph(std::string uri, std::string outputDevice) {
     try {
-        std::println("[AudioTest] play request: {}", uri);
+        std::println("[AudioTest] play request: {} (output: '{}')", uri, outputDevice);
         std::println("[AudioTest] main runtime thread: {}", fileio::isMainThread());
 
         gr::Graph graph;
         auto&     source  = graph.emplaceBlock<gr::audio::WavSource<float>>({{"uri", std::move(uri)}});
         auto&     monitor = graph.emplaceBlock<audio_test_app_detail::LevelMonitor>();
-        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>();
+        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}});
 
         monitor.linePrefix = "[AudioTest] play ";
         graph.connect<"out", "in">(source, monitor).value();
@@ -160,15 +161,15 @@ void runPlaybackGraph(std::string uri) {
     std::println("[AudioTest] playback worker finished");
 }
 
-void runMicGraph(std::shared_ptr<Scheduler> scheduler) {
+void runMicGraph(std::shared_ptr<Scheduler> scheduler, std::string inputDevice, std::string outputDevice) {
     try {
-        std::println("[AudioTest] starting microphone loopback");
+        std::println("[AudioTest] starting microphone loopback (input: '{}', output: '{}')", inputDevice, outputDevice);
         std::println("[AudioTest] main runtime thread: {}", fileio::isMainThread());
 
         gr::Graph graph;
-        auto&     source  = graph.emplaceBlock<gr::audio::AudioSource<float>>();
+        auto&     source  = graph.emplaceBlock<gr::audio::AudioSource<float>>({{"device", std::move(inputDevice)}});
         auto&     monitor = graph.emplaceBlock<audio_test_app_detail::LevelMonitor>();
-        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>();
+        auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}});
 
         monitor.linePrefix = "[AudioTest] mic ";
         graph.connect<"out", "in">(source, monitor).value();
@@ -186,9 +187,10 @@ void runMicGraph(std::shared_ptr<Scheduler> scheduler) {
 
 extern "C" {
 
-EMSCRIPTEN_KEEPALIVE int play_audio_from_uri(const char* uri) {
+EMSCRIPTEN_KEEPALIVE int play_audio_from_uri(const char* uri, const char* outputDevice) {
     try {
-        const std::string uriValue = uri != nullptr ? uri : "";
+        const std::string uriValue    = uri != nullptr ? uri : "";
+        const std::string outputValue = outputDevice != nullptr ? outputDevice : "";
         if (uriValue.empty()) {
             std::println("[AudioTest] empty URI");
             return 0;
@@ -200,7 +202,7 @@ EMSCRIPTEN_KEEPALIVE int play_audio_from_uri(const char* uri) {
             return 0;
         }
 
-        gr::thread_pool::Manager::defaultIoPool()->execute([uriValue]() mutable { runPlaybackGraph(std::move(uriValue)); });
+        gr::thread_pool::Manager::defaultIoPool()->execute([uriValue, outputValue]() mutable { runPlaybackGraph(std::move(uriValue), std::move(outputValue)); });
         return 1;
     } catch (const std::exception& ex) {
         std::println("[AudioTest] exception: {}", ex.what());
@@ -211,7 +213,7 @@ EMSCRIPTEN_KEEPALIVE int play_audio_from_uri(const char* uri) {
 
 EMSCRIPTEN_KEEPALIVE int audio_playback_is_running() { return playbackRunning.load(std::memory_order_acquire) ? 1 : 0; }
 
-EMSCRIPTEN_KEEPALIVE int start_mic() {
+EMSCRIPTEN_KEEPALIVE int start_mic(const char* inputDevice, const char* outputDevice) {
     bool expected = false;
     if (!micRunning.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         std::println("[AudioTest] microphone loopback already in progress");
@@ -219,9 +221,11 @@ EMSCRIPTEN_KEEPALIVE int start_mic() {
     }
 
     try {
-        auto scheduler = std::make_shared<Scheduler>();
-        micScheduler   = scheduler;
-        gr::thread_pool::Manager::defaultIoPool()->execute([scheduler] { runMicGraph(scheduler); });
+        const std::string inputValue  = inputDevice != nullptr ? inputDevice : "";
+        const std::string outputValue = outputDevice != nullptr ? outputDevice : "";
+        auto              scheduler   = std::make_shared<Scheduler>();
+        micScheduler                  = scheduler;
+        gr::thread_pool::Manager::defaultIoPool()->execute([scheduler, inputValue, outputValue]() mutable { runMicGraph(scheduler, std::move(inputValue), std::move(outputValue)); });
         return 1;
     } catch (const std::exception& ex) {
         std::println("[AudioTest] microphone loopback exception: {}", ex.what());
@@ -246,9 +250,14 @@ EMSCRIPTEN_KEEPALIVE int mic_is_running() {
     return running ? 1 : 0;
 }
 
+EMSCRIPTEN_KEEPALIVE void gr_requestAllPermissions() { gr::blocks::common::DeviceRegistry::instance().requestAllPermissions(); }
+
+EMSCRIPTEN_KEEPALIVE int gr_isAudioGranted() { return gr::blocks::common::DeviceRegistry::instance().isGranted("audio") ? 1 : 0; }
+
 } // extern "C"
 
 int main() {
-    std::println("[AudioTest] WASM ready. Click one of the audio buttons to start playback or microphone loopback.");
+    gr::blocks::common::DeviceRegistry::instance().init();
+    std::println("[AudioTest] WASM ready. Click 'Grant permissions' to allow microphone access.");
     return 0;
 }

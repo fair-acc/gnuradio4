@@ -1,5 +1,5 @@
 add_library(gr-audio INTERFACE)
-target_link_libraries(gr-audio INTERFACE gnuradio-core gnuradio-algorithm)
+target_link_libraries(gr-audio INTERFACE gnuradio-core gnuradio-algorithm gr-common)
 if(NOT EMSCRIPTEN)
   target_link_libraries(gr-audio INTERFACE gr-libsoundio)
 endif()
@@ -22,8 +22,7 @@ gr_add_block_library(
   HEADERS
   include/gnuradio-4.0/audio/AudioBackends.hpp
   include/gnuradio-4.0/audio/AudioBlocks.hpp
-  include/gnuradio-4.0/audio/EmscriptenAudioWorkletHelper.hpp
-  include/gnuradio-4.0/audio/EmscriptenAudioWorkletBackend.hpp
+        include/gnuradio-4.0/audio/EmscriptenAudioBackend.hpp
   include/gnuradio-4.0/audio/SoundIoBackend.hpp
   include/gnuradio-4.0/audio/WavSource.hpp
   LINK_LIBRARIES
@@ -33,6 +32,6 @@ if(TARGET GrAudioBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()
 
-if(ENABLE_TESTING AND EMSCRIPTEN)
-  add_subdirectory(test/AudioTestApp)
+if(EMSCRIPTEN)
+  add_subdirectory(src/AudioDemo)
 endif()

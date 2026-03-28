@@ -5,7 +5,7 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/audio/AudioBackends.hpp>
-#include <gnuradio-4.0/audio/EmscriptenAudioWorkletBackend.hpp>
+#include <gnuradio-4.0/audio/EmscriptenAudioBackend.hpp>
 #include <gnuradio-4.0/audio/SoundIoBackend.hpp>
 #include <gnuradio-4.0/audio/WavSource.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>

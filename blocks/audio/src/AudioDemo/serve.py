@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-import argparse
+"""HTTP server with COOP/COEP headers, /tone.wav generator, and /proxy endpoint."""
+
+import http.server
 import io
 import math
+import os
 import socketserver
+import sys
 import wave
-from functools import partial
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-from pathlib import Path
-from urllib.error import URLError, HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
@@ -37,11 +38,10 @@ def make_tone_wav_bytes() -> bytes:
         return buffer.getvalue()
 
 
-class AudioHTTPRequestHandler(SimpleHTTPRequestHandler):
+class AudioDemoHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
-        self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def do_GET(self):
@@ -57,22 +57,17 @@ class AudioHTTPRequestHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/proxy":
-            # Proxy remote WAV URLs through localhost so browser playback tests are not blocked by CORS.
             params = parse_qs(query, keep_blank_values=False)
             target = params.get("url", [""])[0]
             if not target:
                 self.send_error(400, "missing url query parameter")
                 return
-
             parsed = urlparse(target)
             if parsed.scheme not in ("http", "https"):
                 self.send_error(400, "only http and https URLs are supported")
                 return
-
             try:
-                request = Request(
-                    target, headers={"User-Agent": "AudioSinkTestApp/1.0"}
-                )
+                request = Request(target, headers={"User-Agent": "AudioDemo/1.0"})
                 with urlopen(request, timeout=20) as upstream:
                     body = upstream.read()
                     content_type = upstream.headers.get(
@@ -95,16 +90,11 @@ class AudioHTTPRequestHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", default=".", help="Directory to serve")
-    args = parser.parse_args()
-
-    serve_dir = Path(args.dir)
-    if not serve_dir.is_dir():
-        parser.error(f"--dir does not exist or is not a directory: {args.dir}")
-
-    print(f"Serving {serve_dir} on http://localhost:8080")
-    print("Generated WAV endpoint: http://localhost:8080/tone.wav")
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+    directory = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    os.chdir(directory)
     socketserver.TCPServer.allow_reuse_address = True
-    handler = partial(AudioHTTPRequestHandler, directory=str(serve_dir))
-    HTTPServer(("localhost", 8080), handler).serve_forever()
+    with socketserver.TCPServer(("", port), AudioDemoHandler) as httpd:
+        print(f"Serving {directory} on http://localhost:{port} (COOP/COEP enabled)")
+        print(f"Generated WAV endpoint: http://localhost:{port}/tone.wav")
+        httpd.serve_forever()
