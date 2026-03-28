@@ -45,10 +45,11 @@ publishes them downstream as interleaved float or signed 16-bit PCM.)"">;
     using BackendImpl = detail::SoundIoSourceBackend<T>;
 #endif
 
-    BackendImpl _backendImpl{};
-    bool        _failed{false};
-    bool        _formatTagPending{true};
-    std::mutex  _deviceMutex;
+    BackendImpl               _backendImpl{};
+    bool                      _failed{false};
+    bool                      _formatTagPending{true};
+    detail::AudioDeviceConfig _activeConfig{};
+    std::mutex                _deviceMutex;
 
     void start() {
         std::lock_guard deviceLock(_deviceMutex);
@@ -59,15 +60,17 @@ publishes them downstream as interleaved float or signed 16-bit PCM.)"">;
 
     void stop() { shutdownDevice(); }
 
-    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        const bool sampleRateChanged   = newSettings.contains("sample_rate") && oldSettings.at("sample_rate") != newSettings.at("sample_rate");
-        const bool channelCountChanged = newSettings.contains("num_channels") && oldSettings.at("num_channels") != newSettings.at("num_channels");
-        const bool bufferFramesChanged = newSettings.contains("buffer_frames") && oldSettings.at("buffer_frames") != newSettings.at("buffer_frames");
-        if (sampleRateChanged || channelCountChanged || bufferFramesChanged) {
-            std::lock_guard deviceLock(_deviceMutex);
-            if (auto result = initialiseBackendUnlocked(); !result) {
-                failUnlocked("AudioSource::settingsChanged()", result.error());
-            }
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+        if (_activeConfig.sampleRate == 0U) {
+            return; // not yet started — start() will initialise with the final settings
+        }
+        const detail::AudioDeviceConfig requested{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value};
+        if (requested.sampleRate == _activeConfig.sampleRate && requested.numChannels == _activeConfig.numChannels && requested.bufferFrames == _activeConfig.bufferFrames) {
+            return;
+        }
+        std::lock_guard deviceLock(_deviceMutex);
+        if (auto result = initialiseBackendUnlocked(); !result) {
+            failUnlocked("AudioSource::settingsChanged()", result.error());
         }
     }
 
@@ -131,6 +134,7 @@ private:
 
         sample_rate       = static_cast<float>(result->sampleRate);
         num_channels      = static_cast<gr::Size_t>(result->numChannels);
+        _activeConfig     = {.sampleRate = result->sampleRate, .numChannels = result->numChannels, .bufferFrames = buffer_frames.value};
         _formatTagPending = true;
         _failed           = false;
         return {};
@@ -169,9 +173,10 @@ Pair it with `WavSource` or any other block that already produces decoded PCM.)"
     using BackendImpl = detail::SoundIoSinkBackend<T>;
 #endif
 
-    BackendImpl _backendImpl{};
-    bool        _failed{false};
-    std::mutex  _deviceMutex;
+    BackendImpl               _backendImpl{};
+    bool                      _failed{false};
+    detail::AudioDeviceConfig _activeConfig{};
+    std::mutex                _deviceMutex;
 
     void start() {
         std::lock_guard deviceLock(_deviceMutex);
@@ -182,15 +187,17 @@ Pair it with `WavSource` or any other block that already produces decoded PCM.)"
 
     void stop() { shutdownDevice(); }
 
-    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        const bool sampleRateChanged   = newSettings.contains("sample_rate") && oldSettings.at("sample_rate") != newSettings.at("sample_rate");
-        const bool channelCountChanged = newSettings.contains("num_channels") && oldSettings.at("num_channels") != newSettings.at("num_channels");
-        const bool bufferFramesChanged = newSettings.contains("buffer_frames") && oldSettings.at("buffer_frames") != newSettings.at("buffer_frames");
-        if (sampleRateChanged || channelCountChanged || bufferFramesChanged) {
-            std::lock_guard deviceLock(_deviceMutex);
-            if (auto result = initialiseBackendUnlocked(); !result) {
-                failUnlocked("AudioSink::settingsChanged()", result.error());
-            }
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+        if (_activeConfig.sampleRate == 0U) {
+            return; // not yet started — start() will initialise with the final settings
+        }
+        const detail::AudioDeviceConfig requested{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value};
+        if (requested.sampleRate == _activeConfig.sampleRate && requested.numChannels == _activeConfig.numChannels && requested.bufferFrames == _activeConfig.bufferFrames) {
+            return;
+        }
+        std::lock_guard deviceLock(_deviceMutex);
+        if (auto result = initialiseBackendUnlocked(); !result) {
+            failUnlocked("AudioSink::settingsChanged()", result.error());
         }
     }
 
@@ -243,7 +250,8 @@ private:
         if (auto result = _backendImpl.start(config); !result) {
             return result;
         }
-        _failed = false;
+        _activeConfig = config;
+        _failed       = false;
         return {};
     }
 
