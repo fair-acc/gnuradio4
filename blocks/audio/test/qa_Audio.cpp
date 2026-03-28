@@ -337,7 +337,93 @@ const boost::ut::suite audioTests = [] {
         expect(eq(sink.sample_rate.value, source.sample_rate.value)) << caseName;
         expect(eq(sink.num_channels.value, source.num_channels.value)) << caseName;
     };
+
+    "available_devices is populated after start"_test = [] {
+        constexpr std::string_view caseName = "available_devices populated";
+
+        gr::Graph graph;
+        auto&     source                = graph.emplaceBlock<gr::audio::AudioSource<float>>({{"sample_rate", 22050.f}, {"num_channels", gr::Size_t(1)}, {"buffer_frames", gr::Size_t(256)}});
+        source._useDummyBackendForTests = true;
+        auto& sink                      = graph.emplaceBlock<gr::testing::TagSink<float, gr::testing::ProcessFunction::USE_PROCESS_BULK>>();
+        expect(graph.connect<"out", "in">(source, sink).has_value()) << caseName;
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value()) << caseName;
+        expect(runSchedulerFor(sched, 200ms).has_value()) << caseName;
+
+        expect(!source.available_devices.value.empty()) << caseName;
+        for (const auto& entry : source.available_devices.value) {
+            expect(entry.find('[') != std::string::npos) << "device entry should contain '[': " << entry;
+            expect(entry.find(']') != std::string::npos) << "device entry should contain ']': " << entry;
+        }
+    };
+
+    "AudioSink available_devices is populated after start"_test = [] {
+        constexpr std::string_view      caseName = "AudioSink available_devices populated";
+        const std::vector<std::int16_t> reference{0, 1000, -1000, 2000};
+        const auto                      wavBytes = makeWav(1U, 1U, 16U, 22050U, encodePcm16(reference));
+        TempFile                        file{writeTempAudioFile(wavBytes)};
+
+        gr::Graph graph;
+        auto&     source              = graph.emplaceBlock<gr::audio::WavSource<float>>({{"uri", file.path.string()}});
+        auto&     sink                = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"buffer_frames", gr::Size_t(256)}});
+        sink._useDummyBackendForTests = true;
+        expect(graph.connect<"out", "in">(source, sink).has_value()) << caseName;
+
+        gr::scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(graph)).has_value()) << caseName;
+        expect(sched.runAndWait().has_value()) << caseName;
+
+        expect(!sink.available_devices.value.empty()) << caseName;
+    };
+
 #endif
+};
+
+const boost::ut::suite deviceResolutionTests = [] {
+    using namespace boost::ut;
+    using gr::audio::detail::AudioDeviceInfo;
+    using gr::audio::detail::resolveDeviceIndex;
+
+    const std::vector<AudioDeviceInfo> devices{
+        {.name = "Built-in Audio Output", .id = "hw:0,0"},
+        {.name = "USB Headset", .id = "hw:1,0"},
+        {.name = "HDMI Output", .id = "hw:2,0"},
+    };
+
+    "empty spec returns nullopt (system default)"_test = [&] { expect(!resolveDeviceIndex("", devices).has_value()); };
+
+    "'default' returns nullopt"_test = [&] { expect(!resolveDeviceIndex("default", devices).has_value()); };
+
+    "'Default' returns nullopt (case-insensitive)"_test = [&] { expect(!resolveDeviceIndex("Default", devices).has_value()); };
+
+    "substring match on name"_test = [&] {
+        auto result = resolveDeviceIndex("usb", devices);
+        expect(result.has_value()) << "should match 'USB Headset'";
+        expect(eq(*result, 1UZ));
+    };
+
+    "substring match is case-insensitive"_test = [&] {
+        auto result = resolveDeviceIndex("hdmi", devices);
+        expect(result.has_value()) << "should match 'HDMI Output'";
+        expect(eq(*result, 2UZ));
+    };
+
+    "exact ID match with @id: prefix"_test = [&] {
+        auto result = resolveDeviceIndex("@id:hw:1,0", devices);
+        expect(result.has_value()) << "should match hw:1,0";
+        expect(eq(*result, 1UZ));
+    };
+
+    "unmatched name returns nullopt"_test = [&] { expect(!resolveDeviceIndex("NonExistent", devices).has_value()); };
+
+    "unmatched @id: returns nullopt"_test = [&] { expect(!resolveDeviceIndex("@id:hw:99,0", devices).has_value()); };
+
+    "first match wins for ambiguous substring"_test = [&] {
+        auto result = resolveDeviceIndex("output", devices);
+        expect(result.has_value());
+        expect(eq(*result, 0UZ)) << "should match 'Built-in Audio Output' first";
+    };
 };
 
 int main() { return boost::ut::cfg<boost::ut::override>.run(); }

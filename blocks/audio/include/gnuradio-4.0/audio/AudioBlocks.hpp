@@ -14,9 +14,11 @@
 #include <algorithm>
 #include <cmath>
 #include <expected>
+#include <format>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace gr::audio {
 
@@ -31,12 +33,14 @@ publishes them downstream as interleaved float or signed 16-bit PCM.)"">;
 
     gr::PortOut<T> out;
 
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Requested capture sample rate. Updated to the active stream rate after start.">>      sample_rate   = 48000.f;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"Requested interleaved channel count. Updated to the active stream channel count after start.">> num_channels  = 1U;
-    gr::Annotated<gr::Size_t, "buffer_frames", gr::Visible, gr::Doc<"Software queue depth in PCM frames">>                                                          buffer_frames = 4096U;
-    bool                                                                                                                                                            _useDummyBackendForTests{false};
+    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Requested capture sample rate. Updated to the active stream rate after start.">>               sample_rate   = 48000.f;
+    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"Requested interleaved channel count. Updated to the active stream channel count after start.">>          num_channels  = 1U;
+    gr::Annotated<gr::Size_t, "buffer_frames", gr::Visible, gr::Doc<"Software queue depth in PCM frames">>                                                                   buffer_frames = 4096U;
+    gr::Annotated<std::string, "device", gr::Visible, gr::Doc<"Device selector: empty or 'default' for system default, substring match on name, or '@id:...' for exact ID">> device;
+    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio input devices in 'name [id]' format">>                                              available_devices;
+    bool                                                                                                                                                                     _useDummyBackendForTests{false};
 
-    GR_MAKE_REFLECTABLE(AudioSource, out, sample_rate, num_channels, buffer_frames);
+    GR_MAKE_REFLECTABLE(AudioSource, out, sample_rate, num_channels, buffer_frames, device, available_devices);
 
     using gr::Block<AudioSource<T>>::Block;
 #if defined(__EMSCRIPTEN__)
@@ -62,10 +66,10 @@ publishes them downstream as interleaved float or signed 16-bit PCM.)"">;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
         if (_activeConfig.sampleRate == 0U) {
-            return; // not yet started — start() will initialise with the final settings
+            return;
         }
-        const detail::AudioDeviceConfig requested{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value};
-        if (requested.sampleRate == _activeConfig.sampleRate && requested.numChannels == _activeConfig.numChannels && requested.bufferFrames == _activeConfig.bufferFrames) {
+        const detail::AudioDeviceConfig requested{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value, .device = device.value};
+        if (requested.sampleRate == _activeConfig.sampleRate && requested.numChannels == _activeConfig.numChannels && requested.bufferFrames == _activeConfig.bufferFrames && requested.device == _activeConfig.device) {
             return;
         }
         std::lock_guard deviceLock(_deviceMutex);
@@ -126,15 +130,20 @@ private:
     }
 
     [[nodiscard]] std::expected<void, gr::Error> initialiseBackendUnlocked() {
-        const detail::AudioDeviceConfig config{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value, .useDummyBackendForTests = _useDummyBackendForTests};
+        const detail::AudioDeviceConfig config{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value, .device = device.value, .useDummyBackendForTests = _useDummyBackendForTests};
         auto                            result = _backendImpl.start(config);
         if (!result) {
             return std::unexpected(result.error());
         }
 
+        if (result->sampleRate != config.sampleRate && config.sampleRate != 0U) {
+            this->emitErrorMessage("AudioSource::start()", gr::Error(std::format("requested sample rate {} Hz, device negotiated {} Hz", config.sampleRate, result->sampleRate)));
+        }
+
+        available_devices = _backendImpl._availableDevices;
         sample_rate       = static_cast<float>(result->sampleRate);
         num_channels      = static_cast<gr::Size_t>(result->numChannels);
-        _activeConfig     = {.sampleRate = result->sampleRate, .numChannels = result->numChannels, .bufferFrames = buffer_frames.value};
+        _activeConfig     = {.sampleRate = result->sampleRate, .numChannels = result->numChannels, .bufferFrames = buffer_frames.value, .device = device.value};
         _formatTagPending = true;
         _failed           = false;
         return {};
@@ -159,12 +168,14 @@ Pair it with `WavSource` or any other block that already produces decoded PCM.)"
 
     gr::PortIn<T> in;
 
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"PCM sample rate. Updated automatically; not intended to be set by the user.">>     sample_rate   = 48000.f;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"PCM interleaved channel count. Updated automatically; not intended to be set by the user.">> num_channels  = 1U;
-    gr::Annotated<gr::Size_t, "buffer_frames", gr::Visible, gr::Doc<"Software queue depth in PCM frames">>                                                       buffer_frames = 4096U;
-    bool                                                                                                                                                         _useDummyBackendForTests{false};
+    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"PCM sample rate. Updated automatically; not intended to be set by the user.">>                 sample_rate   = 48000.f;
+    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"PCM interleaved channel count. Updated automatically; not intended to be set by the user.">>             num_channels  = 1U;
+    gr::Annotated<gr::Size_t, "buffer_frames", gr::Visible, gr::Doc<"Software queue depth in PCM frames">>                                                                   buffer_frames = 4096U;
+    gr::Annotated<std::string, "device", gr::Visible, gr::Doc<"Device selector: empty or 'default' for system default, substring match on name, or '@id:...' for exact ID">> device;
+    gr::Annotated<std::vector<std::string>, "available_devices", gr::Doc<"Detected audio output devices in 'name [id]' format">>                                             available_devices;
+    bool                                                                                                                                                                     _useDummyBackendForTests{false};
 
-    GR_MAKE_REFLECTABLE(AudioSink, in, sample_rate, num_channels, buffer_frames);
+    GR_MAKE_REFLECTABLE(AudioSink, in, sample_rate, num_channels, buffer_frames, device, available_devices);
 
     using gr::Block<AudioSink<T>>::Block;
 #if defined(__EMSCRIPTEN__)
@@ -189,10 +200,10 @@ Pair it with `WavSource` or any other block that already produces decoded PCM.)"
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
         if (_activeConfig.sampleRate == 0U) {
-            return; // not yet started — start() will initialise with the final settings
+            return;
         }
-        const detail::AudioDeviceConfig requested{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value};
-        if (requested.sampleRate == _activeConfig.sampleRate && requested.numChannels == _activeConfig.numChannels && requested.bufferFrames == _activeConfig.bufferFrames) {
+        const detail::AudioDeviceConfig requested{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value, .device = device.value};
+        if (requested.sampleRate == _activeConfig.sampleRate && requested.numChannels == _activeConfig.numChannels && requested.bufferFrames == _activeConfig.bufferFrames && requested.device == _activeConfig.device) {
             return;
         }
         std::lock_guard deviceLock(_deviceMutex);
@@ -246,12 +257,24 @@ private:
     }
 
     [[nodiscard]] std::expected<void, gr::Error> initialiseBackendUnlocked() {
-        const detail::AudioDeviceConfig config{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value, .useDummyBackendForTests = _useDummyBackendForTests};
-        if (auto result = _backendImpl.start(config); !result) {
-            return result;
+        const detail::AudioDeviceConfig config{.sampleRate = currentSampleRate(), .numChannels = currentChannelCount(), .bufferFrames = buffer_frames.value, .device = device.value, .useDummyBackendForTests = _useDummyBackendForTests};
+        auto                            result = _backendImpl.start(config);
+        if (!result) {
+            return std::unexpected(result.error());
         }
-        _activeConfig = config;
-        _failed       = false;
+
+        const auto& actual = *result;
+        if (actual.sampleRate != config.sampleRate && config.sampleRate != 0U) {
+            this->emitErrorMessage("AudioSink::start()", gr::Error(std::format("requested sample rate {} Hz, device negotiated {} Hz", config.sampleRate, actual.sampleRate)));
+            sample_rate = static_cast<float>(actual.sampleRate);
+        }
+        if (actual.numChannels != config.numChannels && config.numChannels != 0U) {
+            num_channels = static_cast<gr::Size_t>(actual.numChannels);
+        }
+
+        available_devices = _backendImpl._availableDevices;
+        _activeConfig     = {.sampleRate = actual.sampleRate, .numChannels = actual.numChannels, .bufferFrames = buffer_frames.value, .device = device.value};
+        _failed           = false;
         return {};
     }
 

@@ -5,13 +5,19 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <limits>
+#include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace gr::audio::detail {
 
@@ -22,13 +28,66 @@ struct AudioDeviceConfig {
     std::uint32_t sampleRate{0U};
     std::uint32_t numChannels{0U};
     std::size_t   bufferFrames{0U};
+    std::string   device;
     bool          useDummyBackendForTests{false};
 };
 
-struct AudioSourceFormat {
+struct AudioStreamFormat {
     std::uint32_t sampleRate{0U};
     std::uint32_t numChannels{0U};
 };
+
+struct AudioDeviceInfo {
+    std::string name;
+    std::string id;
+};
+
+[[nodiscard]] inline bool caseInsensitiveContains(std::string_view haystack, std::string_view needle) {
+    if (needle.empty() || needle.size() > haystack.size()) {
+        return needle.empty();
+    }
+    return std::ranges::search(haystack, needle, [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); }).begin() != haystack.end();
+}
+
+[[nodiscard]] inline bool isDefaultDevice(std::string_view spec) {
+    if (spec.empty()) {
+        return true;
+    }
+    return caseInsensitiveContains("default", spec) && spec.size() <= 7U;
+}
+
+[[nodiscard]] inline std::optional<std::size_t> resolveDeviceIndex(std::string_view deviceSpec, std::span<const AudioDeviceInfo> devices) {
+    if (isDefaultDevice(deviceSpec)) {
+        return std::nullopt; // caller uses system default
+    }
+
+    constexpr std::string_view kIdPrefix = "@id:";
+    if (deviceSpec.starts_with(kIdPrefix)) {
+        const auto targetId = deviceSpec.substr(kIdPrefix.size());
+        for (std::size_t i = 0U; i < devices.size(); ++i) {
+            if (devices[i].id == targetId) {
+                return i;
+            }
+        }
+        return std::nullopt;
+    }
+
+    for (std::size_t i = 0U; i < devices.size(); ++i) {
+        if (caseInsensitiveContains(devices[i].name, deviceSpec)) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] inline std::vector<std::string> formatDeviceList(std::span<const AudioDeviceInfo> devices) {
+    std::vector<std::string> result;
+    result.reserve(devices.size());
+    for (const auto& dev : devices) {
+        result.push_back(std::format("{} [{}]", dev.name, dev.id));
+    }
+    return result;
+}
 
 template<AudioSample T>
 struct AudioStateBase {

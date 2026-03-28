@@ -49,8 +49,9 @@ struct EmscriptenAudioWorkletSinkBackend {
     WebAudioPendingWorkletInit _pendingInit{};
     WebAudioWorkletRuntime     _runtime{};
     std::size_t                _channelCount{0U};
+    std::vector<std::string>   _availableDevices;
 
-    [[nodiscard]] std::expected<void, gr::Error> start(const AudioDeviceConfig& config) {
+    [[nodiscard]] std::expected<AudioStreamFormat, gr::Error> start(const AudioDeviceConfig& config) {
         shutdown();
 
         if (config.sampleRate == 0U || config.numChannels == 0U) {
@@ -71,15 +72,13 @@ struct EmscriptenAudioWorkletSinkBackend {
             return std::unexpected(pendingInit.error());
         }
 
-        if (pendingInit->sampleRate != config.sampleRate) {
-            gr_webaudio_cancel_create_worklet_node(*pendingInit);
-            shutdown();
-            return std::unexpected(gr::Error(std::format("WebAudio actual sample rate {} does not match requested {}", pendingInit->sampleRate, config.sampleRate)));
-        }
-
-        _pendingInit  = *pendingInit;
-        _channelCount = static_cast<std::size_t>(config.numChannels);
-        return {};
+        _pendingInit      = *pendingInit;
+        _channelCount     = static_cast<std::size_t>(config.numChannels);
+        _availableDevices = {"default [default]"};
+        return AudioStreamFormat{
+            .sampleRate  = _pendingInit.sampleRate,
+            .numChannels = config.numChannels,
+        };
     }
 
     void shutdown() {
@@ -141,8 +140,9 @@ struct EmscriptenAudioWorkletSourceBackend {
     WebAudioPendingWorkletInit _pendingInit{};
     WebAudioWorkletRuntime     _runtime{};
     std::size_t                _channelCount{0U};
+    std::vector<std::string>   _availableDevices;
 
-    [[nodiscard]] std::expected<AudioSourceFormat, gr::Error> start(const AudioDeviceConfig& config) {
+    [[nodiscard]] std::expected<AudioStreamFormat, gr::Error> start(const AudioDeviceConfig& config) {
         shutdown();
 
         if (config.sampleRate == 0U || config.numChannels == 0U) {
@@ -163,9 +163,10 @@ struct EmscriptenAudioWorkletSourceBackend {
             shutdown();
             return std::unexpected(pendingInit.error());
         }
-        _pendingInit = *pendingInit;
+        _pendingInit      = *pendingInit;
+        _availableDevices = {"default [default]"};
 
-        return AudioSourceFormat{
+        return AudioStreamFormat{
             .sampleRate  = _pendingInit.sampleRate,
             .numChannels = static_cast<std::uint32_t>(_channelCount),
         };

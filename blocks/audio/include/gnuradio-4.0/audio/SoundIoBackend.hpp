@@ -47,15 +47,55 @@ template<>
 
 inline gr::Error makeSoundIoError(std::string_view operation, int error, std::source_location location = std::source_location::current()) { return gr::Error(std::format("{}: {}", operation, soundio_strerror(error)), location); }
 
+[[nodiscard]] inline std::vector<AudioDeviceInfo> enumerateSoundIoDevices(SoundIo* sio, bool isInput) {
+    const int                    count = isInput ? soundio_input_device_count(sio) : soundio_output_device_count(sio);
+    std::vector<AudioDeviceInfo> result;
+    result.reserve(static_cast<std::size_t>(std::max(0, count)));
+    for (int i = 0; i < count; ++i) {
+        SoundIoDevice* dev = isInput ? soundio_get_input_device(sio, i) : soundio_get_output_device(sio, i);
+        if (dev != nullptr) {
+            result.push_back({.name = dev->name != nullptr ? dev->name : "", .id = dev->id != nullptr ? dev->id : ""});
+            soundio_device_unref(dev);
+        }
+    }
+    return result;
+}
+
+[[nodiscard]] inline std::expected<SoundIoDevice*, gr::Error> resolveSoundIoDevice(SoundIo* sio, std::string_view deviceSpec, bool isInput, std::span<const AudioDeviceInfo> deviceInfos) {
+    auto resolved = resolveDeviceIndex(deviceSpec, deviceInfos);
+    if (resolved.has_value()) {
+        SoundIoDevice* dev = isInput ? soundio_get_input_device(sio, static_cast<int>(*resolved)) : soundio_get_output_device(sio, static_cast<int>(*resolved));
+        if (dev == nullptr) {
+            return std::unexpected(gr::Error(std::format("failed to acquire {} device at index {}", isInput ? "input" : "output", *resolved)));
+        }
+        return dev;
+    }
+
+    if (!isDefaultDevice(deviceSpec)) {
+        return std::unexpected(gr::Error(std::format("no {} device matching '{}' found", isInput ? "input" : "output", deviceSpec)));
+    }
+
+    const int defaultIndex = isInput ? soundio_default_input_device_index(sio) : soundio_default_output_device_index(sio);
+    if (defaultIndex < 0) {
+        return std::unexpected(gr::Error(std::format("no default {} device found", isInput ? "input" : "output")));
+    }
+    SoundIoDevice* dev = isInput ? soundio_get_input_device(sio, defaultIndex) : soundio_get_output_device(sio, defaultIndex);
+    if (dev == nullptr) {
+        return std::unexpected(gr::Error(std::format("failed to acquire default {} device", isInput ? "input" : "output")));
+    }
+    return dev;
+}
+
 template<AudioSample T>
 struct SoundIoSinkBackend {
-    AudioSinkState<T> _state{};
-    SoundIo*          _soundio{nullptr};
-    SoundIoDevice*    _device{nullptr};
-    SoundIoOutStream* _outstream{nullptr};
-    std::atomic<int>  _pendingError{SoundIoErrorNone};
+    AudioSinkState<T>        _state{};
+    SoundIo*                 _soundio{nullptr};
+    SoundIoDevice*           _device{nullptr};
+    SoundIoOutStream*        _outstream{nullptr};
+    std::atomic<int>         _pendingError{SoundIoErrorNone};
+    std::vector<std::string> _availableDevices;
 
-    [[nodiscard]] std::expected<void, gr::Error> start(const AudioDeviceConfig& config) {
+    [[nodiscard]] std::expected<AudioStreamFormat, gr::Error> start(const AudioDeviceConfig& config) {
         shutdown();
 
         if (config.sampleRate == 0U || config.numChannels == 0U) {
@@ -75,17 +115,15 @@ struct SoundIoSinkBackend {
 
         soundio_flush_events(_soundio);
 
-        const int defaultDeviceIndex = soundio_default_output_device_index(_soundio);
-        if (defaultDeviceIndex < 0) {
-            shutdown();
-            return std::unexpected(gr::Error("soundio_default_output_device_index(): no output device found"));
-        }
+        const auto deviceInfos = enumerateSoundIoDevices(_soundio, false);
+        _availableDevices      = formatDeviceList(deviceInfos);
 
-        _device = soundio_get_output_device(_soundio, defaultDeviceIndex);
-        if (_device == nullptr) {
+        auto deviceResult = resolveSoundIoDevice(_soundio, config.device, false, deviceInfos);
+        if (!deviceResult) {
             shutdown();
-            return std::unexpected(gr::Error("soundio_get_output_device(): failed to acquire output device"));
+            return std::unexpected(deviceResult.error());
         }
+        _device = *deviceResult;
 
         _outstream = soundio_outstream_create(_device);
         if (_outstream == nullptr) {
@@ -131,7 +169,10 @@ struct SoundIoSinkBackend {
             return std::unexpected(makeSoundIoError("soundio_outstream_start()", startError));
         }
 
-        return {};
+        return AudioStreamFormat{
+            .sampleRate  = static_cast<std::uint32_t>(std::max(1, _outstream->sample_rate)),
+            .numChannels = static_cast<std::uint32_t>(std::max(1, _outstream->layout.channel_count)),
+        };
     }
 
     void shutdown() {
@@ -253,13 +294,14 @@ private:
 
 template<AudioSample T>
 struct SoundIoSourceBackend {
-    AudioSourceState<T> _state{};
-    SoundIo*            _soundio{nullptr};
-    SoundIoDevice*      _device{nullptr};
-    SoundIoInStream*    _instream{nullptr};
-    std::atomic<int>    _pendingError{SoundIoErrorNone};
+    AudioSourceState<T>      _state{};
+    SoundIo*                 _soundio{nullptr};
+    SoundIoDevice*           _device{nullptr};
+    SoundIoInStream*         _instream{nullptr};
+    std::atomic<int>         _pendingError{SoundIoErrorNone};
+    std::vector<std::string> _availableDevices;
 
-    [[nodiscard]] std::expected<AudioSourceFormat, gr::Error> start(const AudioDeviceConfig& config) {
+    [[nodiscard]] std::expected<AudioStreamFormat, gr::Error> start(const AudioDeviceConfig& config) {
         shutdown();
 
         if (config.sampleRate == 0U || config.numChannels == 0U) {
@@ -279,17 +321,15 @@ struct SoundIoSourceBackend {
 
         soundio_flush_events(_soundio);
 
-        const int defaultDeviceIndex = soundio_default_input_device_index(_soundio);
-        if (defaultDeviceIndex < 0) {
-            shutdown();
-            return std::unexpected(gr::Error("soundio_default_input_device_index(): no input device found"));
-        }
+        const auto deviceInfos = enumerateSoundIoDevices(_soundio, true);
+        _availableDevices      = formatDeviceList(deviceInfos);
 
-        _device = soundio_get_input_device(_soundio, defaultDeviceIndex);
-        if (_device == nullptr) {
+        auto deviceResult = resolveSoundIoDevice(_soundio, config.device, true, deviceInfos);
+        if (!deviceResult) {
             shutdown();
-            return std::unexpected(gr::Error("soundio_get_input_device(): failed to acquire input device"));
+            return std::unexpected(deviceResult.error());
         }
+        _device = *deviceResult;
 
         _instream = soundio_instream_create(_device);
         if (_instream == nullptr) {
@@ -338,7 +378,7 @@ struct SoundIoSourceBackend {
             return std::unexpected(makeSoundIoError("soundio_instream_start()", startError));
         }
 
-        return AudioSourceFormat{
+        return AudioStreamFormat{
             .sampleRate  = activeSampleRate,
             .numChannels = activeChannelCount,
         };
