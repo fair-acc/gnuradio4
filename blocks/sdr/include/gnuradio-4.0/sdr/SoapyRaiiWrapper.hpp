@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::blocks::sdr::soapy {
@@ -256,17 +257,17 @@ public:
         }
     }
 
-    static std::expected<Device, std::string> make(const Kwargs& args = Kwargs()) {
+    static std::expected<Device, gr::Error> make(const Kwargs& args = Kwargs()) {
         if (std::string_view(SOAPY_SDR_ABI_VERSION) != std::string_view(SoapySDR_getABIVersion())) {
-            return std::unexpected(std::format("SoapySDR ABI mismatch: this {} vs. library {}", SOAPY_SDR_ABI_VERSION, SoapySDR_getABIVersion()));
+            return std::unexpected(gr::Error(std::format("SoapySDR ABI mismatch: this {} vs. library {}", SOAPY_SDR_ABI_VERSION, SoapySDR_getABIVersion())));
         }
         detail::KwargsWrapper cArgs(args);
         if (!cArgs.valid()) {
-            return std::unexpected(std::format("SoapySDRKwargs_set allocation failed for {}", args));
+            return std::unexpected(gr::Error(std::format("SoapySDRKwargs_set allocation failed for {}", args)));
         }
         SoapySDRDevice* raw = SoapySDRDevice_make(cArgs);
         if (!raw) {
-            return std::unexpected(std::format("SoapySDRDevice_make failed for {}", args));
+            return std::unexpected(gr::Error(std::format("SoapySDRDevice_make failed for {}", args)));
         }
         Device dev;
         dev._device.reset(raw, [](SoapySDRDevice* device) {
@@ -297,16 +298,16 @@ public:
         return detail::convertToCpp(antennas, length);
     }
 
-    std::expected<void, std::string> setAntenna(int direction, std::size_t channel, std::string_view antennaName) {
-        if (int error = SoapySDRDevice_setAntenna(_device.get(), direction, channel, antennaName.data()); error) {
-            return std::unexpected(std::format("setAntenna({}, {}, {}) error({}): {}", direction, channel, antennaName, error, SoapySDR_errToStr(error)));
+    std::expected<void, gr::Error> setAntenna(int direction, std::size_t channel, const std::string& antennaName) {
+        if (int error = SoapySDRDevice_setAntenna(_device.get(), direction, channel, antennaName.c_str()); error) {
+            return std::unexpected(gr::Error(std::format("setAntenna({}, {}, {}) error({}): {}", direction, channel, antennaName, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
 
     std::string getAntenna(int direction, std::size_t channel) const {
         char*       value = SoapySDRDevice_getAntenna(_device.get(), direction, channel);
-        std::string result(value);
+        std::string result(value ? value : "");
         free(value);
         return result;
     }
@@ -319,28 +320,28 @@ public:
 
     bool hasAutomaticGainControl(int direction, std::size_t channel) const { return SoapySDRDevice_hasGainMode(_device.get(), direction, channel); }
 
-    std::expected<void, std::string> setAutomaticGainControl(int direction, std::size_t channel, bool automatic) {
+    std::expected<void, gr::Error> setAutomaticGainControl(int direction, std::size_t channel, bool automatic) {
         if (int error = SoapySDRDevice_setGainMode(_device.get(), direction, channel, automatic); error) {
-            return std::unexpected(std::format("setAutomaticGainControl({}, {}, {}) error({}): {}", direction, channel, automatic, error, SoapySDR_errToStr(error)));
+            return std::unexpected(gr::Error(std::format("setAutomaticGainControl({}, {}, {}) error({}): {}", direction, channel, automatic, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
 
     bool isAutomaticGainControl(int direction, std::size_t channel) { return SoapySDRDevice_getGainMode(_device.get(), direction, channel); }
 
-    std::expected<void, std::string> setGain(int direction, std::size_t channel, double gain_dB, std::string_view gainElement = {}) {
-        int error = gainElement.empty() ? SoapySDRDevice_setGain(_device.get(), direction, channel, gain_dB) : SoapySDRDevice_setGainElement(_device.get(), direction, channel, gainElement.data(), gain_dB);
+    std::expected<void, gr::Error> setGain(int direction, std::size_t channel, double gain_dB, const std::string& gainElement = "") {
+        int error = gainElement.empty() ? SoapySDRDevice_setGain(_device.get(), direction, channel, gain_dB) : SoapySDRDevice_setGainElement(_device.get(), direction, channel, gainElement.c_str(), gain_dB);
         if (error) {
-            return std::unexpected(std::format("setGain({}, {}, {}) error({}): {}", direction, channel, gain_dB, error, SoapySDR_errToStr(error)));
+            return std::unexpected(gr::Error(std::format("setGain({}, {}, {}) error({}): {}", direction, channel, gain_dB, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
 
-    double getGain(int direction, std::size_t channel, std::string_view gainElement = {}) const {
+    double getGain(int direction, std::size_t channel, const std::string& gainElement = "") const {
         if (gainElement.empty()) {
             return SoapySDRDevice_getGain(_device.get(), direction, channel);
         }
-        return SoapySDRDevice_getGainElement(_device.get(), direction, channel, gainElement.data());
+        return SoapySDRDevice_getGainElement(_device.get(), direction, channel, gainElement.c_str());
     }
 
     std::vector<double> listAvailableBandwidths(int direction, std::size_t channel) const {
@@ -351,9 +352,9 @@ public:
         return bwList;
     }
 
-    std::expected<void, std::string> setBandwidth(int direction, std::size_t channel, double bandwidthHz) {
+    std::expected<void, gr::Error> setBandwidth(int direction, std::size_t channel, double bandwidthHz) {
         if (int error = SoapySDRDevice_setBandwidth(_device.get(), direction, channel, bandwidthHz); error) {
-            return std::unexpected(std::format("setBandwidth({}, {}, {}) error({}): {}", direction, channel, bandwidthHz, error, SoapySDR_errToStr(error)));
+            return std::unexpected(gr::Error(std::format("setBandwidth({}, {}, {}) error({}): {}", direction, channel, bandwidthHz, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
@@ -361,7 +362,7 @@ public:
     double getBandwidth(int direction, std::size_t channel) const { return SoapySDRDevice_getBandwidth(_device.get(), direction, channel); }
 
     std::vector<Range> getOverallFrequencyRange(int direction, std::size_t channel) const {
-        std::size_t    count;
+        std::size_t    count  = 0UZ;
         SoapySDRRange* ranges = SoapySDRDevice_getFrequencyRange(_device.get(), direction, channel, &count);
 
         std::vector<Range> rangeList;
@@ -374,9 +375,9 @@ public:
         return rangeList;
     }
 
-    std::expected<void, std::string> setCenterFrequency(int direction, std::size_t channel, double frequency, const Kwargs& args = Kwargs()) {
+    std::expected<void, gr::Error> setCenterFrequency(int direction, std::size_t channel, double frequency, const Kwargs& args = Kwargs()) {
         if (int error = SoapySDRDevice_setFrequency(_device.get(), direction, channel, frequency, detail::KwargsWrapper(args)); error) {
-            return std::unexpected(std::format("setCenterFrequency({}, {}, {}) error({}): {}", direction, channel, frequency, error, SoapySDR_errToStr(error)));
+            return std::unexpected(gr::Error(std::format("setCenterFrequency({}, {}, {}) error({}): {}", direction, channel, frequency, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
@@ -391,9 +392,9 @@ public:
         return rateList;
     }
 
-    std::expected<void, std::string> setSampleRate(int direction, std::size_t channel, double rate) {
+    std::expected<void, gr::Error> setSampleRate(int direction, std::size_t channel, double rate) {
         if (int error = SoapySDRDevice_setSampleRate(_device.get(), direction, channel, rate); error) {
-            return std::unexpected(std::format("setSampleRate({}, {}, {}) error({}): {}", direction, channel, rate, error, SoapySDR_errToStr(error)));
+            return std::unexpected(gr::Error(std::format("setSampleRate({}, {}, {}) error({}): {}", direction, channel, rate, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
@@ -408,28 +409,237 @@ public:
 
     std::string getTimeSource() const {
         char*       value = SoapySDRDevice_getTimeSource(_device.get());
-        std::string result(value);
+        std::string result(value ? value : "");
         free(value);
         return result;
     }
 
-    std::expected<void, std::string> setTimeSource(const std::string& source) {
+    std::expected<void, gr::Error> setTimeSource(const std::string& source) {
         if (int error = SoapySDRDevice_setTimeSource(_device.get(), source.c_str()); error) {
-            return std::unexpected(std::format("setTimeSource({}) error({}): {}", source, error, SoapySDR_errToStr(error)));
+            return std::unexpected(gr::Error(std::format("setTimeSource({}) error({}): {}", source, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
 
-    std::uint64_t getHardwareTime(std::string_view what = {}) const { return static_cast<std::uint64_t>(SoapySDRDevice_getHardwareTime(_device.get(), what.data())); }
+    std::uint64_t getHardwareTime(const std::string& what = "") const { return static_cast<std::uint64_t>(SoapySDRDevice_getHardwareTime(_device.get(), what.c_str())); }
 
-    std::expected<void, std::string> setHardwareTime(long long timeNs, const std::string& event = "") {
+    std::expected<void, gr::Error> setHardwareTime(long long timeNs, const std::string& event = "") {
         if (int error = SoapySDRDevice_setHardwareTime(_device.get(), timeNs, event.empty() ? nullptr : event.c_str()); error) {
-            return std::unexpected(std::format("setHardwareTime({}) error({}): {}", timeNs, error, SoapySDR_errToStr(error)));
+            return std::unexpected(gr::Error(std::format("setHardwareTime({}) error({}): {}", timeNs, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    std::expected<void, gr::Error> setMasterClockRate(double rate) {
+        if (int error = SoapySDRDevice_setMasterClockRate(_device.get(), rate); error) {
+            return std::unexpected(gr::Error(std::format("setMasterClockRate({}) error({}): {}", rate, error, SoapySDR_errToStr(error))));
         }
         return {};
     }
 
     double getMasterClockRate() const { return SoapySDRDevice_getMasterClockRate(_device.get()); }
+
+    std::vector<Range> getMasterClockRates() const {
+        std::size_t        count  = 0UZ;
+        SoapySDRRange*     ranges = SoapySDRDevice_getMasterClockRates(_device.get(), &count);
+        std::vector<Range> result(ranges, ranges + count);
+        free(ranges);
+        return result;
+    }
+
+    std::expected<void, gr::Error> setReferenceClockRate(double rate) {
+        if (int error = SoapySDRDevice_setReferenceClockRate(_device.get(), rate); error) {
+            return std::unexpected(gr::Error(std::format("setReferenceClockRate({}) error({}): {}", rate, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    double getReferenceClockRate() const { return SoapySDRDevice_getReferenceClockRate(_device.get()); }
+
+    std::vector<Range> getReferenceClockRates() const {
+        std::size_t        count  = 0UZ;
+        SoapySDRRange*     ranges = SoapySDRDevice_getReferenceClockRates(_device.get(), &count);
+        std::vector<Range> result(ranges, ranges + count);
+        free(ranges);
+        return result;
+    }
+
+    std::vector<std::string> listClockSources() const {
+        std::size_t length  = 0UZ;
+        char**      sources = SoapySDRDevice_listClockSources(_device.get(), &length);
+        return detail::convertToCpp(sources, length);
+    }
+
+    std::string getClockSource() const {
+        char*       value = SoapySDRDevice_getClockSource(_device.get());
+        std::string result(value ? value : "");
+        free(value);
+        return result;
+    }
+
+    std::expected<void, gr::Error> setClockSource(const std::string& source) {
+        if (int error = SoapySDRDevice_setClockSource(_device.get(), source.c_str()); error) {
+            return std::unexpected(gr::Error(std::format("setClockSource({}) error({}): {}", source, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    bool hasDCOffsetMode(int direction, std::size_t channel) const { return SoapySDRDevice_hasDCOffsetMode(_device.get(), direction, channel); }
+
+    std::expected<void, gr::Error> setDCOffsetMode(int direction, std::size_t channel, bool automatic) {
+        if (int error = SoapySDRDevice_setDCOffsetMode(_device.get(), direction, channel, automatic); error) {
+            return std::unexpected(gr::Error(std::format("setDCOffsetMode({}, {}, {}) error({}): {}", direction, channel, automatic, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    bool getDCOffsetMode(int direction, std::size_t channel) const { return SoapySDRDevice_getDCOffsetMode(_device.get(), direction, channel); }
+
+    bool hasDCOffset(int direction, std::size_t channel) const { return SoapySDRDevice_hasDCOffset(_device.get(), direction, channel); }
+
+    std::expected<void, gr::Error> setDCOffset(int direction, std::size_t channel, double offsetI, double offsetQ) {
+        if (int error = SoapySDRDevice_setDCOffset(_device.get(), direction, channel, offsetI, offsetQ); error) {
+            return std::unexpected(gr::Error(std::format("setDCOffset({}, {}, {}, {}) error({}): {}", direction, channel, offsetI, offsetQ, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    std::pair<double, double> getDCOffset(int direction, std::size_t channel) const {
+        double offsetI = 0.0, offsetQ = 0.0;
+        SoapySDRDevice_getDCOffset(_device.get(), direction, channel, &offsetI, &offsetQ);
+        return {offsetI, offsetQ};
+    }
+
+    bool hasIQBalance(int direction, std::size_t channel) const { return SoapySDRDevice_hasIQBalance(_device.get(), direction, channel); }
+
+    std::expected<void, gr::Error> setIQBalance(int direction, std::size_t channel, double balanceI, double balanceQ) {
+        if (int error = SoapySDRDevice_setIQBalance(_device.get(), direction, channel, balanceI, balanceQ); error) {
+            return std::unexpected(gr::Error(std::format("setIQBalance({}, {}, {}, {}) error({}): {}", direction, channel, balanceI, balanceQ, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    std::pair<double, double> getIQBalance(int direction, std::size_t channel) const {
+        double balanceI = 0.0, balanceQ = 0.0;
+        SoapySDRDevice_getIQBalance(_device.get(), direction, channel, &balanceI, &balanceQ);
+        return {balanceI, balanceQ};
+    }
+
+    bool hasFrequencyCorrection(int direction, std::size_t channel) const { return SoapySDRDevice_hasFrequencyCorrection(_device.get(), direction, channel); }
+
+    std::expected<void, gr::Error> setFrequencyCorrection(int direction, std::size_t channel, double ppm) {
+        if (int error = SoapySDRDevice_setFrequencyCorrection(_device.get(), direction, channel, ppm); error) {
+            return std::unexpected(gr::Error(std::format("setFrequencyCorrection({}, {}, {}) error({}): {}", direction, channel, ppm, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    double getFrequencyCorrection(int direction, std::size_t channel) const { return SoapySDRDevice_getFrequencyCorrection(_device.get(), direction, channel); }
+
+    std::vector<std::string> listSensors() const {
+        std::size_t length  = 0UZ;
+        char**      sensors = SoapySDRDevice_listSensors(_device.get(), &length);
+        return detail::convertToCpp(sensors, length);
+    }
+
+    ArgInfo getSensorInfo(const std::string& key) const {
+        SoapySDRArgInfo cInfo = SoapySDRDevice_getSensorInfo(_device.get(), key.c_str());
+        ArgInfo         result;
+        result.key         = cInfo.key ? std::string(cInfo.key) : "";
+        result.value       = cInfo.value ? std::string(cInfo.value) : "";
+        result.name        = cInfo.name ? std::string(cInfo.name) : "";
+        result.description = cInfo.description ? std::string(cInfo.description) : "";
+        result.units       = cInfo.units ? std::string(cInfo.units) : "";
+        result.type        = static_cast<ArgInfo::Type>(cInfo.type);
+        SoapySDRArgInfo_clear(&cInfo);
+        return result;
+    }
+
+    std::string readSensor(const std::string& key) const {
+        char*       value = SoapySDRDevice_readSensor(_device.get(), key.c_str());
+        std::string result(value ? value : "");
+        free(value);
+        return result;
+    }
+
+    std::vector<std::string> listChannelSensors(int direction, std::size_t channel) const {
+        std::size_t length  = 0UZ;
+        char**      sensors = SoapySDRDevice_listChannelSensors(_device.get(), direction, channel, &length);
+        return detail::convertToCpp(sensors, length);
+    }
+
+    ArgInfo getChannelSensorInfo(int direction, std::size_t channel, const std::string& key) const {
+        SoapySDRArgInfo cInfo = SoapySDRDevice_getChannelSensorInfo(_device.get(), direction, channel, key.c_str());
+        ArgInfo         result;
+        result.key         = cInfo.key ? std::string(cInfo.key) : "";
+        result.value       = cInfo.value ? std::string(cInfo.value) : "";
+        result.name        = cInfo.name ? std::string(cInfo.name) : "";
+        result.description = cInfo.description ? std::string(cInfo.description) : "";
+        result.units       = cInfo.units ? std::string(cInfo.units) : "";
+        result.type        = static_cast<ArgInfo::Type>(cInfo.type);
+        SoapySDRArgInfo_clear(&cInfo);
+        return result;
+    }
+
+    std::string readChannelSensor(int direction, std::size_t channel, const std::string& key) const {
+        char*       value = SoapySDRDevice_readChannelSensor(_device.get(), direction, channel, key.c_str());
+        std::string result(value ? value : "");
+        free(value);
+        return result;
+    }
+
+    std::vector<std::string> listGPIOBanks() const {
+        std::size_t length = 0UZ;
+        char**      banks  = SoapySDRDevice_listGPIOBanks(_device.get(), &length);
+        return detail::convertToCpp(banks, length);
+    }
+
+    std::expected<void, gr::Error> writeGPIO(const std::string& bank, unsigned value) {
+        if (int error = SoapySDRDevice_writeGPIO(_device.get(), bank.c_str(), value); error) {
+            return std::unexpected(gr::Error(std::format("writeGPIO({}, {:#x}) error({}): {}", bank, value, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    std::expected<void, gr::Error> writeGPIO(const std::string& bank, unsigned value, unsigned mask) {
+        if (int error = SoapySDRDevice_writeGPIOMasked(_device.get(), bank.c_str(), value, mask); error) {
+            return std::unexpected(gr::Error(std::format("writeGPIO({}, {:#x}, {:#x}) error({}): {}", bank, value, mask, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    unsigned readGPIO(const std::string& bank) const { return SoapySDRDevice_readGPIO(_device.get(), bank.c_str()); }
+
+    std::expected<void, gr::Error> writeGPIODir(const std::string& bank, unsigned dir) {
+        if (int error = SoapySDRDevice_writeGPIODir(_device.get(), bank.c_str(), dir); error) {
+            return std::unexpected(gr::Error(std::format("writeGPIODir({}, {:#x}) error({}): {}", bank, dir, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    std::expected<void, gr::Error> writeGPIODir(const std::string& bank, unsigned dir, unsigned mask) {
+        if (int error = SoapySDRDevice_writeGPIODirMasked(_device.get(), bank.c_str(), dir, mask); error) {
+            return std::unexpected(gr::Error(std::format("writeGPIODir({}, {:#x}, {:#x}) error({}): {}", bank, dir, mask, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    unsigned readGPIODir(const std::string& bank) const { return SoapySDRDevice_readGPIODir(_device.get(), bank.c_str()); }
+
+    std::vector<std::string> listRegisterInterfaces() const {
+        std::size_t length = 0UZ;
+        char**      ifaces = SoapySDRDevice_listRegisterInterfaces(_device.get(), &length);
+        return detail::convertToCpp(ifaces, length);
+    }
+
+    std::expected<void, gr::Error> writeRegister(const std::string& name, unsigned addr, unsigned value) {
+        if (int error = SoapySDRDevice_writeRegister(_device.get(), name.c_str(), addr, value); error) {
+            return std::unexpected(gr::Error(std::format("writeRegister({}, {:#x}, {:#x}) error({}): {}", name, addr, value, error, SoapySDR_errToStr(error))));
+        }
+        return {};
+    }
+
+    unsigned readRegister(const std::string& name, unsigned addr) const { return SoapySDRDevice_readRegister(_device.get(), name.c_str(), addr); }
 
     template<typename TValueType, int direction>
     class Stream {
@@ -477,18 +687,18 @@ public:
             _stream.reset();
         }
 
-        std::expected<void, std::string> activate(int flags = 0, long long timeNs = 0, std::size_t numElems = 0UZ) {
+        std::expected<void, gr::Error> activate(int flags = 0, long long timeNs = 0, std::size_t numElems = 0UZ) {
             int ret = SoapySDRDevice_activateStream(_device.get(), _stream.get(), flags, timeNs, numElems);
             if (ret != 0) {
-                return std::unexpected(std::format("activate(flags={}, timeNs={}, numElems={}) error({}): {}", flags, timeNs, numElems, ret, SoapySDR_errToStr(ret)));
+                return std::unexpected(gr::Error(std::format("activate(flags={}, timeNs={}, numElems={}) error({}): {}", flags, timeNs, numElems, ret, SoapySDR_errToStr(ret))));
             }
             return {};
         }
 
-        std::expected<void, std::string> deactivate(int flags = 0, long long timeNs = 0) {
+        std::expected<void, gr::Error> deactivate(int flags = 0, long long timeNs = 0) {
             int ret = SoapySDRDevice_deactivateStream(_device.get(), _stream.get(), flags, timeNs);
             if (ret != 0) {
-                return std::unexpected(std::format("deactivate(flags={}, timeNs={}) error({}): {}", flags, timeNs, ret, SoapySDR_errToStr(ret)));
+                return std::unexpected(gr::Error(std::format("deactivate(flags={}, timeNs={}) error({}): {}", flags, timeNs, ret, SoapySDR_errToStr(ret))));
             }
             return {};
         }
@@ -531,9 +741,9 @@ public:
     }
 
     template<typename TValueType, int direction, typename TContainer = std::vector<std::size_t>>
-    std::expected<Stream<TValueType, direction>, std::string> setupStream(const TContainer& channels = {0}) {
+    std::expected<Stream<TValueType, direction>, gr::Error> setupStream(const TContainer& channels = {0}) {
         if (!_device) {
-            return std::unexpected(std::string("device not initialised"));
+            return std::unexpected(gr::Error("device not initialised"));
         }
         static_assert(std::is_unsigned_v<typename TContainer::value_type>, "channel indices must be unsigned integers");
         std::vector<std::size_t> channels_converted;
@@ -541,7 +751,7 @@ public:
 
         SoapySDRStream* stream = SoapySDRDevice_setupStream(_device.get(), direction, detail::toSoapySDRFormat<TValueType>(), channels_converted.data(), channels_converted.size(), nullptr);
         if (stream == nullptr) {
-            return std::unexpected(std::format("setupStream failed: {}", SoapySDRDevice_lastError()));
+            return std::unexpected(gr::Error(std::format("setupStream failed: {}", SoapySDRDevice_lastError())));
         }
         return Stream<TValueType, direction>(_device, stream);
     }
@@ -552,45 +762,45 @@ public:
         return detail::convertToCpp(infos, length);
     }
 
-    std::expected<void, std::string> writeSetting(const std::string& key, const std::string& value) {
+    std::expected<void, gr::Error> writeSetting(const std::string& key, const std::string& value) {
         int ret = SoapySDRDevice_writeSetting(_device.get(), key.c_str(), value.c_str());
         if (ret != 0) {
-            return std::unexpected(std::format("writeSetting({}, {}) error({}): {}", key, value, ret, SoapySDR_errToStr(ret)));
+            return std::unexpected(gr::Error(std::format("writeSetting({}, {}) error({}): {}", key, value, ret, SoapySDR_errToStr(ret))));
         }
         return {};
     }
 
     std::string readSetting(const std::string& key) const {
         char*       value = SoapySDRDevice_readSetting(_device.get(), key.c_str());
-        std::string result(value);
+        std::string result(value ? value : "");
         free(value);
         return result;
     }
 
     std::vector<ArgInfo> getChannelSettingInfo(int direction, std::size_t channel) const {
-        std::size_t      length;
-        SoapySDRArgInfo* infos = SoapySDRDevice_getChannelSettingInfo(_device.get(), direction, channel, &length);
+        std::size_t      length = 0UZ;
+        SoapySDRArgInfo* infos  = SoapySDRDevice_getChannelSettingInfo(_device.get(), direction, channel, &length);
         return detail::convertToCpp(infos, length);
     }
 
-    std::expected<void, std::string> writeChannelSetting(int direction, std::size_t channel, const std::string& key, const std::string& value) {
+    std::expected<void, gr::Error> writeChannelSetting(int direction, std::size_t channel, const std::string& key, const std::string& value) {
         int ret = SoapySDRDevice_writeChannelSetting(_device.get(), direction, channel, key.c_str(), value.c_str());
         if (ret != 0) {
-            return std::unexpected(std::format("writeChannelSetting({}, {}, {}, {}) error({}): {}", direction, channel, key, value, ret, SoapySDR_errToStr(ret)));
+            return std::unexpected(gr::Error(std::format("writeChannelSetting({}, {}, {}, {}) error({}): {}", direction, channel, key, value, ret, SoapySDR_errToStr(ret))));
         }
         return {};
     }
 
     std::string readChannelSetting(int direction, std::size_t channel, const std::string& key) const {
         char*       value = SoapySDRDevice_readChannelSetting(_device.get(), direction, channel, key.c_str());
-        std::string result(value);
+        std::string result(value ? value : "");
         free(value);
         return result;
     }
 
     std::string getFrontendMapping(int direction) const {
         char*       mapping = SoapySDRDevice_getFrontendMapping(_device.get(), direction);
-        std::string result(mapping);
+        std::string result(mapping ? mapping : "");
         free(mapping);
         return result;
     }
