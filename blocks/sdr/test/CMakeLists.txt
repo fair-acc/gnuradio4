@@ -121,6 +121,28 @@ if(TARGET SoapySDR)
                                               ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyRaiiWrapper)
     set_tests_properties(qa_SoapyRaiiWrapper
                          PROPERTIES ENVIRONMENT "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0")
+    # GR4 integration test: SoapySource + loopback through scheduler
+    add_executable(qa_SoapyIntegration qa_SoapyIntegration.cpp)
+    target_link_libraries(
+      qa_SoapyIntegration
+      PRIVATE gnuradio-options
+              gnuradio-core
+              gnuradio-blocklib-core
+              gr-sdr
+              gr-basic
+              gr-testing
+              ut)
+    add_dependencies(qa_SoapyIntegration gr-sdr-loopback)
+    add_custom_command(
+      TARGET qa_SoapyIntegration
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${SOAPY_MODULE_DIR}
+      COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:gr-sdr-loopback> ${SOAPY_MODULE_DIR}/
+      COMMENT "Copying gr-sdr-loopback.so for integration test")
+    add_test(NAME qa_SoapyIntegration COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
+                                              ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyIntegration)
+    set_tests_properties(qa_SoapyIntegration
+                         PROPERTIES ENVIRONMENT "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0")
   else()
     message(STATUS "qa_SoapyRaiiWrapper SKIPPED (loopback .so module requires matching SoapySDR ABI)")
   endif()
