@@ -171,7 +171,10 @@ struct DeviceRegistry {
         if (auto hashPos = driver.find('#'); hashPos != std::string::npos) {
             std::size_t id  = 0UZ;
             auto        sub = driver.substr(hashPos + 1);
-            std::from_chars(sub.data(), sub.data() + sub.size(), id);
+            auto [ptr, ec]  = std::from_chars(sub.data(), sub.data() + sub.size(), id);
+            if (ec != std::errc{}) {
+                return 0UZ;
+            }
             return id;
         }
         return 0UZ;
@@ -251,10 +254,16 @@ public:
     explicit LoopbackDevice(const SoapySDR::Kwargs& args) {
         _instanceId = DeviceRegistry::parseInstanceId(args);
         if (auto it = args.find("num_channels"); it != args.end()) {
-            std::from_chars(it->second.data(), it->second.data() + it->second.size(), _numChannels);
+            auto [ptr, ec] = std::from_chars(it->second.data(), it->second.data() + it->second.size(), _numChannels);
+            if (ec != std::errc{} || _numChannels == 0UZ) {
+                _numChannels = 1UZ;
+            }
         }
         if (auto it = args.find("buffer_size"); it != args.end()) {
-            std::from_chars(it->second.data(), it->second.data() + it->second.size(), _bufferSize);
+            auto [ptr, ec] = std::from_chars(it->second.data(), it->second.data() + it->second.size(), _bufferSize);
+            if (ec != std::errc{} || _bufferSize == 0UZ) {
+                _bufferSize = kDefaultBufferSize;
+            }
         }
         if (auto it = args.find("device_mode"); it != args.end()) {
             _deviceMode = parseDeviceMode(it->second);
@@ -271,7 +280,9 @@ public:
     [[nodiscard]] std::size_t instanceId() const { return _instanceId; }
 
     void setChannelModel(ChannelModel model) {
-        assert(!_txStreamActive.load(std::memory_order_relaxed) && "setChannelModel must be called before activateStream(TX)");
+        if (_txStreamActive.load(std::memory_order_acquire)) {
+            return; // setChannelModel must be called before activateStream(TX)
+        }
         if (!model.process) {
             model = ChannelModel::passthrough();
         }
@@ -281,7 +292,9 @@ public:
     }
 
     void setChannelModel(std::size_t channel, ChannelModel model) {
-        assert(!_txStreamActive.load(std::memory_order_relaxed) && "setChannelModel must be called before activateStream(TX)");
+        if (_txStreamActive.load(std::memory_order_acquire)) {
+            return; // setChannelModel must be called before activateStream(TX)
+        }
         if (!model.process) {
             model = ChannelModel::passthrough();
         }
@@ -407,20 +420,20 @@ public:
 
     int activateStream(SoapySDR::Stream* stream, const int /*flags*/ = 0, const long long /*timeNs*/ = 0, const size_t /*numElems*/ = 0) override {
         if (stream == reinterpret_cast<SoapySDR::Stream*>(&_rxStreamSentinel)) {
-            _rxStreamActive.store(true, std::memory_order_relaxed);
+            _rxStreamActive.store(true, std::memory_order_release);
             _lastReadTime = std::chrono::steady_clock::now();
         } else {
-            _txStreamActive.store(true, std::memory_order_relaxed);
+            _txStreamActive.store(true, std::memory_order_release);
         }
         return 0;
     }
 
     int deactivateStream(SoapySDR::Stream* stream, const int /*flags*/ = 0, const long long /*timeNs*/ = 0) override {
         if (stream == reinterpret_cast<SoapySDR::Stream*>(&_rxStreamSentinel)) {
-            _rxStreamActive.store(false, std::memory_order_relaxed);
+            _rxStreamActive.store(false, std::memory_order_release);
             drainBuffers();
         } else {
-            _txStreamActive.store(false, std::memory_order_relaxed);
+            _txStreamActive.store(false, std::memory_order_release);
         }
         return 0;
     }
@@ -651,7 +664,6 @@ public:
         }
         auto model = modelFromSetting(key, value);
         if (model.process) {
-            assert(!_txStreamActive.load(std::memory_order_relaxed) && "writeSetting(model) must be called before activateStream(TX)");
             setChannelModel(std::move(model));
         }
     }
@@ -676,8 +688,7 @@ public:
         }
         auto model = modelFromSetting(key, value);
         if (model.process) {
-            assert(!_txStreamActive.load(std::memory_order_relaxed) && "writeSetting(model) must be called before activateStream(TX)");
-            _channels[channel]->model = std::move(model);
+            setChannelModel(channel, std::move(model));
         }
     }
 
@@ -808,19 +819,19 @@ private:
             return ChannelModel::passthrough();
         }
         if (key == "attenuation_dB") {
-            float dB = 0.f;
-            std::from_chars(value.data(), value.data() + value.size(), dB);
-            return ChannelModel::attenuation(dB);
+            float dB       = 0.f;
+            auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), dB);
+            return (ec == std::errc{}) ? ChannelModel::attenuation(dB) : ChannelModel::passthrough();
         }
         if (key == "noise_floor_dBFS") {
-            float dBFS = 0.f;
-            std::from_chars(value.data(), value.data() + value.size(), dBFS);
-            return ChannelModel::awgn(dBFS);
+            float dBFS     = 0.f;
+            auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), dBFS);
+            return (ec == std::errc{}) ? ChannelModel::awgn(dBFS) : ChannelModel::passthrough();
         }
         if (key == "delay_samples") {
-            std::size_t n = 0UZ;
-            std::from_chars(value.data(), value.data() + value.size(), n);
-            return ChannelModel::delay(n);
+            std::size_t n  = 0UZ;
+            auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), n);
+            return (ec == std::errc{}) ? ChannelModel::delay(n) : ChannelModel::passthrough();
         }
         return {};
     }

@@ -44,12 +44,25 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
     Annotated<std::string, "device", Visible, Doc<"SoapySDR driver name">>                                                       device;
     Annotated<std::string, "device_parameter", Visible, Doc<"additional driver parameters">>                                     device_parameter;
+    Annotated<double, "master_clock_rate", Unit<"Hz">, Doc<"device master clock rate (0 = auto, set before sample_rate)">>       master_clock_rate = 0.0;
+    Annotated<std::string, "clock_source", Doc<"clock reference source (e.g. internal, external, gpsdo)">>                       clock_source;
     Annotated<float, "sample_rate", Unit<"Hz">, Visible, Doc<"ADC sample rate (SigMF core:sample_rate)">>                        sample_rate  = 1'000'000.f;
     Annotated<gr::Size_t, "num_channels", Visible, Doc<"number of RX channels (SigMF core:num_channels)">>                       num_channels = 1U;
     Annotated<std::vector<std::string>, "rx_antennae", Visible, Doc<"per-channel RX antenna selection">>                         rx_antennae;
-    Annotated<std::vector<double>, "frequency", Unit<"Hz">, Visible, Doc<"per-channel center frequency (SigMF core:frequency)">> frequency     = initDefaultValues(107'000'000.);
-    Annotated<std::vector<double>, "rx_bandwidths", Unit<"Hz">, Visible, Doc<"per-channel RX RF bandwidth">>                     rx_bandwidths = initDefaultValues(500'000.);
-    Annotated<std::vector<double>, "rx_gains", Unit<"dB">, Visible, Doc<"per-channel RX tuner gain">>                            rx_gains      = initDefaultValues(10.);
+    Annotated<std::vector<double>, "frequency", Unit<"Hz">, Visible, Doc<"per-channel center frequency (SigMF core:frequency)">> frequency            = initDefaultValues(107'000'000.);
+    Annotated<std::vector<double>, "rx_bandwidths", Unit<"Hz">, Visible, Doc<"per-channel RX RF bandwidth">>                     rx_bandwidths        = initDefaultValues(500'000.);
+    Annotated<std::vector<double>, "rx_gains", Unit<"dB">, Visible, Doc<"per-channel RX tuner gain">>                            rx_gains             = initDefaultValues(10.);
+    Annotated<bool, "gain_mode", Doc<"enable automatic gain control (AGC)">>                                                     gain_mode            = false;
+    Annotated<double, "frequency_correction", Unit<"ppm">, Doc<"crystal oscillator drift compensation">>                         frequency_correction = 0.0;
+    Annotated<bool, "dc_offset_mode", Doc<"enable hardware automatic DC offset removal">>                                        dc_offset_mode       = false;
+    Annotated<std::vector<double>, "dc_offset", Doc<"manual DC offset correction [I0,Q0,I1,Q1,...] per channel">>                dc_offset;
+    Annotated<std::vector<double>, "iq_balance", Doc<"manual IQ balance correction [I0,Q0,I1,Q1,...] per channel">>              iq_balance;
+    Annotated<std::string, "time_source", Doc<"PPS/GPS time reference (e.g. external, gpsdo)">>                                  time_source;
+    Annotated<double, "reference_clock_rate", Unit<"Hz">, Doc<"reference oscillator rate (0 = auto)">>                           reference_clock_rate = 0.0;
+    Annotated<std::string, "stream_args", Doc<"SoapySDR stream kwargs (comma-separated key=value)">>                             stream_args;
+    Annotated<std::string, "tune_args", Doc<"per-channel tuning kwargs (comma-separated key=value)">>                            tune_args;
+    Annotated<std::string, "frontend_mapping", Doc<"logical-to-physical channel mapping">>                                       frontend_mapping;
+    Annotated<std::string, "device_settings", Doc<"device-level settings (comma-separated key=value)">>                          device_settings;
 
     Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per read (ideally N x 512)">, Visible, TSizeChecker> max_chunk_size       = 512U << 4U;
     Annotated<std::uint32_t, "max_time_out_us", Unit<"us">, Doc<"SoapySDR polling timeout">>                         max_time_out_us      = 1'000;
@@ -65,13 +78,14 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     Annotated<float, "ppm_estimator_cutoff", Unit<"Hz">, Doc<"LP cutoff for sample-rate estimator (0 = disable)">>   ppm_estimator_cutoff = 0.f;
     Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">>          ppm_tag_threshold    = 0.1f;
 
-    GR_MAKE_REFLECTABLE(SoapySource, clk_in, out, device, device_parameter, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count, verbose_overflow, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
+    GR_MAKE_REFLECTABLE(SoapySource, clk_in, out, device, device_parameter, master_clock_rate, clock_source, sample_rate, num_channels, rx_antennae, frequency, rx_bandwidths, rx_gains, gain_mode, frequency_correction, dc_offset_mode, dc_offset, iq_balance, time_source, reference_clock_rate, stream_args, tune_args, frontend_mapping, device_settings, max_chunk_size, max_time_out_us, max_overflow_count, max_fragment_count, verbose_overflow, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
     soapy::Device                          _device{};
     soapy::Device::Stream<T, SOAPY_SDR_RX> _rxStream{};
+    soapy::Kwargs                          _devKwargs{};
     bool                                   _ioThreadDone = true;
-    std::atomic<gr::Size_t>                _overFlowCount{0U};
-    gr::Size_t                             _fragmentCount    = 0U;
+    std::atomic<gr::Size_t>                _overflowCount{0U};
+    std::atomic<gr::Size_t>                _fragmentCount{0U};
     std::int64_t                           _clockOffsetNs    = 0;
     bool                                   _clockOffsetValid = false;
     std::string                            _clockTriggerName;
@@ -82,7 +96,11 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     filter::Filter<float>                  _dcFilterI;
     filter::Filter<float>                  _dcFilterQ;
     algorithm::SampleRateEstimator         _rateEstimator;
-    float                                  _ppmLastEmitted = 0.0f;
+    float                                  _ppmLastEmitted   = 0.0f;
+    bool                                   _clockEosReceived = false;
+    std::atomic<bool>                      _ioThreadStarted{false};
+    std::atomic<bool>                      _dcFilterDirty{false};
+    std::atomic<bool>                      _rateEstimatorDirty{false};
 
     struct IoThreadGuard {
         bool& done;
@@ -103,8 +121,8 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         if (newSettings.contains("sample_rate")) {
             applySampleRate();
             forwardSettings.insert_or_assign(std::pmr::string("sample_rate"), sample_rate.value);
-            rebuildDcFilter();
-            rebuildRateEstimator();
+            _dcFilterDirty.store(true, std::memory_order_release);
+            _rateEstimatorDirty.store(true, std::memory_order_release);
         }
         if (newSettings.contains("rx_antennae")) {
             applyAntenna();
@@ -115,35 +133,67 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         if (newSettings.contains("rx_bandwidths")) {
             applyBandwidth();
         }
+        if (newSettings.contains("gain_mode")) {
+            applyGainMode();
+        }
+        if (newSettings.contains("frequency_correction")) {
+            applyFrequencyCorrection();
+        }
+        if (newSettings.contains("dc_offset_mode")) {
+            applyDcOffsetMode();
+        }
+        if (newSettings.contains("dc_offset")) {
+            applyDcOffset();
+        }
+        if (newSettings.contains("iq_balance")) {
+            applyIqBalance();
+        }
+        if (newSettings.contains("device_settings")) {
+            applyDeviceSettings();
+        }
         if (newSettings.contains("dc_blocker_cutoff") || newSettings.contains("dc_blocker_enabled")) {
-            rebuildDcFilter();
+            _dcFilterDirty.store(true, std::memory_order_release);
         }
         if (newSettings.contains("ppm_estimator_cutoff")) {
-            rebuildRateEstimator();
+            _rateEstimatorDirty.store(true, std::memory_order_release);
         }
     }
 
     void start() {
-        _overFlowCount.store(0U, std::memory_order_relaxed);
-        _fragmentCount    = 0U;
+        _overflowCount.store(0U, std::memory_order_relaxed);
+        _fragmentCount.store(0U, std::memory_order_relaxed);
         _clockOffsetNs    = 0;
         _clockOffsetValid = false;
         _clockTriggerName.clear();
-        _firstEmission  = true;
-        _lastTagTimeNs  = 0UL;
-        _ppmLastEmitted = 0.0f;
+        _firstEmission    = true;
+        _lastTagTimeNs    = 0UL;
+        _ppmLastEmitted   = 0.0f;
+        _clockEosReceived = false;
+        _ioThreadStarted.store(false, std::memory_order_relaxed);
+        _dcFilterDirty.store(false, std::memory_order_relaxed);
+        _rateEstimatorDirty.store(false, std::memory_order_relaxed);
         rebuildDcFilter();
         rebuildRateEstimator();
         reinitDevice();
-        if (!_device.get()) {
+        if (!_device.get() || !_rxStream.get()) {
             return;
         }
-        gr::atomic_ref(_ioThreadDone).store_release(false);
-        thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+        soapy::detail::DeviceRegistry::registerActivation(_devKwargs, [this] {
+            if (auto r = _rxStream.activate(); !r) {
+                this->emitErrorMessage("start()", r.error());
+                this->requestStop();
+                return;
+            }
+            _ioThreadStarted.store(true, std::memory_order_release);
+            gr::atomic_ref(_ioThreadDone).store_release(false);
+            thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+        });
     }
 
     void stop() {
-        gr::atomic_ref(_ioThreadDone).wait(false);
+        if (_ioThreadStarted.load(std::memory_order_acquire)) {
+            gr::atomic_ref(_ioThreadDone).wait(false);
+        }
         _rxStream.reset();
         _device.reset();
     }
@@ -156,7 +206,11 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
             this->requestStop();
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        return {requestedWork, 1UZ, work::Status::OK};
+        if (_ioThreadStarted.load(std::memory_order_acquire) && gr::atomic_ref(_ioThreadDone).load_acquire()) {
+            this->requestStop();
+            return {requestedWork, 0UZ, work::Status::DONE};
+        }
+        return {requestedWork, 0UZ, work::Status::OK};
     }
 
     void ioReadLoop() {
@@ -174,6 +228,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
             while (lifecycle::isActive(this->state())) {
                 this->applyChangedSettings();
+                applyDirtyFlags();
 
                 int       flags   = 0;
                 long long time_ns = 0;
@@ -206,23 +261,24 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                 if (span.empty()) {
                     continue;
                 }
-                std::memcpy(span.data(), readBuf.data(), nSamples * sizeof(T));
+                auto nCopy = std::min(nSamples, span.size());
+                std::memcpy(span.data(), readBuf.data(), nCopy * sizeof(T));
 
                 if constexpr (std::is_same_v<T, std::complex<float>>) {
                     if (dc_blocker_enabled) {
-                        applyDcBlocker(span.data(), nSamples);
+                        applyDcBlocker(span.data(), nCopy);
                     }
                 }
 
                 if (emit_timing_tags) {
                     auto intervalNs = static_cast<std::uint64_t>(tag_interval.value * 1e9f);
                     if (intervalNs == 0UL || _lastTagTimeNs == 0UL || (tWallNs - _lastTagTimeNs) >= intervalNs) {
-                        emitTimingTag(nSamples, tWallNs);
+                        emitTimingTag(nCopy, tWallNs);
                         _lastTagTimeNs = tWallNs;
                     }
                 }
 
-                span.publish(nSamples);
+                span.publish(nCopy);
                 this->progress->incrementAndGet();
                 this->progress->notify_all();
             }
@@ -236,6 +292,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
             while (lifecycle::isActive(this->state())) {
                 this->applyChangedSettings();
+                applyDirtyFlags();
 
                 int       flags   = 0;
                 long long time_ns = 0;
@@ -272,12 +329,28 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
                 bool allAvailable = std::ranges::all_of(outWriters, [nSamples](auto& w) { return w.get().available() >= nSamples; });
                 if (!allAvailable) {
-                    continue; // backpressure on any channel — retry entire read
+                    continue;
                 }
-                for (std::size_t ch = 0UZ; ch < outWriters.size(); ++ch) {
-                    auto span = outWriters[ch].get().template tryReserve<SpanReleasePolicy::ProcessNone>(nSamples);
-                    std::memcpy(span.data(), readBufs[ch].data(), nSamples * sizeof(T));
-                    span.publish(nSamples);
+
+                using OutSpanType = decltype(outWriters[0].get().template tryReserve<SpanReleasePolicy::ProcessNone>(0UZ));
+                std::vector<OutSpanType> outSpans;
+                outSpans.reserve(outWriters.size());
+                bool allReserved = true;
+                for (auto& w : outWriters) {
+                    outSpans.push_back(w.get().template tryReserve<SpanReleasePolicy::ProcessNone>(nSamples));
+                    if (outSpans.back().empty()) {
+                        allReserved = false;
+                        break;
+                    }
+                }
+                if (!allReserved) {
+                    outSpans.clear();
+                    continue;
+                }
+                for (std::size_t ch = 0UZ; ch < outSpans.size(); ++ch) {
+                    auto nCopy = std::min(nSamples, outSpans[ch].size());
+                    std::memcpy(outSpans[ch].data(), readBufs[ch].data(), nCopy * sizeof(T));
+                    outSpans[ch].publish(nCopy);
                 }
 
                 if (emit_timing_tags) {
@@ -291,6 +364,11 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                 this->progress->incrementAndGet();
                 this->progress->notify_all();
             }
+        }
+
+        this->publishEoS();
+        if (clk_in.isConnected()) {
+            std::ignore = clk_in.disconnect();
         }
 
         if (auto r = _rxStream.deactivate(); !r) {
@@ -311,7 +389,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         }
 
         auto        tagData       = clkTagRdr.get(clkTagRdr.available());
-        std::size_t nTagsConsumed = 0;
+        std::size_t nTagsConsumed = 0UZ;
 
         for (const auto& clkTag : tagData) {
             ++nTagsConsumed;
@@ -329,11 +407,19 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
                     }
                 }
             }
+            static const std::pmr::string kEosKey(tag::END_OF_STREAM.shortKey());
+            if (clkTag.map.contains(kEosKey)) {
+                _clockEosReceived = true;
+            }
         }
 
         std::ignore  = tagData.consume(nTagsConsumed);
         auto clkSpan = clkReader.get(nAvailable);
         std::ignore  = clkSpan.consume(nAvailable);
+
+        if (_clockEosReceived) {
+            this->requestStop();
+        }
     }
 
     void emitTimingTag(std::size_t nSamples, std::uint64_t tWallNs) {
@@ -400,26 +486,13 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         _firstEmission = false;
     }
 
-    static soapy::Kwargs parseKwargsString(const std::string& str) {
-        soapy::Kwargs     kwargs;
-        std::stringstream ss(str);
-        std::string       keyVal;
-        while (std::getline(ss, keyVal, ',')) {
-            auto pos = keyVal.find('=');
-            if (pos != std::string::npos) {
-                kwargs[keyVal.substr(0, pos)] = keyVal.substr(pos + 1);
-            }
-        }
-        return kwargs;
-    }
-
     void reinitDevice() {
         _rxStream.reset();
-        auto devKwargs = soapy::Kwargs{{"driver", device.value}};
+        _devKwargs = soapy::Kwargs{{"driver", device.value}};
         if (!device_parameter->empty()) {
-            devKwargs.merge(parseKwargsString(device_parameter.value));
+            _devKwargs.merge(soapy::parseKwargsString(device_parameter.value));
         }
-        auto devResult = soapy::Device::make(devKwargs);
+        auto devResult = soapy::Device::make(_devKwargs);
         if (!devResult) {
             this->emitErrorMessage("reinitDevice()", devResult.error());
             this->requestStop();
@@ -435,11 +508,19 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
             return;
         }
 
+        applyClockConfig();
         applySampleRate();
         applyAntenna();
         applyFrequency();
         applyBandwidth();
         applyGain();
+        applyGainMode();
+        applyFrequencyCorrection();
+        applyDcOffsetMode();
+        applyDcOffset();
+        applyIqBalance();
+        applyFrontendMapping();
+        applyDeviceSettings();
 
         auto        supportedFormats = _device.getStreamFormats(SOAPY_SDR_RX, 0);
         const char* requestedFormat  = soapy::detail::toSoapySDRFormat<T>();
@@ -451,16 +532,36 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
         std::vector<gr::Size_t> channelIndices(num_channels);
         std::iota(channelIndices.begin(), channelIndices.end(), gr::Size_t{0});
-        auto streamResult = _device.setupStream<T, SOAPY_SDR_RX>(channelIndices);
+        soapy::Kwargs parsedStreamArgs = stream_args->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(stream_args.value);
+        auto          streamResult     = _device.setupStream<T, SOAPY_SDR_RX>(channelIndices, parsedStreamArgs);
         if (!streamResult) {
             this->emitErrorMessage("reinitDevice()", std::format("{} (requested: {})", streamResult.error(), requestedFormat));
             this->requestStop();
             return;
         }
         _rxStream = std::move(*streamResult);
-        if (auto r = _rxStream.activate(); !r) {
-            this->emitErrorMessage("reinitDevice()", r.error());
-            this->requestStop();
+    }
+
+    void applyClockConfig() {
+        if (!clock_source->empty()) {
+            if (auto r = _device.setClockSource(clock_source.value); !r) {
+                this->emitErrorMessage("applyClockConfig()", r.error());
+            }
+        }
+        if (!time_source->empty()) {
+            if (auto r = _device.setTimeSource(time_source.value); !r) {
+                this->emitErrorMessage("applyClockConfig()", r.error());
+            }
+        }
+        if (master_clock_rate > 0.0) {
+            if (auto r = _device.setMasterClockRate(master_clock_rate); !r) {
+                this->emitErrorMessage("applyClockConfig()", r.error());
+            }
+        }
+        if (reference_clock_rate > 0.0) {
+            if (auto r = _device.setReferenceClockRate(reference_clock_rate); !r) {
+                this->emitErrorMessage("applyClockConfig()", r.error());
+            }
         }
     }
 
@@ -494,6 +595,9 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     }
 
     void applyFrequency() {
+        if (frequency->empty()) {
+            return;
+        }
         for (gr::Size_t i = 0U; i < num_channels; i++) {
             double freq = frequency->at(std::min(static_cast<std::size_t>(i), frequency->size() - 1UZ));
             if (auto r = _device.setCenterFrequency(SOAPY_SDR_RX, i, freq); !r) {
@@ -510,6 +614,9 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     }
 
     void applyBandwidth() {
+        if (rx_bandwidths->empty()) {
+            return;
+        }
         for (gr::Size_t i = 0U; i < num_channels; i++) {
             double bw = rx_bandwidths->at(std::min(static_cast<std::size_t>(i), rx_bandwidths->size() - 1UZ));
             if (auto r = _device.setBandwidth(SOAPY_SDR_RX, i, bw); !r) {
@@ -519,10 +626,108 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     }
 
     void applyGain() {
+        if (rx_gains->empty()) {
+            return;
+        }
         for (gr::Size_t i = 0U; i < num_channels; i++) {
             double g = rx_gains->at(std::min(static_cast<std::size_t>(i), rx_gains->size() - 1UZ));
             if (auto r = _device.setGain(SOAPY_SDR_RX, i, g); !r) {
                 this->emitErrorMessage("applyGain()", r.error());
+            }
+        }
+    }
+
+    void applyGainMode() {
+        if (!gain_mode) {
+            return;
+        }
+        for (gr::Size_t i = 0U; i < num_channels; i++) {
+            if (!_device.hasAutomaticGainControl(SOAPY_SDR_RX, i)) {
+                continue;
+            }
+            if (auto r = _device.setAutomaticGainControl(SOAPY_SDR_RX, i, gain_mode); !r) {
+                this->emitErrorMessage("applyGainMode()", r.error());
+            }
+        }
+    }
+
+    void applyFrequencyCorrection() {
+        if (frequency_correction == 0.0) {
+            return;
+        }
+        for (gr::Size_t i = 0U; i < num_channels; i++) {
+            if (!_device.hasFrequencyCorrection(SOAPY_SDR_RX, i)) {
+                continue;
+            }
+            if (auto r = _device.setFrequencyCorrection(SOAPY_SDR_RX, i, frequency_correction); !r) {
+                this->emitErrorMessage("applyFrequencyCorrection()", r.error());
+            }
+        }
+    }
+
+    void applyDcOffsetMode() {
+        if (!dc_offset_mode) {
+            return;
+        }
+        for (gr::Size_t i = 0U; i < num_channels; i++) {
+            if (!_device.hasDCOffsetMode(SOAPY_SDR_RX, i)) {
+                continue;
+            }
+            if (auto r = _device.setDCOffsetMode(SOAPY_SDR_RX, i, dc_offset_mode); !r) {
+                this->emitErrorMessage("applyDcOffsetMode()", r.error());
+            }
+        }
+    }
+
+    void applyDcOffset() {
+        if (dc_offset->empty()) {
+            return;
+        }
+        for (gr::Size_t i = 0U; i < num_channels; i++) {
+            if (!_device.hasDCOffset(SOAPY_SDR_RX, i)) {
+                continue;
+            }
+            auto idx = static_cast<std::size_t>(i) * 2UZ;
+            if (idx + 1UZ >= dc_offset->size()) {
+                break;
+            }
+            if (auto r = _device.setDCOffset(SOAPY_SDR_RX, i, dc_offset->at(idx), dc_offset->at(idx + 1UZ)); !r) {
+                this->emitErrorMessage("applyDcOffset()", r.error());
+            }
+        }
+    }
+
+    void applyIqBalance() {
+        if (iq_balance->empty()) {
+            return;
+        }
+        for (gr::Size_t i = 0U; i < num_channels; i++) {
+            if (!_device.hasIQBalance(SOAPY_SDR_RX, i)) {
+                continue;
+            }
+            auto idx = static_cast<std::size_t>(i) * 2UZ;
+            if (idx + 1UZ >= iq_balance->size()) {
+                break;
+            }
+            if (auto r = _device.setIQBalance(SOAPY_SDR_RX, i, iq_balance->at(idx), iq_balance->at(idx + 1UZ)); !r) {
+                this->emitErrorMessage("applyIqBalance()", r.error());
+            }
+        }
+    }
+
+    void applyFrontendMapping() {
+        if (!frontend_mapping->empty()) {
+            _device.setFrontendMapping(SOAPY_SDR_RX, frontend_mapping.value);
+        }
+    }
+
+    void applyDeviceSettings() {
+        if (device_settings->empty()) {
+            return;
+        }
+        for (const auto& [key, value] : soapy::parseKwargsString(device_settings.value)) {
+            if (auto r = _device.writeSetting(key, value); !r) {
+                this->emitErrorMessage("applyDeviceSettings()", r.error());
             }
         }
     }
@@ -547,7 +752,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     }
 
     void applyDcBlocker(std::complex<float>* samples, std::size_t nSamples) {
-        for (std::size_t i = 0; i < nSamples; ++i) {
+        for (std::size_t i = 0UZ; i < nSamples; ++i) {
             float filteredI = _dcFilterI.processOne(samples[i].real());
             float filteredQ = _dcFilterQ.processOne(samples[i].imag());
             samples[i]      = {filteredI, filteredQ};
@@ -571,7 +776,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     bool handleStreamError(int ret) {
         switch (ret) {
         case SOAPY_SDR_OVERFLOW: {
-            auto count = _overFlowCount.fetch_add(1U, std::memory_order_relaxed) + 1U;
+            auto count = _overflowCount.fetch_add(1U, std::memory_order_relaxed) + 1U;
             if (verbose_overflow) {
                 std::println(stderr, "[SoapySource] OVERFLOW #{}", count);
             }
@@ -604,13 +809,22 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
     void handleStreamFlags(int flags) {
         if (max_fragment_count > 0 && (flags & SOAPY_SDR_MORE_FRAGMENTS)) {
-            _fragmentCount++;
-            if (_fragmentCount > max_fragment_count) {
-                this->emitErrorMessage("ioReadLoop()", std::format("MORE_FRAGMENTS: {} of max {}", _fragmentCount, max_fragment_count));
+            auto count = _fragmentCount.fetch_add(1U, std::memory_order_relaxed) + 1U;
+            if (count > max_fragment_count) {
+                this->emitErrorMessage("ioReadLoop()", std::format("MORE_FRAGMENTS: {} of max {}", count, max_fragment_count));
                 this->requestStop();
             }
         } else {
-            _fragmentCount = 0U;
+            _fragmentCount.store(0U, std::memory_order_relaxed);
+        }
+    }
+
+    void applyDirtyFlags() {
+        if (_dcFilterDirty.exchange(false, std::memory_order_acquire)) {
+            rebuildDcFilter();
+        }
+        if (_rateEstimatorDirty.exchange(false, std::memory_order_acquire)) {
+            rebuildRateEstimator();
         }
     }
 

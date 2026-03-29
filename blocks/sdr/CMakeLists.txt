@@ -9,7 +9,7 @@ install(FILES include/gnuradio-4.0/sdr/RTL2832Device.hpp include/gnuradio-4.0/sd
 if(TARGET SoapySDR)
   target_link_libraries(gr-sdr INTERFACE SoapySDR)
   install(FILES include/gnuradio-4.0/sdr/SoapyRaiiWrapper.hpp include/gnuradio-4.0/sdr/SoapySource.hpp
-          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/sdr")
+                include/gnuradio-4.0/sdr/SoapySink.hpp DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0/sdr")
 
   # loopback device: static library for tests + optional shared module for system-wide use
   add_library(gr-sdr-loopback-static STATIC src/SoapyLoopbackModule.cpp)
