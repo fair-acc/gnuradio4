@@ -668,6 +668,7 @@ void shutdownWorkletBackend(TState& state, WebAudioPendingWorkletInit& pendingIn
 // -- sink backend --
 
 template<AudioSample T>
+// WebAudio does not support output device selection — the browser routes audio to the system default
 struct EmscriptenAudioWorkletSinkBackend {
     AudioSinkState<T>          _state{};
     WebAudioPendingWorkletInit _pendingInit{};

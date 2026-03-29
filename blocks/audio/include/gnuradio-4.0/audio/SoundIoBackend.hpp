@@ -347,16 +347,17 @@ struct SoundIoSourceBackend {
             return std::unexpected(gr::Error(std::format("libsoundio does not provide a default input layout for {} channels", channelCount)));
         }
 
-        _instream->userdata          = this;
-        _instream->format            = soundIoFormatFor<T>();
-        _instream->sample_rate       = static_cast<int>(config.sampleRate);
-        _instream->layout            = *layout;
-        _instream->software_latency  = static_cast<double>(std::max<std::size_t>(1U, config.bufferFrames)) / static_cast<double>(config.sampleRate);
-        _instream->read_callback     = &SoundIoSourceBackend::readCallback;
-        _instream->overflow_callback = &SoundIoSourceBackend::overflowCallback;
-        _instream->error_callback    = &SoundIoSourceBackend::errorCallback;
-        _instream->name              = "GNU Radio AudioSource";
-        _instream->non_terminal_hint = true;
+        _instream->userdata                 = this;
+        _instream->format                   = soundIoFormatFor<T>();
+        _instream->sample_rate              = static_cast<int>(config.sampleRate);
+        _instream->layout                   = *layout;
+        constexpr double kMaxLatencySeconds = 0.05; // 50ms max — ensures frequent callbacks even with large ring buffers
+        _instream->software_latency         = std::min(kMaxLatencySeconds, static_cast<double>(std::max<std::size_t>(1U, config.bufferFrames)) / static_cast<double>(config.sampleRate));
+        _instream->read_callback            = &SoundIoSourceBackend::readCallback;
+        _instream->overflow_callback        = &SoundIoSourceBackend::overflowCallback;
+        _instream->error_callback           = &SoundIoSourceBackend::errorCallback;
+        _instream->name                     = "GNU Radio AudioSource";
+        _instream->non_terminal_hint        = true;
 
         const int openError = soundio_instream_open(_instream);
         if (openError != SoundIoErrorNone) {

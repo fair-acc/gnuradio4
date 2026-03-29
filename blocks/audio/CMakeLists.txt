@@ -22,7 +22,7 @@ gr_add_block_library(
   HEADERS
   include/gnuradio-4.0/audio/AudioBackends.hpp
   include/gnuradio-4.0/audio/AudioBlocks.hpp
-        include/gnuradio-4.0/audio/EmscriptenAudioBackend.hpp
+  include/gnuradio-4.0/audio/EmscriptenAudioBackend.hpp
   include/gnuradio-4.0/audio/SoundIoBackend.hpp
   include/gnuradio-4.0/audio/WavSource.hpp
   LINK_LIBRARIES

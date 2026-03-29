@@ -53,7 +53,7 @@
             el.scrollTop = el.scrollHeight;
         },
         onRuntimeInitialized: function() {
-            var sr = 48000, dur = 1.0, freq = 440, amp = 0.25;
+            var sr = 48000, dur = 3.0, freq = 440, amp = 0.25;
             var n = Math.floor(sr * dur), bytes = n * 2;
             var wav = new ArrayBuffer(44 + bytes), v = new DataView(wav);
             function w(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
