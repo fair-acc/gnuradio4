@@ -130,6 +130,7 @@ if(TARGET SoapySDR)
               gnuradio-blocklib-core
               gr-sdr
               gr-basic
+              gr-common
               gr-testing
               ut)
     add_dependencies(qa_SoapyIntegration gr-sdr-loopback)

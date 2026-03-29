@@ -100,7 +100,12 @@ const boost::ut::suite<"basic SoapySDR API "> basicSoapyAPI = [] {
         [](std::string deviceDriver) {
             std::println("Basic API test - deviceDriver '{}'", deviceDriver);
 
-            Device device(deviceDriver.empty() ? Kwargs{} : Kwargs{{"driver", deviceDriver}});
+            auto devResult = Device::make(deviceDriver.empty() ? Kwargs{} : Kwargs{{"driver", deviceDriver}});
+            expect(devResult.has_value()) << "Device creation failed";
+            if (!devResult) {
+                return;
+            }
+            Device device = std::move(*devResult);
 
             "Device Setting Info"_test = [&device] {
                 std::vector<ArgInfo> settingsInfo = device.getSettingInfo();

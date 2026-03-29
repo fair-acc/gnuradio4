@@ -52,7 +52,7 @@ struct BurstTaper {
 
     BurstTaper() = default;
 
-    explicit constexpr BurstTaper(TaperType type, T rampTimeSec = T{0}, T sampleRateHz = T{1}, T param = T{0}) {
+    explicit BurstTaper(TaperType type, T rampTimeSec = T{0}, T sampleRateHz = T{1}, T param = T{0}) {
         if (rampTimeSec >= T{0} && sampleRateHz > T{0}) {
             _taperType  = type;
             _rampTime   = rampTimeSec;

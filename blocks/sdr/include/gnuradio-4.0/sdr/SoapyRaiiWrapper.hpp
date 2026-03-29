@@ -22,8 +22,10 @@
 #include <cstring>
 #include <expected>
 #include <format>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <source_location>
 #include <sstream>
 #include <string>
@@ -78,9 +80,9 @@ public:
 [[nodiscard]] inline KwargsList convertToCpp(SoapySDRKwargs* results, std::size_t length) {
     KwargsList kwargsList;
     kwargsList.reserve(length);
-    for (std::size_t i = 0; i < length; ++i) {
+    for (std::size_t i = 0UZ; i < length; ++i) {
         Kwargs kwargs;
-        for (std::size_t j = 0; j < results[i].size; ++j) {
+        for (std::size_t j = 0UZ; j < results[i].size; ++j) {
             kwargs[results[i].keys[j]] = results[i].vals[j];
         }
         kwargsList.push_back(kwargs);
@@ -92,7 +94,7 @@ public:
 [[nodiscard]] inline std::vector<std::string> convertToCpp(char** strings, std::size_t length) {
     std::vector<std::string> stringList;
     stringList.reserve(length);
-    for (std::size_t i = 0; i < length; ++i) {
+    for (std::size_t i = 0UZ; i < length; ++i) {
         stringList.emplace_back(std::string(strings[i]));
     }
     SoapySDRStrings_clear(&strings, length);
@@ -103,7 +105,7 @@ public:
     std::vector<ArgInfo> argInfoList;
     argInfoList.resize(size); // Preallocate space
 
-    for (std::size_t i = 0; i < size; ++i) {
+    for (std::size_t i = 0UZ; i < size; ++i) {
         SoapySDRArgInfo& cInfo   = infos[i];
         ArgInfo&         argInfo = argInfoList[i];
 
@@ -117,14 +119,14 @@ public:
 
         if (cInfo.options != nullptr) {
             argInfo.options.resize(cInfo.numOptions);
-            for (std::size_t j = 0; j < cInfo.numOptions; ++j) {
+            for (std::size_t j = 0UZ; j < cInfo.numOptions; ++j) {
                 argInfo.options[j] = cInfo.options[j] ? std::string(cInfo.options[j]) : "";
             }
         }
 
         if (cInfo.optionNames != nullptr) {
             argInfo.optionNames.resize(cInfo.numOptions);
-            for (std::size_t j = 0; j < cInfo.numOptions; ++j) {
+            for (std::size_t j = 0UZ; j < cInfo.numOptions; ++j) {
                 argInfo.optionNames[j] = cInfo.optionNames[j] ? std::string(cInfo.optionNames[j]) : "";
             }
         }
@@ -157,7 +159,7 @@ constexpr const char* toSoapySDRFormat() {
     } else if constexpr (std::is_same_v<T, uint8_t>) {
         return SOAPY_SDR_U8;
     } else {
-        static_assert(!gr::meta::always_false<T>, "snsupported type");
+        static_assert(!gr::meta::always_false<T>, "unsupported type");
     }
 }
 
@@ -196,7 +198,89 @@ inline void printSoapyReturnDebugInfo(int ret, int flags, long long time_ns) {
     std::println("ret = {}, flags({}) = [{}], time_ns = {}", ret, flags, getSoapyFlagNames(flags), time_ns);
 }
 
+struct DeviceRegistry {
+    static constexpr std::size_t kMaxUsersPerDevice = 2UZ; // one RX (Source) + one TX (Sink)
+
+    struct DeviceState {
+        std::weak_ptr<SoapySDRDevice>      device;
+        std::size_t                        pendingUsers = 0UZ;
+        std::vector<std::function<void()>> activationCallbacks;
+    };
+
+    static std::mutex& mutex() {
+        static auto* m = new std::mutex; // intentional leak — must outlive all device handles
+        return *m;
+    }
+    static std::map<Kwargs, DeviceState>& devices() {
+        static auto* map = new std::map<Kwargs, DeviceState>; // intentional leak
+        return *map;
+    }
+
+    static std::shared_ptr<SoapySDRDevice> findOrCreate(const Kwargs& args) {
+        auto  lock = std::lock_guard(mutex());
+        auto& map  = devices();
+        if (auto it = map.find(args); it != map.end()) {
+            if (auto existing = it->second.device.lock()) {
+                it->second.pendingUsers++;
+                if (it->second.pendingUsers > kMaxUsersPerDevice) {
+                    std::println(stderr, "[SoapySDR] DeviceRegistry: {} blocks sharing device {} — expected at most {} (one Source + one Sink)", it->second.pendingUsers, args, kMaxUsersPerDevice);
+                }
+                return existing;
+            }
+            map.erase(it);
+        }
+        KwargsWrapper cArgs(args);
+        if (!cArgs.valid()) {
+            return nullptr;
+        }
+        SoapySDRDevice* raw = SoapySDRDevice_make(cArgs);
+        if (!raw) {
+            return nullptr;
+        }
+        auto device = std::shared_ptr<SoapySDRDevice>(raw, [](SoapySDRDevice* dev) {
+            if (dev) {
+                SoapySDRDevice_unmake(dev);
+            }
+        });
+        map[args]   = DeviceState{.device = device, .pendingUsers = 1UZ, .activationCallbacks = {}};
+        return device;
+    }
+
+    static void registerActivation(const Kwargs& args, std::function<void()> callback) {
+        auto  lock = std::lock_guard(mutex());
+        auto& map  = devices();
+        auto  it   = map.find(args);
+        if (it == map.end()) {
+            callback();
+            return;
+        }
+        auto& state = it->second;
+        state.activationCallbacks.push_back(std::move(callback));
+        state.pendingUsers--;
+        if (state.pendingUsers == 0UZ) {
+            for (auto& cb : state.activationCallbacks) {
+                cb();
+            }
+            state.activationCallbacks.clear();
+        }
+    }
+};
+
 } // namespace detail
+
+[[nodiscard]] inline Kwargs parseKwargsString(const std::string& str) {
+    Kwargs      kwargs;
+    std::size_t pos = 0UZ;
+    while (pos < str.size()) {
+        auto sep = str.find(',', pos);
+        auto kv  = (sep == std::string::npos) ? str.substr(pos) : str.substr(pos, sep - pos);
+        if (auto eq = kv.find('='); eq != std::string::npos) {
+            kwargs[kv.substr(0, eq)] = kv.substr(eq + 1);
+        }
+        pos = (sep == std::string::npos) ? str.size() : sep + 1;
+    }
+    return kwargs;
+}
 
 [[nodiscard]] inline std::vector<std::string> getSoapySDRModules() {
     std::size_t moduleCount = 0UZ;
@@ -239,42 +323,18 @@ public:
 
     Device() = default;
 
-    Device(const Kwargs& args, std::source_location location = std::source_location::current()) {
-        if (std::string_view(SOAPY_SDR_ABI_VERSION) != std::string_view(SoapySDR_getABIVersion())) {
-            throw gr::exception(std::format("SoapySDR ABI mismatch: this {} vs. library {}", SOAPY_SDR_ABI_VERSION, SoapySDR_getABIVersion()), location);
-        }
-
-        _device.reset(SoapySDRDevice_make(detail::KwargsWrapper(args)), [](SoapySDRDevice* device) {
-            if (device == nullptr) {
-                return;
-            }
-            if (int ret = SoapySDRDevice_unmake(device); ret) {
-                std::println(stderr, "[SoapySDR] error({}) closing device: '{}'", ret, SoapySDR_errToStr(ret));
-            }
-        });
-        if (!_device) {
-            throw gr::exception(std::format("Device({}) - SoapySDRDevice_make failed", args), location);
-        }
-    }
-
     static std::expected<Device, gr::Error> make(const Kwargs& args = Kwargs()) {
         if (std::string_view(SOAPY_SDR_ABI_VERSION) != std::string_view(SoapySDR_getABIVersion())) {
             return std::unexpected(gr::Error(std::format("SoapySDR ABI mismatch: this {} vs. library {}", SOAPY_SDR_ABI_VERSION, SoapySDR_getABIVersion())));
         }
-        detail::KwargsWrapper cArgs(args);
-        if (!cArgs.valid()) {
-            return std::unexpected(gr::Error(std::format("SoapySDRKwargs_set allocation failed for {}", args)));
-        }
-        SoapySDRDevice* raw = SoapySDRDevice_make(cArgs);
-        if (!raw) {
-            return std::unexpected(gr::Error(std::format("SoapySDRDevice_make failed for {}", args)));
+        auto shared = detail::DeviceRegistry::findOrCreate(args);
+        if (!shared) {
+            auto driverIt = args.find("driver");
+            auto hint     = (driverIt != args.end()) ? std::format(" (driver '{}' — check SOAPY_SDR_PLUGIN_PATH if using a custom module)", driverIt->second) : "";
+            return std::unexpected(gr::Error(std::format("device creation failed for {}{}", args, hint)));
         }
         Device dev;
-        dev._device.reset(raw, [](SoapySDRDevice* device) {
-            if (device) {
-                SoapySDRDevice_unmake(device);
-            }
-        });
+        dev._device = std::move(shared);
         return dev;
     }
 
@@ -368,7 +428,7 @@ public:
         std::vector<Range> rangeList;
         rangeList.reserve(count);
 
-        for (std::size_t i = 0; i < count; ++i) {
+        for (std::size_t i = 0UZ; i < count; ++i) {
             rangeList.emplace_back(ranges[i].minimum, ranges[i].maximum, ranges[i].step);
         }
         free(ranges);
@@ -730,6 +790,33 @@ public:
             return SoapySDRDevice_readStream(_device.get(), _stream.get(), ioBufferPointers.data(), ioBuffers.front().size(), &flags, &timeNs, timeOutUs);
         }
 
+        template<typename... TBuffers>
+        requires(Direction == SOAPY_SDR_TX && sizeof...(TBuffers) > 0UZ)
+        [[maybe_unused]] int writeStream(int& flags, long long timeNs, long timeOutUs, TBuffers&&... ioBuffers) {
+            if (_device.get() == nullptr || _stream.get() == nullptr) {
+                return SOAPY_SDR_STREAM_ERROR;
+            }
+            if constexpr (sizeof...(TBuffers) == 1UZ) {
+                auto&&      buffer          = std::get<0>(std::tie(ioBuffers...));
+                const void* ioBufferPointer = static_cast<const void*>(buffer.data());
+                return SoapySDRDevice_writeStream(_device.get(), _stream.get(), &ioBufferPointer, buffer.size(), &flags, timeNs, timeOutUs);
+            } else {
+                std::array<const void*, sizeof...(ioBuffers)> ioBufferPointers = {static_cast<const void*>(ioBuffers.data())...};
+                return SoapySDRDevice_writeStream(_device.get(), _stream.get(), ioBufferPointers.data(), std::get<0>(std::tie(ioBuffers...)).size(), &flags, timeNs, timeOutUs);
+            }
+        }
+
+        template<typename TCollection>
+        requires(Direction == SOAPY_SDR_TX && requires(TCollection c) { c.begin()->data(); })
+        [[maybe_unused]] int writeStreamFromBufferList(int& flags, long long timeNs, long timeOutUs, TCollection&& ioBuffers) {
+            std::vector<const void*> ioBufferPointers;
+            ioBufferPointers.reserve(ioBuffers.size());
+            for (auto& ioBuffer : ioBuffers) {
+                ioBufferPointers.emplace_back(ioBuffer.data());
+            }
+            return SoapySDRDevice_writeStream(_device.get(), _stream.get(), ioBufferPointers.data(), ioBuffers.front().size(), &flags, timeNs, timeOutUs);
+        }
+
         // SoapySDR::Stream
         SoapySDRStream* get() const { return _stream.get(); }
     };
@@ -741,7 +828,7 @@ public:
     }
 
     template<typename TValueType, int direction, typename TContainer = std::vector<std::size_t>>
-    std::expected<Stream<TValueType, direction>, gr::Error> setupStream(const TContainer& channels = {0}) {
+    std::expected<Stream<TValueType, direction>, gr::Error> setupStream(const TContainer& channels = {0}, const Kwargs& streamArgs = {}) {
         if (!_device) {
             return std::unexpected(gr::Error("device not initialised"));
         }
@@ -749,7 +836,8 @@ public:
         std::vector<std::size_t> channels_converted;
         std::transform(channels.begin(), channels.end(), std::back_inserter(channels_converted), [](auto val) { return static_cast<std::size_t>(val); });
 
-        SoapySDRStream* stream = SoapySDRDevice_setupStream(_device.get(), direction, detail::toSoapySDRFormat<TValueType>(), channels_converted.data(), channels_converted.size(), nullptr);
+        detail::KwargsWrapper cStreamArgs(streamArgs);
+        SoapySDRStream*       stream = SoapySDRDevice_setupStream(_device.get(), direction, detail::toSoapySDRFormat<TValueType>(), channels_converted.data(), channels_converted.size(), streamArgs.empty() ? nullptr : cStreamArgs.get());
         if (stream == nullptr) {
             return std::unexpected(gr::Error(std::format("setupStream failed: {}", SoapySDRDevice_lastError())));
         }
@@ -812,7 +900,7 @@ public:
     Kwargs getChannelInfo(int direction, std::size_t channel) const {
         SoapySDRKwargs kwargs = SoapySDRDevice_getChannelInfo(_device.get(), direction, channel);
         Kwargs         result;
-        for (std::size_t i = 0; i < kwargs.size; ++i) {
+        for (std::size_t i = 0UZ; i < kwargs.size; ++i) {
             result[kwargs.keys[i]] = kwargs.vals[i];
         }
         SoapySDRKwargs_clear(&kwargs);
