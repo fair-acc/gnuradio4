@@ -27,14 +27,14 @@ namespace {
 std::atomic<bool> stopRequested{false};
 
 void runCapture() {
-    constexpr double kSampleRate      = 2.048e6;
-    constexpr double kCenterFrequency = 100.0e6;
+    constexpr double kSampleRate = 2.048e6;
+    constexpr double kFrequency  = 100.0e6;
 
-    std::println("[RTL2832] starting capture: {:.3f} MHz @ {:.3f} MS/s", kCenterFrequency / 1e6, kSampleRate / 1e6);
+    std::println("[RTL2832] starting capture: {:.3f} MHz @ {:.3f} MS/s", kFrequency / 1e6, kSampleRate / 1e6);
 
     Graph graph;
     auto& src  = graph.emplaceBlock<blocks::sdr::RTL2832Source<std::complex<float>>>({
-        {"center_frequency", kCenterFrequency},
+        {"frequency", kFrequency},
         {"sample_rate", kSampleRate},
         {"auto_gain", true},
     });
