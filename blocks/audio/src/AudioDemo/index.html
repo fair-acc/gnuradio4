@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>GR4 Audio Demo</title>
+    <style>
+        body { font-family: monospace; margin: 1em; background: #1e1e1e; color: #d4d4d4; }
+        button { font-size: 1em; padding: 0.4em 1em; margin-right: 0.5em; margin-bottom: 0.5em; cursor: pointer; background: #264f78; color: #d4d4d4; border: 1px solid #569cd6; border-radius: 3px; }
+        button:hover { background: #37699e; }
+        button:disabled { opacity: 0.4; cursor: default; }
+        select, input[type="text"] { font-family: monospace; font-size: 1em; padding: 0.3em 0.5em; background: #2d2d2d; color: #d4d4d4; border: 1px solid #555; border-radius: 3px; width: min(40em, 100%); box-sizing: border-box; }
+        label { display: block; margin-top: 0.6em; margin-bottom: 0.2em; color: #569cd6; }
+        .controls { margin-bottom: 1em; }
+        #status { color: #569cd6; margin-left: 1em; }
+        #output { width: 100%; height: 65vh; background: #0e0e0e; color: #4ec9b0; padding: 0.5em; overflow-y: auto; white-space: pre; font-size: 0.85em; border: 1px solid #333; box-sizing: border-box; margin-top: 0.5em; }
+    </style>
+</head>
+<body>
+<h3 style="color:#569cd6; margin-top:0">GR4 Audio Demo</h3>
+<div class="controls">
+    <label for="input-device">Input device</label>
+    <select id="input-device"><option value="">default</option></select>
+    <label for="output-device">Output device</label>
+    <select id="output-device" disabled
+            title="Output device selection is not yet supported by WebAudio in most browsers">
+        <option value="">default (browser-managed)</option>
+    </select>
+    <div style="margin-top:0.6em">
+        <button id="refresh-devices">Grant permissions &amp; refresh devices</button>
+        <span id="status"></span>
+    </div>
+</div>
+<div class="controls">
+    <button id="play-local" disabled>Play MEMFS tone</button>
+    <button id="play-server" disabled>Play URL</button>
+    <button id="stop-playback" disabled>Stop playback</button>
+    <button id="toggle-mic" disabled>Start mic loopback</button>
+    <label style="display:inline; margin-left:1em"><input type="checkbox" id="repeat-checkbox"> repeat</label>
+</div>
+<div>
+    <input id="wav-url" type="text" placeholder="WAV URL (empty = server /tone.wav)"/>
+</div>
+<div id="output"></div>
+
+<script>
+    var Module = {
+        print: function(text) {
+            var el = document.getElementById('output');
+            el.textContent += text + '\n';
+            el.scrollTop = el.scrollHeight;
+        },
+        printErr: function(text) {
+            var el = document.getElementById('output');
+            el.textContent += text + '\n';
+            el.scrollTop = el.scrollHeight;
+        },
+        onRuntimeInitialized: function() {
+            var sr = 48000, dur = 3.0, freq = 440, amp = 0.25;
+            var n = Math.floor(sr * dur), bytes = n * 2;
+            var wav = new ArrayBuffer(44 + bytes), v = new DataView(wav);
+            function w(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
+            w(0,'RIFF'); v.setUint32(4, 36+bytes, true); w(8,'WAVE'); w(12,'fmt ');
+            v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+            v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+            w(36,'data'); v.setUint32(40,bytes,true);
+            for (var i = 0; i < n; i++) {
+                var s = Math.sin(2 * Math.PI * freq * i / sr);
+                v.setInt16(44 + i*2, Math.max(-32768, Math.min(32767, Math.round(32767*amp*s))), true);
+            }
+            Module.FS.writeFile('/tone.wav', new Uint8Array(wav));
+            Module.print('WASM ready. Prepared /tone.wav (' + (44+bytes) + ' bytes)');
+            document.getElementById('status').textContent = 'ready';
+            refreshDevices();
+            refreshUi();
+        }
+    };
+
+    window.appendAudioTestLogFragment = function(fragment) {
+        var el = document.getElementById('output');
+        el.textContent += fragment;
+        el.scrollTop = el.scrollHeight;
+    };
+
+    var playbackBusy = false, micBusy = false;
+    var inputSel = document.getElementById('input-device');
+    var outputSel = document.getElementById('output-device');
+
+    function refreshUi() {
+        document.getElementById('play-local').disabled = playbackBusy || micBusy;
+        document.getElementById('play-server').disabled = playbackBusy || micBusy;
+        document.getElementById('stop-playback').disabled = !playbackBusy;
+        document.getElementById('wav-url').disabled = playbackBusy || micBusy;
+        document.getElementById('toggle-mic').disabled = playbackBusy;
+        document.getElementById('toggle-mic').textContent = micBusy ? 'Stop mic loopback' : 'Start mic loopback';
+    }
+
+    function populateSelect(sel, devices, kind) {
+        var cur = sel.value;
+        var isOutput = (kind === 'audiooutput');
+        sel.innerHTML = isOutput ? '<option value="">default (browser-managed)</option>' : '<option value="">default</option>';
+        devices.forEach(function(d) {
+            if (d.kind !== kind) return;
+            var opt = document.createElement('option');
+            opt.value = d.deviceId;
+            opt.textContent = d.label || ('device ' + d.deviceId.substring(0, 8));
+            if (isOutput) opt.disabled = true;
+            sel.appendChild(opt);
+        });
+        sel.value = cur;
+    }
+
+    async function refreshDevices() {
+        try {
+            var devices = await navigator.mediaDevices.enumerateDevices();
+            populateSelect(inputSel, devices, 'audioinput');
+            populateSelect(outputSel, devices, 'audiooutput');
+            var n = devices.filter(function(d) { return d.kind.startsWith('audio'); }).length;
+            Module.print('Detected ' + n + ' audio device(s)');
+        } catch(e) {
+            Module.print('Device enumeration failed: ' + e);
+        }
+    }
+
+    document.getElementById('refresh-devices').addEventListener('click', async function() {
+        Module.print('Requesting device permissions via DeviceRegistry...');
+        Module.ccall('gr_requestAllPermissions', null, [], []);
+        // permission is async — poll until granted, then enumerate
+        var attempts = 0;
+        var waitForGrant = function () {
+            setTimeout(async function () {
+                var granted = Module.ccall('gr_isAudioGranted', 'number', [], []);
+                if (granted > 0) {
+                    Module.print('Microphone permission granted');
+                    await refreshDevices();
+                    return;
+                }
+                if (++attempts < 100) {
+                    waitForGrant();
+                } else {
+                    Module.print('Microphone permission not granted (timed out)');
+                    await refreshDevices();
+                }
+            }, 100);
+        };
+        waitForGrant();
+    });
+
+    function pollPlayback() {
+        setTimeout(function() {
+            try {
+                if (Module.ccall('audio_playback_is_running', 'number', [], []) === 0) {
+                    Module.print('Playback finished');
+                    playbackBusy = false; refreshUi(); return;
+                }
+                pollPlayback();
+            } catch(e) { Module.print('Poll error: ' + e); playbackBusy = false; refreshUi(); }
+        }, 100);
+    }
+
+    function pollMic() {
+        setTimeout(function() {
+            try {
+                if (Module.ccall('mic_is_running', 'number', [], []) === 0) {
+                    if (micBusy) Module.print('Mic loopback stopped');
+                    micBusy = false; refreshUi(); return;
+                }
+                pollMic();
+            } catch(e) { Module.print('Poll error: ' + e); micBusy = false; refreshUi(); }
+        }, 100);
+    }
+
+    function resumeAudio() {
+        try {
+            Module.ccall('gr_resumeAudioContexts', null, [], []);
+        } catch (e) {
+        }
+    }
+
+    function getRepeatFlag() {
+        return document.getElementById('repeat-checkbox').checked ? 1 : 0;
+    }
+
+    document.getElementById('play-local').addEventListener('click', function() {
+        playbackBusy = true; refreshUi();
+        var ok = Module.ccall('play_audio_from_uri', 'number', ['string', 'string', 'number'], ['/tone.wav', outputSel.value, getRepeatFlag()]);
+        if (!ok) { Module.print('Playback did not start'); playbackBusy = false; refreshUi(); return; }
+        setTimeout(resumeAudio, 100);
+        setTimeout(resumeAudio, 300);
+        setTimeout(resumeAudio, 600);
+        pollPlayback();
+    });
+
+    document.getElementById('play-server').addEventListener('click', function() {
+        var url = document.getElementById('wav-url').value.trim();
+        var uri = url ? (location.origin + '/proxy?url=' + encodeURIComponent(url)) : (location.origin + '/tone.wav');
+        playbackBusy = true; refreshUi();
+        var outDev = outputSel.value;
+        Module.print('Playing: ' + uri);
+        if (outDev) Module.print('Output device: ' + outputSel.options[outputSel.selectedIndex].textContent);
+        var ok = Module.ccall('play_audio_from_uri', 'number', ['string', 'string', 'number'], [uri, outDev, getRepeatFlag()]);
+        if (!ok) { Module.print('Playback did not start'); playbackBusy = false; refreshUi(); return; }
+        setTimeout(resumeAudio, 100);
+        setTimeout(resumeAudio, 300);
+        setTimeout(resumeAudio, 600);
+        pollPlayback();
+    });
+
+    document.getElementById('stop-playback').addEventListener('click', function () {
+        Module.print('Stopping playback');
+        Module.ccall('stop_playback', null, [], []);
+    });
+
+    function startMicWithCurrentDevices() {
+        var inDev = inputSel.value, outDev = outputSel.value;
+        Module.print('Starting mic loopback');
+        if (inDev) Module.print('Input: ' + inputSel.options[inputSel.selectedIndex].textContent);
+        if (outDev) Module.print('Output: ' + outputSel.options[outputSel.selectedIndex].textContent);
+        var ok = Module.ccall('start_mic', 'number', ['string','string'], [inDev, outDev]);
+        if (!ok) { Module.print('Mic loopback did not start'); return; }
+        micBusy = true;
+        refreshUi();
+        setTimeout(resumeAudio, 100);
+        setTimeout(resumeAudio, 300);
+        setTimeout(resumeAudio, 600);
+        pollMic();
+    }
+
+    function restartMicIfRunning() {
+        if (!micBusy) return;
+        Module.print('Device changed — restarting mic loopback');
+        Module.ccall('stop_mic', null, [], []);
+        var waitForStop = function() {
+            setTimeout(function() {
+                if (Module.ccall('mic_is_running', 'number', [], []) !== 0) { waitForStop(); return; }
+                micBusy = false;
+                startMicWithCurrentDevices();
+            }, 50);
+        };
+        waitForStop();
+    }
+
+    inputSel.addEventListener('change', restartMicIfRunning);
+    outputSel.addEventListener('change', restartMicIfRunning);
+
+    document.getElementById('toggle-mic').addEventListener('click', function() {
+        if (!micBusy) {
+            startMicWithCurrentDevices();
+        } else {
+            Module.print('Stopping mic loopback');
+            Module.ccall('stop_mic', null, [], []);
+            refreshUi();
+        }
+    });
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
