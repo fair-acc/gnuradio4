@@ -8,7 +8,7 @@
 #include <gnuradio-4.0/audio/AudioBackends.hpp>
 #include <gnuradio-4.0/audio/EmscriptenAudioBackend.hpp>
 #include <gnuradio-4.0/audio/SoundIoBackend.hpp>
-#include <gnuradio-4.0/audio/WavSource.hpp>
+#include <gnuradio-4.0/fileio/WavBlocks.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
@@ -468,8 +468,7 @@ Publishes timing tags with estimated consumption rate and software latency.)"">;
             return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
 
-        // push to staging buffer — the I/O thread drains it into the backend
-        // only consume what we could push (backpressure to scheduler)
+        // push to staging buffer — consume only what fits (natural backpressure to scheduler)
         const std::size_t stagingAvail = _stagingWriter.available();
         const std::size_t toPush       = detail::wholeFrameSamples(std::min(nFrameSamples, stagingAvail), channelCount);
         std::size_t       nPushed      = 0U;
@@ -483,17 +482,8 @@ Publishes timing tags with estimated consumption rate and software latency.)"">;
         }
         _totalStagedSamples += nPushed;
 
-        const std::size_t nDropped = nFrameSamples - nPushed;
-        if (nDropped > 0U) {
-            dropped_samples = dropped_samples.value + static_cast<gr::Size_t>(nDropped);
-            if (debug_console.value) {
-                std::println(stderr, "[AudioSink] dropped {} samples (staging buffer full, total dropped: {})", nDropped, dropped_samples.value);
-            }
-        }
-
-        // always consume all input to prevent upstream backpressure from stalling the AudioSource
-        std::ignore = inSpan.consume(nFrameSamples);
-        return gr::work::Status::OK;
+        std::ignore = inSpan.consume(nPushed);
+        return nPushed > 0U ? gr::work::Status::OK : gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
     }
 
 private:
@@ -513,6 +503,16 @@ private:
 
         const std::size_t channelCount = std::max<std::size_t>(1U, static_cast<std::size_t>(num_channels.value));
         const double      nominalRate  = static_cast<double>(sample_rate.value);
+
+        // pre-fill: wait for staging buffer to accumulate ~50ms before feeding the backend
+        const std::size_t prefillSamples  = static_cast<std::size_t>(nominalRate * 0.05) * channelCount;
+        const auto        prefillDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        while (!gr::atomic_ref(_ioStopRequested).load_acquire() && std::chrono::steady_clock::now() < prefillDeadline) {
+            if (_stagingReader.available() >= prefillSamples) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
 
         while (!gr::atomic_ref(_ioStopRequested).load_acquire()) {
             if (auto pollResult = _backendImpl.poll(); !pollResult) {
@@ -585,16 +585,25 @@ private:
             _lastReportedUnderruns = underruns;
         }
 
-        // drain remaining staging buffer on shutdown — feed to backend at device rate (with timeout)
-        const auto drainDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(io_buffer_size.value * 1000.f + 500.f));
-        while (_stagingReader.available() > 0U && _backendImpl.isStreamActive() && std::chrono::steady_clock::now() < drainDeadline) {
+        // drain staging → backend, then wait for playout (audio callback consuming the backend buffer)
+        const auto drainDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<int>(io_buffer_size.value * 1000.f + 2000.f));
+
+        // phase 1: transfer all remaining staging samples into the backend ring buffer
+        while (_stagingReader.available() > 0U && std::chrono::steady_clock::now() < drainDeadline) {
+            if (auto pollResult = _backendImpl.poll(); !pollResult) {
+                break;
+            }
+            if (!_backendImpl.isStreamActive()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
+            }
+
             const std::size_t remaining = _stagingReader.available();
             const std::size_t aligned   = detail::wholeFrameSamples(remaining, channelCount);
             if (aligned == 0U) {
                 break;
             }
 
-            // only read what the backend can accept
             const std::size_t backendSpace = _backendImpl._state.writer.available();
             if (backendSpace == 0U) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -613,6 +622,14 @@ private:
             const auto nDrained = _backendImpl._state.writeFromInput(std::span<const T>(readSpan.begin(), readSpan.size()), channelCount);
             _totalIoWrittenSamples += nDrained;
             std::ignore = readSpan.consume(readSpan.size());
+        }
+
+        // phase 2: wait for the audio callback to consume the backend buffer (playout)
+        while (_backendImpl._state.reader.available() > channelCount && _backendImpl.isStreamActive() && std::chrono::steady_clock::now() < drainDeadline) {
+            if (auto pollResult = _backendImpl.poll(); !pollResult) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
         if (debug_console.value) {

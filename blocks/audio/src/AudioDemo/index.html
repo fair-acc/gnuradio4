@@ -33,7 +33,9 @@
 <div class="controls">
     <button id="play-local" disabled>Play MEMFS tone</button>
     <button id="play-server" disabled>Play URL</button>
+    <button id="stop-playback" disabled>Stop playback</button>
     <button id="toggle-mic" disabled>Start mic loopback</button>
+    <label style="display:inline; margin-left:1em"><input type="checkbox" id="repeat-checkbox"> repeat</label>
 </div>
 <div>
     <input id="wav-url" type="text" placeholder="WAV URL (empty = server /tone.wav)"/>
@@ -86,6 +88,7 @@
     function refreshUi() {
         document.getElementById('play-local').disabled = playbackBusy || micBusy;
         document.getElementById('play-server').disabled = playbackBusy || micBusy;
+        document.getElementById('stop-playback').disabled = !playbackBusy;
         document.getElementById('wav-url').disabled = playbackBusy || micBusy;
         document.getElementById('toggle-mic').disabled = playbackBusy;
         document.getElementById('toggle-mic').textContent = micBusy ? 'Stop mic loopback' : 'Start mic loopback';
@@ -173,11 +176,14 @@
         }
     }
 
+    function getRepeatFlag() {
+        return document.getElementById('repeat-checkbox').checked ? 1 : 0;
+    }
+
     document.getElementById('play-local').addEventListener('click', function() {
         playbackBusy = true; refreshUi();
-        var ok = Module.ccall('play_audio_from_uri', 'number', ['string', 'string'], ['/tone.wav', outputSel.value]);
+        var ok = Module.ccall('play_audio_from_uri', 'number', ['string', 'string', 'number'], ['/tone.wav', outputSel.value, getRepeatFlag()]);
         if (!ok) { Module.print('Playback did not start'); playbackBusy = false; refreshUi(); return; }
-        // resume AudioContext from user gesture context, and keep retrying during polling
         setTimeout(resumeAudio, 100);
         setTimeout(resumeAudio, 300);
         setTimeout(resumeAudio, 600);
@@ -191,12 +197,17 @@
         var outDev = outputSel.value;
         Module.print('Playing: ' + uri);
         if (outDev) Module.print('Output device: ' + outputSel.options[outputSel.selectedIndex].textContent);
-        var ok = Module.ccall('play_audio_from_uri', 'number', ['string','string'], [uri, outDev]);
+        var ok = Module.ccall('play_audio_from_uri', 'number', ['string', 'string', 'number'], [uri, outDev, getRepeatFlag()]);
         if (!ok) { Module.print('Playback did not start'); playbackBusy = false; refreshUi(); return; }
         setTimeout(resumeAudio, 100);
         setTimeout(resumeAudio, 300);
         setTimeout(resumeAudio, 600);
         pollPlayback();
+    });
+
+    document.getElementById('stop-playback').addEventListener('click', function () {
+        Module.print('Stopping playback');
+        Module.ccall('stop_playback', null, [], []);
     });
 
     function startMicWithCurrentDevices() {

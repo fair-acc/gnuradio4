@@ -4,6 +4,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
+#include <gnuradio-4.0/fileio/FileIoTypes.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 #include <magic_enum.hpp>
 
@@ -59,8 +60,6 @@ inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::st
 }
 
 } // namespace detail
-
-enum class Mode { overwrite, append, multi };
 
 GR_REGISTER_BLOCK(gr::blocks::fileio::BasicFileSink, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, gr::UncertainValue<float>, gr::UncertainValue<double>, std::complex<float>, std::complex<double> ])
 

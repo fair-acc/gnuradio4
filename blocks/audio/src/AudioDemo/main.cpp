@@ -124,6 +124,7 @@ using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThr
 
 std::atomic<bool>          playbackRunning{false};
 std::atomic<bool>          micRunning{false};
+std::shared_ptr<Scheduler> playbackScheduler;
 std::shared_ptr<Scheduler> micScheduler;
 
 void runGraph(Scheduler& scheduler, gr::Graph&& graph) {
@@ -138,21 +139,20 @@ void runGraph(Scheduler& scheduler, gr::Graph&& graph) {
     }
 }
 
-void runPlaybackGraph(std::string uri, std::string outputDevice) {
+void runPlaybackGraph(std::shared_ptr<Scheduler> scheduler, std::string uri, std::string outputDevice, bool repeat) {
     try {
-        std::println("[AudioTest] play request: {} (output: '{}')", uri, outputDevice);
+        std::println("[AudioTest] play request: {} (output: '{}', repeat: {})", uri, outputDevice, repeat);
         std::println("[AudioTest] main runtime thread: {}", fileio::isMainThread());
 
         gr::Graph graph;
-        auto&     source  = graph.emplaceBlock<gr::audio::WavSource<float>>({{"uri", std::move(uri)}});
+        auto&     source  = graph.emplaceBlock<gr::blocks::fileio::WavSource<float>>({{"uri", std::move(uri)}, {"repeat", repeat}});
         auto&     monitor = graph.emplaceBlock<audio_test_app_detail::LevelMonitor>();
         auto&     sink    = graph.emplaceBlock<gr::audio::AudioSink<float>>({{"device", std::move(outputDevice)}, {"debug_console", true}});
 
         monitor.linePrefix = "[AudioTest] play ";
         graph.connect<"out", "in">(source, monitor).value();
         graph.connect<"out", "in">(source, sink).value();
-        Scheduler scheduler;
-        runGraph(scheduler, std::move(graph));
+        runGraph(*scheduler, std::move(graph));
     } catch (const std::exception& ex) {
         std::println("[AudioTest] worker exception: {}", ex.what());
     }
@@ -187,7 +187,7 @@ void runMicGraph(std::shared_ptr<Scheduler> scheduler, std::string inputDevice, 
 
 extern "C" {
 
-EMSCRIPTEN_KEEPALIVE int play_audio_from_uri(const char* uri, const char* outputDevice) {
+EMSCRIPTEN_KEEPALIVE int play_audio_from_uri(const char* uri, const char* outputDevice, int repeatFlag) {
     try {
         const std::string uriValue    = uri != nullptr ? uri : "";
         const std::string outputValue = outputDevice != nullptr ? outputDevice : "";
@@ -202,16 +202,33 @@ EMSCRIPTEN_KEEPALIVE int play_audio_from_uri(const char* uri, const char* output
             return 0;
         }
 
-        gr::thread_pool::Manager::defaultIoPool()->execute([uriValue, outputValue]() mutable { runPlaybackGraph(std::move(uriValue), std::move(outputValue)); });
+        auto scheduler      = std::make_shared<Scheduler>();
+        playbackScheduler   = scheduler;
+        const bool doRepeat = repeatFlag != 0;
+        gr::thread_pool::Manager::defaultIoPool()->execute([scheduler, uriValue, outputValue, doRepeat]() mutable { runPlaybackGraph(scheduler, std::move(uriValue), std::move(outputValue), doRepeat); });
         return 1;
     } catch (const std::exception& ex) {
         std::println("[AudioTest] exception: {}", ex.what());
+        playbackScheduler.reset();
         playbackRunning.store(false, std::memory_order_release);
         return 0;
     }
 }
 
-EMSCRIPTEN_KEEPALIVE int audio_playback_is_running() { return playbackRunning.load(std::memory_order_acquire) ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE void stop_playback() {
+    if (playbackScheduler) {
+        std::println("[AudioTest] stopping playback");
+        playbackScheduler->requestStop();
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE int audio_playback_is_running() {
+    const bool running = playbackRunning.load(std::memory_order_acquire);
+    if (!running) {
+        playbackScheduler.reset();
+    }
+    return running ? 1 : 0;
+}
 
 EMSCRIPTEN_KEEPALIVE int start_mic(const char* inputDevice, const char* outputDevice) {
     bool expected = false;

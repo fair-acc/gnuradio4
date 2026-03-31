@@ -85,7 +85,8 @@ const boost::ut::suite TagTests = [] {
 #endif
         expect(registry.contains("gr::http::HttpSource"sv));
         expect(registry.contains("gr::http::HttpSink"sv));
-        expect(registry.contains("gr::audio::WavSource<float32>"sv));
+        expect(registry.contains("gr::blocks::fileio::WavSource<float32>"sv));
+        expect(registry.contains("gr::blocks::fileio::WavSink<float32>"sv));
         expect(registry.contains("gr::audio::AudioSink<float32>"sv));
         expect(registry.contains("gr::filter::fir_filter<float32>"sv));
         expect(registry.contains("gr::blocks::fft::FFT<float32>"sv));
@@ -93,7 +94,7 @@ const boost::ut::suite TagTests = [] {
 
     "CheckBlockInstantiations"_test = [&] {
         expect(registry.create("gr::testing::Delay<float32>"sv, {}) != nullptr);
-        expect(registry.create("gr::audio::WavSource<float32>"sv, {}) != nullptr);
+        expect(registry.create("gr::blocks::fileio::WavSource<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::audio::AudioSink<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::basic::DataSink<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::basic::ClockSource"sv, {}) != nullptr);
