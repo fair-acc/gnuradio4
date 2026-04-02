@@ -40,13 +40,21 @@ void test_block(const TestParameters<T> p) {
     expect(std::ranges::equal(sink._samples, p.output)) << std::format("Failed to validate block output: Expected {} but got {} for input {}", p.output, sink._samples, p.inputs);
 };
 
+template<typename T>
+constexpr T val(double x) {
+    if constexpr (gr::meta::complex_like<T>) {
+        using V = typename T::value_type;
+        return T{static_cast<V>(x), static_cast<V>(0)};
+    } else {
+        return static_cast<T>(x);
+    }
+}
+
 const boost::ut::suite<"basic math tests"> basicMath = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::blocks::math;
-    constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float,
-                                                 double /*, gr::UncertainValue<float>, gr::UncertainValue<double>,
-std::complex<float>, std::complex<double>*/>();
+    constexpr auto kArithmeticTypes = std::tuple<uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> /*, gr::UncertainValue<float>, gr::UncertainValue<double>*/>();
 
     "Add"_test = []<typename T>(const T&) { //
         test_block<T, Add<T>>({
@@ -54,9 +62,9 @@ std::complex<float>, std::complex<double>*/>();
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
         test_block<T, Add<T>>({
-            .inputs = {gr::Tensor<T>(gr::data_from, {T(1), T(2), T(3), T(4.2)}), //
-                gr::Tensor<T>(gr::data_from, {T(5), T(6), T(7), T(8.3)})},       //
-            .output = gr::Tensor<T>(gr::data_from, {T(6), T(8), T(10), T(12.5)}) //
+            .inputs = {gr::Tensor<T>(gr::data_from, {T(1), T(2), T(3), val<T>(4.2)}), //
+                gr::Tensor<T>(gr::data_from, {T(5), T(6), T(7), val<T>(8.3)})},       //
+            .output = gr::Tensor<T>(gr::data_from, {T(6), T(8), T(10), val<T>(12.5)}) //
         });
         test_block<T, Add<T>>({
             .inputs = {gr::Tensor<T>(gr::data_from, {12, 35, 18, 17}), //
@@ -71,15 +79,15 @@ std::complex<float>, std::complex<double>*/>();
             .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Subtract<T>>({                                              //
-            .inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(7), T(5), T(3.5)}),  //
-                gr::Tensor<T>(gr::data_from, {T(3), T(2), T(0), T(1.2)})},        //
-            .output = gr::Tensor<T>(gr::data_from, {T(6), T(5), T(5), T(2.3)})}); //
-        test_block<T, Subtract<T>>({                                              //
-            .inputs = {gr::Tensor<T>(gr::data_from, {15, 38, 88, 29}),            //
-                gr::Tensor<T>(gr::data_from, {3, 12, 26, 18}),                    //
-                gr::Tensor<T>(gr::data_from, {0, 10, 50, 7})},                    //
-            .output = gr::Tensor<T>(gr::data_from, {12, 16, 12, 4})});            //
+        test_block<T, Subtract<T>>({                                                   //
+            .inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(7), T(5), val<T>(3.5)}),  //
+                gr::Tensor<T>(gr::data_from, {T(3), T(2), T(0), val<T>(1.2)})},        //
+            .output = gr::Tensor<T>(gr::data_from, {T(6), T(5), T(5), val<T>(2.3)})}); //
+        test_block<T, Subtract<T>>({                                                   //
+            .inputs = {gr::Tensor<T>(gr::data_from, {15, 38, 88, 29}),                 //
+                gr::Tensor<T>(gr::data_from, {3, 12, 26, 18}),                         //
+                gr::Tensor<T>(gr::data_from, {0, 10, 50, 7})},                         //
+            .output = gr::Tensor<T>(gr::data_from, {12, 16, 12, 4})});                 //
     } | kArithmeticTypes;
 
     "Multiply"_test = []<typename T>(const T&) {
@@ -87,10 +95,10 @@ std::complex<float>, std::complex<double>*/>();
             .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Multiply<T>>({                                             //
-            .inputs = {gr::Tensor<T>(gr::data_from, {T(1), T(2), T(3), T(4.0)}), //
-                gr::Tensor<T>(gr::data_from, {T(4), T(5), T(6), T(7.1)})},       //
-            .output = gr::Tensor<T>(gr::data_from, {T(4), T(10), T(18), T(28.4)})});
+        test_block<T, Multiply<T>>({                                                  //
+            .inputs = {gr::Tensor<T>(gr::data_from, {T(1), T(2), T(3), val<T>(4.0)}), //
+                gr::Tensor<T>(gr::data_from, {T(4), T(5), T(6), val<T>(7.1)})},       //
+            .output = gr::Tensor<T>(gr::data_from, {T(4), T(10), T(18), val<T>(28.4)})});
         test_block<T, Multiply<T>>({                               //
             .inputs = {gr::Tensor<T>(gr::data_from, {0, 1, 2, 3}), //
                 gr::Tensor<T>(gr::data_from, {4, 5, 6, 2}),        //
@@ -103,9 +111,9 @@ std::complex<float>, std::complex<double>*/>();
             .inputs = {gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})}, //
             .output = gr::Tensor<T>(gr::data_from, {1, 2, 8, 17})    //
         });
-        test_block<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(4), T(5), T(7.0)}), //
-                                      gr::Tensor<T>(gr::data_from, {T(3), T(4), T(1), T(2.0)})},       //
-            .output                       = gr::Tensor<T>(gr::data_from, {T(3), T(1), T(5), T(3.5)})});
+        test_block<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {T(9), T(4), T(5), val<T>(7.0)}), //
+                                      gr::Tensor<T>(gr::data_from, {T(3), T(4), T(1), val<T>(2.0)})},       //
+            .output                       = gr::Tensor<T>(gr::data_from, {T(3), T(1), T(5), val<T>(3.5)})});
         test_block<T, Divide<T>>({.inputs = {gr::Tensor<T>(gr::data_from, {0, 10, 40, 80}), //
                                       gr::Tensor<T>(gr::data_from, {1, 2, 4, 20}),          //
                                       gr::Tensor<T>(gr::data_from, {1, 5, 5, 2})},          //
