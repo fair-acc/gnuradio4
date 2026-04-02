@@ -1,6 +1,7 @@
 #ifndef GNURADIO_TAGMONITORS_HPP
 #define GNURADIO_TAGMONITORS_HPP
 
+#include <complex>
 #include <limits>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -10,6 +11,25 @@
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 namespace gr::testing {
+
+namespace detail {
+
+template<typename T>
+struct SampleValueConverter {
+    static constexpr T make(std::size_t value) { return static_cast<T>(value); }
+};
+
+template<typename T>
+struct SampleValueConverter<std::complex<T>> {
+    static constexpr std::complex<T> make(std::size_t value) { return std::complex<T>{static_cast<T>(value), T{0}}; }
+};
+
+template<typename T>
+[[nodiscard]] constexpr T make_sample_value(std::size_t value) {
+    return SampleValueConverter<T>::make(value);
+}
+
+} // namespace detail
 
 enum class ProcessFunction {
     USE_PROCESS_BULK = 0, ///
@@ -165,7 +185,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             _valueIndex++;
             return currentValue;
         }
-        return mark_tag ? (nGeneratedTags > 0 ? static_cast<T>(1) : static_cast<T>(0)) : static_cast<T>(_nSamplesProduced);
+        return mark_tag ? (nGeneratedTags > 0 ? detail::make_sample_value<T>(std::size_t{1}) : detail::make_sample_value<T>(std::size_t{0})) : detail::make_sample_value<T>(_nSamplesProduced);
     }
 
     work::Status processBulk(OutputSpanLike auto& outSpan) noexcept
@@ -203,10 +223,10 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             }
         } else {
             if (mark_tag) {
-                outSpan[0] = nGeneratedTags > 0 ? static_cast<T>(1) : static_cast<T>(0);
+                outSpan[0] = nGeneratedTags > 0 ? detail::make_sample_value<T>(std::size_t{1}) : detail::make_sample_value<T>(std::size_t{0});
             } else {
                 for (std::size_t i = 0; i < nSamples; ++i) {
-                    outSpan[i] = static_cast<T>(_nSamplesProduced) + static_cast<T>(i);
+                    outSpan[i] = detail::make_sample_value<T>(_nSamplesProduced + i);
                 }
             }
         }
