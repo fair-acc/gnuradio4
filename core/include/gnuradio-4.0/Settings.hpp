@@ -235,18 +235,6 @@ std::string enumToString(T&& enum_value) {
     }
 }
 
-template<typename T>
-requires std::is_enum_v<T>
-std::vector<std::string> enumChoices() {
-    std::vector<std::string> result;
-    result.reserve(magic_enum::enum_count<T>());
-    for (auto [value, name] : magic_enum::enum_entries<T>()) {
-        (void)value;
-        result.emplace_back(name);
-    }
-    return result;
-}
-
 } // namespace detail
 
 struct SettingsCtx {
@@ -925,8 +913,15 @@ public:
                 if constexpr (hasMetaInfo && std::is_enum_v<Type>) {
                     auto  memberName                                               = std::string(refl::data_member_name<TBlock, kIdx>.view());
                     auto& meta_info                                                = _block->meta_information;
-                    meta_info[convert_string_domain(memberName) + "::enum_values"] = detail::enumChoices<Type>();
-                    meta_info[convert_string_domain(memberName) + "::enum_type"]   = std::string(magic_enum::enum_type_name<Type>());
+                    meta_info[convert_string_domain(memberName) + "::enum_values"] = [] {
+                        std::vector<std::string> result;
+                        result.reserve(magic_enum::enum_count<Type>());
+                        for (auto [_, name] : magic_enum::enum_entries<Type>()) {
+                            result.emplace_back(name);
+                        }
+                        return result;
+                    }();
+                    meta_info[convert_string_domain(memberName) + "::enum_type"] = std::string(magic_enum::enum_type_name<Type>());
                 }
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
