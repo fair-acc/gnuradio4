@@ -235,6 +235,18 @@ std::string enumToString(T&& enum_value) {
     }
 }
 
+template<typename T>
+requires std::is_enum_v<T>
+std::vector<std::string> enumChoices() {
+    std::vector<std::string> result;
+    result.reserve(magic_enum::enum_count<T>());
+    for (auto [value, name] : magic_enum::enum_entries<T>()) {
+        (void)value;
+        result.emplace_back(name);
+    }
+    return result;
+}
+
 } // namespace detail
 
 struct SettingsCtx {
@@ -908,6 +920,15 @@ public:
             refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using RawType    = std::remove_cvref_t<MemberType>;
+                using Type       = unwrap_if_wrapped_t<RawType>;
+
+                if constexpr (hasMetaInfo && std::is_enum_v<Type>) {
+                    auto  memberName                                               = std::string(refl::data_member_name<TBlock, kIdx>.view());
+                    auto& meta_info                                                = _block->meta_information;
+                    meta_info[convert_string_domain(memberName) + "::enum_values"] = detail::enumChoices<Type>();
+                    meta_info[convert_string_domain(memberName) + "::enum_type"]   = std::string(magic_enum::enum_type_name<Type>());
+                }
+
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
                     auto  memberName                                                        = std::string(refl::data_member_name<TBlock, kIdx>.view());
                     auto& meta_information                                                  = _block->meta_information;
