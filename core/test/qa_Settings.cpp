@@ -307,6 +307,8 @@ const boost::ut::suite SettingsTests = [] {
             expect(eq(block.settings().get().size(), 18UL));
             expect(eq(block.scaling_factor, 1.f));
             expect(eq(gr::test::get_value_or_fail<float>(*block.settings().get("scaling_factor")), 1.f));
+            expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(block.meta_information.value.at("test_enum_setting::enum_values")), std::vector<std::string>{"TEST_STATE1", "TEST_STATE2", "TEST_STATE3"}));
+            expect(eq(gr::test::get_value_or_fail<std::vector<std::string>>(block.meta_information.value.at("annotated_test_enum_setting::enum_values")), std::vector<std::string>{"TEST_STATE1", "TEST_STATE2", "TEST_STATE3"}));
         };
 
         "with init parameter via graph"_test = [] {
