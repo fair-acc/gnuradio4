@@ -7,6 +7,7 @@ static const bool registerSimpleSchedulers = [] {
     auto& registry = static_cast<gr::SchedulerRegistry&>(grPluginInstance());
 
     registry.template insert<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>>("=gr::scheduler::SimpleSingle");
+    registry.template insert<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreadedBlocking>>("=gr::scheduler::SimpleSingleBlocking");
     registry.template insert<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>>("=gr::scheduler::SimpleMulti");
 
     return true;
