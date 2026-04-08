@@ -187,6 +187,7 @@ set(GR_ENABLE_HTTP
       STRING
       "HTTP client support (libcurl wrapper): ON=enable and require libcurl (error if not found), OFF=disable, OPTIONAL=enable only if libcurl is found, otherwise disable"
 )
+set(GR4_PKGCONFIG_EXTRA_LIBS "")
 set_property(
   CACHE GR_ENABLE_HTTP
   PROPERTY STRINGS
@@ -339,6 +340,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(ENABLE_TBB)
     find_package(TBB REQUIRED)
     target_link_libraries(gnuradio-options INTERFACE TBB::tbb)
+    set(GR4_PKGCONFIG_EXTRA_LIBS "-ltbb")
   else()
     target_compile_definitions(gnuradio-options INTERFACE _GLIBCXX_USE_TBB_PAR_BACKEND=0)
   endif()
