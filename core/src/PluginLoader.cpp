@@ -3,7 +3,7 @@
 namespace gr {
 PluginLoader& globalPluginLoader() {
     auto pluginPaths = [] {
-        std::vector<std::filesystem::path> result;
+        std::vector<std::string> result;
 
         auto* envpath = ::getenv("GNURADIO4_PLUGIN_DIRECTORIES");
         if (envpath == nullptr) {

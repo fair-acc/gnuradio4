@@ -177,6 +177,13 @@ option(ENABLE_TBB "Enable the TBB dependency for std::execution::par in gcc" OFF
 option(ENABLE_EXAMPLES "Enable Example Builds" ${GR_TOPLEVEL_PROJECT})
 option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 option(MIT_ONLY "Exclude modules with non-MIT/Apache-compatible licences" OFF)
+
+if(NOT DEFINED GR_DATA_CACHE_DIR)
+    set(GR_DATA_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/gnuradio_cache" 
+        CACHE PATH 
+        "Writeable system path where GR should store its cached data (for example, /var/lib/gnuradio4/cache)")
+endif()
+
 set(GR_MAX_WASM_THREAD_COUNT
     60
     CACHE STRING "Max number of threads for WASM pthread pool")

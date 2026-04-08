@@ -299,44 +299,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
         const std::size_t  nBlocks = gr::graph::countBlocks<gr::block::Category::NormalBlock>(rootGraph);
         Tensor<pmt::Value> serializedBlocks;
         serializedBlocks.reserve(nBlocks);
-        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel>& block) {
-            property_map map;
-
-            if (gr::Graph* subgraph = block->graph()) {
-                map.emplace("id", "SUBGRAPH");
-                map["unique_name"] = std::string(block->uniqueName());
-                map["name"]        = std::string(block->name());
-
-                property_map graphYaml = detail::saveGraphToMap(loader, *subgraph);
-
-                const std::size_t  nExportedPorts = block->exportedInputPorts().size() + block->exportedOutputPorts().size();
-                Tensor<pmt::Value> exportedPortsData;
-                exportedPortsData.reserve(nExportedPorts);
-                for (const auto& [blockName, portName] : block->exportedInputPorts()) {
-                    exportedPortsData.push_back(Tensor<pmt::Value>(data_from, {gr::pmt::Value(blockName), gr::pmt::Value("INPUT"s), gr::pmt::Value(portName)}));
-                }
-                for (const auto& [blockName, portName] : block->exportedOutputPorts()) {
-                    exportedPortsData.push_back(Tensor<pmt::Value>(data_from, {gr::pmt::Value(blockName), gr::pmt::Value("OUTPUT"s), gr::pmt::Value(portName)}));
-                }
-
-                graphYaml["exported_ports"] = std::move(exportedPortsData);
-                map.emplace("graph"s, std::move(graphYaml));
-
-                // TODO: a unit-test that this is working
-                auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get());
-
-                if (schedulerModel != nullptr) {
-                    property_map schedulerMap;
-                    schedulerMap["id"] = loader.schedulerRegistry().typeName(block);
-                    map["scheduler"]   = std::move(schedulerMap);
-                }
-
-            } else {
-                map = serializeBlock(loader, block, BlockSerializationFlags::All & (~BlockSerializationFlags::Ports));
-            }
-
-            serializedBlocks.emplace_back(std::move(map));
-        });
+        gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&](const std::shared_ptr<BlockModel>& block) { serializedBlocks.emplace_back(serializeBlock(loader, block, BlockSerializationFlags::All & (~BlockSerializationFlags::Ports))); });
         result["blocks"] = std::move(serializedBlocks);
     }
 
@@ -397,6 +360,20 @@ inline gr::meta::indirect<gr::Graph> loadGrc(PluginLoader& loader, std::string_v
 }
 
 inline std::string saveGrc(PluginLoader& loader, const gr::Graph& rootGraph) { return pmt::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
+
+inline std::shared_ptr<gr::BlockModel> detail::instantiateBlockFromYamlDefinition(PluginLoader& loader, const detail::YamlDefinitionsLoader::Definition& def) {
+    try {
+        gr::Graph tempGraph;
+        detail::loadGraphFromMap(loader, tempGraph, def.definition);
+        auto blocks = tempGraph.blocks();
+        if (blocks.empty()) {
+            return nullptr;
+        }
+        return blocks.front();
+    } catch (...) {
+        return nullptr;
+    }
+}
 
 } // namespace gr
 

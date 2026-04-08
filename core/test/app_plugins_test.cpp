@@ -14,7 +14,7 @@
 using namespace std::chrono_literals;
 
 struct TestContext {
-    explicit TestContext(std::vector<std::filesystem::path> paths) : loader(gr::globalBlockRegistry(), std::move(paths)) {}
+    explicit TestContext(std::vector<std::string> paths) : loader(gr::globalBlockRegistry(), gr::globalSchedulerRegistry(), std::move(paths)) {}
 
     gr::PluginLoader loader;
 };
@@ -29,7 +29,7 @@ const auto builtin_counter  = "builtin_counter"s;
 } // namespace names
 
 int main(int argc, char* argv[]) {
-    std::vector<std::filesystem::path> paths;
+    std::vector<std::string> paths;
     if (argc < 2) {
         paths.emplace_back("test/plugins");
         paths.emplace_back("plugins");
