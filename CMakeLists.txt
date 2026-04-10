@@ -444,17 +444,19 @@ FetchContent_Declare(
   ut
   GIT_REPOSITORY https://github.com/boost-ext/ut.git
   GIT_TAG 53e17f25119598c6458d30351b260193096ba67e # latest tag as of 2023-04-02
-)
+  EXCLUDE_FROM_ALL)
 
 FetchContent_Declare(
   vir-simd
   GIT_REPOSITORY https://github.com/mattkretz/vir-simd.git
-  GIT_TAG v0.4.4)
+  GIT_TAG v0.4.4
+  EXCLUDE_FROM_ALL)
 
 FetchContent_Declare(
   cpp-httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-  GIT_TAG v0.18.1)
+  GIT_TAG v0.18.1
+  EXCLUDE_FROM_ALL)
 
 if(NOT EMSCRIPTEN)
   set(libsoundio_patch_command git apply --ignore-space-change --ignore-whitespace
@@ -830,3 +832,5 @@ else()
 endif()
 
 message(STATUS "================================================")
+
+include(cmake/CPackConfig.cmake)

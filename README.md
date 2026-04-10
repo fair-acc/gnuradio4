@@ -24,6 +24,12 @@ led to adoption in hobbyist, academic, and commercial environments. GNU Radio ha
 found use in software-defined radio, digital communications, nuclear physics, high-
 energy particle physics, astrophysics, radio astronomy and more!
 
+## Binary builds
+
+Our binary builds are generated with `CPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4` in
+order to avoid clashing with distribution provided gnuradio, on client code
+you might need to pass `CMAKE_PREFIX_PATH` in order to find it.
+
 ## Building
 
 GNU Radio 4.0 uses modern C++ (C++23), and is tested for
