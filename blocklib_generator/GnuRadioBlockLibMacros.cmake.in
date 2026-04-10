@@ -187,7 +187,7 @@ function(gr_add_block_library LIB_NAME)
         message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
         add_library(${SHARED_LIB_NAME} SHARED)
         target_link_libraries(${SHARED_LIB_NAME} ${OBJECT_LIB_NAME})
-        install(TARGETS ${SHARED_LIB_NAME} LIBRARY DESTINATION lib)
+        install(TARGETS ${SHARED_LIB_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
     endif()
 
     if(CBL_MAKE_STATIC_LIBRARY)
@@ -195,7 +195,7 @@ function(gr_add_block_library LIB_NAME)
         message(STATUS "[BlockLibMacros] Creating a static library target ${STATIC_LIB_NAME}")
         add_library(${STATIC_LIB_NAME} STATIC)
         target_link_libraries(${STATIC_LIB_NAME} ${OBJECT_LIB_NAME})
-        install(TARGETS ${STATIC_LIB_NAME} LIBRARY DESTINATION lib)
+        install(TARGETS ${STATIC_LIB_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
     endif()
 
     # TODO Install pkgconfig files, CMake files for finding the package,
