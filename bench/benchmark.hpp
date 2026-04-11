@@ -485,25 +485,30 @@ using ResultMap = std::unordered_map<std::string, std::tuple<std::variant<std::m
 class results {
     using EntryType = std::pair<std::string, ResultMap>;
     using Data      = std::vector<EntryType>;
-    static std::mutex _lock;
-    static Data       _data;
+
+    // lazy init (Meyer's singleton) — avoids static init order issues
+    static Data& storage() noexcept {
+        static Data d;
+        return d;
+    }
+    static std::mutex& lock() noexcept {
+        static std::mutex m;
+        return m;
+    }
 
 public:
     [[nodiscard]] static ResultMap& add_result(std::string_view name) noexcept {
-        std::lock_guard guard(_lock);
-        return _data.emplace_back(std::string(name), ResultMap()).second;
+        std::lock_guard guard(lock());
+        return storage().emplace_back(std::string(name), ResultMap()).second;
     }
 
     static void add_separator() noexcept {
-        std::lock_guard guard(_lock);
-        _data.emplace_back(std::string{}, ResultMap{});
+        std::lock_guard guard(lock());
+        storage().emplace_back(std::string{}, ResultMap{});
     }
 
-    [[nodiscard]] static constexpr Data const& data() noexcept { return _data; };
+    [[nodiscard]] static Data const& data() noexcept { return storage(); };
 };
-
-inline results::Data results::_data;
-inline std::mutex    results::_lock;
 
 class time_point {
     using timePoint = std::chrono::time_point<std::chrono::high_resolution_clock>;
