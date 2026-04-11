@@ -10,6 +10,7 @@ add_subdirectory(math)
 add_subdirectory(sdr)
 add_subdirectory(testing)
 add_subdirectory(timing)
+add_subdirectory(device)
 
 # shared library that contains all registered blocks
 add_subdirectory(libs)

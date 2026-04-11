@@ -58,6 +58,25 @@ add_ut_test(qa_AtomicBitset)
 add_ut_test(qa_AtomicRef)
 add_ut_test(qa_Value)
 add_ut_test(qa_ValueHelper)
+add_ut_test(qa_Complex)
+add_ut_test(qa_Execution)
+add_ut_test(qa_UsmMemoryResource)
+
+# device test helpers (parallelFor + GL shader wrappers)
+add_library(device_test_helpers STATIC device_test_helpers.cpp)
+target_link_libraries(device_test_helpers PUBLIC gnuradio-options gnuradio-core)
+if(GR_HAS_GL_COMPUTE)
+  target_link_libraries(device_test_helpers PUBLIC PkgConfig::GR_EGL PkgConfig::GR_GL)
+endif()
+
+# device tests
+add_ut_test(qa_DeviceContext)
+target_link_libraries(qa_DeviceContext PRIVATE device_test_helpers)
+
+add_ut_test(qa_DeviceScheduler)
+
+add_ut_test(qa_DeviceMultiplyConst)
+target_link_libraries(qa_DeviceMultiplyConst PRIVATE device_test_helpers)
 add_ut_test(qa_ComputeDomain)
 add_ut_test(qa_DataSet)
 add_ut_test(qa_DynamicBlock)

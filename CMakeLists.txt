@@ -164,6 +164,23 @@ if(CMAKE_CXX_COMPILER MATCHES ".*acpp.*" OR CMAKE_CXX_COMPILER MATCHES ".*adapti
   message(STATUS "Detected AdaptiveCpp based on compiler path: ${CMAKE_CXX_COMPILER}")
 endif()
 
+# Detect OpenGL compute shader support (EGL + GL 4.3 or GLES 3.1)
+set(GR_HAS_GL_COMPUTE OFF)
+if(NOT EMSCRIPTEN)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(GR_EGL QUIET IMPORTED_TARGET egl)
+    pkg_check_modules(GR_GL QUIET IMPORTED_TARGET opengl)
+    if(NOT GR_GL_FOUND)
+      pkg_check_modules(GR_GL QUIET IMPORTED_TARGET gl)
+    endif()
+    if(GR_EGL_FOUND AND GR_GL_FOUND)
+      set(GR_HAS_GL_COMPUTE ON)
+      message(STATUS "OpenGL compute shaders available (EGL ${GR_EGL_VERSION}, GL ${GR_GL_VERSION})")
+    endif()
+  endif()
+endif()
+
 # Option affects GR4 build, as well as the behaviour of BlockLib cmake functions that are used in out-of-tree modules
 option(GR_ENABLE_BLOCK_REGISTRY "Enable building the block registry" ${REGISTRY_DEFAULT})
 option(USE_CCACHE "Use ccache if available" ON)
@@ -606,8 +623,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
 endif()
 
 add_library(vir INTERFACE)
-target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
-                                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_include_directories(vir SYSTEM INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
+                                                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 install(TARGETS vir EXPORT gnuradio4Targets)
 install(DIRECTORY ${vir-simd_SOURCE_DIR}/vir DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
@@ -802,6 +819,7 @@ message(STATUS "Toolchain details")
 message(STATUS "------------------------------------------------")
 message(STATUS "C++ compiler ID          : ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "GR_USE_ADAPTIVE_CPP?     : ${GR_USE_ADAPTIVE_CPP}")
+message(STATUS "GR_HAS_GL_COMPUTE?       : ${GR_HAS_GL_COMPUTE}")
 message(STATUS "C++ compiler path        : ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ compiler version     : ${CMAKE_CXX_COMPILER_VERSION}")
 string(

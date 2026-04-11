@@ -12,6 +12,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/device/ShaderFragment.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
 GR_REGISTER_BLOCK(builtin_multiply, [T], [ double, float ])
@@ -38,6 +39,8 @@ struct builtin_multiply : gr::Block<builtin_multiply<T>> {
     }
 
     [[nodiscard]] constexpr auto processOne(T a) const noexcept { return a * factor; }
+
+    [[nodiscard]] gr::device::ShaderFragment shaderFragment() const { return {.glslFunction = "float process(float x) { return x * FACTOR; }", .constants = {{"FACTOR", static_cast<float>(factor)}}}; }
 };
 
 GR_REGISTER_BLOCK(builtin_counter, [T], [ double, float ])

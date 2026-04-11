@@ -408,6 +408,20 @@ concept HasProcessEpilogueFunction = traits::block::can_processEpilogue<Derived>
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;
 
+template<typename Derived>
+concept AutoParallelisable = HasConstProcessOneFunction<Derived> && HasNoexceptProcessOneFunction<Derived>;
+
+template<typename Derived>
+concept HasSyclBulk = requires { &Derived::processBulk_sycl; }; // processBulk_sycl(sycl::queue&, std::span<const T> in, std::span<T> out)
+
+template<typename Derived>
+concept HasShaderFragment = requires(const Derived& block) {
+    { block.shaderFragment() }; // returns ShaderFragment — checked structurally, not by type
+};
+
+template<typename Derived>
+concept DeviceEligible = AutoParallelisable<Derived> || HasSyclBulk<Derived> || HasShaderFragment<Derived>;
+
 } // namespace gr
 
 #endif // include guard
