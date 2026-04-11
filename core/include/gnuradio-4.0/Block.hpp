@@ -441,6 +441,23 @@ struct Result {
     std::size_t performed_work = 0;
     Status      status         = Status::OK;
 };
+
+/// if the block reported an error or insufficient buffers, zero the counts
+inline void sanitiseProcessStatus(Status status, std::size_t& processedIn, std::size_t& processedOut) noexcept {
+    if (status == Status::INSUFFICIENT_OUTPUT_ITEMS || status == Status::INSUFFICIENT_INPUT_ITEMS || status == Status::ERROR) {
+        processedIn  = 0UZ;
+        processedOut = 0UZ;
+    }
+}
+
+/// compute how much work was performed — used by the scheduler for block prioritisation
+inline std::size_t computePerformedWork(Status status, std::size_t processedIn, std::size_t processedOut, bool isSource) noexcept {
+    if (status != Status::OK) {
+        return 0UZ;
+    }
+    return isSource ? processedOut : processedIn;
+}
+
 } // namespace work
 
 template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
@@ -754,7 +771,6 @@ public:
     PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
-protected:
     alignas(kCacheLine) std::array<std::byte, 1024UZ> _mergedTagBuffer{};
     std::pmr::monotonic_buffer_resource    _mergedTagUpstream{_mergedTagBuffer.data(), _mergedTagBuffer.size()};
     std::pmr::unsynchronized_pool_resource _mergedTagPool{&_mergedTagUpstream};
@@ -769,7 +785,7 @@ protected:
     [[nodiscard]] constexpr auto&       self() noexcept { return *static_cast<Derived*>(this); }
     [[nodiscard]] constexpr const auto& self() const noexcept { return *static_cast<const Derived*>(this); }
 
-    // BlockBase accessor function pointer initializers (cold-path only, used by propertyCallbacks)
+protected: // BlockBase function-pointer plumbing — not part of the user API
     static SettingsBase&              cbSettingsImpl(void* self) { return static_cast<Block*>(self)->_settings; }
     static lifecycle::State           cbStateImpl(const void* self) { return static_cast<const Block*>(self)->state(); }
     static std::expected<void, Error> cbChangeStateToImpl(void* self, lifecycle::State s) { return static_cast<Block*>(self)->changeStateTo(s); }
@@ -778,6 +794,7 @@ protected:
     static property_map&              cbMetaInformationImpl(void* self) { return static_cast<Block*>(self)->meta_information.value; }
     static property_map&              cbUiConstraintsImpl(void* self) { return static_cast<Block*>(self)->ui_constraints.value; }
 
+public:
     template<typename TFunction, typename... Args>
     [[maybe_unused]] constexpr inline auto invokeUserProvidedFunction(std::string_view callingSite, TFunction&& func, Args&&... args, const std::source_location& location = std::source_location::current()) noexcept {
         if constexpr (noexcept(func(std::forward<Args>(args)...))) { // function declared as 'noexcept' skip exception handling
@@ -1286,7 +1303,6 @@ public:
         for_each_port(processPort, inputPorts<PortType::MESSAGE>(&self()));
     }
 
-protected:
     /***
      * Aggregate the amount of samples that can be consumed/produced from a range of ports.
      * @param ports a typelist of input or output ports
@@ -1629,94 +1645,12 @@ protected:
      * @return struct { std::size_t produced_work, work_return_t}
      */
 
-    work::Result workInternal(std::size_t requestedWork)
-    requires(Derived::blockCategory == block::Category::NormalBlock)
-    {
+    template<typename TInputSpans, typename TOutputSpans>
+    work::Status dispatchProcessing(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t& processedIn, std::size_t& processedOut) {
         using enum gr::work::Status;
-        using TInputTypes  = traits::block::stream_input_port_types<Derived>;
-        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
+        using TInputTypes = traits::block::stream_input_port_types<Derived>;
 
-        applyChangedSettings(); // apply settings even if the block is already stopped
-
-        if (this->state() == lifecycle::State::REQUESTED_STOP) {
-            emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
-        }
-
-        if constexpr (TOutputTypes::size.value > 0UZ) {
-            if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
-                this->requestStop(); // no dependent non-optional children, should stop processing
-            }
-        }
-
-        if (this->state() == lifecycle::State::STOPPED) {
-            disconnectFromUpStreamParents();
-            return {requestedWork, 0UZ, DONE};
-        }
-
-        // TODO: finally remove me
-        // const auto [minSyncIn, maxSyncIn, maxSyncAvailableIn, hasAsyncIn] = getPortLimits(inputPorts<PortType::STREAM>(&self()));
-        // const auto [minSyncOut, maxSyncOut, maxSyncAvailableOut, hasAsyncOut] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
-
-        on_scope_exit _cacheGuard = [&] {
-            inputStreamCache.invalidateStatistic();
-            outputStreamCache.invalidateStatistic();
-        };
-        std::size_t minSyncIn           = inputStreamCache.minSyncRequirement();
-        std::size_t maxSyncIn           = inputStreamCache.maxSyncRequirement();
-        std::size_t maxSyncAvailableIn  = inputStreamCache.maxSyncAvailable();
-        bool        hasAsyncIn          = inputStreamCache.hasASyncAvailable();
-        std::size_t minSyncOut          = outputStreamCache.minSyncRequirement();
-        std::size_t maxSyncOut          = outputStreamCache.maxSyncRequirement();
-        std::size_t maxSyncAvailableOut = outputStreamCache.maxSyncAvailable();
-        bool        hasAsyncOut         = outputStreamCache.hasASyncAvailable();
-
-        auto [hasTag, hasAnyTag, nextTag, nextEosTag, asyncEoS] = getNextTagAndEosPosition();
-        std::size_t maxChunk                                    = getMergedBlockLimit();
-        const auto  inputSkipBefore                             = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
-        const auto  nextTagLimit                                = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
-        const auto  ensureMinimalDecimation                     = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<long unsigned int>(input_chunk_size); // ensure to process at least one input_chunk_size (may shift tags)
-        const auto  availableToProcess                          = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
-        const auto  availableToPublish                          = std::min({maxSyncOut, maxSyncAvailableOut});
-        auto [resampledIn, resampledOut, resampledStatus]       = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
-        const auto nextEosTagSkipBefore                         = nextEosTag - inputSkipBefore;
-        const bool isEosTagPresent                              = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
-
-        if (inputSkipBefore > 0) {                                                                    // consume samples on sync ports that need to be consumed due to the stride
-            auto inputSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), inputSkipBefore); // only way to consume is via the ReaderSpanLike now
-            updateMergedInputTagAndApplySettings(inputSpans, inputSkipBefore);                        // apply all tags in the skipped data range
-            consumeReaders(inputSkipBefore, inputSpans);
-        }
-        // return if there is no work to be performed // todo: add eos policy
-        if (isEosTagPresent || lifecycle::isShuttingDown(this->state()) || asyncEoS) {
-            emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
-            publishEoS();
-            this->setAndNotifyState(lifecycle::State::STOPPED);
-            return {requestedWork, 0UZ, DONE};
-        }
-
-        if (resampledIn == 0 && resampledOut == 0 && !hasAsyncIn && !hasAsyncOut) {
-            return {requestedWork, 0UZ, resampledStatus};
-        }
-
-        // for non-bulk processing, the processed span has to be limited to the first sample if it contains a tag s.t. the tag is not applied to every sample
-        const bool limitByFirstTag = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
-
-        // call the block implementation's work function
-        work::Status userReturnStatus = ERROR; // default if nothing has been set
-        std::size_t  processedIn      = limitByFirstTag ? 1UZ : resampledIn;
-        std::size_t  processedOut     = limitByFirstTag ? 1UZ : resampledOut;
-
-        auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
-        auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
-
-        if (hasAnyTag) {
-            updateMergedInputTagAndApplySettings(inputSpans, processedIn);
-            applyChangedSettings();
-        }
-
-        // Actual publishing occurs when outputSpans go out of scope. If processedOut == 0, the Tags will not be published.
-        publishCachedOutputTags(outputSpans);
-        publishMergedInputTag(outputSpans);
+        work::Status userReturnStatus = ERROR;
 
         if constexpr (HasProcessBulkFunction<Derived>) {
             invokeUserProvidedFunction("invokeProcessBulk", [&userReturnStatus, &inputSpans, &outputSpans, this] noexcept(HasNoexceptProcessBulkFunction<Derived>) { userReturnStatus = invokeProcessBulk(inputSpans, outputSpans); });
@@ -1739,32 +1673,26 @@ protected:
 
         } else if constexpr (HasProcessOneFunction<Derived>) {
             if (processedIn != processedOut) {
-                emitErrorMessage("Block::workInternal:", std::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", resampledIn, resampledOut));
+                emitErrorMessage("Block::workInternal:", std::format("N input samples ({}) does not equal to N output samples ({}) for processOne() method.", processedIn, processedOut));
                 requestStop();
                 processedIn  = 0;
                 processedOut = 0;
             } else {
-                constexpr bool        kIsSourceBlock = TInputTypes::size() == 0;
-                constexpr std::size_t kMaxWidth      = stdx::simd_abi::max_fixed_size<double>;
-                // A block determines its simd::size() via its input types. However, a source block doesn't have any
-                // input types and therefore wouldn't be able to produce simd output on processOne calls. To overcome
-                // this limitation, a source block can implement `processOne(meta::constexpr_value auto width)`
-                // alongside `processOne()` and then return simd objects with simd::size() == width.
-                constexpr bool kIsSimdSourceBlock = kIsSourceBlock and requires(const Derived& d) { d.processOne(meta::cw<kMaxWidth>); };
+                constexpr bool        kIsSourceBlock     = TInputTypes::size() == 0;
+                constexpr std::size_t kMaxWidth          = stdx::simd_abi::max_fixed_size<double>;
+                constexpr bool        kIsSimdSourceBlock = kIsSourceBlock and requires(const Derived& d) { d.processOne(meta::cw<kMaxWidth>); }; // source blocks opt into SIMD via processOne(width)
+
                 if constexpr (kIsSimdSourceBlock) {
-                    // SIMD source — block opted into SIMD by providing processOne(width)
                     constexpr auto kWidth = meta::cw<kMaxWidth>;
                     invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
                 } else if constexpr (HasConstProcessOneFunction<Derived>) {
                     if constexpr (traits::block::can_processOne_simd<Derived>) {
-                        // const processOne with SIMD-compatible inputs
                         constexpr auto kWidth = meta::cw<std::min(kMaxWidth, meta::simdize<typename TInputTypes::template apply<std::tuple>>::size() * std::size_t(4))>;
                         invokeUserProvidedFunction("invokeProcessOneSimd", [&userReturnStatus, &inputSpans, &outputSpans, &kWidth, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOneSimd(inputSpans, outputSpans, kWidth, processedIn); });
-                    } else { // Non-SIMD loop
+                    } else {
                         invokeUserProvidedFunction("invokeProcessOnePure", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, this] noexcept(HasNoexceptProcessOneFunction<Derived>) { userReturnStatus = invokeProcessOnePure(inputSpans, outputSpans, processedIn); });
                     }
-                } else { // processOne isn't const i.e. not a pure function w/o side effects -> need to evaluate state
-                         // after each sample
+                } else {
                     static_assert(not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
                     const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
                     userReturnStatus  = result.status;
@@ -1772,15 +1700,82 @@ protected:
                     processedOut      = result.processedOut;
                 }
             }
-        } else { // block does not define any valid processing function
+        } else {
             meta::print_types<meta::message_type<"neither processBulk(...) nor processOne(...) implemented for:">, Derived>{};
         }
 
-        // sanitise input/output samples based on explicit user-defined processBulk(...) return status
-        if (userReturnStatus == INSUFFICIENT_OUTPUT_ITEMS || userReturnStatus == INSUFFICIENT_INPUT_ITEMS || userReturnStatus == ERROR) {
-            processedIn  = 0UZ;
-            processedOut = 0UZ;
+        return userReturnStatus;
+    }
+
+    /// check lifecycle state — returns early Result if block should stop, nullopt if work should proceed
+    std::optional<work::Result> applySettingsAndCheckLifecycle(std::size_t requestedWork) {
+        using enum gr::work::Status;
+        using TOutputTypes = traits::block::stream_output_port_types<Derived>;
+
+        applyChangedSettings();
+
+        if (this->state() == lifecycle::State::REQUESTED_STOP) {
+            emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
         }
+        if constexpr (TOutputTypes::size.value > 0UZ) {
+            if (disconnect_on_done && hasNoDownStreamConnectedChildren()) {
+                this->requestStop();
+            }
+        }
+        if (this->state() == lifecycle::State::STOPPED) {
+            applyChangedSettings(); // drain any pending settings before disconnecting
+            disconnectFromUpStreamParents();
+            return work::Result{requestedWork, 0UZ, DONE};
+        }
+        return std::nullopt;
+    }
+
+    /// compute available samples, tag positions, resampling, chunk limits
+    struct SampleLimits {
+        std::size_t  resampledIn{}, resampledOut{}, inputSkipBefore{};
+        work::Status resampledStatus = work::Status::OK;
+        bool         hasTag{}, hasAnyTag{}, asyncEoS{}, isEosPresent{}, limitByFirstTag{};
+        bool         hasAsyncIn{}, hasAsyncOut{};
+    };
+
+    SampleLimits computeSampleLimits(std::size_t requestedWork) {
+        std::size_t minSyncIn           = inputStreamCache.minSyncRequirement();
+        std::size_t maxSyncIn           = inputStreamCache.maxSyncRequirement();
+        std::size_t maxSyncAvailableIn  = inputStreamCache.maxSyncAvailable();
+        bool        hasAsyncIn          = inputStreamCache.hasASyncAvailable();
+        std::size_t minSyncOut          = outputStreamCache.minSyncRequirement();
+        std::size_t maxSyncOut          = outputStreamCache.maxSyncRequirement();
+        std::size_t maxSyncAvailableOut = outputStreamCache.maxSyncAvailable();
+        bool        hasAsyncOut         = outputStreamCache.hasASyncAvailable();
+
+        auto [hasTag, hasAnyTag, nextTag, nextEosTag, asyncEoS] = getNextTagAndEosPosition();
+        std::size_t       maxChunk                              = getMergedBlockLimit();
+        const std::size_t inputSkipBefore                       = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
+        const std::size_t nextTagLimit                          = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
+        const std::size_t ensureMinimalDecimation               = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<std::size_t>(input_chunk_size);
+        const std::size_t availableToProcess                    = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
+        const std::size_t availableToPublish                    = std::min({maxSyncOut, maxSyncAvailableOut});
+        auto [resampledIn, resampledOut, resampledStatus]       = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
+        const auto nextEosTagSkipBefore                         = nextEosTag - inputSkipBefore;
+        const bool isEosPresent                                 = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
+        const bool limitByFirstTag                              = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
+
+        return {.resampledIn = resampledIn, .resampledOut = resampledOut, .inputSkipBefore = inputSkipBefore, .resampledStatus = resampledStatus, .hasTag = hasTag, .hasAnyTag = hasAnyTag, .asyncEoS = asyncEoS, .isEosPresent = isEosPresent, .limitByFirstTag = limitByFirstTag, .hasAsyncIn = hasAsyncIn, .hasAsyncOut = hasAsyncOut};
+    }
+
+    /// apply input tags and settings from all sync ports
+    template<typename TInputSpans>
+    void applyInputTagsAndSettings(TInputSpans& inputSpans, std::size_t processedIn, bool hasAnyTag) {
+        if (hasAnyTag) {
+            updateMergedInputTagAndApplySettings(inputSpans, processedIn);
+            applyChangedSettings();
+        }
+    }
+
+    /// publish tags and samples, consume inputs, handle EOS
+    template<typename TInputSpans, typename TOutputSpans>
+    void finaliseIO(TInputSpans& inputSpans, TOutputSpans& outputSpans, work::Status& userReturnStatus, std::size_t& processedIn, std::size_t processedOut, std::size_t resampledIn) {
+        using enum gr::work::Status;
 
         if (processedOut > 0) {
             publishCachedOutputTags(outputSpans);
@@ -1821,31 +1816,63 @@ protected:
             this->setAndNotifyState(lifecycle::State::STOPPED);
             publishEoS(outputSpans);
         }
+    }
 
-        // check/sanitise return values (N.B. these are used by the scheduler as indicators
-        // whether and how much 'work' has been done to -- for example -- prioritise one block over another
-        std::size_t performedWork = 0UZ;
-        if (userReturnStatus == OK) {
-            constexpr bool kIsSourceBlock = traits::block::stream_input_port_types<Derived>::size == 0;
-            constexpr bool kIsSinkBlock   = traits::block::stream_output_port_types<Derived>::size == 0;
-            if constexpr (!kIsSourceBlock && !kIsSinkBlock) { // normal block with input(s) and output(s)
-                performedWork = processedIn;
-            } else if constexpr (kIsSinkBlock) {
-                performedWork = processedIn;
-            } else if constexpr (kIsSourceBlock) {
-                performedWork = processedOut;
-            } else {
-                performedWork = 1UZ;
-            }
+    work::Result workInternal(std::size_t requestedWork)
+    requires(Derived::blockCategory == block::Category::NormalBlock)
+    {
+        using enum gr::work::Status;
+        using TInputTypes = traits::block::stream_input_port_types<Derived>;
 
-            if (performedWork > 0UZ) {
-                progress->incrementAndGet();
-            }
+        if (std::optional<work::Result> earlyOut = applySettingsAndCheckLifecycle(requestedWork)) {
+            return *earlyOut;
+        }
+
+        on_scope_exit _cacheGuard = [&] {
+            inputStreamCache.invalidateStatistic();
+            outputStreamCache.invalidateStatistic();
+        };
+        SampleLimits limits = computeSampleLimits(requestedWork);
+
+        if (limits.inputSkipBefore > 0) {
+            auto skipSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), limits.inputSkipBefore);
+            updateMergedInputTagAndApplySettings(skipSpans, limits.inputSkipBefore);
+            consumeReaders(limits.inputSkipBefore, skipSpans);
+        }
+
+        if (limits.isEosPresent || lifecycle::isShuttingDown(this->state()) || limits.asyncEoS) {
+            emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
+            publishEoS();
+            this->setAndNotifyState(lifecycle::State::STOPPED);
+            return {requestedWork, 0UZ, DONE};
+        }
+
+        if (limits.resampledIn == 0 && limits.resampledOut == 0 && !limits.hasAsyncIn && !limits.hasAsyncOut) {
+            return {requestedWork, 0UZ, limits.resampledStatus};
+        }
+
+        std::size_t processedIn  = limits.limitByFirstTag ? 1UZ : limits.resampledIn;
+        std::size_t processedOut = limits.limitByFirstTag ? 1UZ : limits.resampledOut;
+
+        auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
+        auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
+
+        applyInputTagsAndSettings(inputSpans, processedIn, limits.hasAnyTag);
+        publishCachedOutputTags(outputSpans);
+        publishMergedInputTag(outputSpans);
+
+        work::Status userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);
+        work::sanitiseProcessStatus(userReturnStatus, processedIn, processedOut);
+        finaliseIO(inputSpans, outputSpans, userReturnStatus, processedIn, processedOut, limits.resampledIn);
+
+        constexpr bool kIsSourceBlock = TInputTypes::size.value == 0;
+        std::size_t    performedWork  = work::computePerformedWork(userReturnStatus, processedIn, processedOut, kIsSourceBlock);
+        if (performedWork > 0UZ) {
+            progress->incrementAndGet();
         }
         return {requestedWork, performedWork, userReturnStatus};
-    } // end: work::Result workInternal(std::size_t requestedWork) { ... }
+    }
 
-public:
     /**
      * @brief Process as many samples as available and compatible with the internal boundary requirements or limited by 'requested_work`
      *
