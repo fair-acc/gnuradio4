@@ -10,7 +10,7 @@ using namespace gr;
 GR_REGISTER_BLOCK(gr::basic::SyncBlock, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double, std::complex<float>, std::complex<double> ])
 
 template<typename T>
-struct SyncBlock : Block<SyncBlock<T>, NoDefaultTagForwarding> {
+struct SyncBlock : Block<SyncBlock<T>, NoTagPropagation> {
     using Description = Doc<R""(@brief SyncBlock synchronises data streams across multiple inputs.
 
 The SyncBlock addresses key scenarios including initial time shifts, clock drift, and significant delays.

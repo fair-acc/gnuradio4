@@ -139,9 +139,16 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
                 }
             }
 
-            if (plot_merged_tags && this->inputTagsPresent()) {
-                _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = this->_mergedInputTag.map, .index = _tagIndex++, .relIndex = 0, .merged = true});
-                this->_mergedInputTag.map.clear(); // TODO: provide proper API for clearing tags
+            if (plot_merged_tags) {
+                property_map mergedMap;
+                for (const auto& [relIndex, tagMapRef] : inData.tags()) {
+                    if (relIndex == 0) {
+                        mergedMap.merge(property_map(tagMapRef.get()));
+                    }
+                }
+                if (!mergedMap.empty()) {
+                    _historyTags.push_back(TagInfo{.timestamp = nowStamp, .map = std::move(mergedMap), .index = _tagIndex++, .relIndex = 0, .merged = true});
+                }
             }
         } // end lifetime of '_drawMutex' write lock-guard
 

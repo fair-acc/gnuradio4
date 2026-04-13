@@ -153,7 +153,18 @@ std::optional<SettingsCtx> CtxSettingsBase::activateContext(SettingsCtx ctx) {
         std::optional<property_map> _parameters = getBestMatchStoredParameters(ctx);
         if (_parameters) {
             auto& parameters = *_parameters;
-            _stagedParameters.insert(parameters.begin(), parameters.end());
+
+            // filter out auto-update params to avoid overwriting tag-updated values
+            if (!_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
+                _autoUpdateParameters[bestMatchSettingsCtx.value()] = getBestMatchAutoUpdateParameters(bestMatchSettingsCtx.value()).value_or(doGetAllWritableMembers());
+            }
+            const auto& autoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
+            for (const auto& [key, value] : parameters) {
+                if (!autoUpdateParams.contains(std::string(key))) {
+                    _stagedParameters.insert_or_assign(key, value);
+                }
+            }
+
             _activeCtx = bestMatchSettingsCtx.value();
             setChanged(true);
         } else {

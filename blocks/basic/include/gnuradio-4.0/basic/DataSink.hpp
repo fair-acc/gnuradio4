@@ -613,12 +613,13 @@ public:
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inData) noexcept {
-        // Note: AbstractListener::process currently accepts a property_map for a single Tag only.
-        // Consider updating the method signature to handle multiple Tags simultaneously.
         std::optional<property_map> tagData;
-        if (this->inputTagsPresent()) {
-            assert(this->mergedInputTag().index == 0);
-            tagData = this->mergedInputTag().map;
+        for (const auto& [relIndex, tagMapRef] : inData.tags()) {
+            if (!tagData) {
+                tagData.emplace(tagMapRef.get());
+            } else {
+                tagData->merge(property_map(tagMapRef.get()));
+            }
         }
 
         {

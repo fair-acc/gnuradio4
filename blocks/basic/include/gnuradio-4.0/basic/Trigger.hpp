@@ -15,7 +15,7 @@ GR_REGISTER_BLOCK("gr::blocks::basic::SchmittTriggerPolynomial", gr::blocks::bas
 
 template<typename T, gr::trigger::InterpolationMethod Method>
 requires(std::is_arithmetic_v<T> or (UncertainValueLike<T> && std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>))
-struct SchmittTrigger : public gr::Block<SchmittTrigger<T, Method>, NoDefaultTagForwarding> {
+struct SchmittTrigger : public gr::Block<SchmittTrigger<T, Method>, NoTagPropagation> {
     using Description = Doc<R""(@brief Digital Schmitt trigger implementation with optional intersample interpolation
 
 @see https://en.wikipedia.org/wiki/Schmitt_trigger

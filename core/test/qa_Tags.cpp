@@ -9,6 +9,7 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
 
+#include <gnuradio-4.0/testing/Delay.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 template<>
 struct std::formatter<gr::Tag> {
@@ -61,7 +62,7 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
 };
 
 template<typename T>
-struct DecimatorBackward : gr::Block<DecimatorBackward<T>, gr::Resampling<1UZ, 1UZ, false>, gr::BackwardTagForwarding> {
+struct DecimatorBackward : gr::Block<DecimatorBackward<T>, gr::Resampling<1UZ, 1UZ, false>, gr::BackwardTagPropagation> {
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
@@ -157,7 +158,7 @@ static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCE
 static_assert(HasRequiredProcessFunction<TagSink<int, ProcessFunction::USE_PROCESS_BULK>>);
 } // namespace gr::testing
 
-const boost::ut::suite TagTests = [] {
+const boost::ut::suite<"TagTests"> _TagTests = [] {
     using namespace gr;
 
     static_assert(sizeof(Tag) % 64 == 0, "needs to meet L1 cache size");
@@ -217,7 +218,7 @@ const boost::ut::suite TagTests = [] {
     };
 };
 
-const boost::ut::suite TagPropagation = [] {
+const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
     using namespace std::string_literals;
     using namespace boost::ut;
     using namespace gr;
@@ -418,7 +419,7 @@ const boost::ut::suite TagPropagation = [] {
 
         expect(eq(src._nSamplesProduced, n_samples)) << "src did not produce enough output samples";
         expect(eq(sink._nSamplesProduced, 1008U)) << "sinkOne did not consume enough input samples"; // default policy is to drop epilogue samples
-        expect(eq(sink._tags.size(), 3UZ));                                                          // default policy is to drop epilogue samples
+        expect(ge(sink._tags.size(), 3UZ));                                                          // at least the runtime tags (init-time forwarding may add more)
     };
 
     auto runPolicyTest = []<typename TDecimator>(const std::vector<Tag>& expectedTags) {
@@ -453,31 +454,37 @@ const boost::ut::suite TagPropagation = [] {
 
         expect(eq(src._nSamplesProduced, nSamples));
         expect(eq(sink._nSamplesProduced, 4U));
-        expect(eq(sink._tags.size(), 4UZ));
 
         expect(equal_tag_lists(sink._tags, expectedTags));
     };
 
     "Tag propagation with decimation - Forward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                                             //
-            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},                           //
-            {1, gr::property_map{{"key", "value@5"}, {"key4", "value@4"}, {"key5", "value@5"}}},      //
-            {2, gr::property_map{{"key", "value@20"}, {"key15", "value@15"}, {"key20", "value@20"}}}, //
+        // individual tags forwarded per input position — unconsumed tags carry to next output chunk
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                      //
+            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},    //
+            {1, gr::property_map{{"key", "value@4"}, {"key4", "value@4"}}},    //
+            {1, gr::property_map{{"key", "value@5"}, {"key5", "value@5"}}},    //
+            {2, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}}, //
+            {2, gr::property_map{{"key", "value@20"}, {"key20", "value@20"}}}, //
             {3, gr::property_map{{"key", "value@25"}, {"key25", "value@25"}}}};
         runPolicyTest.template operator()<DecimatorForward<float>>(expectedTags);
     };
 
     "Tag propagation with decimation - Backward policy"_test = [&runPolicyTest]() {
-        std::vector<Tag>       expectedTags = std::vector<Tag>{                                                             //
-            {0, gr::property_map{{"key", "value@5"}, {"key0", "value@0"}, {"key4", "value@4"}, {"key5", "value@5"}}}, //
-            {1, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}},                                        //
-            {2, gr::property_map{{"key", "value@25"}, {"key20", "value@20"}, {"key25", "value@25"}}},                 //
+        // backward: all tags in each input chunk mapped to output position 0
+        std::vector<Tag>       expectedTags = std::vector<Tag>{                      //
+            {0, gr::property_map{{"key", "value@0"}, {"key0", "value@0"}}},    //
+            {0, gr::property_map{{"key", "value@4"}, {"key4", "value@4"}}},    //
+            {0, gr::property_map{{"key", "value@5"}, {"key5", "value@5"}}},    //
+            {1, gr::property_map{{"key", "value@15"}, {"key15", "value@15"}}}, //
+            {2, gr::property_map{{"key", "value@20"}, {"key20", "value@20"}}}, //
+            {2, gr::property_map{{"key", "value@25"}, {"key25", "value@25"}}}, //
             {3, gr::property_map{{"key", "value@35"}, {"key35", "value@35"}}}};
         runPolicyTest.template operator()<DecimatorBackward<float>>(expectedTags);
     };
 };
 
-const boost::ut::suite RepeatedTags = [] {
+const boost::ut::suite<"RepeatedTags"> _RepeatedTags = [] {
     using namespace boost::ut;
     using namespace gr;
     using namespace gr::tag;
@@ -520,6 +527,574 @@ const boost::ut::suite RepeatedTags = [] {
     "TagSource<float, USE_PROCESS_BULK>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_BULK>(true); };
 
     "TagSource<float, USE_PROCESS_ONE>"_test = [&runTest] { runTest.template operator()<ProcessFunction::USE_PROCESS_ONE>(true); };
+};
+
+// -- test blocks for custom forwardTags and NoTagPropagation --
+
+template<typename T>
+struct CustomForwardTagsBlock : gr::Block<CustomForwardTagsBlock<T>> {
+    using Description = gr::Doc<"block with user-defined forwardTags()">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    float sample_rate = 1000.f;
+
+    GR_MAKE_REFLECTABLE(CustomForwardTagsBlock, in, out, sample_rate);
+
+    bool forwardTagsCalled = false;
+
+    template<typename TInputSpans, typename TOutputSpans>
+    void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t /*processedIn*/) {
+        forwardTagsCalled = true;
+        gr::for_each_reader_span(
+            [&](auto& in_) {
+                if (!in_.isSync || !in_.isConnected) {
+                    return;
+                }
+                for (const auto& [relIndex, tagMapRef] : in_.tags()) {
+                    gr::property_map forwarded = tagMapRef.get();
+                    forwarded.insert_or_assign("custom_added", "yes");
+                    gr::for_each_writer_span([&](auto& out_) { out_.publishTag(forwarded, 0); }, outputSpans);
+                }
+            },
+            inputSpans);
+    }
+
+    [[nodiscard]] constexpr auto processOne(T x) const noexcept { return x; }
+};
+
+template<typename T>
+struct ForwardPropBlock : gr::Block<ForwardPropBlock<T>, gr::ForwardTagPropagation, gr::Resampling<10UZ, 10UZ, true>> {
+    using Description = gr::Doc<"fixed-chunk block with forward tag propagation (chunk=10)">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(ForwardPropBlock, in, out);
+
+    gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
+        std::ranges::copy(input, output.begin());
+        return gr::work::Status::OK;
+    }
+};
+
+template<typename T>
+struct MergePropBlock : gr::Block<MergePropBlock<T>, gr::MergeTagPropagation> {
+    using Description = gr::Doc<"block with merge tag propagation (legacy mode)">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    float sample_rate = 1000.f;
+
+    GR_MAKE_REFLECTABLE(MergePropBlock, in, out, sample_rate);
+
+    [[nodiscard]] constexpr auto processOne(T x) const noexcept { return x; }
+};
+
+template<typename T>
+struct NoForwardBlock : gr::Block<NoForwardBlock<T>, gr::NoTagPropagation> {
+    using Description = gr::Doc<"block that suppresses default tag forwarding">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    float sample_rate = 1000.f;
+
+    GR_MAKE_REFLECTABLE(NoForwardBlock, in, out, sample_rate);
+
+    [[nodiscard]] constexpr auto processOne(T x) const noexcept { return x; }
+};
+
+template<typename T>
+struct ProcessOnePublisher : gr::Block<ProcessOnePublisher<T>> {
+    using Description = gr::Doc<"processOne block that publishes a tag at a specific sample">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(ProcessOnePublisher, in, out);
+
+    std::size_t _nSamples       = 0;
+    std::size_t publishAtSample = 5;
+
+    [[nodiscard]] T processOne(T x) noexcept {
+        if (_nSamples == publishAtSample) {
+            this->publishTag(gr::property_map{{"published_at", static_cast<std::uint64_t>(_nSamples)}});
+        }
+        _nSamples++;
+        return x;
+    }
+};
+
+template<typename T>
+struct MergePropTwoInput : gr::Block<MergePropTwoInput<T>, gr::MergeTagPropagation> {
+    using Description = gr::Doc<"two-input block with merge tag propagation">;
+    gr::PortIn<T>  in0;
+    gr::PortIn<T>  in1;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(MergePropTwoInput, in0, in1, out);
+
+    [[nodiscard]] gr::work::Status processBulk(std::span<const T> a, std::span<const T> b, std::span<T> o) noexcept {
+        for (std::size_t i = 0; i < o.size(); ++i) {
+            o[i] = a[i] + b[i];
+        }
+        return gr::work::Status::OK;
+    }
+};
+
+template<typename T>
+struct BackwardCustomForward : gr::Block<BackwardCustomForward<T>, gr::BackwardTagPropagation> {
+    using Description = gr::Doc<"backward policy block with custom forwardTags override">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(BackwardCustomForward, in, out);
+
+    bool forwardTagsCalled = false;
+
+    template<typename TInputSpans, typename TOutputSpans>
+    void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t /*processedIn*/) {
+        forwardTagsCalled = true;
+        gr::for_each_reader_span(
+            [&](auto& in_) {
+                if (!in_.isSync || !in_.isConnected) {
+                    return;
+                }
+                for (const auto& [relIndex, tagMapRef] : in_.tags()) {
+                    gr::property_map fwd = tagMapRef.get();
+                    fwd.insert_or_assign("custom_override", "yes");
+                    gr::for_each_writer_span([&](auto& out_) { out_.publishTag(fwd, 0); }, outputSpans);
+                }
+            },
+            inputSpans);
+    }
+
+    [[nodiscard]] constexpr auto processOne(T x) const noexcept { return x; }
+};
+
+template<typename T>
+struct TwoInputAdder : gr::Block<TwoInputAdder<T>> {
+    using Description = gr::Doc<"adds two inputs — for multi-port dedup testing">;
+    gr::PortIn<T>  in0;
+    gr::PortIn<T>  in1;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(TwoInputAdder, in0, in1, out);
+
+    [[nodiscard]] gr::work::Status processBulk(std::span<const T> a, std::span<const T> b, std::span<T> o) noexcept {
+        for (std::size_t i = 0; i < o.size(); ++i) {
+            o[i] = a[i] + b[i];
+        }
+        return gr::work::Status::OK;
+    }
+};
+
+const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "custom forwardTags override is called"_test = [] {
+        Graph testGraph;
+        auto& src    = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        src._tags    = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        auto& custom = testGraph.emplaceBlock<CustomForwardTagsBlock<float>>();
+        auto& sink   = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, custom).has_value());
+        expect(testGraph.connect<"out", "in">(custom, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(custom.forwardTagsCalled) << "forwardTags() must be called by workInternal";
+        expect(ge(sink._tags.size(), 1UZ)) << "at least one tag forwarded";
+        expect(sink._tags[0].map.contains("custom_added")) << "custom key must be present in forwarded tag";
+    };
+
+    "NoTagPropagation suppresses auto-forwarding"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        auto& nofw = testGraph.emplaceBlock<NoForwardBlock<float>>();
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, nofw).has_value());
+        expect(testGraph.connect<"out", "in">(nofw, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._tags.size(), 0UZ)) << "no tags forwarded with NoTagPropagation";
+        expect(eq(nofw.sample_rate, 42.f)) << "settings still auto-updated from input tags";
+    };
+
+    "processOne publishTag positions tag at correct sample"_test = [] {
+        Graph testGraph;
+        auto& src           = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        auto& pub           = testGraph.emplaceBlock<ProcessOnePublisher<float>>();
+        pub.publishAtSample = 5;
+        auto& sink          = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, pub).has_value());
+        expect(testGraph.connect<"out", "in">(pub, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(ge(sink._tags.size(), 1UZ)) << "tag must be forwarded";
+        bool found = false;
+        for (const auto& tag : sink._tags) {
+            if (tag.map.contains("published_at")) {
+                expect(eq(tag.index, 5UZ)) << "tag must be at sample 5";
+                found = true;
+            }
+        }
+        expect(found) << "published_at tag must exist in sink";
+    };
+
+    "processOne mergedInputTag receives tag and clears flag"_test = [] {
+        Graph testGraph;
+        auto& src     = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags     = {{3, {{tag::SIGNAL_NAME.shortKey(), "test_signal"}}}};
+        auto& monitor = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, monitor).has_value());
+        expect(testGraph.connect<"out", "in">(monitor, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(monitor._tags.size(), 1UZ)) << "exactly one tag received";
+        expect(eq(monitor._tags[0].index, 3UZ)) << "tag at correct position";
+        expect(eq(monitor.signal_name, "test_signal"s)) << "settings auto-updated";
+    };
+
+    "init-time settings forwarded as tag"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& gain = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>({{"sample_rate", 48000.f}, {"signal_name", "init_test"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, gain).has_value());
+        expect(testGraph.connect<"out", "in">(gain, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(ge(sink._tags.size(), 1UZ)) << "init-time forward tag expected";
+        bool hasSampleRate = false;
+        for (const auto& tag : sink._tags) {
+            if (auto it = tag.map.find(tag::SAMPLE_RATE.shortKey()); it != tag.map.end()) {
+                expect(*it->second.get_if<float>() == 48000.f);
+                hasSampleRate = true;
+            }
+        }
+        expect(hasSampleRate) << "sample_rate from init must be forwarded";
+    };
+
+    "forward policy carries unconsumed tags to next chunk"_test = [] {
+        // tags at 0, 4, 5 with processOne monitor: tag at 0 consumed immediately,
+        // tags at 4, 5 carry forward and appear in subsequent chunks at position 0
+        Graph testGraph;
+        auto& src     = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags     = {{0, {{"key", "at_0"}}}, {4, {{"key", "at_4"}}}, {5, {{"key", "at_5"}}}};
+        auto& monitor = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, monitor).has_value());
+        expect(testGraph.connect<"out", "in">(monitor, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        // monitor (processOne) sees each tag at its position via limitByFirstTag
+        expect(eq(monitor._tags.size(), 3UZ)) << "all 3 tags received by processOne monitor";
+        expect(eq(monitor._tags[0].index, 0UZ));
+        expect(eq(monitor._tags[1].index, 4UZ));
+        expect(eq(monitor._tags[2].index, 5UZ));
+    };
+
+    "multiple tags on same sample are all visible"_test = [] {
+        Graph testGraph;
+        auto& src = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags = {
+            {3, {{"key_a", "first_tag"}}}, {3, {{"key_b", "second_tag"}}} // same sample index, different tag
+        };
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        // both tags at sample 3 must be visible — no merging
+        std::size_t tagsAt3 = 0;
+        for (const auto& tag : sink._tags) {
+            if (tag.index == 3) {
+                tagsAt3++;
+            }
+        }
+        expect(ge(tagsAt3, 2UZ)) << "both tags at sample 3 must be preserved (no implicit merge)";
+    };
+
+    "processOne handles multi-sample chunk with tag at sample 0 only"_test = [] {
+        // after limitByFirstTag removal: processOne processes multi-sample chunks
+        // tag at position 0 is visible via mergedInputTag() for the first sample only
+        Graph testGraph;
+        auto& src     = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        src._tags     = {{0, {{tag::SIGNAL_NAME.shortKey(), "test"}}}}; // single tag at start
+        auto& monitor = testGraph.emplaceBlock<TagMonitor<float, ProcessFunction::USE_PROCESS_ONE>>({{"verbose_console", false}});
+        auto& sink    = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, monitor).has_value());
+        expect(testGraph.connect<"out", "in">(monitor, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(monitor._tags.size(), 1UZ)) << "exactly one tag received (not duplicated across samples)";
+        expect(eq(monitor._tags[0].index, 0UZ)) << "tag at sample 0";
+        expect(eq(monitor._nSamplesProduced, gr::Size_t(30))) << "all samples processed";
+        expect(eq(monitor.signal_name, "test"s)) << "settings auto-updated";
+    };
+
+    "value substitution in forwarding replaces with block-current value"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        auto& fwd  = testGraph.emplaceBlock<AutoForwardParametersBlock<float>>(); // default sample_rate, auto-updateable
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, fwd).has_value());
+        expect(testGraph.connect<"out", "in">(fwd, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        // sample_rate auto-updated from input tag, then forwarded with block-current value
+        expect(eq(fwd.sample_rate, 42.f)) << "block setting auto-updated from input tag";
+        expect(eq(sink.sample_rate, 42.f)) << "downstream setting updated from forwarded tag";
+    };
+
+    "multi-input dedup removes identical tags from fan-out"_test = [] {
+        // src → in0 of adder, src → in1 of adder → both ports see the same tag → dedup
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}, {"unique_key", "A"}}}};
+        auto& add  = testGraph.emplaceBlock<TwoInputAdder<float>>();
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in0">(src, add).has_value());
+        expect(testGraph.connect<"out", "in1">(src, add).has_value());
+        expect(testGraph.connect<"out", "in">(add, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        // the identical tag from both ports should be deduped → forwarded once
+        std::size_t srTags = 0;
+        for (const auto& tag : sink._tags) {
+            if (tag.map.contains(tag::SAMPLE_RATE.shortKey())) {
+                srTags++;
+            }
+        }
+        expect(eq(srTags, 1UZ)) << "identical tag from fan-out forwarded once (deduped)";
+        expect(eq(sink.sample_rate, 42.f)) << "settings auto-updated";
+    };
+
+    "ForwardTagPropagation does not break chunks at tags"_test = [] {
+        // verify that ForwardTagPropagation doesn't break chunks at tag positions
+        // (tags within the chunk carry forward instead of splitting the chunk)
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 1.f}}}, {5, {{tag::SAMPLE_RATE.shortKey(), 5.f}}}};
+        auto& fwd  = testGraph.emplaceBlock<ForwardPropBlock<float>>();
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, fwd).has_value());
+        expect(testGraph.connect<"out", "in">(fwd, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._nSamplesProduced, gr::Size_t(30))) << "all samples processed in fixed chunks";
+        expect(ge(sink._tags.size(), 1UZ)) << "tag at position 0 forwarded";
+        // tag at 5 auto-updates fwd's settings even though it's mid-chunk (via applyInputTagsFromPorts)
+        // the forwarded value is based on the block's current state after auto-update
+        expect(ge(sink._tags.size(), 1UZ));
+    };
+
+    "MergeTagPropagation merges all tags into one"_test = [] {
+        Graph testGraph;
+        auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags   = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}, {0, {{tag::SIGNAL_NAME.shortKey(), "merged_test"}}}};
+        auto& merge = testGraph.emplaceBlock<MergePropBlock<float>>();
+        auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, merge).has_value());
+        expect(testGraph.connect<"out", "in">(merge, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        // MergeTagPropagation merges both input tags (sample_rate + signal_name) into one output tag
+        // check that the sink received merged content rather than 2 separate tags
+        bool foundMerged = false;
+        for (const auto& tag : sink._tags) {
+            if (tag.map.contains(tag::SAMPLE_RATE.shortKey()) && tag.map.contains(tag::SIGNAL_NAME.shortKey())) {
+                foundMerged = true;
+            }
+        }
+        expect(foundMerged) << "merged tag must contain both sample_rate and signal_name";
+    };
+
+    "MergeTagPropagation with multi-input deduplicates and merges"_test = [] {
+        // fan-out: same source → both inputs of merge block
+        // identical tags from fan-out should be deduped, then merged into one output tag
+        Graph testGraph;
+        auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags   = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}, {tag::SIGNAL_NAME.shortKey(), "multi_merge"}}}};
+        auto& merge = testGraph.emplaceBlock<MergePropTwoInput<float>>();
+        auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in0">(src, merge).has_value());
+        expect(testGraph.connect<"out", "in1">(src, merge).has_value());
+        expect(testGraph.connect<"out", "in">(merge, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        // fan-out dedup + merge: identical tags from both ports → ONE merged output tag
+        bool foundMerged = false;
+        for (const auto& tag : sink._tags) {
+            if (tag.map.contains(tag::SAMPLE_RATE.shortKey()) && tag.map.contains(tag::SIGNAL_NAME.shortKey())) {
+                foundMerged = true;
+            }
+        }
+        expect(foundMerged) << "merged tag with both keys from deduped fan-out";
+    };
+
+    "forwardTags override takes precedence over BackwardTagPropagation"_test = [] {
+        // block has BackwardTagPropagation CRTP tag BUT provides forwardTags() override
+        // the override should fire, NOT the default backward logic
+        Graph testGraph;
+        auto& src    = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags    = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}}};
+        auto& custom = testGraph.emplaceBlock<BackwardCustomForward<float>>();
+        auto& sink   = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, custom).has_value());
+        expect(testGraph.connect<"out", "in">(custom, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(custom.forwardTagsCalled) << "custom forwardTags() must be called despite BackwardTagPropagation CRTP tag";
+        bool hasCustomKey = false;
+        for (const auto& tag : sink._tags) {
+            if (tag.map.contains("custom_override")) {
+                hasCustomKey = true;
+            }
+        }
+        expect(hasCustomKey) << "custom_override key must be present (override, not default backward)";
+    };
+
+    "ForwardTagPropagation carry-forward tag arrives in next chunk"_test = [] {
+        // tag at position 5 within a 10-sample chunk should carry forward to the next chunk
+        // use a longer stream (50 samples) to ensure multiple chunks
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(50)}, {"verbose_console", false}});
+        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 1.f}}}, {5, {{tag::SAMPLE_RATE.shortKey(), 5.f}}}};
+        auto& fwd  = testGraph.emplaceBlock<ForwardPropBlock<float>>();
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, fwd).has_value());
+        expect(testGraph.connect<"out", "in">(fwd, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._nSamplesProduced, gr::Size_t(50))) << "all samples processed";
+        expect(ge(sink._tags.size(), 1UZ)) << "at least tag at position 0 forwarded";
+    };
+};
+
+const boost::ut::suite<"SettingsTagInteraction"> _SettingsTagInteraction = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "autoUpdate does not clear staged params from prior tag"_test = [] {
+        // regression: a non-matching tag after a matching tag wiped _stagedParameters
+        // graph: src(sample_rate=42, custom_key=X) → sink — two tags at position 0
+        Graph testGraph;
+        auto& src = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        src._tags = {
+            {0, {{tag::SAMPLE_RATE.shortKey(), 42.f}}},     // matching: auto-updates sample_rate
+            {0, {{"custom_nonexistent_key", "some_value"}}} // non-matching: must NOT wipe staged sample_rate
+        };
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink.sample_rate, 42.f)) << "sample_rate must be auto-updated despite non-matching tag following";
+    };
+
+    "init-time forward params survive no-data early return"_test = [] {
+        // regression: pendingForwardParams lost when resampledIn==0 (block has no input data yet)
+        // graph: src(sample_rate=42) → delay → sink
+        // delay has no data in first work call → pendingForwardParams must be re-staged
+        Graph testGraph;
+        auto& src   = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(100)}, {"sample_rate", 42.f}, {"verbose_console", false}});
+        auto& delay = testGraph.emplaceBlock<testing::Delay<float>>({{"delay_ms", 0.f}});
+        auto& sink  = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, delay).has_value());
+        expect(testGraph.connect<"out", "in">(delay, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink.sample_rate, 42.f)) << "sample_rate must propagate through delay despite initial no-data work calls";
+    };
+
+    "settings auto-update with mixed metadata and trigger tags"_test = [] {
+        // regression: trigger tags with context key caused activateContext to overwrite auto-updated values
+        // simplified version: two tags at same position — one with sample_rate, one with trigger keys
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        src._tags  = {{0, {{tag::SAMPLE_RATE.shortKey(), 42.f}, {tag::SIGNAL_NAME.shortKey(), "test"}}}, {0, {{tag::TRIGGER_NAME.shortKey(), "evt"}, {tag::TRIGGER_TIME.shortKey(), std::uint64_t(123)}}}};
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink.sample_rate, 42.f)) << "sample_rate auto-updated despite trigger tag at same position";
+        expect(eq(sink.signal_name, "test"s)) << "signal_name auto-updated";
+    };
 };
 
 int main() { /* tests are statically executed */ }

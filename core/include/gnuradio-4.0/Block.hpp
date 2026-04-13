@@ -694,8 +694,10 @@ public:
     using AllowIncompleteFinalUpdate = ArgumentsTypeList::template find_or_default<is_incompleteFinalUpdatePolicy, IncompleteFinalUpdatePolicy<IncompleteFinalUpdateEnum::DROP>>;
     using DrawableControl            = ArgumentsTypeList::template find_or_default<is_drawable, Drawable<UICategory::None, "">>;
 
-    constexpr static bool noDefaultTagForwarding = std::disjunction_v<std::is_same<NoDefaultTagForwarding, Arguments>...>;
-    constexpr static bool backwardTagForwarding  = std::disjunction_v<std::is_same<BackwardTagForwarding, Arguments>...>;
+    constexpr static bool noTagPropagation       = std::disjunction_v<std::is_same<NoTagPropagation, Arguments>...>;
+    constexpr static bool forwardTagPropagation  = std::disjunction_v<std::is_same<ForwardTagPropagation, Arguments>...>;
+    constexpr static bool backwardTagPropagation = std::disjunction_v<std::is_same<BackwardTagPropagation, Arguments>...>;
+    constexpr static bool mergeTagPropagation    = std::disjunction_v<std::is_same<MergeTagPropagation, Arguments>...>;
 
     constexpr static block::Category blockCategory = block::Category::NormalBlock;
 
@@ -771,13 +773,12 @@ public:
     PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
-    alignas(kCacheLine) std::array<std::byte, 1024UZ> _mergedTagBuffer{};
-    std::pmr::monotonic_buffer_resource    _mergedTagUpstream{_mergedTagBuffer.data(), _mergedTagBuffer.size()};
-    std::pmr::unsynchronized_pool_resource _mergedTagPool{&_mergedTagUpstream};
-    Tag                                    _mergedInputTag{0UZ, property_map{&_mergedTagPool}};
-
-    bool             _outputTagsChanged = false; // It is used to indicate that processOne published a Tag and want prematurely break a loop. Should be set to "true" in block implementation processOne().
-    std::vector<Tag> _outputTags{};              // This std::vector is used to cache published Tags when block implements processOne method. The tags are then copied to output spans. Note: that for he processOne each tag is published for all output ports
+    // processOne tag state — valid ONLY during workInternal dispatch (this is a performance optimisation).
+    bool         _inProcessOneDispatch = false;
+    bool         _inputTagPresent      = false;
+    Tag          _mergedInputTag{};
+    bool         _outputTagPending = false;
+    property_map _pendingOutputTag{};
 
     // intermediate non-real-time<->real-time setting states
     CtxSettings<Derived> _settings;
@@ -857,19 +858,19 @@ public:
     }
 
     Block(Block&& other) noexcept
-        : lifecycle::StateMachine<Derived>(std::move(other)),                                                                                                      //
-          BlockBase(std::move(other)),                                                                                                                             //
-          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),                                              //
-          stride(std::move(other.stride)),                                                                                                                         //
-          disconnect_on_done(other.disconnect_on_done),                                                                                                            //
-          compute_domain(std::move(other.compute_domain)),                                                                                                         //
-          strideCounter(other.strideCounter),                                                                                                                      //
-          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)),                                           //
-          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),                                                    //
-          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                                                          //
-          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),                                                         //
-          _mergedInputTag{0UZ, property_map{&_mergedTagPool}}, _outputTagsChanged(std::move(other._outputTagsChanged)), _outputTags(std::move(other._outputTags)), //
-          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                                                                //
+        : lifecycle::StateMachine<Derived>(std::move(other)),                                                            //
+          BlockBase(std::move(other)),                                                                                   //
+          input_chunk_size(std::move(other.input_chunk_size)), output_chunk_size(std::move(other.output_chunk_size)),    //
+          stride(std::move(other.stride)),                                                                               //
+          disconnect_on_done(other.disconnect_on_done),                                                                  //
+          compute_domain(std::move(other.compute_domain)),                                                               //
+          strideCounter(other.strideCounter),                                                                            //
+          unique_id(std::move(other.unique_id)), unique_name(std::move(other.unique_name)), name(std::move(other.name)), //
+          ui_constraints(std::move(other.ui_constraints)), meta_information(std::move(other.meta_information)),          //
+          msgIn(std::move(other.msgIn)), msgOut(std::move(other.msgOut)),                                                //
+          inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)),               //
+          _inProcessOneDispatch{false}, _inputTagPresent{false}, _outputTagPending{false},                               //
+          _settings(CtxSettings<Derived>(*static_cast<Derived*>(this), std::move(other._settings)))                      //
     {
         _blockSelf       = static_cast<void*>(this);
         other._blockSelf = nullptr;
@@ -914,13 +915,16 @@ public:
 
         settings().init();
 
-        // important: these tags need to be queued because at this stage the block is not yet connected to other downstream blocks
+        // apply initial settings — forward params re-staged so first workInternal publishes them
         invokeUserProvidedFunction("init() - applyStagedParameters", [this] noexcept(false) {
-            if (const auto applyResult = settings().applyStagedParameters(); !applyResult.forwardParameters.empty()) {
-                if constexpr (!noDefaultTagForwarding) {
-                    publishTag(applyResult.forwardParameters, 0);
-                }
+            auto applyResult = settings().applyStagedParameters();
+            if (!applyResult.appliedParameters.empty()) {
                 notifyListeners(block::property::kSetting, settings().get());
+            }
+            if constexpr (!noTagPropagation) {
+                if (!applyResult.forwardParameters.empty()) {
+                    std::ignore = settings().setStaged(applyResult.forwardParameters);
+                }
             }
         });
         checkBlockParameterConsistency();
@@ -931,9 +935,7 @@ public:
 
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return false; }
 
-    [[nodiscard]] constexpr bool inputTagsPresent() const noexcept { return !_mergedInputTag.map.empty(); };
-
-    [[nodiscard]] constexpr const Tag& mergedInputTag() const noexcept { return _mergedInputTag; }
+    // tag access (#625): processBulk blocks use inSpan.tags() directly; processOne blocks use inputTagsPresent() + mergedInputTag()
 
     [[nodiscard]] constexpr const SettingsBase& settings() const noexcept { return _settings; }
 
@@ -978,9 +980,6 @@ public:
                 return;
             }
         }
-        // TODO: remove these obsolete lines
-        // const auto [minSyncIn, maxSyncIn, _, _1]    = getPortLimits(inputPorts<PortType::STREAM>(&self()));
-        // const auto [minSyncOut, maxSyncOut, _2, _3] = getPortLimits(outputPorts<PortType::STREAM>(&self()));
         inputStreamCache.invalidateConfig();
         outputStreamCache.invalidateConfig();
         const std::size_t minSyncIn  = inputStreamCache.minSyncRequirement();
@@ -1086,102 +1085,155 @@ public:
         }
     }
 
-    constexpr void publishMergedInputTag(auto& outputSpanTuple) noexcept {
-        if constexpr (!noDefaultTagForwarding) {
-            if (inputTagsPresent()) {
-                const auto&  autoForwardKeys = settings().autoForwardParameters();
-                property_map onlyAutoForwardMap;
-                std::ranges::copy_if(_mergedInputTag.map, std::inserter(onlyAutoForwardMap, onlyAutoForwardMap.end()), [&autoForwardKeys](const auto& kv) { return autoForwardKeys.contains(convert_string_domain(kv.first)); });
-                for_each_writer_span([&onlyAutoForwardMap](auto& outSpan) { outSpan.publishTag(onlyAutoForwardMap, 0); }, outputSpanTuple);
-            }
-        }
-    }
-
-    constexpr void publishCachedOutputTags(auto& outputSpanTuple) noexcept {
-        if (_outputTags.empty()) {
+    /// default tag forwarding — called by workInternal unless the user provides forwardTags()
+    template<typename TInputSpans, typename TOutputSpans>
+    void forwardInputTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) noexcept {
+        if constexpr (noTagPropagation) {
             return;
         }
-        for (const auto& tag : _outputTags) {
-            for_each_writer_span([&tag](auto& outSpan) { outSpan.publishTag(tag.map, tag.index); }, outputSpanTuple);
-        }
-        _outputTags.clear();
-    }
+        const auto&       autoForwardKeys = settings().autoForwardParameters();
+        const auto&       blockSettings   = CtxSettings<Derived>::allWritableMembers();
+        const std::size_t tagWindow       = backwardTagPropagation ? processedIn : 1UZ;
 
-    /**
-     * Merge tags from all sync ports into one merged tag, apply auto-update parameters
-     */
-    void updateMergedInputTagAndApplySettings(auto& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
-        std::size_t untilLocalIndexAdjusted = untilLocalIndex;
-        if constexpr (!backwardTagForwarding) {
-            untilLocalIndexAdjusted = 1UZ;
-        }
-        const auto isIndexEqual       = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; };
-        const auto isIndexAndMapEqual = [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first && lhs.second.get() == rhs.second.get(); };
+        std::optional<property_map> cachedSettings;
+        auto                        filterAndSubstitute = [&](const property_map& src) {
+            property_map dst;
+            for (const auto& [key, value] : src) {
+                auto shortKey = convert_string_domain(key);
+                if (!autoForwardKeys.contains(shortKey)) {
+                    continue;
+                }
+                if (!cachedSettings) {
+                    cachedSettings.emplace(settings().get());
+                }
+                if (auto it = cachedSettings->find(key); blockSettings.contains(shortKey) && it != cachedSettings->end()) {
+                    dst.insert_or_assign(key, it->second);
+                } else {
+                    dst.insert_or_assign(key, value);
+                }
+            }
+            return dst;
+        };
 
-        // TODO: we still fill _mergedInputTag, but this will be removed in the one of the next PR
-        for_each_reader_span(
-            [this, untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual](auto& in) {
-                if (in.isSync && in.isConnected) {
-                    auto inTags = in.tags(untilLocalIndexAdjusted) | ranges::PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
-                    for (const auto& [_, tagMap] : inTags) {
-                        for (const auto& [key, value] : tagMap.get()) {
-                            _mergedInputTag.map.insert_or_assign(key, value);
+        auto publishFiltered = [&](std::ptrdiff_t relIndex, const property_map& tagMap) {
+            auto forwarded = filterAndSubstitute(tagMap);
+            if (!forwarded.empty()) {
+                const auto offset = backwardTagPropagation ? 0UZ : static_cast<std::size_t>(std::max(std::ptrdiff_t(0), relIndex));
+                for_each_writer_span([&forwarded, offset](auto& out) { out.publishTag(forwarded, offset); }, outputSpans);
+            }
+        };
+
+        if constexpr (mergeTagPropagation) {
+            // MergeTagPropagation: all auto-forward keys → one output tag at position 0
+            property_map merged;
+            for_each_reader_span(
+                [&](auto& in) {
+                    if (!in.isSync || !in.isConnected) {
+                        return;
+                    }
+                    for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
+                        auto filtered = filterAndSubstitute(tagMapRef.get());
+                        merged.merge(std::move(filtered));
+                    }
+                },
+                inputSpans);
+            if (!merged.empty()) {
+                for_each_writer_span([&merged](auto& out) { out.publishTag(merged, 0); }, outputSpans);
+            }
+            return;
+        }
+
+        constexpr std::size_t kNInputPorts = traits::block::stream_input_ports<Derived>::size;
+
+        if constexpr (kNInputPorts <= 1) {
+            for_each_reader_span(
+                [&](auto& in) {
+                    if (!in.isSync || !in.isConnected) {
+                        return;
+                    }
+                    for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
+                        publishFiltered(relIndex, tagMapRef.get());
+                    }
+                },
+                inputSpans);
+        } else {
+            using SeenEntry                                      = std::pair<std::ptrdiff_t, const property_map*>;
+            constexpr std::size_t                 kDedupCapacity = 8UZ;
+            std::array<SeenEntry, kDedupCapacity> seen{};
+            std::size_t                           nSeen = 0;
+
+            for_each_reader_span(
+                [&](auto& in) {
+                    if (!in.isSync || !in.isConnected) {
+                        return;
+                    }
+                    for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
+                        const auto& map       = tagMapRef.get();
+                        const auto  nToCheck  = std::min(nSeen, kDedupCapacity);
+                        bool        duplicate = false;
+                        for (std::size_t j = 0; j < nToCheck; ++j) {
+                            if (seen[j].first == relIndex && *seen[j].second == map) {
+                                duplicate = true;
+                                break;
+                            }
+                        }
+                        if (!duplicate) {
+                            publishFiltered(relIndex, map);
+                            if (nSeen < kDedupCapacity) {
+                                seen[nSeen] = {relIndex, &map};
+                            }
+                            ++nSeen;
                         }
                     }
-                }
-            },
-            inputSpans);
-
-        // non-duplicated, ordered by index, the last Tag (wih max index) wins
-        using InputSpanT = typename gr::PortIn<float>::InputSpan<SpanReleasePolicy::ProcessNone>;
-        using ViewT      = decltype(std::declval<InputSpanT>().tags(0UZ));
-        std::vector<ViewT> allPairViews;
-        allPairViews.reserve(8);
-        for_each_reader_span(
-            [&allPairViews, untilLocalIndexAdjusted](auto& in) {
-                if (in.isSync && in.isConnected) {
-                    auto inTags = in.tags(untilLocalIndexAdjusted);
-                    static_assert(std::ranges::input_range<decltype(inTags)>);
-                    static_assert(std::ranges::forward_range<decltype(inTags)>);
-                    allPairViews.push_back(std::move(inTags));
-                }
-            },
-            inputSpans);
-
-        auto mergedPairsLazy        = allPairViews | ranges::Merge{[](const PairRelIndexMapRef& lhs, const PairRelIndexMapRef& rhs) { return lhs.first < rhs.first; }};
-        auto nonDuplicatedInputTags = mergedPairsLazy | ranges::PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
-
-        if (inputTagsPresent()) {
-            for (const auto& tag : nonDuplicatedInputTags) {
-                // TODO: autoUpdate does not really need Tag, it should be changed to accept property_map
-                settings().autoUpdate(Tag{tag.first < 0 ? 0UZ : static_cast<std::size_t>(tag.first), tag.second.get()});
-            }
+                },
+                inputSpans);
         }
+    }
 
-        // update PortMetaInfo
+    /// apply settings from per-port input tags and update PortMetaInfo — no merge, no intermediate storage
+    template<typename TInputSpans>
+    void applyInputTagsFromPorts(TInputSpans& inputSpans, std::size_t untilLocalIndex = 1UZ) noexcept {
+        const std::size_t tagWindow = backwardTagPropagation ? untilLocalIndex : 1UZ;
+
+        for_each_reader_span(
+            [this, tagWindow](auto& in) {
+                if (!in.isSync || !in.isConnected) {
+                    return;
+                }
+                for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
+                    settings().autoUpdate(Tag{relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex), tagMapRef.get()});
+                }
+            },
+            inputSpans);
+
         for_each_port_and_reader_span(
-            [this, &untilLocalIndexAdjusted, isIndexEqual, isIndexAndMapEqual]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) { //
-                auto inTags = span.tags(untilLocalIndexAdjusted) | ranges::PairDeduplicateView(isIndexEqual, isIndexAndMapEqual);
-                for (const auto& [_, tagMap] : inTags) {
-                    emitErrorMessageIfAny("Block::updateMergedInputTagAndApplySettings", port.metaInfo.update(tagMap.get()));
+            [this, tagWindow]<PortLike TPort, ReaderSpanLike TReaderSpan>(TPort& port, TReaderSpan& span) {
+                for (const auto& [_, tagMapRef] : span.tags(tagWindow)) {
+                    emitErrorMessageIfAny("Block::applyInputTagsFromPorts", port.metaInfo.update(tagMapRef.get()));
                 }
             },
             inputPorts<PortType::STREAM>(&self()), inputSpans);
     }
 
-    void applyChangedSettings() {
+    void applyChangedSettings(bool publishForwardTags = true, property_map* capturedForwardParams = nullptr) {
         if (!settings().changed()) {
             return;
         }
-        invokeUserProvidedFunction("applyChangedSettings()", [this] noexcept(false) {
+        invokeUserProvidedFunction("applyChangedSettings()", [this, publishForwardTags, capturedForwardParams] noexcept(false) {
             auto applyResult = settings().applyStagedParameters();
             checkBlockParameterConsistency();
 
-            auto& forwardParametersMap = applyResult.forwardParameters;
-            if (!forwardParametersMap.empty()) {
-                for (auto& [key, value] : forwardParametersMap) {
-                    _mergedInputTag.insert_or_assign(convert_string_domain(key), value);
+            if constexpr (!noTagPropagation) {
+                if (publishForwardTags && !applyResult.forwardParameters.empty()) {
+                    if (capturedForwardParams) {
+                        capturedForwardParams->merge(std::move(applyResult.forwardParameters));
+                    } else {
+                        publishTag(applyResult.forwardParameters, 0);
+                    }
                 }
+            } else {
+                std::ignore = publishForwardTags;
+                std::ignore = capturedForwardParams;
             }
 
             settings().setChanged(false);
@@ -1206,12 +1258,12 @@ public:
                     if constexpr (std::remove_cvref_t<Port>::kIsInput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
                             if constexpr (std::remove_cvref_t<Port>::isOptional()) { // handle unconnected Optional ports: request 0 samples (like async)
-                                return std::forward<Port>(port).template get<ProcessAll, !backwardTagForwarding>(port.isConnected() ? nSyncSamples : 0UZ);
+                                return std::forward<Port>(port).template get<ProcessAll, !backwardTagPropagation>(port.isConnected() ? nSyncSamples : 0UZ);
                             } else {
-                                return std::forward<Port>(port).template get<ProcessAll, !backwardTagForwarding>(nSyncSamples);
+                                return std::forward<Port>(port).template get<ProcessAll, !backwardTagPropagation>(nSyncSamples);
                             }
                         } else {
-                            return std::forward<Port>(port).template get<ProcessNone, !backwardTagForwarding>(port.streamReader().available());
+                            return std::forward<Port>(port).template get<ProcessNone, !backwardTagPropagation>(port.streamReader().available());
                         }
                     } else if constexpr (std::remove_cvref_t<Port>::kIsOutput) {
                         if constexpr (std::remove_cvref_t<Port>::kIsSynch) {
@@ -1233,31 +1285,31 @@ public:
             ports);
     }
 
-    inline constexpr void publishTag(property_map&& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(std::move(tag_data), tagOffset); }
-
-    inline constexpr void publishTag(const property_map& tag_data, std::size_t tagOffset = 0UZ) noexcept { processPublishTag(tag_data, tagOffset); }
-
+    /// publish a tag — in processOne dispatch: defers to dispatch loop for correct positioning; otherwise writes to ports directly
     template<PropertyMapType PropertyMap>
-    inline constexpr void processPublishTag(PropertyMap&& tagData, std::size_t tagOffset) noexcept {
-        if (_outputTags.empty()) {
-            _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
-        } else {
-            auto& lastTag = _outputTags.back();
-#ifndef NDEBUG
-            if (lastTag.index > tagOffset) { // check the order of published Tags.index
-                std::println(stderr, "{}::processPublishTag() - Tag indices are not in the correct order, lastTag.index:{}, index:{}", this->name, lastTag.index, tagOffset);
-                // std::abort();
-            }
-#endif
-            if (lastTag.index == tagOffset) { // -> merge tags with the same index
-                auto& lastTagMap = lastTag.map;
-                for (auto&& [key, value] : tagData) {
-                    lastTagMap.insert_or_assign(std::forward<decltype(key)>(key), std::forward<decltype(value)>(value));
-                }
+    inline constexpr void publishTag(PropertyMap&& tagData, std::size_t tagOffset = 0UZ) noexcept {
+        if (_inProcessOneDispatch) {
+            _outputTagPending = true;
+            if (_pendingOutputTag.empty()) {
+                _pendingOutputTag = property_map(std::forward<PropertyMap>(tagData));
             } else {
-                _outputTags.emplace_back(Tag(tagOffset, std::forward<PropertyMap>(tagData)));
+                for (auto&& [k, v] : tagData) {
+                    _pendingOutputTag.insert_or_assign(k, std::forward<decltype(v)>(v));
+                }
             }
+        } else {
+            for_each_port([&tagData, tagOffset](PortLike auto& outPort) { outPort.publishTag(tagData, tagOffset); }, outputPorts<PortType::STREAM>(&self()));
         }
+    }
+
+    /// pre-computed merged tag from all sync input ports at relIndex 0 — returns once, then empty (processOne only)
+    [[nodiscard]] constexpr bool inputTagsPresent() const noexcept { return _inputTagPresent; }
+
+    [[nodiscard]] const Tag& mergedInputTag() noexcept
+    requires(HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>)
+    {
+        _inputTagPresent = false;
+        return _mergedInputTag;
     }
 
     inline constexpr void publishEoS() noexcept {
@@ -1536,6 +1588,7 @@ public:
             std::size_t  processedOut;
         };
 
+        _inProcessOneDispatch                      = true;
         std::size_t nOutSamplesBeforeRequestedStop = 0UZ;
         for (std::size_t i = 0UZ; i < nSamplesToProcess; ++i) {
             auto results = std::apply([this, i](auto&... inputs) { return this->invoke_processOne(inputs[i]...); }, inputSpans);
@@ -1551,13 +1604,18 @@ public:
                 },
                 outputSpans, results);
             nOutSamplesBeforeRequestedStop++;
-            // the block implementer can set `_outputTagsChanged` to true in `processOne` to prematurely leave the loop and apply his changes
-            if (_outputTagsChanged || lifecycle::isShuttingDown(this->state())) [[unlikely]] { // emitted tag and/or requested to stop
+            if (_outputTagPending) [[unlikely]] {
+                for_each_writer_span([this, i](auto& out) { out.publishTag(_pendingOutputTag, i); }, outputSpans);
+                _outputTagPending = false;
+                break;
+            }
+            if (lifecycle::isShuttingDown(this->state())) [[unlikely]] {
                 break;
             }
         }
-        _outputTagsChanged = false;
-        return ProcessOneResult{lifecycle::isShuttingDown(this->state()) ? DONE : OK, nSamplesToProcess, std::min(nSamplesToProcess, nOutSamplesBeforeRequestedStop)};
+        _inProcessOneDispatch = false;
+        const auto nProcessed = std::min(nSamplesToProcess, nOutSamplesBeforeRequestedStop);
+        return ProcessOneResult{lifecycle::isShuttingDown(this->state()) ? DONE : OK, nProcessed, nProcessed};
     }
 
     [[nodiscard]] bool hasNoDownStreamConnectedChildren() const noexcept {
@@ -1708,11 +1766,9 @@ public:
     }
 
     /// check lifecycle state — returns early Result if block should stop, nullopt if work should proceed
-    std::optional<work::Result> applySettingsAndCheckLifecycle(std::size_t requestedWork) {
+    std::optional<work::Result> checkLifecycle(std::size_t requestedWork) {
         using enum gr::work::Status;
         using TOutputTypes = traits::block::stream_output_port_types<Derived>;
-
-        applyChangedSettings();
 
         if (this->state() == lifecycle::State::REQUESTED_STOP) {
             emitErrorMessageIfAny("workInternal(): REQUESTED_STOP -> STOPPED", this->changeStateTo(lifecycle::State::STOPPED));
@@ -1734,7 +1790,7 @@ public:
     struct SampleLimits {
         std::size_t  resampledIn{}, resampledOut{}, inputSkipBefore{};
         work::Status resampledStatus = work::Status::OK;
-        bool         hasTag{}, hasAnyTag{}, asyncEoS{}, isEosPresent{}, limitByFirstTag{};
+        bool         hasTag{}, hasAnyTag{}, asyncEoS{}, isEosPresent{};
         bool         hasAsyncIn{}, hasAsyncOut{};
     };
 
@@ -1749,26 +1805,29 @@ public:
         bool        hasAsyncOut         = outputStreamCache.hasASyncAvailable();
 
         auto [hasTag, hasAnyTag, nextTag, nextEosTag, asyncEoS] = getNextTagAndEosPosition();
-        std::size_t       maxChunk                              = getMergedBlockLimit();
-        const std::size_t inputSkipBefore                       = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
-        const std::size_t nextTagLimit                          = (nextTag - inputSkipBefore) >= minSyncIn ? (nextTag - inputSkipBefore) : std::numeric_limits<std::size_t>::max();
-        const std::size_t ensureMinimalDecimation               = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<std::size_t>(input_chunk_size);
-        const std::size_t availableToProcess                    = std::min({maxSyncIn, maxChunk, (maxSyncAvailableIn - inputSkipBefore), ensureMinimalDecimation, (nextEosTag - inputSkipBefore)});
-        const std::size_t availableToPublish                    = std::min({maxSyncOut, maxSyncAvailableOut});
-        auto [resampledIn, resampledOut, resampledStatus]       = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
-        const auto nextEosTagSkipBefore                         = nextEosTag - inputSkipBefore;
-        const bool isEosPresent                                 = nextEosTag <= 0 || nextEosTagSkipBefore < minSyncIn || nextEosTagSkipBefore < input_chunk_size || output_chunk_size * (nextEosTagSkipBefore / input_chunk_size) < minSyncOut;
-        const bool limitByFirstTag                              = (!HasProcessBulkFunction<Derived> && HasProcessOneFunction<Derived>) && hasTag;
-
-        return {.resampledIn = resampledIn, .resampledOut = resampledOut, .inputSkipBefore = inputSkipBefore, .resampledStatus = resampledStatus, .hasTag = hasTag, .hasAnyTag = hasAnyTag, .asyncEoS = asyncEoS, .isEosPresent = isEosPresent, .limitByFirstTag = limitByFirstTag, .hasAsyncIn = hasAsyncIn, .hasAsyncOut = hasAsyncOut};
+        if constexpr (forwardTagPropagation) {
+            nextTag = std::numeric_limits<std::size_t>::max(); // don't break chunks at tags — tags carry forward
+        }
+        std::size_t       maxChunk                        = getMergedBlockLimit();
+        const std::size_t inputSkipBefore                 = inputSamplesToSkipBeforeNextChunk(std::min({maxSyncAvailableIn, nextTag, nextEosTag}));
+        const std::size_t nextTagAfterSkip                = nextTag > inputSkipBefore ? nextTag - inputSkipBefore : 0UZ;
+        const std::size_t availAfterSkip                  = maxSyncAvailableIn > inputSkipBefore ? maxSyncAvailableIn - inputSkipBefore : 0UZ;
+        const std::size_t eosAfterSkip                    = nextEosTag > inputSkipBefore ? nextEosTag - inputSkipBefore : 0UZ;
+        const std::size_t nextTagLimit                    = nextTagAfterSkip >= minSyncIn ? nextTagAfterSkip : std::numeric_limits<std::size_t>::max();
+        const std::size_t ensureMinimalDecimation         = nextTagLimit >= input_chunk_size ? nextTagLimit : static_cast<std::size_t>(input_chunk_size);
+        const std::size_t availableToProcess              = std::min({maxSyncIn, maxChunk, availAfterSkip, ensureMinimalDecimation, eosAfterSkip});
+        const std::size_t availableToPublish              = std::min({maxSyncOut, maxSyncAvailableOut});
+        auto [resampledIn, resampledOut, resampledStatus] = computeResampling(std::min(minSyncIn, nextEosTag), availableToProcess, minSyncOut, availableToPublish, requestedWork);
+        const bool isEosPresent                           = nextEosTag <= 0 || eosAfterSkip < minSyncIn || eosAfterSkip < input_chunk_size || output_chunk_size * (eosAfterSkip / input_chunk_size) < minSyncOut;
+        return {.resampledIn = resampledIn, .resampledOut = resampledOut, .inputSkipBefore = inputSkipBefore, .resampledStatus = resampledStatus, .hasTag = hasTag, .hasAnyTag = hasAnyTag, .asyncEoS = asyncEoS, .isEosPresent = isEosPresent, .hasAsyncIn = hasAsyncIn, .hasAsyncOut = hasAsyncOut};
     }
 
     /// apply input tags and settings from all sync ports
     template<typename TInputSpans>
     void applyInputTagsAndSettings(TInputSpans& inputSpans, std::size_t processedIn, bool hasAnyTag) {
         if (hasAnyTag) {
-            updateMergedInputTagAndApplySettings(inputSpans, processedIn);
-            applyChangedSettings();
+            applyInputTagsFromPorts(inputSpans, processedIn);
+            applyChangedSettings(false);
         }
     }
 
@@ -1777,12 +1836,7 @@ public:
     void finaliseIO(TInputSpans& inputSpans, TOutputSpans& outputSpans, work::Status& userReturnStatus, std::size_t& processedIn, std::size_t processedOut, std::size_t resampledIn) {
         using enum gr::work::Status;
 
-        if (processedOut > 0) {
-            publishCachedOutputTags(outputSpans);
-            if (!_mergedInputTag.map.empty()) {
-                _mergedInputTag.map.clear();
-            }
-        } else {
+        if (processedOut == 0) {
             // if no data is published or consumed => do not publish any tags
             for_each_writer_span([](auto& outSpan) { outSpan.tagsPublished = 0; }, outputSpans);
         }
@@ -1824,7 +1878,7 @@ public:
         using enum gr::work::Status;
         using TInputTypes = traits::block::stream_input_port_types<Derived>;
 
-        if (std::optional<work::Result> earlyOut = applySettingsAndCheckLifecycle(requestedWork)) {
+        if (std::optional<work::Result> earlyOut = checkLifecycle(requestedWork)) {
             return *earlyOut;
         }
 
@@ -1832,11 +1886,13 @@ public:
             inputStreamCache.invalidateStatistic();
             outputStreamCache.invalidateStatistic();
         };
+        property_map pendingForwardParams;
+        applyChangedSettings(true, &pendingForwardParams);
         SampleLimits limits = computeSampleLimits(requestedWork);
 
         if (limits.inputSkipBefore > 0) {
             auto skipSpans = prepareStreams(inputPorts<PortType::STREAM>(&self()), limits.inputSkipBefore);
-            updateMergedInputTagAndApplySettings(skipSpans, limits.inputSkipBefore);
+            applyInputTagsFromPorts(skipSpans, limits.inputSkipBefore);
             consumeReaders(limits.inputSkipBefore, skipSpans);
         }
 
@@ -1848,20 +1904,64 @@ public:
         }
 
         if (limits.resampledIn == 0 && limits.resampledOut == 0 && !limits.hasAsyncIn && !limits.hasAsyncOut) {
+            if (!pendingForwardParams.empty()) {
+                std::ignore = settings().setStaged(pendingForwardParams); // re-stage for next work call
+            }
             return {requestedWork, 0UZ, limits.resampledStatus};
         }
 
-        std::size_t processedIn  = limits.limitByFirstTag ? 1UZ : limits.resampledIn;
-        std::size_t processedOut = limits.limitByFirstTag ? 1UZ : limits.resampledOut;
+        std::size_t processedIn  = limits.resampledIn;
+        std::size_t processedOut = limits.resampledOut;
 
         auto inputSpans  = prepareStreams(inputPorts<PortType::STREAM>(&self()), processedIn);
         auto outputSpans = prepareStreams(outputPorts<PortType::STREAM>(&self()), processedOut);
 
+        applyChangedSettings(); // publishes any additional external settings changes via port fallback
         applyInputTagsAndSettings(inputSpans, processedIn, limits.hasAnyTag);
-        publishCachedOutputTags(outputSpans);
-        publishMergedInputTag(outputSpans);
+
+        if constexpr (requires { self().forwardTags(inputSpans, outputSpans, processedIn); }) {
+            self().forwardTags(inputSpans, outputSpans, processedIn);
+        } else {
+            forwardInputTags(inputSpans, outputSpans, processedIn);
+        }
+
+        if (!pendingForwardParams.empty()) {
+            for_each_writer_span([&pendingForwardParams](auto& out) { out.publishTag(pendingForwardParams, 0); }, outputSpans);
+        }
+
+        if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
+            bool hasTags = false;
+            for_each_reader_span([&hasTags](const auto& in) { hasTags = hasTags || (in.isSync && in.isConnected && !in.rawTags.empty()); }, inputSpans);
+            if (hasTags) {
+                property_map merged;
+                for_each_reader_span(
+                    [&merged](auto& in) {
+                        if (!in.isSync || !in.isConnected) {
+                            return;
+                        }
+                        for (const auto& [relIndex, tagMapRef] : in.tags()) {
+                            if (relIndex == 0) {
+                                for (const auto& [k, v] : tagMapRef.get()) {
+                                    merged.insert_or_assign(k, v);
+                                }
+                            }
+                        }
+                    },
+                    inputSpans);
+                if (!merged.empty()) {
+                    _mergedInputTag  = Tag{0UZ, std::move(merged)};
+                    _inputTagPresent = true;
+                }
+            }
+        }
 
         work::Status userReturnStatus = dispatchProcessing(inputSpans, outputSpans, processedIn, processedOut);
+
+        if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
+            _inputTagPresent      = false;
+            _outputTagPending     = false;
+            _inProcessOneDispatch = false;
+        }
         work::sanitiseProcessStatus(userReturnStatus, processedIn, processedOut);
         finaliseIO(inputSpans, outputSpans, userReturnStatus, processedIn, processedOut, limits.resampledIn);
 

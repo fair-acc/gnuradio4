@@ -73,20 +73,30 @@ struct Visible {};
  * value will be kept.
  *
  * This default behavior is generally sufficient. However, if it’s not suitable for your use case, you can disable it
- * by adding the `NoDefaultTagForwarding` attribute to the template parameters. In such cases, the block should implement
- * custom tag forwarding in the `processBulk` function. The `InputSpanLike` and `OutputSpanLike` APIs are available to simplify
- * with custom tag forwarding.
+ * by adding `NoTagPropagation` to the template parameters and implementing custom forwarding via `forwardTags()`.
  */
-struct NoDefaultTagForwarding {};
+struct NoTagPropagation {};
 
 /**
- * @brief Specifies the Tag Forwarding Policy for blocks with chunked data constraints, namely `input_chunk_size != 1`.
- *
- * If this attribute is omitted, the default `Forward` policy applies. The available policies are:
- * - Forward (default, no attribute required): Processes the tag as if it belongs to the first sample of the **next** `processBulk(..)` call.
- * - Backward (`BackwardTagForwarding` is set): Processes the tag as if it belongs to the first sample of the **current** `processBulk(..)` call.
+ * @brief For fixed-chunk blocks: tags NOT at position 0 are delayed to the next chunk’s start.
+ * Tags at position 0 are forwarded immediately. Chunk size is NOT broken by tag positions.
+ * Use for blocks like FFT where the chunk size must remain fixed.
  */
-struct BackwardTagForwarding {};
+struct ForwardTagPropagation {};
+
+/**
+ * @brief For fixed-chunk blocks: ALL tags within the chunk are mapped to output position 0.
+ * All tags are consumed per chunk. Use for decimation blocks where multiple input samples
+ * map to one output sample.
+ */
+struct BackwardTagPropagation {};
+
+/**
+ * @brief Merges all forwarded input tags into a single output tag per chunk.
+ * This mimics the legacy forwarding behaviour. Tags at the same position are merged
+ * (last key wins). By default, tags are forwarded individually with cross-port dedup.
+ */
+struct MergeTagPropagation {};
 
 /**
  * @brief Annotates block, indicating to perform resampling based on the provided `inputChunkSize` and `outputChunkSize`.
