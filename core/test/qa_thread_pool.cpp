@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 const boost::ut::suite<"gr::thread_pool GR4 default"> defaultThreadPool = [] {

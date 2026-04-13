@@ -359,7 +359,7 @@ public:
         // Forward any messages to children that were received before the scheduler was initialised
         _messagePortsConnected = true;
 
-        WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(_pendingMessagesToChildren.size());
+        WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(_pendingMessagesToChildren.size());
         std::ranges::move(_pendingMessagesToChildren, msgSpan.begin());
         _pendingMessagesToChildren.clear();
     }
@@ -371,7 +371,7 @@ public:
             if (msg.serviceName != this->unique_name && msg.serviceName != this->name && msg.endpoint != block::property::kLifeCycleState) {
                 // only forward wildcard, non-scheduler messages, and non-lifecycle messages (N.B. the latter is exclusively handled by the scheduler)
                 if (_messagePortsConnected) {
-                    WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().reserve<SpanReleasePolicy::ProcessAll>(1UZ);
+                    WriterSpanLike auto msgSpan = _toChildMessagePort.streamWriter().template reserve<SpanReleasePolicy::ProcessAll>(1UZ);
                     msgSpan[0]                  = msg;
                 } else {
                     // if not yet connected, keep messages to children in cache and forward when connecting

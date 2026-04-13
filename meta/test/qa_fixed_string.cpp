@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <atomic>
