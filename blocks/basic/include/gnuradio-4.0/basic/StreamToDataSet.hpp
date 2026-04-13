@@ -152,7 +152,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
     }
 
     gr::work::Status processBulkStream(InputSpanLike auto& inSamples, OutputSpanLike auto& outSamples) {
-        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(_filterState);
+        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(_filterState, inSamples);
         _accState.update(startTrigger, endTrigger, isSingleTrigger, n_pre, n_post);
 
         if (!_accState.isActive) { // If accumulation is not active, consume all input samples and publish 0 samples.
@@ -204,7 +204,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
         //    This is a workaround to support cases of overlapping datasets, for example, Start1-Start2-Stop1-Stop2 case.
         //    always add new DataSet when Start trigger is present
         property_map tmpFilterState;
-        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(tmpFilterState);
+        const auto [startTrigger, endTrigger, isSingleTrigger] = detectTrigger(tmpFilterState, inSamples);
         if (startTrigger) {
             _tempDataSets.emplace_back();
             initNewDataSet(_tempDataSets.back());
@@ -218,7 +218,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
         // Update state only for the front dataset which is not in the isPostActiveState
         for (std::size_t i = 0; i < _tempDataSets.size(); i++) {
             if (!_accState[i].isPostActive) {
-                const auto [startTrigger2, endTrigger2, isSingleTrigger2] = detectTrigger(_filterState[i]);
+                const auto [startTrigger2, endTrigger2, isSingleTrigger2] = detectTrigger(_filterState[i], inSamples);
                 if (endTrigger2) {
                     _accState[i].update(startTrigger2, endTrigger2, isSingleTrigger2, n_pre, n_post);
                 }
@@ -250,9 +250,12 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
 
                 // Note: Tags for pre-samples are not added to DataSet
                 if (n_max.value == 0UZ || ds.signal_values.size() < n_max.value) { // Add tags only if the DataSet is not full
-                    const Tag& mergedTag = this->mergedInputTag();
-                    if (!ds.timing_events.empty() && !mergedTag.map.empty() && accState.isActive) {
-                        ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(ds.signal_values.size()), mergedTag.map);
+                    if (!ds.timing_events.empty() && accState.isActive) {
+                        for (const auto& [relIndex, tagMapRef] : inSamples.tags()) {
+                            if (relIndex == 0 && !tagMapRef.get().empty()) {
+                                ds.timing_events[0].emplace_back(static_cast<std::ptrdiff_t>(ds.signal_values.size()), tagMapRef.get());
+                            }
+                        }
                     }
                 }
 
@@ -275,7 +278,7 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                     }
                 }
             }
-            this->_mergedInputTag.map.clear(); // ensure that the input tag is only propagated once
+            // tags are per-sample from input span — no persistent state to clear
         }
 
         copyInputSamplesToHistory(inSamples, inSamples.size());
@@ -306,14 +309,21 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
     }
 
 private:
-    auto detectTrigger(property_map& filterState) {
+    template<typename TInputSpan>
+    auto detectTrigger(property_map& filterState, TInputSpan& inSpan) {
         struct {
             bool startTrigger    = false;
             bool endTrigger      = false;
             bool isSingleTrigger = false;
         } result;
 
-        const trigger::MatchResult matchResult = _matcher(filter.value, this->mergedInputTag(), filterState);
+        Tag inputTag;
+        for (const auto& [relIndex, tagMapRef] : inSpan.tags()) {
+            if (relIndex == 0) {
+                inputTag.map.merge(property_map(tagMapRef.get()));
+            }
+        }
+        const trigger::MatchResult matchResult = _matcher(filter.value, inputTag, filterState);
         if (matchResult != trigger::MatchResult::Ignore) {
             assert(filterState.contains("isSingleTrigger"));
             result.startTrigger    = matchResult == trigger::MatchResult::Matching;

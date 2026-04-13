@@ -12,7 +12,7 @@ using namespace gr;
 GR_REGISTER_BLOCK(gr::basic::Selector, [T], [ uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t, float, double ])
 
 template<typename T>
-struct Selector : Block<Selector<T>, NoDefaultTagForwarding> {
+struct Selector : Block<Selector<T>, NoTagPropagation> {
     using Description = Doc<R""(@brief basic multiplexing class to route arbitrary inputs to outputs
 
 See https://wiki.gnuradio.org/index.php/Selector

@@ -1035,12 +1035,13 @@ public:
                 ctx = _activeCtx;
             }
 
-            const bool activeCtxChanged = _activeCtx == ctx;
+            const bool activeCtxChanged = _activeCtx != ctx;
 
-            const auto autoUpdateParametersIt = _autoUpdateParameters.find(ctx);
-            if (autoUpdateParametersIt == _autoUpdateParameters.end()) {
-                return;
+            // fuzzy-match auto-update parameters (exact lookup may fail due to timestamp mismatch)
+            if (!_autoUpdateParameters.contains(ctx)) {
+                _autoUpdateParameters[ctx] = getBestMatchAutoUpdateParameters(ctx).value_or(allWritableMembers());
             }
+            auto& autoUpdateParams = _autoUpdateParameters[ctx];
 
             // Use static dispatch table for O(1) lookup instead of O(members) iteration (Optimization F)
             const auto& handlers   = autoUpdateHandlers();
@@ -1049,14 +1050,13 @@ public:
             for (const auto& [key, value] : parameters) {
                 auto it = handlers.find(key);
                 if (it != handlers.end()) {
-                    if (it->second(key, value, autoUpdateParametersIt->second, _stagedParameters)) {
+                    if (it->second(key, value, autoUpdateParams, _stagedParameters)) {
                         wasChanged = true;
                     }
                 }
             }
 
-            if (tagCtx == std::nullopt && !wasChanged) { // not context and no parameters in the Tag
-                _stagedParameters.clear();
+            if (tagCtx == std::nullopt && !wasChanged && _stagedParameters.empty()) {
                 setChanged(false);
             } else if (activeCtxChanged || wasChanged) {
                 setChanged(true);

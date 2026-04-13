@@ -266,7 +266,6 @@ private:
             if (_tagCallback) {
                 _tagCallback(_tags[_tagIndex]);
             }
-            this->_outputTagsChanged = true;
             _tagIndex++;
             result.nGeneratedTags++;
         } while (_tagIndex < _tags.size() && _tags[_tagIndex].index == targetIndex);
@@ -324,7 +323,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
         if (this->inputTagsPresent()) {
-            const Tag& tag = this->mergedInputTag();
+            const auto& tag = this->mergedInputTag();
             if (verbose_console) {
                 print_tag(tag, std::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
             }
@@ -342,16 +341,16 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
         return input;
     }
 
-    constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept
+    constexpr work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        if (this->inputTagsPresent()) {
-            const Tag& tag = this->mergedInputTag();
+        for (const auto& [relIndex, tagMapRef] : input.tags()) {
+            const Tag tag{relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex), tagMapRef.get()};
             if (verbose_console) {
                 print_tag(tag, std::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
             }
             if (log_tags) {
-                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced + tag.index, tag.map);
                 if (_tagCallback) {
                     _tagCallback(newTag);
                 }
@@ -415,9 +414,9 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
         if (this->inputTagsPresent()) {
-            const Tag& tag = this->mergedInputTag();
+            const auto& tag = this->mergedInputTag();
             if (verbose_console) {
-                print_tag(tag, std::format("{}::processOne(...1)    \t received tag at {:6}", this->name, _nSamplesProduced));
+                print_tag(tag, std::format("{}::processOne(...1)\t received tag at {:6}", this->name, _nSamplesProduced));
             }
             if (log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
@@ -435,17 +434,16 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
         }
     }
 
-    // template<gr::meta::t_or_simd<T> V>
-    constexpr work::Status processBulk(std::span<const T> input)
+    constexpr work::Status processBulk(InputSpanLike auto& input)
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
-        if (this->inputTagsPresent()) {
-            const Tag& tag = this->mergedInputTag();
+        for (const auto& [relIndex, tagMapRef] : input.tags()) {
+            const Tag tag{relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex), tagMapRef.get()};
             if (verbose_console) {
                 print_tag(tag, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));
             }
             if (log_tags) {
-                const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
+                const auto& newTag = _tags.emplace_back(_nSamplesProduced + tag.index, tag.map);
                 if (_tagCallback) {
                     _tagCallback(newTag);
                 }
