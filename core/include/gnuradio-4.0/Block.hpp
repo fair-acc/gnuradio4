@@ -1898,7 +1898,7 @@ public:
 
             retMessage->cmd             = Final; // N.B. could enable/allow for partial if we return multiple messages (e.g. using coroutines?)
             retMessage->serviceName     = unique_name;
-            WriterSpanLike auto msgSpan = msgOut.streamWriter().tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
+            WriterSpanLike auto msgSpan = msgOut.streamWriter().template tryReserve<SpanReleasePolicy::ProcessAll>(1UZ);
             if (msgSpan.empty()) {
                 throw gr::exception(std::format("{}::processMessages() can not reserve span for message\n", name));
             } else {

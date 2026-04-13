@@ -46,6 +46,16 @@ auto eq(const RangeLHS& lhs, const RangeRHS& rhs, T tolerance);
 template<typename Enum>
 requires std::is_enum_v<Enum>
 auto eq(Enum lhs, Enum rhs);
+
+// Boost.UT uses its own source_location fallback on Apple libc++, so bridge
+// std::source_location call sites only when the two types differ.
+#if defined(_LIBCPP_APPLE_CLANG_VER)
+template<class TExpr>
+requires(!std::same_as<reflection::source_location, std::source_location> && (type_traits::is_op<TExpr> || concepts::explicitly_convertible_to<TExpr, bool>))
+constexpr auto expect(const TExpr& expr, const std::source_location& sl) {
+    return boost::ut::expect(expr, reflection::source_location::current(sl.file_name(), static_cast<int>(sl.line())));
+}
+#endif
 } // namespace boost::ut
 
 namespace gr::test {

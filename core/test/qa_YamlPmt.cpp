@@ -4,6 +4,7 @@
 #include <limits>
 #include <variant>
 
+#include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 #include <gnuradio-4.0/Value.hpp>

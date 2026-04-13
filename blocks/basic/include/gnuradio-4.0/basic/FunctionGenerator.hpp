@@ -281,7 +281,7 @@ Operating modes:
         const double dur = static_cast<double>(duration);
 
         double value{};
-        switch (signal_type) {
+        switch (signal_type.value) {
         case Const: value = sv; break;
         case LinearRamp: value = _currentTime > dur ? fv : sv + (fv - sv) * (_currentTime / dur); break;
         case ParabolicRamp: value = calculateParabolicRamp(); break;

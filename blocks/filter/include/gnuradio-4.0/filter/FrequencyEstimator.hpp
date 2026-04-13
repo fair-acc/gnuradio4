@@ -479,7 +479,7 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
 
         // configure derivative kernel (stored time-reversed for direct inner_product)
         // gain factor = lim_{ω→0} |H(ω)|/sin(ω), used for frequency estimation
-        switch (derivative_method) {
+        switch (derivative_method.value) {
         case DerivativeMethod::SymmetricDifference:
             // H(ω) = 2j·sin(ω), |H(ω)| = 2·sin(ω)
             _derivative_kernel      = {T(1), T(0), T(-1)};
