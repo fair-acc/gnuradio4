@@ -52,14 +52,16 @@ jobs:
           CC: gcc-14
           CXX: g++-14
           CMAKE_EXPORT_COMPILE_COMMANDS: "ON"
-        run: >
-          cmake -S . -B build
-            -DCMAKE_COLOR_DIAGNOSTICS=ON
-            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo
-            -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4
-            -DUSE_CCACHE=ON
-            -DENABLE_COVERAGE=OFF
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_COLOR_DIAGNOSTICS=ON \
+            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4 \
+            -DUSE_CCACHE=ON \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_COVERAGE=OFF \
             -DADDRESS_SANITIZER=OFF
 
       - name: Build CPack packages
@@ -76,6 +78,92 @@ jobs:
           path: |
             build/*.deb
             build/*.ddeb
+          if-no-files-found: error
+
+      - name: Show final ccache and build directory stats
+        if: always()
+        continue-on-error: true
+        run: |
+          ccache --show-stats
+          echo "--- Build directory ---"
+          du -sh build
+          echo "--- Debian packages (.deb/.ddeb) ---"
+          find build \( -name "*.deb" -o -name "*.ddeb" \) -exec du -ch {} + | tail -1
+
+  package-emscripten:
+    name: "Emscripten | RelWithDebInfo | CPack"
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/fair-acc/gr4-build-container:latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-cpack-emscripten-relwithdebinfo-${{ github.sha }}
+          restore-keys: |
+            ccache-cpack-emscripten-relwithdebinfo
+
+      - name: Cache fetchContent
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/build/_deps
+          key: fetchContent-cpack-emscripten-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            fetchContent-cpack-emscripten-relwithdebinfo
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=3G
+          ccache --set-config=compression=true
+          ccache --set-config=compression_level=6
+          ccache --set-config=depend_mode=true
+          ccache --set-config=hash_dir=false
+          ccache --set-config=sloppiness=file_macro,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
+          ccache --show-stats
+
+      - name: Configure
+        shell: bash
+        run: |
+          export SYSTEM_NODE=$(which node)
+          $EMSDK_HOME/emsdk activate $EMSDK_VERSION
+          source $EMSDK_HOME/emsdk_env.sh
+          emcmake cmake -S . -B build \
+            -DCMAKE_COLOR_DIAGNOSTICS=ON \
+            -DDISABLE_EXTERNAL_DEPS_WARNINGS=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/gnuradio4-emscripten \
+            -DCPACK_PACKAGE_NAME=gnuradio4-emscripten \
+            -DCPACK_GENERATOR=DEB \
+            -DCPACK_DEBIAN_PACKAGE_ARCHITECTURE=all \
+            -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS=OFF \
+            -DCPACK_DEBIAN_DEBUGINFO_PACKAGE=OFF \
+            -DUSE_CCACHE=ON \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_COVERAGE=OFF \
+            -DCMAKE_CROSSCOMPILING_EMULATOR=${SYSTEM_NODE} \
+            -DGNURADIO_PARSE_REGISTRATIONS_TOOL_CXX_COMPLILER=g++-14
+
+      - name: Build CPack packages
+        shell: bash
+        run: |
+          source $EMSDK_HOME/emsdk_env.sh
+          cmake --build build --target package
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: emscripten-relwithdebinfo-deb-${{ github.run_number }}
+          path: build/*.deb
           if-no-files-found: error
 
       - name: Show final ccache and build directory stats

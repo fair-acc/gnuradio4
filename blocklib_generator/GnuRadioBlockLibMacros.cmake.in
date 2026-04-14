@@ -198,6 +198,9 @@ function(gr_add_block_library LIB_NAME)
         install(TARGETS ${STATIC_LIB_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
     endif()
 
+    install(FILES "${CMAKE_BINARY_DIR}/generated_plugins/${LIB_NAME}/${LIB_NAME}.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
+
     # TODO Install pkgconfig files, CMake files for finding the package,
     # header for blocklib init
 endfunction()
