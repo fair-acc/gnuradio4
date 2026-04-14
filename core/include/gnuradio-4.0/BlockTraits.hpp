@@ -347,6 +347,9 @@ using dynamic_span = std::span<T>;
 
 template<std::size_t... InIdx, std::size_t... OutIdx>
 auto can_processBulk_invoke_test(auto& block, auto& inputs, auto& outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(block.processBulk(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
+
+template<std::size_t... InIdx, std::size_t... OutIdx>
+auto can_processEpilogue_invoke_test(auto& block, auto& inputs, auto& outputs, std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) -> decltype(block.processEpilogue(std::get<InIdx>(inputs)..., std::get<OutIdx>(outputs)...));
 } // namespace detail
 
 template<typename TBlock, template<typename> typename TArguments>
@@ -358,6 +361,16 @@ template<typename TBlock>
 concept can_processBulk = PortReflectable<TBlock> &&                                                                                                                                          //
                           (can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_std_notstd> || //
                               can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_std> || can_processBulk_helper<TBlock, detail::port_to_processBulk_argument_notstd_notstd>);
+
+template<typename TBlock, template<typename> typename TArguments>
+concept can_processEpilogue_helper = requires(TBlock& n, typename traits::block::stream_input_ports<TBlock>::template transform<TArguments>::tuple_type inputs, typename traits::block::stream_output_ports<TBlock>::template transform<TArguments>::tuple_type outputs) {
+    { detail::can_processEpilogue_invoke_test(n, inputs, outputs, stream_input_ports<TBlock>::index_sequence, stream_output_ports<TBlock>::index_sequence) } -> std::same_as<work::Status>;
+};
+
+template<typename TBlock>
+concept can_processEpilogue = PortReflectable<TBlock> &&                                                                                                                                                  //
+                              (can_processEpilogue_helper<TBlock, detail::port_to_processBulk_argument_std_std> || can_processEpilogue_helper<TBlock, detail::port_to_processBulk_argument_std_notstd> || //
+                                  can_processEpilogue_helper<TBlock, detail::port_to_processBulk_argument_notstd_std> || can_processEpilogue_helper<TBlock, detail::port_to_processBulk_argument_notstd_notstd>);
 
 /**
  * Satisfied if `TDerived` has a member function `processBulk` which can be invoked with a number of arguments matching the number of input and output ports. Input arguments must accept either a
@@ -388,6 +401,9 @@ concept HasProcessBulkFunction = traits::block::can_processBulk<Derived>;
 
 template<typename Derived>
 concept HasNoexceptProcessBulkFunction = HasProcessBulkFunction<Derived> && gr::meta::IsNoexceptMemberFunction<decltype(&Derived::processBulk)>;
+
+template<typename Derived>
+concept HasProcessEpilogueFunction = traits::block::can_processEpilogue<Derived>;
 
 template<typename Derived>
 concept HasRequiredProcessFunction = (HasProcessBulkFunction<Derived> or HasProcessOneFunction<Derived>) and (HasProcessOneFunction<Derived> + HasProcessBulkFunction<Derived>) == 1;

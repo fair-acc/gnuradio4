@@ -1530,21 +1530,31 @@ public:
         }
     }
 
-    template<typename TIn, typename TOut>
-    gr::work::Status invokeProcessBulk(TIn& inputReaderTuple, TOut& outputReaderTuple) {
+    template<typename Fn, typename TIn, typename TOut>
+    gr::work::Status invokeBulkDispatch(Fn&& fn, TIn& inputReaderTuple, TOut& outputReaderTuple) {
         auto tempInputSpanStorage = std::apply(
             []<typename... PortReader>(PortReader&... args) {
                 return std::tuple{([](auto& a) {
                     if constexpr (gr::meta::array_or_vector_type<PortReader>) {
                         return std::span{a.data(), a.size()};
                     } else {
-                        return a;
+                        return std::move(a);
                     }
                 }(args))...};
             },
             inputReaderTuple);
 
-        auto tempOutputSpanStorage = std::apply([]<typename... PortReader>(PortReader&... args) { return std::tuple{(gr::meta::array_or_vector_type<PortReader> ? std::span{args.data(), args.size()} : args)...}; }, outputReaderTuple);
+        auto tempOutputSpanStorage = std::apply(
+            []<typename... PortReader>(PortReader&... args) {
+                return std::tuple{([](auto& a) {
+                    if constexpr (gr::meta::array_or_vector_type<std::remove_cvref_t<decltype(a)>>) {
+                        return std::span{a.data(), a.size()};
+                    } else {
+                        return std::move(a);
+                    }
+                }(args))...};
+            },
+            outputReaderTuple);
 
         auto refToSpan = []<typename T, typename U>(T&& original, U&& temporary) -> decltype(auto) {
             if constexpr (gr::meta::array_or_vector_type<std::decay_t<T>>) {
@@ -1554,7 +1564,17 @@ public:
             }
         };
 
-        return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) { return self().processBulk(refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))..., refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
+        return [&]<std::size_t... InIdx, std::size_t... OutIdx>(std::index_sequence<InIdx...>, std::index_sequence<OutIdx...>) { return fn(refToSpan(std::get<InIdx>(inputReaderTuple), std::get<InIdx>(tempInputSpanStorage))..., refToSpan(std::get<OutIdx>(outputReaderTuple), std::get<OutIdx>(tempOutputSpanStorage))...); }(std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(inputReaderTuple)>>>(), std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<decltype(outputReaderTuple)>>>());
+    }
+
+    template<typename TIn, typename TOut>
+    gr::work::Status invokeProcessBulk(TIn& inputReaderTuple, TOut& outputReaderTuple) {
+        return invokeBulkDispatch([this](auto&... args) { return self().processBulk(args...); }, inputReaderTuple, outputReaderTuple);
+    }
+
+    template<typename TIn, typename TOut>
+    gr::work::Status invokeProcessEpilogue(TIn& inputReaderTuple, TOut& outputReaderTuple) {
+        return invokeBulkDispatch([this](auto&... args) { return self().processEpilogue(args...); }, inputReaderTuple, outputReaderTuple);
     }
 
     work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
@@ -1899,6 +1919,18 @@ public:
         }
 
         if (limits.isEosPresent || lifecycle::isShuttingDown(this->state()) || limits.asyncEoS) {
+            if constexpr (HasProcessEpilogueFunction<Derived>) {
+                inputStreamCache.invalidateStatistic();
+                const std::size_t trailing = inputStreamCache.maxSyncAvailable();
+                if (trailing > 0 && trailing != gr::undefined_size) {
+                    const std::size_t epilogueOutSize = std::max<std::size_t>((input_chunk_size > 0) ? (trailing * output_chunk_size + input_chunk_size - 1) / input_chunk_size : trailing, output_chunk_size);
+                    auto              epilogueIn      = prepareStreams(inputPorts<PortType::STREAM>(&self()), trailing);
+                    auto              epilogueOut     = prepareStreams(outputPorts<PortType::STREAM>(&self()), epilogueOutSize);
+                    invokeProcessEpilogue(epilogueIn, epilogueOut);
+                    publishSamples(0UZ, epilogueOut); // publish only what the block explicitly requested via out.publish(n)
+                    consumeReaders(trailing, epilogueIn);
+                }
+            }
             emitErrorMessageIfAny("workInternal(): EOS tag arrived -> REQUESTED_STOP", this->changeStateTo(lifecycle::State::REQUESTED_STOP));
             publishEoS();
             this->setAndNotifyState(lifecycle::State::STOPPED);

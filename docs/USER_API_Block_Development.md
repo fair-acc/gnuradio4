@@ -567,6 +567,40 @@ struct MyBlock : gr::Block<MyBlock<T>, gr::NoDefaultTagForwarding> { ... };
 this->publishEoS();  // convenience: publishes {gr::tag::END_OF_STREAM, true}
 ```
 
+### End-of-stream epilogue — `processEpilogue()`
+
+When `end_of_stream` arrives and the remaining input samples cannot form a complete chunk
+(fewer than `input_chunk_size`), the default behaviour is to **drop the trailing samples** and
+stop. For blocks that accumulate internal state (FFT windows, protocol framers, file writers),
+provide `processEpilogue()` with the same signature as `processBulk()`:
+
+```cpp
+struct MyAccumulator : gr::Block<MyAccumulator, gr::Resampling<1024, 1024, true>> {
+    gr::PortIn<float>  in;
+    gr::PortOut<float> out;
+    GR_MAKE_REFLECTABLE(MyAccumulator, in, out);
+
+    gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) noexcept {
+        // normal processing — input.size() == 1024
+    }
+
+    gr::work::Status processEpilogue(InputSpanLike auto& input, OutputSpanLike auto& output) noexcept {
+        // trailing samples — input.size() < 1024
+        const auto n = input.size();
+        std::copy_n(input.begin(), n, output.begin());
+        std::ranges::fill(output.subspan(n), 0.f); // zero-pad remainder
+        output.publish(output.size());              // explicit publish required
+        return gr::work::Status::OK;
+    }
+};
+```
+
+- **Opt-in**: detected via `if constexpr` — zero cost for blocks without it.
+- **Output publishing**: call `output.publish(n)` explicitly; default is zero samples published.
+- **Output span size**: `max(trailing, output_chunk_size)`.
+- **Call sequence**: called once, immediately before transitioning to `REQUESTED_STOP`.
+- **Without `processEpilogue()`**: trailing samples are silently dropped (existing behaviour).
+
 ### Standard tag keys
 
 | Key                             | Type          | Description                        |

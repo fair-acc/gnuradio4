@@ -1122,6 +1122,107 @@ const boost::ut::suite<"Requested Work Tests"> _requestedWorkTests = [] {
     };
 };
 
+template<typename T>
+struct EpilogueAccumulator : gr::Block<EpilogueAccumulator<T>, gr::Resampling<10UZ, 10UZ, true>> {
+    using Description = gr::Doc<"fixed-chunk block that records trailing samples via processEpilogue">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(EpilogueAccumulator, in, out);
+
+    std::size_t processedSamples = 0;
+    std::size_t epilogueSamples  = 0;
+    bool        epilogueCalled   = false;
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) noexcept {
+        const auto n = std::min(input.size(), output.size());
+        std::copy_n(input.begin(), n, output.begin());
+        processedSamples += n;
+        return gr::work::Status::OK;
+    }
+
+    gr::work::Status processEpilogue(gr::InputSpanLike auto& input, gr::OutputSpanLike auto& output) noexcept {
+        epilogueCalled  = true;
+        epilogueSamples = input.size();
+        const auto n    = std::min(input.size(), output.size());
+        std::copy_n(input.begin(), n, output.begin());
+        output.publish(n);
+        return gr::work::Status::OK;
+    }
+};
+
+template<typename T>
+struct NoEpilogueChunked : gr::Block<NoEpilogueChunked<T>, gr::Resampling<10UZ, 10UZ, true>> {
+    using Description = gr::Doc<"fixed-chunk block without processEpilogue">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    GR_MAKE_REFLECTABLE(NoEpilogueChunked, in, out);
+
+    gr::work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
+        std::ranges::copy(input, output.begin());
+        return gr::work::Status::OK;
+    }
+};
+
+const boost::ut::suite<"ProcessEpilogue"> _processEpilogue = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "processEpilogue receives trailing samples at EOS"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(25)}, {"verbose_console", false}});
+        auto& acc  = testGraph.emplaceBlock<EpilogueAccumulator<float>>();
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, acc).has_value());
+        expect(testGraph.connect<"out", "in">(acc, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(acc.epilogueCalled) << "processEpilogue must be called for trailing samples";
+        expect(eq(acc.epilogueSamples, 5UZ)) << "5 trailing samples (25 total, chunk=10, 2 full chunks=20)";
+        expect(eq(acc.processedSamples, 20UZ)) << "20 samples processed in full chunks";
+        expect(eq(sink._nSamplesProduced, gr::Size_t(25))) << "sink receives all 25 samples (20 bulk + 5 epilogue)";
+    };
+
+    "block without processEpilogue drops trailing samples"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(25)}, {"verbose_console", false}});
+        auto& fwd  = testGraph.emplaceBlock<NoEpilogueChunked<float>>();
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, fwd).has_value());
+        expect(testGraph.connect<"out", "in">(fwd, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(sink._nSamplesProduced, gr::Size_t(20))) << "only full chunks forwarded, 5 trailing dropped";
+    };
+
+    "processEpilogue not called when samples align to chunk boundary"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(30)}, {"verbose_console", false}});
+        auto& acc  = testGraph.emplaceBlock<EpilogueAccumulator<float>>();
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, acc).has_value());
+        expect(testGraph.connect<"out", "in">(acc, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(!acc.epilogueCalled) << "no epilogue when samples align to chunk boundary";
+        expect(eq(acc.processedSamples, 30UZ)) << "all 30 samples processed in full chunks";
+    };
+};
+
 const boost::ut::suite<"reflFirstTypeName Tests"> _reflFirstTypeNameTests = [] {
     using namespace boost::ut;
     using namespace gr::detail;
