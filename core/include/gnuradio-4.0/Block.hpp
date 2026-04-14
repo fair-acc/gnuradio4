@@ -1220,6 +1220,8 @@ public:
             return;
         }
         invokeUserProvidedFunction("applyChangedSettings()", [this, publishForwardTags, capturedForwardParams] noexcept(false) {
+            std::ignore      = publishForwardTags;
+            std::ignore      = capturedForwardParams;
             auto applyResult = settings().applyStagedParameters();
             checkBlockParameterConsistency();
 
