@@ -589,10 +589,10 @@ struct Port {
               rawTags(getTagsInRange(nSamples_, tagReader, reader.position())),                                   //
               streamIndex{reader.position()}, isConnected(connected), isSync(sync) {}
 
-        InputSpan(const InputSpan&)            = default;
-        InputSpan& operator=(const InputSpan&) = default;
-        // InputSpan(InputSpan&&) noexcept            = delete;
-        // InputSpan& operator=(InputSpan&&) noexcept = delete;
+        InputSpan(const InputSpan&)            = delete;
+        InputSpan& operator=(const InputSpan&) = delete;
+        InputSpan(InputSpan&&) noexcept        = default;
+        InputSpan& operator=(InputSpan&&)      = default;
 
         ~InputSpan() {
             if (ReaderSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward
@@ -671,10 +671,10 @@ struct Port {
               tags(tagsWriter.template tryReserve<SpanReleasePolicy::ProcessNone>(tagsWriter.available())),      //
               streamIndex{streamOffset}, isConnected(connected), isSync(sync) {}
 
-        OutputSpan(const OutputSpan&)            = default;
-        OutputSpan& operator=(const OutputSpan&) = default;
-        // OutputSpan(OutputSpan&&) noexcept            = delete;
-        // OutputSpan& operator=(OutputSpan&&) noexcept = delete;
+        OutputSpan(const OutputSpan&)            = delete;
+        OutputSpan& operator=(const OutputSpan&) = delete;
+        OutputSpan(OutputSpan&&) noexcept        = default;
+        OutputSpan& operator=(OutputSpan&&)      = default;
 
         ~OutputSpan() {
             if (WriterSpanType<spanReleasePolicy>::instanceCount() == 1UZ) { // has to be one, because the parent destructor which decrements it to zero is only called afterward

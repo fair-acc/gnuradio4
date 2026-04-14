@@ -224,10 +224,10 @@ you can set the `backPressure` property to false.
             }
         } else {
             for (const auto& [inIndex, outIndices] : _internalMappingInOut) {
-                InputSpanLike auto inSpan         = ins[inIndex];
-                std::size_t        monOutSize     = _selectedSrc == inIndex ? monOut.size() : std::numeric_limits<std::size_t>::max();
-                std::size_t        nSamplesToCopy = std::min({inSpan.size(), monOutSize, //
-                           std::ranges::min(outIndices | std::views::transform([&](std::size_t outIndex) { return outs[outIndex].size() - outOffsets[outIndex]; }))});
+                InputSpanLike auto& inSpan         = ins[inIndex];
+                std::size_t         monOutSize     = _selectedSrc == inIndex ? monOut.size() : std::numeric_limits<std::size_t>::max();
+                std::size_t         nSamplesToCopy = std::min({inSpan.size(), monOutSize, //
+                            std::ranges::min(outIndices | std::views::transform([&](std::size_t outIndex) { return outs[outIndex].size() - outOffsets[outIndex]; }))});
 
                 for (const std::size_t outIndex : outIndices) {
                     copyToOutput(nSamplesToCopy, inSpan, outs[outIndex], outIndex);
@@ -237,8 +237,8 @@ you can set the `backPressure` property to false.
         }
 
         if (_selectedSrc < ins.size()) {
-            InputSpanLike auto inSpan         = ins[_selectedSrc];
-            std::size_t        nSamplesToCopy = std::min({inSpan.size(), monOut.size(), nSamplesToConsume[_selectedSrc]});
+            auto&       inSpan         = ins[_selectedSrc];
+            std::size_t nSamplesToCopy = std::min({inSpan.size(), monOut.size(), nSamplesToConsume[_selectedSrc]});
             copyToOutput(nSamplesToCopy, inSpan, monOut, std::numeric_limits<std::size_t>::max());
             nSamplesToConsume[_selectedSrc] = nSamplesToCopy;
         }

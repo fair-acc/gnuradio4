@@ -37,10 +37,6 @@ or next chunk, whichever is closer. Also adds an "offset" key to the tag map sig
 
     double sampling_rate = 1.0;
 
-    // TODO: References are required here because InputSpan and OutputSpan have internal states
-    // (e.g., tagsPublished) that are unique to each instance. Copying these objects without proper
-    // state management can lead to incorrect behavior when the publishTag() method is called.
-    // This issue must be resolved in future updates, see https://github.com/fair-acc/gnuradio4/issues/439
     gr::work::Status processBulk(gr::InputSpanLike auto& inSamples, gr::OutputSpanLike auto& outSamples) {
         std::copy(inSamples.begin(), inSamples.end(), outSamples.begin());
         std::size_t tagsForwarded = 0;
