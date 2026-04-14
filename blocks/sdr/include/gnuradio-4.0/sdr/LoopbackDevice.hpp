@@ -694,7 +694,7 @@ public:
 
     std::string readSetting(const int /*direction*/, const size_t /*channel*/, const std::string& /*key*/) const override { return ""; }
 
-    SoapySDR::ArgInfo getSettingInfo(const std::string& key) const override {
+    SoapySDR::ArgInfo getSettingInfoByKey(const std::string& key) const {
         for (const auto& info : getSettingInfo()) {
             if (info.key == key) {
                 return info;
@@ -703,7 +703,7 @@ public:
         return {};
     }
 
-    SoapySDR::ArgInfo getSettingInfo(const int direction, const size_t channel, const std::string& key) const override {
+    SoapySDR::ArgInfo getSettingInfoByKey(const int direction, const size_t channel, const std::string& key) const {
         for (const auto& info : getSettingInfo(direction, channel)) {
             if (info.key == key) {
                 return info;

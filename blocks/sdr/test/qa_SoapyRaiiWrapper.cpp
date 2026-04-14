@@ -19,7 +19,9 @@ const boost::ut::suite<"SoapyRaiiWrapper module loading"> moduleTests = [] {
                 break;
             }
         }
-        expect(found) << "gr-sdr-loopback.so should be in SOAPY_SDR_PLUGIN_PATH";
+        const char* pluginPath     = std::getenv("SOAPY_SDR_PLUGIN_PATH");
+        std::string pluginPathText = (pluginPath != nullptr && *pluginPath != '\0') ? pluginPath : "<unset>";
+        expect(found) << ("gr-sdr-loopback.so should be in SOAPY_SDR_PLUGIN_PATH (current: " + pluginPathText + ")");
     };
 
     "enumerate finds loopback driver"_test = [] {

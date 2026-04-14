@@ -335,7 +335,9 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
 
         auto retVal = sched.runAndWait();
 
-        expect(retVal.has_value()) << std::format("scheduler execution error: {}", retVal.error());
+        if (!retVal.has_value()) {
+            expect(false) << std::format("scheduler execution error: {}", retVal.error());
+        }
 
         if (watchdogThread.joinable()) {
             watchdogThread.join();
@@ -379,7 +381,9 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         auto [watchdogThread, externalInterventionNeeded] = createWatchdog(sched, 6s);
 
         auto retVal = sched.runAndWait();
-        expect(retVal.has_value()) << std::format("scheduler execution error: {}", retVal.error());
+        if (!retVal.has_value()) {
+            expect(false) << std::format("scheduler execution error: {}", retVal.error());
+        }
 
         if (watchdogThread.joinable()) {
             watchdogThread.join();
