@@ -54,6 +54,10 @@ DemoSubSchedulerResult<T> createDemoSubScheduler() {
     gr::Graph                 graph;
     result.pass1 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
     result.pass2 = std::addressof(graph.template emplaceBlock<gr::testing::Copy<T>>());
+    // We have a delayed connection to CountingSink, the scheduler shouldn't
+    // stop before the connection is established just because pass2 doesn't
+    // have a downstream connection yet
+    result.pass2->disconnect_on_done = false;
     expect(graph.connect(*result.pass1, "out", *result.pass2, "in").has_value());
     result.setGraph(std::move(graph));
     return result;

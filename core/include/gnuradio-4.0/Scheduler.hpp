@@ -328,6 +328,8 @@ public:
         return _nRunningJobs->value() > 0UZ;
     }
 
+    void setPool(std::shared_ptr<TaskExecutor> pool) { _pool = std::move(pool); }
+
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _graph->blocks(); }

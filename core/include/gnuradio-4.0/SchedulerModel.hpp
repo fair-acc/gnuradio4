@@ -68,6 +68,8 @@ public:
             return;
         }
 
+        sched.setPool(gr::thread_pool::Manager::defaultIoPool());
+
         _schedulerThread = std::thread([&sched] {
             // this will invoke scheduler's start(), which blocks
             if (!sched.changeStateTo(gr::lifecycle::State::RUNNING)) {
