@@ -60,9 +60,10 @@ function(gr_generate_block_instantiations LIB_NAME)
     endif()
 
     # directory where gnuradio_4_0_parse_registrations will output .cpp files.
-    set(GEN_DIR "${CMAKE_BINARY_DIR}/generated_plugins/${MODULE_NAME_BASE}")
+    set(GEN_DIR "${CMAKE_BINARY_DIR}/plugins/${MODULE_NAME_BASE}")
     file(MAKE_DIRECTORY "${GEN_DIR}")
     target_include_directories(${LIB_NAME} PUBLIC ${GEN_DIR})
+    target_include_directories(${LIB_NAME} PUBLIC ${CMAKE_BINARY_DIR}/include)
 
     set(GEN_CPP_LIST "${GEN_DIR}/integrator.cpp")
 
@@ -154,6 +155,14 @@ function(gr_generate_block_instantiations LIB_NAME)
             gr_detail_merge_files_into(${GEN_DIR}/raw_calls.hpp "${RAW_CALLS_FILES}")
         endif()
 
+        set(GENERATED_PUBLIC_HEADER_SOURCE "${GEN_DIR}/${MODULE_NAME_BASE}.hpp")
+        if(EXISTS "${GENERATED_PUBLIC_HEADER_SOURCE}")
+            set(GENERATED_PUBLIC_HEADER_BUILD_DIR "${CMAKE_BINARY_DIR}/include/gnuradio-4.0")
+            set(GENERATED_PUBLIC_HEADER_BUILD_PATH "${GENERATED_PUBLIC_HEADER_BUILD_DIR}/${MODULE_NAME_BASE}.hpp")
+            file(MAKE_DIRECTORY "${GENERATED_PUBLIC_HEADER_BUILD_DIR}")
+            configure_file("${GENERATED_PUBLIC_HEADER_SOURCE}" "${GENERATED_PUBLIC_HEADER_BUILD_PATH}" COPYONLY)
+        endif()
+
     target_sources(${LIB_NAME} PRIVATE ${GEN_CPP_LIST})
 endfunction()
 
@@ -180,26 +189,45 @@ function(gr_add_block_library LIB_NAME)
         HEADERS ${CBL_HEADERS}
         MODULE_NAME_BASE ${LIB_NAME}
         ${SPLIT_BLOCK_INSTANTIATIONS_ARG})
-    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+
+    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
 
     if(CBL_MAKE_SHARED_LIBRARY)
         set(SHARED_LIB_NAME "${LIB_NAME}Shared")
         message(STATUS "[BlockLibMacros] Creating a shared library target ${SHARED_LIB_NAME}")
         add_library(${SHARED_LIB_NAME} SHARED)
-        target_link_libraries(${SHARED_LIB_NAME} ${OBJECT_LIB_NAME})
-        install(TARGETS ${SHARED_LIB_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
+        if(NOT TARGET gnuradio4::${SHARED_LIB_NAME})
+            add_library(gnuradio4::${SHARED_LIB_NAME} ALIAS ${SHARED_LIB_NAME})
+        endif()
+        target_include_directories(${SHARED_LIB_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+                                                          $<INSTALL_INTERFACE:include>)
+        target_sources(${SHARED_LIB_NAME} PRIVATE $<TARGET_OBJECTS:${OBJECT_LIB_NAME}>)
+        target_link_libraries(${SHARED_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+        install(
+            TARGETS ${SHARED_LIB_NAME}
+            EXPORT gnuradio4Targets
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
     endif()
 
     if(CBL_MAKE_STATIC_LIBRARY)
         set(STATIC_LIB_NAME "${LIB_NAME}Static")
         message(STATUS "[BlockLibMacros] Creating a static library target ${STATIC_LIB_NAME}")
         add_library(${STATIC_LIB_NAME} STATIC)
-        target_link_libraries(${STATIC_LIB_NAME} ${OBJECT_LIB_NAME})
-        install(TARGETS ${STATIC_LIB_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
+        if(NOT TARGET gnuradio4::${STATIC_LIB_NAME})
+            add_library(gnuradio4::${STATIC_LIB_NAME} ALIAS ${STATIC_LIB_NAME})
+        endif()
+        target_include_directories(${STATIC_LIB_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+                                  $<INSTALL_INTERFACE:include>)
+        target_sources(${STATIC_LIB_NAME} PRIVATE $<TARGET_OBJECTS:${OBJECT_LIB_NAME}>)
+        target_link_libraries(${STATIC_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core ${CBL_LINK_LIBRARIES})
+        install(
+            TARGETS ${STATIC_LIB_NAME}
+            EXPORT gnuradio4Targets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/gnuradio-4/plugins)
     endif()
 
-    install(FILES "${CMAKE_BINARY_DIR}/generated_plugins/${LIB_NAME}/${LIB_NAME}.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
+    install(FILES "${CMAKE_BINARY_DIR}/include/gnuradio-4.0/${LIB_NAME}.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
     # TODO Install pkgconfig files, CMake files for finding the package,
     # header for blocklib init
@@ -241,7 +269,7 @@ function(gr_add_block_plugin LIB_NAME)
         gnuradio-4.0/Plugin.hpp
         REGISTRY_INSTANCE
         grPluginInstance)
-    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio-core gnuradio-blocklib-core gnuradio-plugin ${CBL_LINK_LIBRARIES})
+    target_link_libraries(${OBJECT_LIB_NAME} PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-blocklib-core gnuradio4::gnuradio-plugin ${CBL_LINK_LIBRARIES})
 
     set(PLUGIN_LIB_NAME "${LIB_NAME}Plugin")
     message(STATUS "[BlockLibMacros] Creating a plugin target ${PLUGIN_LIB_NAME}")

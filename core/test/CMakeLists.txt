@@ -92,40 +92,50 @@ add_ut_test(qa_SubGraphAssets)
 set(_QA_SUBGRAPH_HTTP_PORT 18765)
 target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
 if(EMSCRIPTEN)
-    set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
-    set(HTTP_SERVER_PORT ${_QA_SUBGRAPH_HTTP_PORT})
-    configure_file(subgraph_assets_pre.js.in subgraph_assets_pre.js @ONLY)
-    target_link_options(qa_SubGraphAssets PRIVATE
-        --pre-js=${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js
-        "SHELL:-s PROXY_TO_PTHREAD=1")
-    set_property(TARGET qa_SubGraphAssets APPEND PROPERTY LINK_DEPENDS
-        ${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js)
+  set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+  set(HTTP_SERVER_PORT ${_QA_SUBGRAPH_HTTP_PORT})
+  configure_file(subgraph_assets_pre.js.in subgraph_assets_pre.js @ONLY)
+  target_link_options(
+    qa_SubGraphAssets
+    PRIVATE
+    --pre-js=${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js
+    "SHELL:-s PROXY_TO_PTHREAD=1")
+  set_property(
+    TARGET qa_SubGraphAssets
+    APPEND
+    PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js)
 else()
-    target_link_libraries(qa_SubGraphAssets PRIVATE httplib::httplib)
+  target_link_libraries(qa_SubGraphAssets PRIVATE httplib::httplib)
 endif()
-if (GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
-  add_dependencies(qa_SubGraphAssets GoodBasePlugin good_math_plugin good_conversion_plugin bad_plugin)
-endif ()
+if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+  add_dependencies(
+    qa_SubGraphAssets
+    GoodBasePlugin
+    good_math_plugin
+    good_conversion_plugin
+    bad_plugin)
+endif()
 
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_Settings)
 
   add_app_test(qa_grc)
   gr_generate_block_instantiations(qa_grc HEADERS CollectionTestBlocks.hpp)
-  target_link_libraries(qa_grc PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+  target_link_libraries(qa_grc PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)
 
   add_ut_test(qa_GraphMessages)
-  target_link_libraries(qa_GraphMessages PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+  target_link_libraries(qa_GraphMessages PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)
 
   add_ut_test(qa_SchedulerMessages)
-  target_link_libraries(qa_SchedulerMessages PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+  target_link_libraries(qa_SchedulerMessages PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)
 
   add_subdirectory(plugins)
   add_app_test(qa_plugins_test)
-  target_link_libraries(qa_plugins_test PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+  target_link_libraries(qa_plugins_test PUBLIC gnuradio4::GrBasicBlocksShared gnuradio4::GrTestingBlocksShared)
 
   add_app_test(qa_plugin_schedulers_test)
-  target_link_libraries(qa_plugin_schedulers_test PUBLIC GrBasicBlocksShared GrTestingBlocksShared)
+  target_link_libraries(qa_plugin_schedulers_test PUBLIC gnuradio4::GrBasicBlocksShared
+                                                         gnuradio4::GrTestingBlocksShared)
 endif()
 
 if(GR_USE_ADAPTIVE_CPP)

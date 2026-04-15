@@ -49,6 +49,7 @@ set(public_headers
     include/gnuradio-4.0/YamlPmt.hpp)
 
 set_target_properties(gnuradio-core PROPERTIES PUBLIC_HEADER "${public_headers}")
+add_library(gnuradio4::gnuradio-core ALIAS gnuradio-core)
 target_include_directories(
   gnuradio-core
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
@@ -67,6 +68,7 @@ target_link_libraries(
 add_library(gnuradio-blocklib-core SHARED src/BlockRegistry.cpp)
 set(blocklib_public_headers include/gnuradio-4.0/BlockRegistry.hpp include/gnuradio-4.0/Plugin.hpp)
 set_target_properties(gnuradio-blocklib-core PROPERTIES PUBLIC_HEADER "${blocklib_public_headers}")
+add_library(gnuradio4::gnuradio-blocklib-core ALIAS gnuradio-blocklib-core)
 message(INFO "PATH include " $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/>)
 target_include_directories(gnuradio-blocklib-core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/>
                                                          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)

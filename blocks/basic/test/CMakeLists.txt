@@ -6,7 +6,7 @@ add_ut_test(qa_TriggerBlocks)
 
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_BasicAvailableBlocks)
-  target_link_libraries(qa_BasicAvailableBlocks PRIVATE GrBasicBlocksShared)
+  target_link_libraries(qa_BasicAvailableBlocks PRIVATE gnuradio4::GrBasicBlocksShared)
 endif()
 add_ut_test(qa_StreamToDataSet)
 add_ut_test(qa_SyncBlock)

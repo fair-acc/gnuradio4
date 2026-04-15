@@ -1,12 +1,13 @@
 add_library(gr-audio INTERFACE)
+add_library(gnuradio4::gr-audio ALIAS gr-audio)
 target_link_libraries(
   gr-audio
-  INTERFACE gnuradio-core
-            gnuradio-algorithm
-            gr-common
-            gr-fileio)
+  INTERFACE gnuradio4::gnuradio-core
+            gnuradio4::gnuradio-algorithm
+            gnuradio4::gr-common
+            gnuradio4::gr-fileio)
 if(NOT EMSCRIPTEN)
-  target_link_libraries(gr-audio INTERFACE gr-libsoundio)
+  target_link_libraries(gr-audio INTERFACE gnuradio4::gr-libsoundio)
 endif()
 if(EMSCRIPTEN)
   target_link_options(
@@ -30,9 +31,9 @@ gr_add_block_library(
   include/gnuradio-4.0/audio/EmscriptenAudioBackend.hpp
   include/gnuradio-4.0/audio/SoundIoBackend.hpp
   LINK_LIBRARIES
-  gr-audio)
+  gnuradio4::gr-audio)
 
-if(TARGET GrAudioBlocksShared AND ENABLE_TESTING)
+if(TARGET gnuradio4::GrAudioBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()
 

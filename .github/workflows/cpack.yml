@@ -15,12 +15,12 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-cpack-gcc14-relwithdebinfo-${{ github.sha }}
@@ -28,7 +28,7 @@ jobs:
             ccache-cpack-gcc14-relwithdebinfo
 
       - name: Cache fetchContent
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build/_deps
           key: fetchContent-cpack-gcc14-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
@@ -72,7 +72,7 @@ jobs:
         run: sudo apt install ./build/*.deb ./build/*.ddeb -y
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ubuntu-gcc14-relwithdebinfo-deb-${{ github.run_number }}
           path: |
@@ -99,12 +99,12 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-cpack-emscripten-relwithdebinfo-${{ github.sha }}
@@ -112,7 +112,7 @@ jobs:
             ccache-cpack-emscripten-relwithdebinfo
 
       - name: Cache fetchContent
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/build/_deps
           key: fetchContent-cpack-emscripten-relwithdebinfo-${{ hashFiles('CMakeLists.txt') }}
@@ -160,7 +160,7 @@ jobs:
           cmake --build build --target package
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: emscripten-relwithdebinfo-deb-${{ github.run_number }}
           path: build/*.deb
