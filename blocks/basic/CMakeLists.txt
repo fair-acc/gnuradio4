@@ -10,7 +10,7 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/SyncBlock.hpp
     include/gnuradio-4.0/basic/Trigger.hpp)
 
-set(GrBasicBlocks_LIBS gr-basic gr-testing)
+set(GrBasicBlocks_LIBS gnuradio4::gr-basic gnuradio4::gr-testing)
 
 if(PYTHON_AVAILABLE)
   list(
@@ -26,9 +26,11 @@ if(PYTHON_AVAILABLE)
 endif()
 
 add_library(gr-basic INTERFACE ${GrBasicBlocks_HDRS})
-target_link_libraries(gr-basic INTERFACE gnuradio-core gnuradio-algorithm ${GrBasicBlocks_LIBS})
+add_library(gnuradio4::gr-basic ALIAS gr-basic)
+target_link_libraries(gr-basic INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm)
 target_include_directories(gr-basic INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                               $<INSTALL_INTERFACE:include/>)
+install(TARGETS gr-basic EXPORT gnuradio4Targets)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/basic"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
@@ -41,6 +43,6 @@ gr_add_block_library(
   LINK_LIBRARIES
   ${GrBasicBlocks_LIBS})
 
-if(TARGET GrBasicBlocksShared AND ENABLE_TESTING)
+if(TARGET gnuradio4::GrBasicBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()

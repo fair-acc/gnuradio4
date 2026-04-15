@@ -179,9 +179,9 @@ option(ENABLE_TESTING "Enable Test Builds" ${GR_TOPLEVEL_PROJECT})
 option(MIT_ONLY "Exclude modules with non-MIT/Apache-compatible licences" OFF)
 
 if(NOT DEFINED GR_DATA_CACHE_DIR)
-    set(GR_DATA_CACHE_DIR "${CMAKE_CURRENT_BINARY_DIR}/gnuradio_cache" 
-        CACHE PATH 
-        "Writeable system path where GR should store its cached data (for example, /var/lib/gnuradio4/cache)")
+  set(GR_DATA_CACHE_DIR
+      "${CMAKE_CURRENT_BINARY_DIR}/gnuradio_cache"
+      CACHE PATH "Writeable system path where GR should store its cached data (for example, /var/lib/gnuradio4/cache)")
 endif()
 
 set(GR_MAX_WASM_THREAD_COUNT
@@ -257,6 +257,7 @@ include(cmake/CompilerWarnings.cmake)
 add_subdirectory(blocklib_generator)
 
 add_library(gnuradio-options INTERFACE)
+add_library(gnuradio4::gnuradio-options ALIAS gnuradio-options)
 install(TARGETS gnuradio-options EXPORT gnuradio4Targets)
 
 message(
@@ -415,6 +416,7 @@ endif()
 # include header-only libraries that have been inlined to simplify builds w/o requiring access to the internet
 if(NOT (TARGET magic_enum))
   add_library(magic_enum INTERFACE)
+  add_library(gnuradio4::magic_enum ALIAS magic_enum)
   target_include_directories(
     magic_enum ${CMAKE_EXT_DEP_WARNING_GUARD} INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/magic_enum/>
                                                         $<INSTALL_INTERFACE:include>)
@@ -432,14 +434,17 @@ add_library(
   exprtk STATIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.cpp" # dummy source file
 )
-target_include_directories(exprtk PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
-                                         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk")
+add_library(gnuradio4::exprtk ALIAS exprtk)
+target_include_directories(exprtk PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party>
+                                         $<INSTALL_INTERFACE:include>)
 if(EMSCRIPTEN)
   target_compile_options(exprtk PRIVATE -O1 -g0)
 else()
   target_compile_options(exprtk PRIVATE -O1 -g0 -fvisibility=hidden)
 endif()
 set_source_files_properties(third_party/exprtk.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
+install(TARGETS exprtk EXPORT gnuradio4Targets)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/exprtk.hpp" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 # include exprtk header-only - END
 
 include(FetchContent)
@@ -543,6 +548,7 @@ if(NOT EMSCRIPTEN)
   target_include_directories(
     libsoundio_static ${CMAKE_EXT_DEP_WARNING_GUARD} PUBLIC $<BUILD_INTERFACE:${libsoundio_SOURCE_DIR}>
                                                             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  add_library(gnuradio4::libsoundio_static ALIAS libsoundio_static)
   if(APPLE)
     find_library(GR_LIBSOUNDIO_COREAUDIO_LIBRARY CoreAudio REQUIRED)
     find_library(GR_LIBSOUNDIO_COREFOUNDATION_LIBRARY CoreFoundation REQUIRED)
@@ -569,6 +575,7 @@ if(NOT EMSCRIPTEN)
   install(TARGETS libsoundio_static EXPORT gnuradio4Targets)
 
   add_library(gr-libsoundio INTERFACE)
+  add_library(gnuradio4::gr-libsoundio ALIAS gr-libsoundio)
   target_link_libraries(gr-libsoundio INTERFACE libsoundio_static)
   install(TARGETS gr-libsoundio EXPORT gnuradio4Targets)
 endif()
@@ -613,6 +620,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)") # WIP
 endif()
 
 add_library(vir INTERFACE)
+add_library(gnuradio4::vir ALIAS vir)
 target_include_directories(vir INTERFACE $<BUILD_INTERFACE:${vir-simd_SOURCE_DIR}/>
                                          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 install(TARGETS vir EXPORT gnuradio4Targets)
@@ -747,6 +755,14 @@ install(
   FILE gnuradio4Targets.cmake
   NAMESPACE gnuradio4::
   DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+
+if(TARGET gnuradio-plugin)
+  install(
+    EXPORT gnuradio4PluginTargets
+    FILE gnuradio4PluginTargets.cmake
+    NAMESPACE gnuradio4::
+    DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")
+endif()
 
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4Config.cmake"
               "${CMAKE_CURRENT_BINARY_DIR}/gnuradio4ConfigVersion.cmake" DESTINATION "${GR_CMAKECONFIG_INSTALL_DIR}")

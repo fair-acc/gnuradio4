@@ -4,7 +4,7 @@
 #include <cassert>
 #include <iostream>
 
-#include <GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
 
 using namespace std::string_literals;
 

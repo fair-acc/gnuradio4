@@ -15,12 +15,12 @@
 
 #include "CollectionTestBlocks.hpp"
 
-#include <GrBasicBlocks.hpp>
-#include <GrTestingBlocks.hpp>
-#include <qa_grc.hpp>
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrTestingBlocks.hpp>
+#include <gnuradio-4.0/qa_grc.hpp>
 
 #include "TestBlockRegistryContext.hpp"
-#include "gnuradio-4.0/BlockModel.hpp"
+#include <gnuradio-4.0/BlockModel.hpp>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 

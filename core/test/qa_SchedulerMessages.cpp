@@ -4,14 +4,13 @@
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
-#include <GrBasicBlocks.hpp>
-#include <GrTestingBlocks.hpp>
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrTestingBlocks.hpp>
 
 #include "TestBlockRegistryContext.hpp"
 
 #include "magic_enum.hpp"
 #include "message_utils.hpp"
-#include <magic_enum/magic_enum.hpp>
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;

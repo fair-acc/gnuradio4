@@ -6,7 +6,7 @@
 #include <gnuradio-4.0/basic/Selector.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
 
-#include <GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
 
 const boost::ut::suite AvailableBlockTests = [] {
     using namespace boost::ut;

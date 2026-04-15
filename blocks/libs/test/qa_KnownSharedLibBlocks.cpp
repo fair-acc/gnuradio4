@@ -9,14 +9,14 @@ using namespace boost::ut;
 
 using namespace std::string_view_literals;
 
-#include <GrAudioBlocks.hpp>
-#include <GrBasicBlocks.hpp>
-#include <GrElectricalBlocks.hpp>
-#include <GrFileIoBlocks.hpp>
-#include <GrFilterBlocks.hpp>
-#include <GrFourierBlocks.hpp>
-#include <GrHttpBlocks.hpp>
-#include <GrTestingBlocks.hpp>
+#include <gnuradio-4.0/GrAudioBlocks.hpp>
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrElectricalBlocks.hpp>
+#include <gnuradio-4.0/GrFileIoBlocks.hpp>
+#include <gnuradio-4.0/GrFilterBlocks.hpp>
+#include <gnuradio-4.0/GrFourierBlocks.hpp>
+#include <gnuradio-4.0/GrHttpBlocks.hpp>
+#include <gnuradio-4.0/GrTestingBlocks.hpp>
 
 const boost::ut::suite TagTests = [] {
     auto&       registry = gr::globalBlockRegistry();
