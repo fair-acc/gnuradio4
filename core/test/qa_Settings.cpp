@@ -206,9 +206,9 @@ const boost::ut::suite SettingsTests = [] {
         expect(src.settings().set({{gr::tag::SAMPLE_RATE.shortKey(), 49000.0f}}).empty()) << "successful set returns empty map";
         expect(eq(src.settings().getNStoredParameters(), 1UZ));     // old parameters are removed from stored
         expect(eq(src.settings().getNAutoUpdateParameters(), 1UZ)); // old parameters are removed from autoUpdate
-        expect(eq(src.settings().stagedParameters().size(), 0UZ));
-        expect(src.settings().activateContext() != std::nullopt);  // activateContext() fills staged parameters
-        expect(eq(src.settings().stagedParameters().size(), 2UZ)); // "n_samples_max", sample_rate
+        // staged params may contain re-staged forward params from init(); activateContext() adds more
+        expect(src.settings().activateContext() != std::nullopt); // activateContext() fills staged parameters
+        expect(ge(src.settings().stagedParameters().size(), 2UZ)) << "at least n_samples_max + sample_rate";
 
         gr::scheduler::Simple sched;
         if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -1004,6 +1004,125 @@ connections:
         }
     };
 #endif
+};
+
+namespace gr::pmr_test {
+
+template<typename T>
+struct PmrSettingsBlock : gr::Block<PmrSettingsBlock<T>> {
+    using Description = gr::Doc<"block with std::pmr:: settings fields">;
+    gr::PortIn<T>  in;
+    gr::PortOut<T> out;
+
+    gr::Annotated<std::pmr::string, "signal name">         signal_name;
+    gr::Annotated<std::pmr::vector<float>, "coefficients"> coefficients;
+    gr::Annotated<std::string, "label">                    label   = "default";
+    gr::Annotated<std::vector<float>, "weights">           weights = std::vector<float>{1.f, 2.f};
+
+    GR_MAKE_REFLECTABLE(PmrSettingsBlock, in, out, signal_name, coefficients, label, weights);
+
+    [[nodiscard]] constexpr T processOne(T x) const noexcept { return x; }
+};
+
+} // namespace gr::pmr_test
+
+const boost::ut::suite<"PMR settings"> _pmrSettings = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace std::string_literals;
+
+    "pmr::string block setting round-trips through property_map"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& blk  = testGraph.emplaceBlock<pmr_test::PmrSettingsBlock<float>>({{"signal_name", "test_signal"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, blk).has_value());
+        expect(testGraph.connect<"out", "in">(blk, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(std::string_view(blk.signal_name), "test_signal"sv)) << "pmr::string field must be set from property_map";
+    };
+
+    "pmr::vector<float> block setting round-trips"_test = [] {
+        pmr_test::PmrSettingsBlock<float> blk;
+        blk.init(std::make_shared<gr::Sequence>());
+
+        Tensor<float> t(extents_from, {3UZ});
+        t[0] = 1.f;
+        t[1] = 2.f;
+        t[2] = 3.f;
+
+        property_map params;
+        params["coefficients"] = std::move(t);
+        expect(blk.settings().setStaged(params).empty()) << "setStaged() must succeed";
+        std::ignore = blk.settings().applyStagedParameters();
+
+        expect(eq(blk.coefficients.value.size(), 3UZ)) << "pmr::vector must have 3 elements";
+        expect(eq(blk.coefficients.value[0], 1.f));
+        expect(eq(blk.coefficients.value[2], 3.f));
+
+        auto stored = blk.settings().get();
+        expect(stored.contains("coefficients")) << "pmr::vector field in get()";
+    };
+
+    "std::string block setting backward compatibility"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& blk  = testGraph.emplaceBlock<pmr_test::PmrSettingsBlock<float>>({{"label", "hello"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, blk).has_value());
+        expect(testGraph.connect<"out", "in">(blk, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        expect(eq(std::string_view(blk.label), "hello"sv)) << "std::string field must still work";
+    };
+
+    "settings get() returns both pmr and non-pmr fields"_test = [] {
+        pmr_test::PmrSettingsBlock<float> blk;
+        blk.init(std::make_shared<gr::Sequence>());
+
+        property_map params;
+        params["signal_name"] = std::pmr::string("from_map");
+        params["label"]       = std::string("also_set");
+        expect(blk.settings().set(params).empty());
+        std::ignore = blk.settings().applyStagedParameters();
+
+        auto allSettings = blk.settings().get();
+        expect(allSettings.contains("signal_name")) << "pmr::string field must appear in get()";
+        expect(allSettings.contains("label")) << "std::string field must appear in get()";
+    };
+
+    "rebindFieldsTo migrates pmr fields to new resource"_test = [] {
+        std::array<std::byte, 65536>        buf{};
+        std::pmr::monotonic_buffer_resource targetMr(buf.data(), buf.size());
+
+        pmr_test::PmrSettingsBlock<float> blk;
+        blk.init(std::make_shared<gr::Sequence>());
+
+        blk.signal_name.value  = std::pmr::string("test_signal");
+        blk.coefficients.value = std::pmr::vector<float>{1.f, 2.f, 3.f};
+
+        expect(blk.signal_name.value.get_allocator().resource() == std::pmr::get_default_resource());
+        expect(blk.coefficients.value.get_allocator().resource() == std::pmr::get_default_resource());
+
+        blk.rebindFieldsTo(&targetMr);
+
+        expect(blk.resource() == &targetMr) << "block resource must be rebound";
+        expect(blk.signal_name.value.get_allocator().resource() == &targetMr) << "pmr::string field must be rebound";
+        expect(blk.coefficients.value.get_allocator().resource() == &targetMr) << "pmr::vector field must be rebound";
+        expect(eq(std::string_view(blk.signal_name), "test_signal"sv)) << "data preserved after rebind";
+        expect(eq(blk.coefficients.value.size(), 3UZ)) << "vector size preserved";
+        expect(eq(blk.coefficients.value[2], 3.f)) << "vector data preserved";
+    };
 };
 
 int main() { /* tests are statically executed */ }

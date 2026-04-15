@@ -2,6 +2,7 @@
 #define GNURADIO_ANNOTATED_HPP
 
 #include <format>
+#include <memory_resource>
 #include <sstream>
 #include <string_view>
 #include <type_traits>
@@ -344,6 +345,8 @@ struct Annotated {
     constexpr bool operator==(const U& other) const noexcept {
         if constexpr (requires { other.value; }) {
             return value == other.value;
+        } else if constexpr (std::is_convertible_v<const T&, std::string_view> && std::is_convertible_v<const U&, std::string_view>) {
+            return std::string_view(value) == std::string_view(other);
         } else {
             return value == other;
         }
@@ -366,9 +369,9 @@ struct Annotated {
     }
 
     operator std::string_view() const noexcept
-    requires std::is_same_v<T, std::string>
+    requires(std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string>)
     {
-        return std::string_view(value); // Convert from std::string to std::string_view
+        return std::string_view(value);
     }
 
     // meta-information

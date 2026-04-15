@@ -135,9 +135,11 @@ std::optional<SettingsCtx> CtxSettingsBase::activateContext(SettingsCtx ctx) {
     if (bestMatchSettingsCtx.value().context == _activeCtx.context) {
         std::optional<property_map> parameters = getBestMatchStoredParameters(ctx);
         if (parameters) {
+            if (!_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
+                _autoUpdateParameters[bestMatchSettingsCtx.value()] = getBestMatchAutoUpdateParameters(bestMatchSettingsCtx.value()).value_or(doGetAllWritableMembers());
+            }
             const std::set<std::string>& currentAutoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
 
-            // the following is more compile-time friendly
             property_map notAutoUpdateParams;
             for (const auto& pair : parameters.value()) {
                 if (!currentAutoUpdateParams.contains(std::string(pair.first))) {
@@ -153,18 +155,7 @@ std::optional<SettingsCtx> CtxSettingsBase::activateContext(SettingsCtx ctx) {
         std::optional<property_map> _parameters = getBestMatchStoredParameters(ctx);
         if (_parameters) {
             auto& parameters = *_parameters;
-
-            // filter out auto-update params to avoid overwriting tag-updated values
-            if (!_autoUpdateParameters.contains(bestMatchSettingsCtx.value())) {
-                _autoUpdateParameters[bestMatchSettingsCtx.value()] = getBestMatchAutoUpdateParameters(bestMatchSettingsCtx.value()).value_or(doGetAllWritableMembers());
-            }
-            const auto& autoUpdateParams = _autoUpdateParameters.at(bestMatchSettingsCtx.value());
-            for (const auto& [key, value] : parameters) {
-                if (!autoUpdateParams.contains(std::string(key))) {
-                    _stagedParameters.insert_or_assign(key, value);
-                }
-            }
-
+            _stagedParameters.insert(parameters.begin(), parameters.end());
             _activeCtx = bestMatchSettingsCtx.value();
             setChanged(true);
         } else {

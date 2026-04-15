@@ -558,7 +558,7 @@ To handle tags manually, disable default forwarding:
 
 ```cpp
 template<typename T>
-struct MyBlock : gr::Block<MyBlock<T>, gr::NoDefaultTagForwarding> { ... };
+struct MyBlock : gr::Block<MyBlock<T>, gr::NoTagPropagation> { ... };
 ```
 
 ### End-of-stream

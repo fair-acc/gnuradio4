@@ -57,7 +57,7 @@ constexpr bool isReadableMember() {
     };
     // TODO(follow-up PR): remove pmt::Value as settings type — it erases type information, prevents validation, and complicates GRC YAML serialisation
     // return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || isReadableImmutable();
-    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
+    return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
            || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, pmt::Value> || isReadableImmutable();
 }
 
@@ -200,7 +200,7 @@ inline std::size_t computeHash(const pmt::Value& value) {
 template<typename TCollection>
 auto collectionToTensor(const TCollection& collection) {
     using TValue       = typename TCollection::value_type;
-    using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
+    using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue> || std::is_same_v<std::pmr::string, TValue>, pmt::Value, TValue>;
     Tensor<TTensorValue> result(extents_from, {collection.size()});
     std::ranges::copy(collection, result.begin());
     return result;
@@ -289,17 +289,17 @@ template<typename T>
     if constexpr (std::is_enum_v<T>) {
         return detail::tryExtractEnumValue<T>(value, key);
     } else {
-        if constexpr (std::is_same_v<T, std::string>) {
+        if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string>) {
             auto sv = value.value_or(std::string_view{});
             if (sv.data()) {
-                return std::string(sv);
+                return T(sv);
             } else {
                 return std::unexpected(std::format("value {} for key '{}' has wrong type {} {}, needs {}", value, key, value.value_type(), value.container_type(), std::string(meta::type_name<T>())));
             }
 
         } else if constexpr (meta::array_or_vector_type<T>) {
             using TValue            = typename T::value_type;
-            using TTensorElem       = std::conditional_t<std::is_same_v<TValue, std::string>, pmt::Value, TValue>;
+            using TTensorElem       = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, pmt::Value, TValue>;
             const auto* tensorValue = value.get_if<Tensor<TTensorElem>>();
             if (!tensorValue) {
                 return std::unexpected(std::format("Value {} is not a tensor of {}", value, meta::type_name<TTensorElem>()));
@@ -312,8 +312,8 @@ template<typename T>
             } else {
                 converted.resize(tensorValue->size());
             }
-            if constexpr (std::is_same_v<TValue, std::string>) {
-                std::ranges::transform(*tensorValue, converted.begin(), [](const pmt::Value& in) { return in.value_or(std::string()); });
+            if constexpr (std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>) {
+                std::ranges::transform(*tensorValue, converted.begin(), [](const pmt::Value& in) { return TValue(in.value_or(std::string_view{})); });
             } else {
                 std::ranges::copy(*tensorValue, converted.begin());
             }
@@ -643,13 +643,21 @@ private:
                 return true;
             }
 #endif
+        } else if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
+            if (value.holds<std::pmr::string>()) {
+                stagedParameters.insert_or_assign(keyPmr, value);
+                return true;
+            }
         } else if constexpr (meta::array_or_vector_type<Type>) {
             using TValue      = typename Type::value_type;
-            using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string>, std::pmr::string, TValue>;
+            using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, std::pmr::string, TValue>;
             if (value.holds<Tensor<TTensorElem>>()) {
                 auto converted = pmt::convertTo<Tensor<TTensorElem>>(value);
-                stagedParameters.insert_or_assign(keyPmr, std::move(converted.value()));
-                return true;
+                if (converted.has_value()) {
+                    stagedParameters.insert_or_assign(keyPmr, std::move(*converted));
+                    return true;
+                }
+                return false;
             }
         } else {
             if (value.holds<Type>()) {
@@ -669,22 +677,19 @@ private:
         std::expected<Type, std::string> maybe_value;
         if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
             maybe_value = detail::tryExtractEnumValue<Type>(stagedValue, key);
-        } else if constexpr (std::is_same_v<Type, std::string>) {
+        } else if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
             auto str = stagedValue.value_or(std::string_view{});
             if (str.data() != nullptr) {
-                maybe_value = std::string(str);
+                maybe_value = Type(str);
             } else {
                 maybe_value = std::unexpected("Unexpected type in stagedValue");
             }
         } else if constexpr (meta::array_or_vector_type<Type>) {
             using TValue       = typename Type::value_type;
-            using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue>, pmt::Value, TValue>;
+            using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue> || std::is_same_v<std::pmr::string, TValue>, pmt::Value, TValue>;
             auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
             if (tensor != nullptr) {
-                maybe_value = typename decltype(maybe_value)::value_type{};
-                if (auto conversionResult = pmt::assignTo(*maybe_value, *tensor); !conversionResult) {
-                    maybe_value = std::unexpected(conversionResult.error().message);
-                }
+                maybe_value = settings::convertParameter<Type>(key, stagedValue);
             } else {
                 maybe_value = std::unexpected("Unexpected type in stagedValue");
             }
@@ -749,15 +754,15 @@ private:
     // Helper template for updateActiveParameters - reads member value for active parameters
     template<std::size_t kIdx, typename RawType, typename Type>
     static void updateActiveParameterImpl(const TBlock* block, property_map& activeParameters) {
-        const auto& key    = std::string(refl::data_member_name<TBlock, kIdx>.view());
+        const auto  key    = std::pmr::string(refl::data_member_name<TBlock, kIdx>.view());
         const auto& member = refl::data_member<kIdx>(*block);
         if constexpr (detail::isEnumOrAnnotatedEnum<RawType>) {
-            activeParameters.insert_or_assign(convert_string_domain(key), detail::enumToString(member));
+            activeParameters.insert_or_assign(key, detail::enumToString(member));
         } else if constexpr (meta::array_or_vector_type<Type>) {
             const auto& from = detail::unwrap_decorated_reference(member);
-            activeParameters.insert_or_assign(convert_string_domain(key), pmt::Value(detail::collectionToTensor(from)));
+            activeParameters.insert_or_assign(key, pmt::Value(detail::collectionToTensor(from)));
         } else {
-            activeParameters.insert_or_assign(convert_string_domain(key), detail::unwrap_decorated_value(member));
+            activeParameters.insert_or_assign(key, detail::unwrap_decorated_value(member));
         }
     }
 
@@ -1021,7 +1026,8 @@ public:
     NO_INLINE void autoUpdate(const Tag& tag) override {
         if constexpr (refl::reflectable<TBlock>) {
             std::lock_guard lg(_mutex);
-            const auto      tagCtx = createSettingsCtxFromTag(tag);
+            const auto      tagCtx      = createSettingsCtxFromTag(tag);
+            const auto      previousCtx = _activeCtx; // capture before activateContext may change it
 
             SettingsCtx ctx;
             if (tagCtx != std::nullopt) {
@@ -1035,7 +1041,7 @@ public:
                 ctx = _activeCtx;
             }
 
-            const bool activeCtxChanged = _activeCtx != ctx;
+            const bool activeCtxChanged = previousCtx != ctx;
 
             // fuzzy-match auto-update parameters (exact lookup may fail due to timestamp mismatch)
             if (!_autoUpdateParameters.contains(ctx)) {
@@ -1114,6 +1120,7 @@ public:
                     const float ratio         = static_cast<float>(_block->output_chunk_size) / static_cast<float>(_block->input_chunk_size);
                     const float newSampleRate = ratio * (*_activeParameters.at(gr::tag::SAMPLE_RATE.shortKey()).template get_if<float>());
                     result.forwardParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate);
+                    _activeParameters.insert_or_assign(gr::tag::SAMPLE_RATE.shortKey(), newSampleRate); // update for value substitution in forwardInputTags
                 }
             }
 

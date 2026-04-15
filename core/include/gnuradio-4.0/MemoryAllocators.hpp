@@ -10,9 +10,11 @@
 #include <new>
 #include <print>
 #include <source_location>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <gnuradio-4.0/meta/CacheLineSize.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
@@ -238,7 +240,44 @@ template<class T>
     return target_ptr;
 }
 
+/// convert std:: container to std::pmr:: equivalent (element-wise copy, explicit resource)
+template<typename T>
+[[nodiscard]] auto to_pmr(const std::vector<T>& src, std::pmr::memory_resource* mr) {
+    return std::pmr::vector<T>(src.begin(), src.end(), mr);
+}
+
+[[nodiscard]] inline std::pmr::string to_pmr(std::string_view s, std::pmr::memory_resource* mr) { return std::pmr::string(s, mr); }
+
+/// convert std::pmr:: container to std:: equivalent (element-wise copy)
+template<typename T>
+[[nodiscard]] auto to_std(const std::pmr::vector<T>& src) {
+    return std::vector<T>(src.begin(), src.end());
+}
+
+[[nodiscard]] inline std::string to_std(std::string_view s) { return std::string(s); }
+
+/// satisfied by any type with an extended move constructor accepting a pmr allocator
+template<typename T>
+concept PmrMigratable = std::uses_allocator_v<T, std::pmr::polymorphic_allocator<>> && std::is_constructible_v<T, T&&, std::pmr::polymorphic_allocator<>>;
+
+/// migrate a single pmr-aware value to a new memory_resource (in-place destroy + reconstruct)
+/// safe: after move, field is empty — reconstruct from empty rebound is non-throwing
+template<PmrMigratable T>
+void migrateField(T& field, std::pmr::memory_resource* mr) {
+    std::pmr::polymorphic_allocator<> alloc{mr};
+    T                                 rebound{std::move(field), alloc};
+    std::destroy_at(&field);
+    std::construct_at(&field, std::move(rebound));
+}
+
 } // namespace pmr
 } // namespace gr::allocator
+
+namespace gr {
+using gr::allocator::pmr::migrateField;
+using gr::allocator::pmr::PmrMigratable;
+using gr::allocator::pmr::to_pmr;
+using gr::allocator::pmr::to_std;
+} // namespace gr
 
 #endif // MEMORYALLOCATORS_HPP

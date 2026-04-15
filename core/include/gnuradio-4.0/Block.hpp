@@ -770,6 +770,8 @@ public:
 
     // PropertyCallback, propertyCallbacks and propertySubscriptions are inherited from BlockBase
 
+    std::pmr::memory_resource* _allocResource = std::pmr::get_default_resource(); // pmr resource for internal and derived-block pmr fields
+
     PortCache<Derived, PortDirection::INPUT, PortType::STREAM>  inputStreamCache;
     PortCache<Derived, PortDirection::OUTPUT, PortType::STREAM> outputStreamCache;
 
@@ -1326,6 +1328,24 @@ public:
 
     constexpr void requestStop() noexcept { emitErrorMessageIfAny("requestStop()", this->changeStateTo(lifecycle::State::REQUESTED_STOP)); }
 
+    [[nodiscard]] constexpr std::pmr::polymorphic_allocator<> allocator() const noexcept { return std::pmr::polymorphic_allocator<>{_allocResource}; }
+
+    [[nodiscard]] constexpr std::pmr::memory_resource* resource() const noexcept { return _allocResource; }
+
+    void rebindFieldsTo(std::pmr::memory_resource* mr) {
+        _allocResource = mr;
+        refl::for_each_data_member_index<Derived>([&](auto kIdx) {
+            auto& field     = refl::data_member<kIdx>(self());
+            using F         = std::remove_cvref_t<decltype(field)>;
+            using Unwrapped = unwrap_if_wrapped_t<F>;
+            if constexpr (gr::PmrMigratable<F>) {
+                gr::migrateField(field, mr);
+            } else if constexpr (is_annotated<F>() && gr::PmrMigratable<Unwrapped>) {
+                gr::migrateField(field.value, mr);
+            }
+        });
+    }
+
     constexpr void processScheduledMessages() {
         using namespace std::chrono;
         const std::uint64_t nanoseconds_count = static_cast<uint64_t>(duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count());
@@ -1801,7 +1821,6 @@ public:
             }
         }
         if (this->state() == lifecycle::State::STOPPED) {
-            applyChangedSettings(); // drain any pending settings before disconnecting
             disconnectFromUpStreamParents();
             return work::Result{requestedWork, 0UZ, DONE};
         }
