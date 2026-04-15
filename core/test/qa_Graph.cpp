@@ -495,4 +495,147 @@ const boost::ut::suite<"forEachBlock"> _3 = [] {
     };
 };
 
+namespace {
+struct TestMR : std::pmr::memory_resource {
+    std::size_t allocCount = 0;
+    void*       do_allocate(std::size_t n, std::size_t) override {
+        ++allocCount;
+        return ::operator new(n == 0 ? 1 : n);
+    }
+    void do_deallocate(void* p, std::size_t, std::size_t) override { ::operator delete(p); }
+    bool do_is_equal(const std::pmr::memory_resource& o) const noexcept override { return this == &o; }
+};
+
+std::pmr::memory_resource* testProvider(const gr::ComputeDomain&, void* ctx) { return static_cast<std::pmr::memory_resource*>(ctx); }
+} // namespace
+
+const boost::ut::suite<"Edge domain resolution"> _edgeDomainResolution = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+
+    "edge with explicit domain resolves resource"_test = [] {
+        TestMR mr;
+        ComputeRegistry::instance().register_provider("test-edge", &testProvider);
+
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        EdgeParameters params;
+        params.domain      = ComputeDomain::gpu_shared("test-edge");
+        params.domain.user = &mr;
+        expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &mr) << "edge buffer must use resolved resource";
+        expect(edges[0]._tagResource == &mr) << "tag buffer must use resolved resource";
+    };
+
+    "edge with host domain uses default resource"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "host domain must use default resource";
+    };
+
+    "explicit dataResource overrides domain resolution"_test = [] {
+        TestMR explicitMr;
+        ComputeRegistry::instance().register_provider("test-override", &testProvider);
+
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        EdgeParameters params;
+        params.domain       = ComputeDomain::gpu_shared("test-override");
+        params.dataResource = &explicitMr;
+        params.tagResource  = &explicitMr;
+        expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &explicitMr) << "explicit resource must override domain resolution";
+    };
+
+    "block compute_domain auto-resolves edge resource"_test = [] {
+        TestMR mr;
+        ComputeRegistry::instance().register_provider("test-auto", &testProvider);
+
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-auto"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        // connect without explicit EdgeParameters — domain should auto-resolve from block compute_domain
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(eq(edges[0]._domain.kind, "gpu"sv)) << "domain kind auto-resolved from block compute_domain";
+        expect(eq(edges[0]._domain.backend, "test-auto"sv)) << "domain backend auto-resolved";
+    };
+
+    "explicit EdgeParameters.domain overrides block compute_domain"_test = [] {
+        TestMR mr;
+        ComputeRegistry::instance().register_provider("test-explicit-dom", &testProvider);
+
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}, {"compute_domain", "gpu:test-auto"}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        EdgeParameters params;
+        params.domain      = ComputeDomain::gpu_shared("test-explicit-dom");
+        params.domain.user = &mr;
+        expect(testGraph.connect<"out", "in">(src, sink, params).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(edges[0]._dataResource == &mr) << "explicit EdgeParameters.domain must override block compute_domain";
+        expect(eq(edges[0]._domain.backend, "test-explicit-dom"sv)) << "explicit domain backend preserved";
+    };
+
+    "two CPU blocks produce default edge"_test = [] {
+        Graph testGraph;
+        auto& src  = testGraph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t(10)}, {"verbose_console", false}});
+        auto& sink = testGraph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"verbose_console", false}});
+
+        expect(testGraph.connect<"out", "in">(src, sink).has_value());
+
+        scheduler::Simple<> sched;
+        expect(sched.exchange(std::move(testGraph)).has_value());
+        expect(sched.runAndWait().has_value());
+
+        auto edges = sched.graph().edges();
+        expect(eq(edges.size(), 1UZ));
+        expect(eq(edges[0]._domain.kind, "host"sv)) << "default CPU blocks must produce host domain edge";
+        expect(edges[0]._dataResource == std::pmr::get_default_resource()) << "default resource";
+    };
+};
+
 int main() { /* not needed for UT */ }

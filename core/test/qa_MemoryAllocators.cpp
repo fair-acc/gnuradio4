@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "gnuradio-4.0/MemoryAllocators.hpp"
+#include "gnuradio-4.0/Tag.hpp"
 
 namespace {
 template<typename T>
@@ -418,6 +419,107 @@ const boost::ut::suite<"gr::allocator::pmr:: ..."> _migrate = [] {
         expect(mr1.is_balanced());
         expect(mr2.is_balanced());
         expect(mr3.is_balanced());
+    };
+};
+
+const boost::ut::suite<"PMR conversion helpers"> _pmrConversion = [] {
+    using namespace boost::ut;
+    using namespace std::string_view_literals;
+
+    "to_pmr string round-trip"_test = [] {
+        auto* mr     = std::pmr::get_default_resource();
+        auto  pmrStr = gr::to_pmr("hello"sv, mr);
+        expect(eq(std::string_view(pmrStr), "hello"sv));
+        auto stdStr = gr::to_std(std::string_view(pmrStr));
+        expect(eq(std::string_view(stdStr), "hello"sv));
+    };
+
+    "to_pmr string with custom resource"_test = [] {
+        std::array<std::byte, 256>          buf{};
+        std::pmr::monotonic_buffer_resource mr(buf.data(), buf.size());
+        auto                                pmrStr = gr::to_pmr("custom"sv, &mr);
+        expect(eq(std::string_view(pmrStr), "custom"sv));
+    };
+
+    "to_pmr/to_std vector round-trip"_test = [] {
+        auto*              mr     = std::pmr::get_default_resource();
+        std::vector<float> stdVec = {1.f, 2.f, 3.f};
+        auto               pmrVec = gr::to_pmr(stdVec, mr);
+        expect(eq(pmrVec.size(), 3UZ));
+        expect(eq(pmrVec[2], 3.f));
+
+        auto backToStd = gr::to_std(pmrVec);
+        expect(eq(backToStd.size(), 3UZ));
+        expect(eq(backToStd[0], 1.f));
+    };
+
+    "to_pmr vector with custom resource"_test = [] {
+        std::array<std::byte, 4096>         buf{};
+        std::pmr::monotonic_buffer_resource mr(buf.data(), buf.size());
+        std::vector<int>                    src    = {10, 20, 30};
+        auto                                pmrVec = gr::to_pmr(src, &mr);
+        expect(eq(pmrVec.size(), 3UZ));
+        expect(eq(pmrVec[1], 20));
+    };
+
+    "to_pmr/to_std empty containers"_test = [] {
+        auto* mr = std::pmr::get_default_resource();
+        expect(gr::to_pmr(std::string_view{}, mr).empty());
+        expect(gr::to_std(std::string_view{}).empty());
+        expect(gr::to_pmr(std::vector<int>{}, mr).empty());
+        expect(gr::to_std(std::pmr::vector<int>{}).empty());
+    };
+
+    "PmrMigratable concept"_test = [] {
+        expect(gr::PmrMigratable<std::pmr::string>);
+        expect(gr::PmrMigratable<std::pmr::vector<float>>);
+        expect(gr::PmrMigratable<std::pmr::vector<int>>);
+        expect(!gr::PmrMigratable<std::string>);
+        expect(!gr::PmrMigratable<std::vector<float>>);
+        expect(!gr::PmrMigratable<int>);
+    };
+
+    "migrateField moves pmr::vector to new resource"_test = [] {
+        std::array<std::byte, 8192>         buf{};
+        std::pmr::monotonic_buffer_resource targetMr(buf.data(), buf.size());
+
+        std::pmr::vector<float> v = {1.f, 2.f, 3.f};
+        expect(v.get_allocator().resource() == std::pmr::get_default_resource());
+
+        gr::migrateField(v, &targetMr);
+        expect(v.get_allocator().resource() == &targetMr) << "resource must be rebound";
+        expect(eq(v.size(), 3UZ));
+        expect(eq(v[0], 1.f));
+        expect(eq(v[2], 3.f));
+    };
+
+    "migrateField moves pmr::string to new resource"_test = [] {
+        std::array<std::byte, 4096>         buf{};
+        std::pmr::monotonic_buffer_resource targetMr(buf.data(), buf.size());
+
+        std::pmr::string s("hello world — long enough to avoid SSO");
+        gr::migrateField(s, &targetMr);
+        expect(s.get_allocator().resource() == &targetMr);
+        expect(eq(std::string_view(s), "hello world — long enough to avoid SSO"sv));
+    };
+
+    "set_default_resource redirects property_map allocations"_test = [] {
+        std::array<std::byte, 65536>        buf{};
+        std::pmr::monotonic_buffer_resource poolMr(buf.data(), buf.size());
+
+        auto* previous = std::pmr::set_default_resource(&poolMr);
+
+        gr::property_map map;
+        map["sample_rate"]  = 48000.f;
+        map["signal_name"]  = std::pmr::string("test");
+        map["trigger_time"] = std::uint64_t(123456789);
+
+        expect(map.get_allocator().resource() == &poolMr) << "property_map must use the overridden default resource";
+
+        gr::Tag testTag{42UZ, std::move(map)};
+        expect(testTag.map.get_allocator().resource() == &poolMr) << "Tag::map must use the overridden default resource";
+
+        std::pmr::set_default_resource(previous);
     };
 };
 

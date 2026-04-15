@@ -67,7 +67,7 @@ struct EdgeParameters {
     std::pmr::memory_resource* dataResource  = std::pmr::get_default_resource();
     std::pmr::memory_resource* tagResource   = std::pmr::get_default_resource();
 
-    ComputeDomain domain = ComputeDomain::host();
+    ComputeDomain domain = ComputeDomain::host(); // resolution: explicit domain > block compute_domain > host; resolved in applyEdgeConnection()
 };
 
 struct Edge {
@@ -90,10 +90,27 @@ struct Edge {
     std::string                _name         = "unnamed edge"; // custom edge name
     std::pmr::memory_resource* _dataResource = std::pmr::get_default_resource();
     std::pmr::memory_resource* _tagResource  = std::pmr::get_default_resource();
+    ComputeDomain              _domain       = ComputeDomain::host();
+    std::string                _domainStr; // owns the string that _domain.backend may point into
 
     std::shared_ptr<property_map> _uiConstraints{std::make_shared<property_map>()}; // used to store UI and other non-dsp related meta-information
 
     Edge() = delete;
+
+    Edge(const Edge& other) : _sourceBlock(other._sourceBlock), _destinationBlock(other._destinationBlock), _sourcePortDefinition(other._sourcePortDefinition), _destinationPortDefinition(other._destinationPortDefinition), _state(other._state), _actualBufferSize(other._actualBufferSize), _edgeType(other._edgeType), _sourcePort(other._sourcePort), _destinationPort(other._destinationPort), _minBufferSize(other._minBufferSize), _weight(other._weight), _name(other._name), _dataResource(other._dataResource), _tagResource(other._tagResource), _domain(other._domain), _domainStr(other._domainStr), _uiConstraints(other._uiConstraints) {
+        if (!_domainStr.empty()) {
+            _domain = ComputeDomain::parse(_domainStr); // re-parse so string_views point into our _domainStr
+        }
+    }
+    Edge& operator=(const Edge& other) {
+        if (this != &other) {
+            Edge tmp(other);
+            *this = std::move(tmp);
+        }
+        return *this;
+    }
+    Edge(Edge&&) noexcept            = default;
+    Edge& operator=(Edge&&) noexcept = default;
 
     explicit Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition,               //
         std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPortDefinition,               //
@@ -107,7 +124,7 @@ struct Edge {
         EdgeParameters parameters) noexcept                                                                   //
         : _sourceBlock(sourceBlock), _destinationBlock(destinationBlock),                                     //
           _sourcePortDefinition(sourcePortDefinition), _destinationPortDefinition(destinationPortDefinition), //
-          _minBufferSize(parameters.minBufferSize), _weight(parameters.weight), _name(std::move(parameters.name)), _dataResource(parameters.dataResource), _tagResource(parameters.tagResource) {}
+          _minBufferSize(parameters.minBufferSize), _weight(parameters.weight), _name(std::move(parameters.name)), _dataResource(parameters.dataResource), _tagResource(parameters.tagResource), _domain(parameters.domain) {}
 
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& sourceBlock() const noexcept { return _sourceBlock; }
     [[nodiscard]] constexpr const std::shared_ptr<BlockModel>& destinationBlock() const noexcept { return _destinationBlock; }

@@ -96,19 +96,24 @@ const suite<"ComputeDomain"> _0 = [] {
         expect(eq(x.size(), 8UZ));
     };
 
-    "unknown backend throws"_test = [] {
+    "unknown backend returns error"_test = [] {
         gr::ComputeDomain dom;
         dom.kind    = "gpu";
         dom.backend = "does-not-exist";
-        expect(throws<std::runtime_error>([&] { (void)gr::bind(dom); }));
+        auto result = gr::ComputeRegistry::instance().resolve(dom, nullptr);
+        expect(!result.has_value());
+        // bind() falls back to new_delete_resource
+        auto bd = gr::bind(dom);
+        expect(bd.mr == std::pmr::new_delete_resource());
     };
 
-    "provider returned null throws"_test = [] {
+    "provider returned null returns error"_test = [] {
         gr::ComputeRegistry::instance().register_provider("null", &null_provider);
         gr::ComputeDomain dom;
         dom.kind    = "gpu";
         dom.backend = "null";
-        expect(throws<std::runtime_error>([&] { (void)gr::bind(dom); }));
+        auto result = gr::ComputeRegistry::instance().resolve(dom, nullptr);
+        expect(!result.has_value());
     };
 
     "mini example: gpu-shared (toy) alloc"_test = [] {
@@ -140,6 +145,100 @@ const suite<"ComputeDomain"> _0 = [] {
             t.join();
         }
         expect(mr.allocs.load() >= 8UZ);
+    };
+};
+
+const suite<"ComputeDomain::parse"> _parseTests = [] {
+    using namespace std::string_view_literals;
+
+    "parse host variants"_test = [] {
+        for (auto s : {"host"sv, "default_cpu"sv, "default_io"sv, ""sv}) {
+            auto d = gr::ComputeDomain::parse(s);
+            expect(eq(d.kind, "host"sv)) << s;
+            expect(d.access == gr::Access::HostOnly) << s;
+            expect(eq(d.backend, "none"sv)) << s;
+            expect(eq(d.deviceIndex, -1)) << s;
+        }
+    };
+
+    "parse gpu default backend"_test = [] {
+        auto d = gr::ComputeDomain::parse("gpu");
+        expect(eq(d.kind, "gpu"sv));
+        expect(d.access == gr::Access::Shared);
+        expect(eq(d.backend, "sycl"sv));
+        expect(eq(d.deviceIndex, -1));
+    };
+
+    "parse gpu:sycl"_test = [] {
+        auto d = gr::ComputeDomain::parse("gpu:sycl");
+        expect(eq(d.kind, "gpu"sv));
+        expect(eq(d.backend, "sycl"sv));
+        expect(eq(d.deviceIndex, -1));
+    };
+
+    "parse gpu:sycl:0"_test = [] {
+        auto d = gr::ComputeDomain::parse("gpu:sycl:0");
+        expect(eq(d.kind, "gpu"sv));
+        expect(eq(d.backend, "sycl"sv));
+        expect(eq(d.deviceIndex, 0));
+    };
+
+    "parse gpu:cuda:3"_test = [] {
+        auto d = gr::ComputeDomain::parse("gpu:cuda:3");
+        expect(eq(d.kind, "gpu"sv));
+        expect(eq(d.backend, "cuda"sv));
+        expect(eq(d.deviceIndex, 3));
+    };
+
+    "parse gpu:gl"_test = [] {
+        auto d = gr::ComputeDomain::parse("gpu:gl");
+        expect(eq(d.kind, "gpu"sv));
+        expect(eq(d.backend, "gl"sv));
+        expect(eq(d.deviceIndex, -1));
+    };
+
+    "parse gpu:hip:1"_test = [] {
+        auto d = gr::ComputeDomain::parse("gpu:hip:1");
+        expect(eq(d.kind, "gpu"sv));
+        expect(eq(d.backend, "hip"sv));
+        expect(eq(d.deviceIndex, 1));
+    };
+
+    "parse fpga"_test = [] {
+        auto d = gr::ComputeDomain::parse("fpga");
+        expect(eq(d.kind, "fpga"sv));
+        expect(d.access == gr::Access::Shared);
+        expect(eq(d.backend, "none"sv));
+        expect(eq(d.deviceIndex, -1));
+    };
+
+    "parse tpu"_test = [] {
+        auto d = gr::ComputeDomain::parse("tpu");
+        expect(eq(d.kind, "tpu"sv));
+        expect(d.access == gr::Access::Shared);
+        expect(eq(d.backend, "none"sv));
+    };
+
+    "parse unknown falls back to host"_test = [] {
+        for (auto s : {"custom_pool"sv, "my_thread"sv, "unknown:stuff"sv}) {
+            auto d = gr::ComputeDomain::parse(s);
+            expect(eq(d.kind, "host"sv)) << s;
+            expect(d.access == gr::Access::HostOnly) << s;
+        }
+    };
+
+    "parse gpu with SYCL-reported backend passes through"_test = [] {
+        auto d = gr::ComputeDomain::parse("gpu:vulkan");
+        expect(eq(d.kind, "gpu"sv));
+        expect(eq(d.backend, "vulkan"sv)) << "unknown backends are passed through for SYCL device names";
+    };
+
+    "parse gpu with vendor-specific backend"_test = [] {
+        std::string input = "gpu:Intel(R) UHD Graphics:0";
+        auto        d     = gr::ComputeDomain::parse(input);
+        expect(eq(d.kind, "gpu"sv));
+        expect(eq(d.backend, "Intel(R) UHD Graphics"sv));
+        expect(eq(d.deviceIndex, 0));
     };
 };
 

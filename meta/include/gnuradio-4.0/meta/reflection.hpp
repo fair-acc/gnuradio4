@@ -5,6 +5,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <array>
+#include <memory_resource>
 // #include <string> // for type_name specialization
 #include <tuple>
 #ifdef _MSC_VER
@@ -289,6 +290,7 @@ GR_SPECIALIZE_TYPE_NAME(double);
 GR_SPECIALIZE_TYPE_NAME(long double);
 GR_SPECIALIZE_TYPE_NAME(std::string);
 GR_SPECIALIZE_TYPE_NAME(std::string_view);
+GR_SPECIALIZE_TYPE_NAME(std::pmr::string);
 
 #undef GR_SPECIALIZE_TYPE_NAME
 

@@ -642,6 +642,44 @@ public:
             return edge._state;
         }
 
+        // auto-populate edge domain from block compute_domain if edge domain is still host (default)
+        if (edge._domain.kind == "host" && edge._dataResource == std::pmr::get_default_resource()) {
+            auto tryResolveFromBlock = [&edge](const BlockModel& block) -> bool {
+                const auto& staged    = block.settings().stagedParameters();
+                auto        domainStr = std::string();
+                if (auto it = staged.find(std::pmr::string("compute_domain")); it != staged.end()) {
+                    auto sv = it->second.value_or(std::string_view{});
+                    if (sv.data()) {
+                        domainStr = std::string(sv);
+                    }
+                }
+                if (domainStr.empty()) {
+                    if (auto active = block.settings().get("compute_domain")) {
+                        auto sv = active->value_or(std::string_view{});
+                        if (sv.data()) {
+                            domainStr = std::string(sv);
+                        }
+                    }
+                }
+                if (!domainStr.empty() && domainStr != gr::thread_pool::kDefaultIoPoolId && domainStr != gr::thread_pool::kDefaultCpuPoolId && domainStr != "host") {
+                    edge._domainStr = std::move(domainStr);
+                    edge._domain    = ComputeDomain::parse(edge._domainStr);
+                    return true;
+                }
+                return false;
+            };
+            if (!tryResolveFromBlock(*edge._sourceBlock)) {
+                tryResolveFromBlock(*edge._destinationBlock);
+            }
+        }
+        // resolve domain → PMR resources when dataResource is still the default
+        if (edge._domain.kind != "host" && edge._dataResource == std::pmr::get_default_resource()) {
+            if (auto* mr = ComputeRegistry::instance().tryResolve(edge._domain, edge._domain.user)) {
+                edge._dataResource = mr;
+                edge._tagResource  = mr;
+            }
+        }
+
         auto& sourcePort      = *srcPortResult.value();
         auto& destinationPort = *dstPortResult.value();
 
