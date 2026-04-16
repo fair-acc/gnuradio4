@@ -87,23 +87,31 @@ add_ut_test(qa_thread_pool)
 add_ut_test(qa_PerformanceMonitor)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
+
 add_ut_test(qa_SubGraphAssets)
+
 set(_QA_SUBGRAPH_HTTP_PORT 18765)
-set(_QA_SUBGRAPH_HTTP_PID  ${CMAKE_CURRENT_BINARY_DIR}/qa_SubGraphAssets_http_server.pid)
 target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
-add_test(NAME qa_SubGraphAssets_server_start
-  COMMAND python3
-          ${CMAKE_CURRENT_SOURCE_DIR}/start_http_server.py
-          ${CMAKE_CURRENT_SOURCE_DIR}/assets
-          ${_QA_SUBGRAPH_HTTP_PORT}
-          ${_QA_SUBGRAPH_HTTP_PID})
-set_tests_properties(qa_SubGraphAssets_server_start PROPERTIES FIXTURES_SETUP   qa_SubGraphAssetsHttpServer)
-add_test(NAME qa_SubGraphAssets_server_stop
-  COMMAND python3
-          ${CMAKE_CURRENT_SOURCE_DIR}/stop_http_server.py
-          ${_QA_SUBGRAPH_HTTP_PID})
-set_tests_properties(qa_SubGraphAssets_server_stop  PROPERTIES FIXTURES_CLEANUP qa_SubGraphAssetsHttpServer)
-set_tests_properties(qa_SubGraphAssets              PROPERTIES FIXTURES_REQUIRED qa_SubGraphAssetsHttpServer)
+if(APPLE)
+    set_tests_properties(qa_SubGraphAssets PROPERTIES 
+        ENVIRONMENT "GR_TEST_DISABLE_REMOTE=1"
+    )
+else()
+    set(_QA_SUBGRAPH_HTTP_PID  ${CMAKE_CURRENT_BINARY_DIR}/qa_SubGraphAssets_http_server.pid)
+    add_test(NAME qa_SubGraphAssets_server_start
+      COMMAND python3
+              ${CMAKE_CURRENT_SOURCE_DIR}/start_http_server.py
+              ${CMAKE_CURRENT_SOURCE_DIR}/assets
+              ${_QA_SUBGRAPH_HTTP_PORT}
+              ${_QA_SUBGRAPH_HTTP_PID})
+    set_tests_properties(qa_SubGraphAssets_server_start PROPERTIES FIXTURES_SETUP   qa_SubGraphAssetsHttpServer)
+    add_test(NAME qa_SubGraphAssets_server_stop
+      COMMAND python3
+              ${CMAKE_CURRENT_SOURCE_DIR}/stop_http_server.py
+              ${_QA_SUBGRAPH_HTTP_PID})
+    set_tests_properties(qa_SubGraphAssets_server_stop  PROPERTIES FIXTURES_CLEANUP qa_SubGraphAssetsHttpServer)
+    set_tests_properties(qa_SubGraphAssets              PROPERTIES FIXTURES_REQUIRED qa_SubGraphAssetsHttpServer)
+endif()
 
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_Settings)
