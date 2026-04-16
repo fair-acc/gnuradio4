@@ -311,4 +311,4 @@ const boost::ut::suite AssetsLoadingTests = [] {
     };
 };
 
-int main() {}
+int main() { return boost::ut::cfg<boost::ut::override>.run(); }

@@ -802,7 +802,7 @@ protected:
 
     void adoptBlock(const std::shared_ptr<BlockModel>& newBlock) {
         using enum lifecycle::State;
-        if (!_toChildMessagePort.connect(*newBlock->msgIn)) {
+        if (const auto connectResult = _toChildMessagePort.connect(*newBlock->msgIn); !connectResult.has_value()) {
             this->emitErrorMessage("connectBlockMessagePorts()", std::format("Failed to connect scheduler input message port to child '{}'", newBlock->uniqueName()));
         }
         auto toSchedulerBuffer = _fromChildMessagePort.buffer();
@@ -926,7 +926,7 @@ protected:
 
         // For the YAML path, settings from the serialised block definition are applied
         // via loadParametersFromPropertyMap after emplacement
-        const bool   isYamlPath   = messageData.find("yaml") != messageData.end();
+        const bool   isYamlPath   = messageData.contains("yaml");
         property_map yamlSettings = isYamlPath ? std::exchange(blockProperties, {}) : property_map{};
 
         auto& newBlock = targetGraph->emplaceBlock(blockType, blockProperties);
@@ -1238,17 +1238,16 @@ protected:
     std::optional<Message> propertyCallbackSchedulerInspect([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kSchedulerInspect);
 
-        const bool yamlSerialize = [&] {
-            if (!message.data) {
+        if (const bool yamlSerialize = [&] {
+                if (!message.data) {
+                    return false;
+                }
+                if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
+                    return it->second == "yaml";
+                }
                 return false;
-            }
-            if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-                return it->second == "yaml";
-            }
-            return false;
-        }();
-
-        if (!yamlSerialize) {
+            }();
+            !yamlSerialize) {
             message.data = [&] {
                 property_map result;
                 result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(this->name);

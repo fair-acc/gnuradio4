@@ -51,8 +51,7 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
 
                 // Convert ctxTime.context to a string, regardless of its actual type
                 std::string contextStr;
-                pmt::ValueVisitor([&contextStr](const auto& arg) {
-                    using T = std::decay_t<decltype(arg)>;
+                pmt::ValueVisitor([&contextStr]<typename T>(const T& arg) {
                     if constexpr (std::is_same_v<T, std::string>) {
                         contextStr = arg;
                     } else if constexpr (std::is_same_v<std::string_view, T> || std::is_same_v<std::pmr::string, T>) {
@@ -92,13 +91,13 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
         };
 
         property_map inputPorts;
-        for (auto& portOrCollection : block->dynamicInputPorts()) {
+        for (const auto& portOrCollection : block->dynamicInputPorts()) {
             inputPorts[convert_string_domain(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
         }
         result.emplace(serialization_fields::BLOCK_INPUT_PORTS, std::move(inputPorts));
 
         property_map outputPorts;
-        for (auto& portOrCollection : block->dynamicOutputPorts()) {
+        for (const auto& portOrCollection : block->dynamicOutputPorts()) {
             outputPorts[convert_string_domain(BlockModel::portName(portOrCollection))] = serializePortOrCollection(portOrCollection);
         }
         result.emplace(serialization_fields::BLOCK_OUTPUT_PORTS, std::move(outputPorts));
@@ -110,7 +109,7 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
 property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<BlockModel>& block, int flags) {
     property_map map;
 
-    if (gr::Graph* subgraph = block->graph()) {
+    if (const gr::Graph* subgraph = block->graph()) {
         map.emplace("id", "SUBGRAPH");
         map["unique_name"] = std::string(block->uniqueName());
         map["name"]        = std::string(block->name());
@@ -136,9 +135,7 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
             map["graph"]                  = std::move(subgraphMap);
         }
 
-        auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get());
-
-        if (schedulerModel != nullptr) {
+        if (const auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get()); schedulerModel != nullptr) {
             property_map schedulerMap;
             schedulerMap["id"] = pluginLoader.schedulerRegistry().typeName(block);
             map["scheduler"]   = std::move(schedulerMap);

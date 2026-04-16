@@ -74,9 +74,8 @@ inline std::expected<std::string, ParseError> readUriToString(std::string_view u
 inline std::expected<std::chrono::sys_seconds, ParseError> parseTimestamp(const std::string& ts) {
     // clang/libc++ does not implement std::chrono::parse
 #if not defined(_LIBCPP_VERSION)
-    std::istringstream       ss{ts};
-    std::chrono::sys_seconds tp;
-    if (ss >> std::chrono::parse("%Y-%m-%d-%H:%M:%S", tp)) {
+    std::istringstream ss{ts};
+    if (std::chrono::sys_seconds tp{}; ss >> std::chrono::parse("%Y-%m-%d-%H:%M:%S", tp)) {
         return tp;
     }
 #else
@@ -114,7 +113,7 @@ struct YamlDefinitionsLoader {
     };
 
     static std::string assetsCacheDir() {
-        if (auto* env = ::getenv("GR_DATA_CACHE_DIR"); env != nullptr) {
+        if (const char* env = ::getenv("GR_DATA_CACHE_DIR"); env != nullptr) {
             return std::string(env);
         } else {
             return std::string(GR_DATA_CACHE_DIR);
@@ -173,8 +172,7 @@ struct YamlDefinitionsLoader {
                 const auto modified     = getMapField(*assetMap, "modified", "undefined"s);
                 const auto modifiedTime = parseTimestamp(modified);
                 const auto cachePath    = cacheDir / uriToCacheFilename(blockUri);
-                const bool cacheHit     = modifiedTime && std::filesystem::exists(cachePath) && std::chrono::file_clock::to_sys(std::filesystem::last_write_time(cachePath)) >= *modifiedTime;
-                if (cacheHit) {
+                if (const bool cacheHit = modifiedTime && std::filesystem::exists(cachePath) && std::chrono::file_clock::to_sys(std::filesystem::last_write_time(cachePath)) >= *modifiedTime; cacheHit) {
                     blockContent = readUriToString(cachePath.string());
                 } else {
                     blockContent = readUriToString(blockUri);
@@ -416,8 +414,7 @@ public:
             return result;
         }
 
-        auto* plugin = pluginForBlockName(name);
-        if (plugin != nullptr) {
+        if (auto* plugin = pluginForBlockName(name); plugin != nullptr) {
             return plugin->createBlock(name, params);
         }
 

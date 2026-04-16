@@ -88,15 +88,12 @@ add_ut_test(qa_PerformanceMonitor)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
 
-add_ut_test(qa_SubGraphAssets)
-
-set(_QA_SUBGRAPH_HTTP_PORT 18765)
-target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
 if(APPLE)
-    set_tests_properties(qa_SubGraphAssets PROPERTIES 
-        ENVIRONMENT "GR_TEST_DISABLE_REMOTE=1"
-    )
+    # TODO: OSX CI doesn't run qa_SubGraphAssets properly, fix the CI setup
 else()
+    add_ut_test(qa_SubGraphAssets)
+    set(_QA_SUBGRAPH_HTTP_PORT 18765)
+    target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
     set(_QA_SUBGRAPH_HTTP_PID  ${CMAKE_CURRENT_BINARY_DIR}/qa_SubGraphAssets_http_server.pid)
     add_test(NAME qa_SubGraphAssets_server_start
       COMMAND python3

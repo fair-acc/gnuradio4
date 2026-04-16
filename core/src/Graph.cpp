@@ -106,17 +106,16 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
 std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kGraphInspect);
 
-    const bool yamlSerialize = [&] {
-        if (!message.data) {
+    if (const bool yamlSerialize = [&] {
+            if (!message.data) {
+                return false;
+            }
+            if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
+                return it->second == "yaml";
+            }
             return false;
-        }
-        if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-            return it->second == "yaml";
-        }
-        return false;
-    }();
-
-    if (!yamlSerialize) {
+        }();
+        !yamlSerialize) {
         message.data = [&] {
             property_map _result;
             auto&        result = _result;
