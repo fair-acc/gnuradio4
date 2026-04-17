@@ -18,6 +18,9 @@ gr_add_block_library(
   include/gnuradio-4.0/testing/Delay.hpp
   include/gnuradio-4.0/testing/PerformanceMonitor.hpp
   include/gnuradio-4.0/testing/SettingsChangeRecorder.hpp
+  include/gnuradio-4.0/testing/TestSpectrumGenerator.hpp
+  include/gnuradio-4.0/testing/SyntheticPeakSpectrum.hpp
+  include/gnuradio-4.0/testing/EvolvingPeakSpectrum.hpp
   LINK_LIBRARIES
   gnuradio4::gr-testing
   gnuradio4::gnuradio-algorithm)

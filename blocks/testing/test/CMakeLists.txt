@@ -1,2 +1,5 @@
 add_ut_test(qa_NullSources)
 add_ut_test(qa_UI_Integration)
+add_ut_test(qa_TestSpectrumGenerator)
+add_ut_test(qa_SyntheticPeakSpectrum)
+add_ut_test(qa_EvolvingPeakSpectrum)
