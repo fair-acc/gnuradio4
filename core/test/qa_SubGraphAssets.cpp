@@ -2,9 +2,14 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <boost/ut.hpp>
+
+#ifndef __EMSCRIPTEN__
+#include <httplib.h>
+#endif
 
 #include <build_configure.hpp>
 
@@ -19,12 +24,7 @@ namespace {
 const std::string kAssetsDir  = std::string(TESTS_SOURCE_PATH) + "/assets";
 const std::string kServerBase = "http://127.0.0.1:" + std::to_string(HTTP_SERVER_PORT);
 const std::string kCacheDir   = gr::detail::YamlDefinitionsLoader::assetsCacheDir() + "/asset_cache";
-#ifdef __EMSCRIPTEN__
-// Local filesystem and XHR are not available in the Node.js WASM test environment.
-const bool kSkipRemote = true;
-#else
-const bool kSkipRemote = std::getenv("GR_TEST_DISABLE_REMOTE") != nullptr;
-#endif
+const bool        kSkipRemote = std::getenv("GR_TEST_DISABLE_REMOTE") != nullptr;
 
 gr::PluginLoader makeLoader(const std::vector<std::string>& paths) {
     static gr::BlockRegistry     registry;
@@ -311,4 +311,23 @@ const boost::ut::suite AssetsLoadingTests = [] {
     };
 };
 
-int main() { return boost::ut::cfg<boost::ut::override>.run(); }
+int main() {
+#ifndef __EMSCRIPTEN__
+    httplib::Server httpServer;
+    httpServer.set_mount_point("/", kAssetsDir);
+    auto serverThread = std::thread([&httpServer] { httpServer.listen("127.0.0.1", HTTP_SERVER_PORT); });
+    httpServer.wait_until_ready();
+#else
+    // Give the pre-js HTTP server (started via server.listen()) time to bind
+    // before the first test fires an HTTP request.
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+#endif
+
+    const int result = boost::ut::cfg<boost::ut::override>.run();
+
+#ifndef __EMSCRIPTEN__
+    httpServer.stop();
+    serverThread.join();
+#endif
+    return result;
+}

@@ -60,7 +60,8 @@ inline std::string joinUri(const std::string& base, const std::string& file) {
 }
 
 inline std::expected<std::string, ParseError> readUriToString(std::string_view uri) {
-    auto readerExp = gr::algorithm::fileio::readAsync(uri);
+    gr::algorithm::fileio::ReaderConfig config;
+    auto readerExp = gr::algorithm::fileio::readAsync(uri, config);
     if (!readerExp) {
         return std::unexpected(ParseError{.message = "Failed to read URI"});
     }
@@ -125,14 +126,12 @@ struct YamlDefinitionsLoader {
     explicit YamlDefinitionsLoader(std::span<const std::string> uris) { loadBlockDefinitions(uris); }
 
     void loadBlockDefinitions(std::span<const std::string> uris) {
-#ifndef __EMSCRIPTEN__
         const auto cacheDir = std::filesystem::path(assetsCacheDir()) / "asset_cache";
         std::filesystem::create_directories(cacheDir);
         if (!std::filesystem::is_directory(cacheDir)) {
             std::println("FATAL ERROR: Directory {} does not exist, can not proceed", cacheDir.string());
             std::terminate();
         }
-#endif
 
         auto getMapField = []<typename R>(const auto& map, const auto& key, const R& defaultValue) {
             auto it = map.find(key);
@@ -168,7 +167,6 @@ struct YamlDefinitionsLoader {
                 const auto blockUri = joinUri(uriBase, file);
 
                 std::expected<std::string, ParseError> blockContent;
-#ifndef __EMSCRIPTEN__
                 const auto modified     = getMapField(*assetMap, "modified", "undefined"s);
                 const auto modifiedTime = parseTimestamp(modified);
                 const auto cachePath    = cacheDir / uriToCacheFilename(blockUri);
@@ -182,9 +180,6 @@ struct YamlDefinitionsLoader {
                         }
                     }
                 }
-#else
-                blockContent = readUriToString(blockUri);
-#endif
                 if (!blockContent) {
                     continue;
                 }

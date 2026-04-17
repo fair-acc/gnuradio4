@@ -88,26 +88,20 @@ add_ut_test(qa_PerformanceMonitor)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
 
-if(APPLE)
-    # TODO: OSX CI doesn't run qa_SubGraphAssets properly, fix the CI setup
+add_ut_test(qa_SubGraphAssets)
+set(_QA_SUBGRAPH_HTTP_PORT 18765)
+target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
+if(EMSCRIPTEN)
+    set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    set(HTTP_SERVER_PORT ${_QA_SUBGRAPH_HTTP_PORT})
+    configure_file(subgraph_assets_pre.js.in subgraph_assets_pre.js @ONLY)
+    target_link_options(qa_SubGraphAssets PRIVATE
+        --pre-js=${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js
+        "SHELL:-s PROXY_TO_PTHREAD=1")
+    set_property(TARGET qa_SubGraphAssets APPEND PROPERTY LINK_DEPENDS
+        ${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js)
 else()
-    add_ut_test(qa_SubGraphAssets)
-    set(_QA_SUBGRAPH_HTTP_PORT 18765)
-    target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
-    set(_QA_SUBGRAPH_HTTP_PID  ${CMAKE_CURRENT_BINARY_DIR}/qa_SubGraphAssets_http_server.pid)
-    add_test(NAME qa_SubGraphAssets_server_start
-      COMMAND python3
-              ${CMAKE_CURRENT_SOURCE_DIR}/start_http_server.py
-              ${CMAKE_CURRENT_SOURCE_DIR}/assets
-              ${_QA_SUBGRAPH_HTTP_PORT}
-              ${_QA_SUBGRAPH_HTTP_PID})
-    set_tests_properties(qa_SubGraphAssets_server_start PROPERTIES FIXTURES_SETUP   qa_SubGraphAssetsHttpServer)
-    add_test(NAME qa_SubGraphAssets_server_stop
-      COMMAND python3
-              ${CMAKE_CURRENT_SOURCE_DIR}/stop_http_server.py
-              ${_QA_SUBGRAPH_HTTP_PID})
-    set_tests_properties(qa_SubGraphAssets_server_stop  PROPERTIES FIXTURES_CLEANUP qa_SubGraphAssetsHttpServer)
-    set_tests_properties(qa_SubGraphAssets              PROPERTIES FIXTURES_REQUIRED qa_SubGraphAssetsHttpServer)
+    target_link_libraries(qa_SubGraphAssets PRIVATE httplib::httplib)
 endif()
 
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
