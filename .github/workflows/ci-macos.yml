@@ -42,7 +42,7 @@ jobs:
         uses: Homebrew/actions/setup-homebrew@main
 
       - name: Install LLVM and ccache
-        run: brew install ${{ matrix.compiler.brew_pkg }} ccache
+        run: brew install ${{ matrix.compiler.brew_pkg }} ccache cpr
 
       - name: Log compiler version
         run: ${{ matrix.compiler.prefix }}/bin/clang --version
