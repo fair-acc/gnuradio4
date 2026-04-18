@@ -184,7 +184,7 @@ public:
     Annotated<std::size_t, "max_work_items", Doc<"number of work items per work scheduling interval (controls latency)">>      max_work_items                  = std::numeric_limits<std::size_t>::max(); // TODO: check whether we can keep this std::size_t or more consistently to gr::Size_t
     Annotated<property_map, "sched_settings", Doc<"scheduler implementation specific settings">>                               sched_settings{};
 
-    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, timeout_inactivity_count, process_stream_to_message_ratio, max_work_items, sched_settings);
+    GR_MAKE_REFLECTABLE(SchedulerBase, timeout_ms, watchdog_timeout, timeout_inactivity_count, process_stream_to_message_ratio, max_work_items, poolName, sched_settings);
 
     constexpr static block::Category blockCategory = block::Category::ScheduledBlockGroup;
 
@@ -264,7 +264,7 @@ public:
         _executionOrder.reset(); // force earlier crashes if this is accessed after destruction (e.g. from thread that was kept running)
     }
 
-    [[nodiscard]] std::expected<meta::indirect<Graph>, Error> exchange(meta::indirect<Graph>&& newGraph, std::string_view defaultPoolName = gr::thread_pool::kDefaultCpuPoolId, const profiling::Options& option = {}) {
+    [[nodiscard]] std::expected<meta::indirect<Graph>, Error> exchange(meta::indirect<Graph>&& newGraph, const profiling::Options& option = {}) {
         using enum lifecycle::State;
         const auto oldState = this->state();
         if (lifecycle::isActive(oldState)) { // need to stop running scheduler
@@ -288,8 +288,12 @@ public:
             rebuildProfiler(option);
         }
 
-        if (_pool->name() != defaultPoolName) { // need to update thread pool
-            _pool = gr::thread_pool::Manager::instance().get(defaultPoolName);
+        if (_pool->name() != std::string_view(poolName.value)) { // sync pool with (possibly updated) poolName setting
+            try {
+                _pool = gr::thread_pool::Manager::instance().get(std::string_view(poolName.value));
+            } catch (const std::exception&) {
+                // unknown pool name: keep existing pool
+            }
         }
 
         // restore the original lifecycle state
@@ -328,7 +332,20 @@ public:
         return _nRunningJobs->value() > 0UZ;
     }
 
-    void setPool(std::shared_ptr<TaskExecutor> pool) { _pool = std::move(pool); }
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) noexcept {
+        if (!newSettings.contains("poolName")) {
+            return;
+        }
+        const std::string_view requested{poolName.value};
+        if (!_pool || _pool->name() == requested) {
+            return;
+        }
+        try {
+            _pool = gr::thread_pool::Manager::instance().get(requested);
+        } catch (const std::exception&) {
+            // unknown pool name: keep existing pool
+        }
+    }
 
     void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
 
@@ -818,8 +835,7 @@ protected:
             return;
         }
 
-        auto blockAddress = reinterpret_cast<std::uintptr_t>(&newBlock);
-        auto runnerIndex  = (blockAddress / sizeof(void*)) % nBatches;
+        auto runnerIndex = std::hash<BlockModel*>{}(newBlock.get()) % nBatches;
         _adoptionBlocks[runnerIndex].push_back(newBlock);
         switch (newBlock->state()) {
         case STOPPED:

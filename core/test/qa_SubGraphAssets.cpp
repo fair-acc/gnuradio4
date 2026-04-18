@@ -16,6 +16,7 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
+#include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
 
 namespace ut = boost::ut;
 
@@ -44,14 +45,7 @@ gr::PluginLoader makeLoaderWithPlugins(const std::vector<std::string>& assetPath
     return gr::PluginLoader(registry, schedulerRegistry, allPaths);
 }
 
-// Derive the cache file name the same way PluginLoader does.
-std::string uriToFilename(std::string_view uri) {
-    std::string name(uri);
-    std::ranges::replace_if(name, [](unsigned char c) { return !std::isalnum(c) && c != '.' && c != '-'; }, '_');
-    return name;
-}
-
-std::filesystem::path cachePathFor(std::string_view uri) { return std::filesystem::path(kCacheDir) / uriToFilename(uri); }
+std::filesystem::path cachePathFor(std::string_view uri) { return std::filesystem::path(kCacheDir) / gr::detail::uriToCacheFilename(uri); }
 
 void clearCache() { std::filesystem::remove_all(kCacheDir); }
 
@@ -318,9 +312,18 @@ int main() {
     auto serverThread = std::thread([&httpServer] { httpServer.listen("127.0.0.1", HTTP_SERVER_PORT); });
     httpServer.wait_until_ready();
 #else
-    // Give the pre-js HTTP server (started via server.listen()) time to bind
-    // before the first test fires an HTTP request.
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // Poll the pre-js HTTP server until a known asset responds. This replaces a
+    // blind sleep; Node's http.createServer().listen(...) has no synchronous
+    // ready signal, so probing is the only deterministic option here.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (auto reader = gr::algorithm::fileio::readAsync(kServerBase + "/root_a/index.yaml"); reader) {
+            if (auto bytes = reader->get(); bytes && !bytes->empty()) {
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
 #endif
 
     const int result = boost::ut::cfg<boost::ut::override>.run();

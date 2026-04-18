@@ -75,15 +75,25 @@ std::optional<Message> Graph::propertyCallbackRegistrySchedulerTypes([[maybe_unu
 std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kInspectBlock);
     using namespace std::string_literals;
-    const auto& data       = message.data.value();
+
+    gr::Message reply;
+    reply.endpoint = graph::property::kBlockInspected;
+
+    if (!message.data) {
+        reply.data = std::unexpected(Error{"Invalid block specification"s});
+        return reply;
+    }
+    const auto& data       = *message.data;
     const auto  uniqueName = data.at("uniqueName").value_or(std::string_view{});
     if (uniqueName.empty()) {
-        throw gr::exception(std::format("Invalid block specification"));
+        reply.data = std::unexpected(Error{"Invalid block specification"s});
+        return reply;
     }
 
     auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
     if (it == _blocks.end()) {
-        throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
+        reply.data = std::unexpected(Error{std::format("Block {} was not found in {}", uniqueName, this->unique_name)});
+        return reply;
     }
 
     const bool yamlSerialize = [&] {
@@ -93,8 +103,6 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
         return false;
     }();
 
-    gr::Message reply;
-    reply.endpoint = graph::property::kBlockInspected;
     if (yamlSerialize) {
         reply.data = property_map{{"yamlData", pmt::yaml::serialize(serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All))}};
     } else {

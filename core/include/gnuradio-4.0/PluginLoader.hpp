@@ -102,9 +102,16 @@ inline std::expected<std::chrono::sys_seconds, ParseError> parseTimestamp(const 
     return std::unexpected(ParseError{.message = std::format("Invalid timestamp {}", ts)});
 }
 
-inline std::string uriToCacheFilename(std::string uri) {
-    std::ranges::replace_if(uri, [](unsigned char c) { return !std::isalnum(c) && c != '.' && c != '-'; }, '_');
-    return uri;
+inline std::string uriToCacheFilename(std::string_view uri) {
+    // FNV-1a 64-bit: deterministic across runs, collision-resistant, NAME_MAX-safe.
+    constexpr std::uint64_t fnvOffset = 0xcbf29ce484222325ULL;
+    constexpr std::uint64_t fnvPrime  = 0x100000001b3ULL;
+    std::uint64_t           hash      = fnvOffset;
+    for (char c : uri) {
+        hash ^= static_cast<std::uint8_t>(c);
+        hash *= fnvPrime;
+    }
+    return std::format("{:016x}", hash);
 }
 
 struct YamlDefinitionsLoader {
@@ -126,11 +133,12 @@ struct YamlDefinitionsLoader {
     explicit YamlDefinitionsLoader(std::span<const std::string> uris) { loadBlockDefinitions(uris); }
 
     void loadBlockDefinitions(std::span<const std::string> uris) {
-        const auto cacheDir = std::filesystem::path(assetsCacheDir()) / "asset_cache";
-        std::filesystem::create_directories(cacheDir);
-        if (!std::filesystem::is_directory(cacheDir)) {
-            std::println("FATAL ERROR: Directory {} does not exist, can not proceed", cacheDir.string());
-            std::terminate();
+        const auto      cacheDir = std::filesystem::path(assetsCacheDir()) / "asset_cache";
+        std::error_code createEc;
+        std::filesystem::create_directories(cacheDir, createEc);
+        const bool cacheAvailable = !createEc && std::filesystem::is_directory(cacheDir);
+        if (!cacheAvailable) {
+            std::println("warning: plugin cache directory {} is not available; caching disabled", cacheDir.string());
         }
 
         auto getMapField = []<typename R>(const auto& map, const auto& key, const R& defaultValue) {
@@ -167,18 +175,22 @@ struct YamlDefinitionsLoader {
                 const auto blockUri = joinUri(uriBase, file);
 
                 std::expected<std::string, ParseError> blockContent;
-                const auto modified     = getMapField(*assetMap, "modified", "undefined"s);
-                const auto modifiedTime = parseTimestamp(modified);
-                const auto cachePath    = cacheDir / uriToCacheFilename(blockUri);
-                if (const bool cacheHit = modifiedTime && std::filesystem::exists(cachePath) && std::chrono::file_clock::to_sys(std::filesystem::last_write_time(cachePath)) >= *modifiedTime; cacheHit) {
-                    blockContent = readUriToString(cachePath.string());
-                } else {
-                    blockContent = readUriToString(blockUri);
-                    if (blockContent) {
-                        if (std::ofstream f(cachePath); f) {
-                            f << *blockContent;
+                if (cacheAvailable) {
+                    const auto modified     = getMapField(*assetMap, "modified", "undefined"s);
+                    const auto modifiedTime = parseTimestamp(modified);
+                    const auto cachePath    = cacheDir / uriToCacheFilename(blockUri);
+                    if (const bool cacheHit = modifiedTime && std::filesystem::exists(cachePath) && std::chrono::file_clock::to_sys(std::filesystem::last_write_time(cachePath)) >= *modifiedTime; cacheHit) {
+                        blockContent = readUriToString(cachePath.string());
+                    } else {
+                        blockContent = readUriToString(blockUri);
+                        if (blockContent) {
+                            if (std::ofstream f(cachePath); f) {
+                                f << *blockContent;
+                            }
                         }
                     }
+                } else {
+                    blockContent = readUriToString(blockUri);
                 }
                 if (!blockContent) {
                     continue;
@@ -217,7 +229,7 @@ struct YamlDefinitionsLoader {
     }
 };
 
-std::shared_ptr<gr::BlockModel> instantiateBlockFromYamlDefinition(gr::PluginLoader& loader, const YamlDefinitionsLoader::Definition& def);
+std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> instantiateBlockFromYamlDefinition(gr::PluginLoader& loader, const YamlDefinitionsLoader::Definition& def) noexcept;
 
 } // namespace detail
 
@@ -414,7 +426,12 @@ public:
         }
 
         if (const auto def = _yamlRegistry.definitionForBlockName(name)) {
-            return detail::instantiateBlockFromYamlDefinition(*this, *def);
+            auto result = detail::instantiateBlockFromYamlDefinition(*this, *def);
+            if (!result) {
+                std::print("Error: YAML block instantiation failed for '{}': {} ({})\n", name, result.error().message, result.error().srcLoc());
+                return {};
+            }
+            return *result;
         }
 
 #ifndef NDEBUG
@@ -455,7 +472,7 @@ public:
             }
             std::print("]\n");
 
-            std::print("Available schedulers from plugins [\n", name);
+            std::print("Available schedulers from plugins [\n");
             for (const auto& [schedulerName, _] : _pluginForSchedulerName) {
                 std::print("    {}\n", schedulerName);
             }
@@ -513,7 +530,12 @@ public:
         }
 
         if (const auto def = _yamlRegistry.definitionForBlockName(name)) {
-            return detail::instantiateBlockFromYamlDefinition(*this, *def);
+            auto result = detail::instantiateBlockFromYamlDefinition(*this, *def);
+            if (!result) {
+                std::print("Error: YAML block instantiation failed for '{}': {} ({})\n", name, result.error().message, result.error().srcLoc());
+                return nullptr;
+            }
+            return *result;
         }
 
         return nullptr;

@@ -361,17 +361,19 @@ inline gr::meta::indirect<gr::Graph> loadGrc(PluginLoader& loader, std::string_v
 
 inline std::string saveGrc(PluginLoader& loader, const gr::Graph& rootGraph) { return pmt::yaml::serialize(detail::saveGraphToMap(loader, rootGraph)); }
 
-inline std::shared_ptr<gr::BlockModel> detail::instantiateBlockFromYamlDefinition(PluginLoader& loader, const detail::YamlDefinitionsLoader::Definition& def) {
+inline std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> detail::instantiateBlockFromYamlDefinition(PluginLoader& loader, const detail::YamlDefinitionsLoader::Definition& def) noexcept {
     try {
         gr::Graph tempGraph;
         detail::loadGraphFromMap(loader, tempGraph, def.definition);
         auto blocks = tempGraph.blocks();
         if (blocks.empty()) {
-            return nullptr;
+            return std::unexpected(gr::Error{"YAML definition produced no blocks"});
         }
         return blocks.front();
-    } catch (...) {
-        return nullptr;
+    } catch (const gr::exception& e) {
+        return std::unexpected(gr::Error{e});
+    } catch (const std::exception& e) {
+        return std::unexpected(gr::Error{e});
     }
 }
 
