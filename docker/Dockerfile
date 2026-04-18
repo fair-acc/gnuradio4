@@ -97,6 +97,12 @@ RUN git clone --depth 1 --branch ${ACPP_GIT_REF} https://github.com/AdaptiveCpp/
  && cmake --install /tmp/AdaptiveCpp/build \
  && rm -rf /tmp/AdaptiveCpp
 
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository universe && \
+    apt-get update && \
+    apt-get install -y libcpr-dev
+
 ENV PATH="${ACPP_INSTALL_PREFIX}/bin:${PATH}"
 
 USER user

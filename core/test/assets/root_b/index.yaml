@@ -1,0 +1,5 @@
+assets:
+  - file: block_gamma.yaml
+    created: "2024-01-01-00:00:00"
+    modified: "2024-01-15-10:00:00"
+    block_type: MyGammaBlock

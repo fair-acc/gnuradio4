@@ -122,7 +122,7 @@ inline void sendAndWaitMessageEmplaceEdge(gr::MsgPortOut& toGraph, gr::MsgPortIn
         {std::pmr::string(gr::serialization_fields::EDGE_SOURCE_PORT), sourcePort},             //
         {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_BLOCK), destinationBlock}, //
         {std::pmr::string(gr::serialization_fields::EDGE_DESTINATION_PORT), destinationPort},   //
-        {std::pmr::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::Size_t()},       //
+        {std::pmr::string(gr::serialization_fields::EDGE_MIN_BUFFER_SIZE), gr::undefined_Size}, //
         {std::pmr::string(gr::serialization_fields::EDGE_WEIGHT), 0},                           //
         {std::pmr::string(gr::serialization_fields::EDGE_NAME), "unnamed edge"}};
     testing::sendAndWaitForReply<gr::message::Command::Set>(toGraph, fromGraph, serviceName, gr::scheduler::property::kEmplaceEdge, data, //

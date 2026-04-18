@@ -1,4 +1,5 @@
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
 
 namespace gr {
@@ -74,49 +75,81 @@ std::optional<Message> Graph::propertyCallbackRegistrySchedulerTypes([[maybe_unu
 std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kInspectBlock);
     using namespace std::string_literals;
-    const auto& data       = message.data.value();
-    const auto  uniqueName = data.at("uniqueName").value_or(std::string_view{});
-    if (uniqueName.empty()) {
-        throw gr::exception(std::format("Invalid block specification"));
-    }
-    using namespace std::string_literals;
-
-    auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
-    if (it == _blocks.end()) {
-        throw gr::exception(std::format("Block {} was not found in {}", uniqueName, this->unique_name));
-    }
 
     gr::Message reply;
     reply.endpoint = graph::property::kBlockInspected;
-    reply.data     = serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All);
+
+    if (!message.data) {
+        reply.data = std::unexpected(Error{"Invalid block specification"s});
+        return reply;
+    }
+    const auto& data       = *message.data;
+    const auto  uniqueName = data.at("uniqueName").value_or(std::string_view{});
+    if (uniqueName.empty()) {
+        reply.data = std::unexpected(Error{"Invalid block specification"s});
+        return reply;
+    }
+
+    auto it = std::ranges::find_if(_blocks, [&uniqueName](const auto& block) { return block->uniqueName() == uniqueName; });
+    if (it == _blocks.end()) {
+        reply.data = std::unexpected(Error{std::format("Block {} was not found in {}", uniqueName, this->unique_name)});
+        return reply;
+    }
+
+    const bool yamlSerialize = [&] {
+        if (const auto fmt = data.find("serialization_format"); fmt != data.cend()) {
+            return fmt->second == "yaml";
+        }
+        return false;
+    }();
+
+    if (yamlSerialize) {
+        reply.data = property_map{{"yamlData", pmt::yaml::serialize(serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All))}};
+    } else {
+        reply.data = serializeBlock(*_pluginLoader, *it, BlockSerializationFlags::All);
+    }
     return {reply};
 }
 
 std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kGraphInspect);
-    message.data = [&] {
-        property_map _result;
-        auto&        result = _result;
 
-        result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
-        result[std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
-        result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
+    if (const bool yamlSerialize = [&] {
+            if (!message.data) {
+                return false;
+            }
+            if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
+                return it->second == "yaml";
+            }
+            return false;
+        }();
+        !yamlSerialize) {
+        message.data = [&] {
+            property_map _result;
+            auto&        result = _result;
 
-        property_map serializedChildren;
-        for (const auto& child : blocks()) {
-            serializedChildren[std::pmr::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
-        }
-        result[std::pmr::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
+            result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
+            result[std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
+            result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
 
-        property_map serializedEdges;
-        std::size_t  index = 0UZ;
-        for (const auto& edge : edges()) {
-            serializedEdges[convert_string_domain(std::to_string(index))] = serializeEdge(edge);
-            index++;
-        }
-        result[std::pmr::string(serialization_fields::BLOCK_EDGES)] = std::move(serializedEdges);
-        return result;
-    }();
+            property_map serializedChildren;
+            for (const auto& child : blocks()) {
+                serializedChildren[std::pmr::string(child->uniqueName())] = serializeBlock(*_pluginLoader, child, BlockSerializationFlags::All);
+            }
+            result[std::pmr::string(serialization_fields::BLOCK_CHILDREN)] = std::move(serializedChildren);
+
+            property_map serializedEdges;
+            std::size_t  index = 0UZ;
+            for (const auto& edge : edges()) {
+                serializedEdges[convert_string_domain(std::to_string(index))] = serializeEdge(edge);
+                index++;
+            }
+            result[std::pmr::string(serialization_fields::BLOCK_EDGES)] = std::move(serializedEdges);
+            return result;
+        }();
+    } else {
+        message.data = {{"yamlData", saveGrc(*_pluginLoader, *this)}};
+    }
 
     message.endpoint = graph::property::kGraphInspected;
     return message;

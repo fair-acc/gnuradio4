@@ -1,0 +1,23 @@
+definition_metadata:
+  block_type: MyAlphaBlock
+  plugin_name: AlphaPlugin
+  plugin_author: Test Author
+  plugin_license: LGPL-3.0
+  plugin_version: "2024-01-15"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: chained_multiplier_alpha
+    graph:
+      blocks:
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier1
+        - id: good::multiply<float64>
+          parameters:
+            name: multiplier2
+      connections:
+        - [multiplier1, 0, multiplier2, 0]
+      exported_ports:
+        - [multiplier1, INPUT, in, in]
+        - [multiplier2, OUTPUT, out, out]

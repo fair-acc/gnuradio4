@@ -88,6 +88,25 @@ add_ut_test(qa_PerformanceMonitor)
 add_ut_test(qa_YamlPmt)
 add_ut_test(qa_PortableTypeName)
 
+add_ut_test(qa_SubGraphAssets)
+set(_QA_SUBGRAPH_HTTP_PORT 18765)
+target_compile_definitions(qa_SubGraphAssets PRIVATE HTTP_SERVER_PORT=${_QA_SUBGRAPH_HTTP_PORT})
+if(EMSCRIPTEN)
+    set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+    set(HTTP_SERVER_PORT ${_QA_SUBGRAPH_HTTP_PORT})
+    configure_file(subgraph_assets_pre.js.in subgraph_assets_pre.js @ONLY)
+    target_link_options(qa_SubGraphAssets PRIVATE
+        --pre-js=${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js
+        "SHELL:-s PROXY_TO_PTHREAD=1")
+    set_property(TARGET qa_SubGraphAssets APPEND PROPERTY LINK_DEPENDS
+        ${CMAKE_CURRENT_BINARY_DIR}/subgraph_assets_pre.js)
+else()
+    target_link_libraries(qa_SubGraphAssets PRIVATE httplib::httplib)
+endif()
+if (GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
+  add_dependencies(qa_SubGraphAssets GoodBasePlugin good_math_plugin good_conversion_plugin bad_plugin)
+endif ()
+
 if(GR_ENABLE_BLOCK_REGISTRY AND INTERNAL_ENABLE_BLOCK_PLUGINS)
   add_ut_test(qa_Settings)
 

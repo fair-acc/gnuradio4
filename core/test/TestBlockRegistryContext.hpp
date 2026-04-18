@@ -3,7 +3,7 @@
 
 #include <boost/ut.hpp>
 
-using paths = std::vector<std::filesystem::path>;
+using paths = std::vector<std::string>;
 
 struct TestContext {
     gr::BlockRegistry     registry;
@@ -18,5 +18,5 @@ struct TestContext {
     }
 
     template<typename... Args>
-    TestContext(std::vector<std::filesystem::path> pluginPaths, Args*... args) : registry(initRegistry(args...)), loader(registry, schedulerRegistry, std::move(pluginPaths)) {}
+    TestContext(std::vector<std::string> pluginPaths, Args*... args) : registry(initRegistry(args...)), loader(registry, schedulerRegistry, std::move(pluginPaths)) {}
 };

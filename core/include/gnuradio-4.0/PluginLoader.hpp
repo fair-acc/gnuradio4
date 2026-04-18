@@ -2,15 +2,27 @@
 #define GNURADIO_PLUGIN_LOADER_HPP
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <span>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#if defined(_LIBCPP_VERSION)
+#include <regex>
+#endif
+
 #include "BlockRegistry.hpp"
+
+#include <gnuradio-4.0/PluginMetadata.hpp>
+#include <gnuradio-4.0/YamlPmt.hpp>
+#include <gnuradio-4.0/algorithm/fileio/FileIo.hpp>
 
 #ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
 #include <dlfcn.h>
@@ -24,6 +36,202 @@ namespace gr {
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
+
+// Forward declaration needed for instantiateBlockFromYamlDefinition before PluginLoader is fully defined.
+class PluginLoader;
+
+namespace detail {
+
+using gr::pmt::yaml::ParseError;
+
+template<typename R>
+R optionalMapAt(const auto& map, std::string_view key, auto defaultResult) {
+    if (auto it = map.find(std::string(key)); it != map.cend()) {
+        return it->second;
+    } else {
+        return defaultResult;
+    }
+}
+
+inline std::string joinUri(const std::string& base, const std::string& file) {
+    return base.empty()          ? file        //
+           : base.ends_with('/') ? base + file //
+                                 : base + '/' + file;
+}
+
+inline std::expected<std::string, ParseError> readUriToString(std::string_view uri) {
+    gr::algorithm::fileio::ReaderConfig config;
+    auto readerExp = gr::algorithm::fileio::readAsync(uri, config);
+    if (!readerExp) {
+        return std::unexpected(ParseError{.message = "Failed to read URI"});
+    }
+    auto bytesExp = readerExp->get();
+    if (!bytesExp) {
+        return std::unexpected(ParseError{.message = "Failed to read URI"});
+    }
+    return std::string(bytesExp->begin(), bytesExp->end());
+}
+
+inline std::expected<std::chrono::sys_seconds, ParseError> parseTimestamp(const std::string& ts) {
+    // clang/libc++ does not implement std::chrono::parse
+#if not defined(_LIBCPP_VERSION)
+    std::istringstream ss{ts};
+    if (std::chrono::sys_seconds tp{}; ss >> std::chrono::parse("%Y-%m-%d-%H:%M:%S", tp)) {
+        return tp;
+    }
+#else
+    static const std::regex pattern(R"(^(\d{4})-(\d{2})-(\d{2})-(\d{2}):(\d{2}):(\d{2})$)");
+
+    std::smatch match;
+    if (std::regex_match(ts, match, pattern)) {
+        int y  = std::stoi(match[1]);
+        int m  = std::stoi(match[2]);
+        int d  = std::stoi(match[3]);
+        int hh = std::stoi(match[4]);
+        int mm = std::stoi(match[5]);
+        int ss = std::stoi(match[6]);
+
+        std::chrono::year_month_day ymd{std::chrono::year{y}, std::chrono::month{static_cast<unsigned>(m)}, std::chrono::day{static_cast<unsigned>(d)}};
+
+        auto days = std::chrono::sys_days{ymd};
+        auto time = std::chrono::hours{hh} + std::chrono::minutes{mm} + std::chrono::seconds{ss};
+
+        return days + time;
+    }
+#endif
+    return std::unexpected(ParseError{.message = std::format("Invalid timestamp {}", ts)});
+}
+
+inline std::string uriToCacheFilename(std::string_view uri) {
+    // FNV-1a 64-bit: deterministic across runs, collision-resistant, NAME_MAX-safe.
+    constexpr std::uint64_t fnvOffset = 0xcbf29ce484222325ULL;
+    constexpr std::uint64_t fnvPrime  = 0x100000001b3ULL;
+    std::uint64_t           hash      = fnvOffset;
+    for (char c : uri) {
+        hash ^= static_cast<std::uint8_t>(c);
+        hash *= fnvPrime;
+    }
+    return std::format("{:016x}", hash);
+}
+
+struct YamlDefinitionsLoader {
+    struct Definition {
+        gr::property_map   definition;
+        gr_plugin_metadata metadata;
+    };
+
+    static std::string assetsCacheDir() {
+        if (const char* env = ::getenv("GR_DATA_CACHE_DIR"); env != nullptr) {
+            return std::string(env);
+        } else {
+            return std::string(GR_DATA_CACHE_DIR);
+        }
+    }
+
+    std::unordered_map<std::string, Definition> _definitionForBlockName;
+
+    explicit YamlDefinitionsLoader(std::span<const std::string> uris) { loadBlockDefinitions(uris); }
+
+    void loadBlockDefinitions(std::span<const std::string> uris) {
+        const auto      cacheDir = std::filesystem::path(assetsCacheDir()) / "asset_cache";
+        std::error_code createEc;
+        std::filesystem::create_directories(cacheDir, createEc);
+        const bool cacheAvailable = !createEc && std::filesystem::is_directory(cacheDir);
+        if (!cacheAvailable) {
+            std::println("warning: plugin cache directory {} is not available; caching disabled", cacheDir.string());
+        }
+
+        auto getMapField = []<typename R>(const auto& map, const auto& key, const R& defaultValue) {
+            auto it = map.find(key);
+            if (it == map.cend()) {
+                return defaultValue;
+
+            } else {
+                return it->second.value_or(defaultValue);
+            }
+        };
+
+        for (const auto& uriBase : uris) {
+            // Note: If all this was expected-based, this could have been a chain of and_then calls
+            const auto indexContent = readUriToString(joinUri(uriBase, "index.yaml"));
+            if (!indexContent) {
+                continue;
+            }
+            const auto indexMap = gr::pmt::yaml::deserialize(*indexContent);
+            if (!indexMap) {
+                continue;
+            }
+            const auto assetsList = getMapField(*indexMap, "assets", gr::Tensor<gr::pmt::Value>{});
+            for (const gr::pmt::Value& assetEntry : assetsList) {
+                const auto* assetMap = assetEntry.get_if<pmt::Value::Map>();
+                if (!assetMap) {
+                    continue;
+                }
+                const auto file = getMapField(*assetMap, "file", std::string());
+                if (file.empty()) {
+                    continue;
+                }
+
+                const auto blockUri = joinUri(uriBase, file);
+
+                std::expected<std::string, ParseError> blockContent;
+                if (cacheAvailable) {
+                    const auto modified     = getMapField(*assetMap, "modified", "undefined"s);
+                    const auto modifiedTime = parseTimestamp(modified);
+                    const auto cachePath    = cacheDir / uriToCacheFilename(blockUri);
+                    if (const bool cacheHit = modifiedTime && std::filesystem::exists(cachePath) && std::chrono::file_clock::to_sys(std::filesystem::last_write_time(cachePath)) >= *modifiedTime; cacheHit) {
+                        blockContent = readUriToString(cachePath.string());
+                    } else {
+                        blockContent = readUriToString(blockUri);
+                        if (blockContent) {
+                            if (std::ofstream f(cachePath); f) {
+                                f << *blockContent;
+                            }
+                        }
+                    }
+                } else {
+                    blockContent = readUriToString(blockUri);
+                }
+                if (!blockContent) {
+                    continue;
+                }
+
+                auto blockMap = gr::pmt::yaml::deserialize(*blockContent);
+                if (!blockMap) {
+                    continue;
+                }
+
+                const auto meta  = getMapField(*blockMap, "definition_metadata", gr::property_map{});
+                auto       field = [&](const auto& key) {
+                    const auto it = meta.find(std::string(key));
+                    return it != meta.end() ? it->second.value_or(std::string{}) : std::string{};
+                };
+                gr_plugin_metadata metadata{
+                    .plugin_name    = field("plugin_name"),    //
+                    .plugin_author  = field("plugin_author"),  //
+                    .plugin_license = field("plugin_license"), //
+                    .plugin_version = field("plugin_version"),
+                    .block_type     = field("block_type"), //
+                };
+
+                if (metadata.block_type.empty()) {
+                    continue;
+                }
+
+                auto blockType = metadata.block_type;
+                _definitionForBlockName.insert_or_assign(std::move(blockType), Definition{std::move(*blockMap), std::move(metadata)});
+            }
+        }
+    }
+
+    std::optional<Definition> definitionForBlockName(std::string_view name) const { //
+        return detail::optionalMapAt<std::optional<Definition>>(_definitionForBlockName, name, std::nullopt);
+    }
+};
+
+std::expected<std::shared_ptr<gr::BlockModel>, gr::Error> instantiateBlockFromYamlDefinition(gr::PluginLoader& loader, const YamlDefinitionsLoader::Definition& def) noexcept;
+
+} // namespace detail
 
 #ifdef INTERNAL_ENABLE_BLOCK_PLUGINS
 // Plugins are not supported on WASM
@@ -126,34 +334,29 @@ public:
 
 class PluginLoader {
 private:
-    std::vector<PluginHandler>                       _pluginHandlers;
+    detail::YamlDefinitionsLoader                _yamlRegistry;
+    std::vector<PluginHandler>                   _pluginHandlers;
+    std::unordered_map<std::string, std::string> _failedPlugins;
+    std::unordered_set<std::string>              _loadedPluginFiles;
+
     std::unordered_map<std::string, gr_plugin_base*> _pluginForBlockName;
     std::unordered_map<std::string, gr_plugin_base*> _pluginForSchedulerName;
-    std::unordered_map<std::string, std::string>     _failedPlugins;
-    std::unordered_set<std::string>                  _loadedPluginFiles;
 
     BlockRegistry*     _registry;
     SchedulerRegistry* _schedulerRegistry;
 
-    gr_plugin_base* pluginForBlockName(std::string_view name) const {
-        if (auto it = _pluginForBlockName.find(std::string(name)); it != _pluginForBlockName.end()) {
-            return it->second;
-        } else {
-            return nullptr;
-        }
+    gr_plugin_base* pluginForBlockName(std::string_view name) const { //
+        return detail::optionalMapAt<gr_plugin_base*>(_pluginForBlockName, name, nullptr);
     }
 
-    gr_plugin_base* pluginForSchedulerName(std::string_view name) const {
-        if (auto it = _pluginForSchedulerName.find(std::string(name)); it != _pluginForSchedulerName.end()) {
-            return it->second;
-        } else {
-            return nullptr;
-        }
+    gr_plugin_base* pluginForSchedulerName(std::string_view name) const { //
+        return detail::optionalMapAt<gr_plugin_base*>(_pluginForSchedulerName, name, nullptr);
     }
 
 public:
-    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::filesystem::path> plugin_directories) : _registry(&registry), _schedulerRegistry(&scheduler_registry) {
-        for (const auto& directory : plugin_directories) {
+    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::string> paths) : _yamlRegistry(paths), _registry(&registry), _schedulerRegistry(&scheduler_registry) {
+        for (const auto& pathStr : paths) {
+            const std::filesystem::path directory(pathStr);
             if (!std::filesystem::is_directory(directory)) {
                 continue;
             }
@@ -218,27 +421,40 @@ public:
             return result;
         }
 
-        auto* plugin = pluginForBlockName(name);
-        if (plugin == nullptr) {
-#ifndef NDEBUG
-            std::print("Available blocks in the registry\n");
-            for (const auto& block : _registry->keys()) {
-                std::print("    {}\n", block);
-            }
-            std::print("]\n");
-
-            std::print("Available blocks from plugins [\n", name);
-            for (const auto& [blockName, _] : _pluginForBlockName) {
-                std::print("    {}\n", blockName);
-            }
-            std::print("]\n");
-#endif
-            std::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
-            return {};
+        if (auto* plugin = pluginForBlockName(name); plugin != nullptr) {
+            return plugin->createBlock(name, params);
         }
 
-        auto result = plugin->createBlock(name, params);
-        return result;
+        if (const auto def = _yamlRegistry.definitionForBlockName(name)) {
+            auto result = detail::instantiateBlockFromYamlDefinition(*this, *def);
+            if (!result) {
+                std::print("Error: YAML block instantiation failed for '{}': {} ({})\n", name, result.error().message, result.error().srcLoc());
+                return {};
+            }
+            return *result;
+        }
+
+#ifndef NDEBUG
+        std::print("Available blocks in the registry\n");
+        for (const auto& block : _registry->keys()) {
+            std::print("    {}\n", block);
+        }
+        std::print("]\n");
+
+        std::print("Available blocks from plugins [\n");
+        for (const auto& [blockName, _] : _pluginForBlockName) {
+            std::print("    {}\n", blockName);
+        }
+        std::print("]\n");
+
+        std::print("Available YAML definitions[\n");
+        for (const auto& [blockName, _] : _yamlRegistry._definitionForBlockName) {
+            std::print("    {}\n", blockName);
+        }
+        std::print("]\n");
+#endif
+        std::print("Error: Plugin not found for '{}', returning nullptr.\n", name);
+        return {};
     }
 
     std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = property_map{}) {
@@ -256,7 +472,7 @@ public:
             }
             std::print("]\n");
 
-            std::print("Available schedulers from plugins [\n", name);
+            std::print("Available schedulers from plugins [\n");
             for (const auto& [schedulerName, _] : _pluginForSchedulerName) {
                 std::print("    {}\n", schedulerName);
             }
@@ -287,17 +503,20 @@ public:
     bool isBlockAvailable(std::string_view block) const { return _registry->contains(block) || pluginForBlockName(block) != nullptr; }
 
     bool isSchedulerAvailable(std::string_view scheduler) const { return _schedulerRegistry->contains(scheduler) || pluginForSchedulerName(scheduler) != nullptr; }
+
+    const auto& definitionForBlockName() const { return _yamlRegistry._definitionForBlockName; }
 };
 #else
 // PluginLoader on WASM is just a wrapper on BlockRegistry to provide the
 // same API as proper PluginLoader
 class PluginLoader {
 private:
-    BlockRegistry*     _registry;
-    SchedulerRegistry* _schedulerRegistry;
+    detail::YamlDefinitionsLoader _yamlRegistry;
+    BlockRegistry*                _registry;
+    SchedulerRegistry*            _schedulerRegistry;
 
 public:
-    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::filesystem::path> /*plugin_directories*/) : _registry(&registry), _schedulerRegistry(&scheduler_registry) {}
+    PluginLoader(BlockRegistry& registry, SchedulerRegistry& scheduler_registry, std::span<const std::string> paths) : _yamlRegistry(paths), _registry(&registry), _schedulerRegistry(&scheduler_registry) {}
 
     BlockRegistry&     registry() { return *_registry; }
     SchedulerRegistry& schedulerRegistry() { return *_schedulerRegistry; }
@@ -305,7 +524,22 @@ public:
     auto availableBlocks() const { return _registry->keys(); }
     auto availableSchedulers() const { return _schedulerRegistry->keys(); }
 
-    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) { return _registry->create(name, params); }
+    std::shared_ptr<gr::BlockModel> instantiate(std::string_view name, const property_map& params = {}) {
+        if (auto result = _registry->create(name, params)) {
+            return result;
+        }
+
+        if (const auto def = _yamlRegistry.definitionForBlockName(name)) {
+            auto result = detail::instantiateBlockFromYamlDefinition(*this, *def);
+            if (!result) {
+                std::print("Error: YAML block instantiation failed for '{}': {} ({})\n", name, result.error().message, result.error().srcLoc());
+                return nullptr;
+            }
+            return *result;
+        }
+
+        return nullptr;
+    }
 
     std::shared_ptr<gr::SchedulerModel> instantiateScheduler(std::string_view name, const property_map& params = {}) {
         auto result = _schedulerRegistry->create(name, params);
@@ -314,6 +548,8 @@ public:
 
     bool isBlockAvailable(std::string_view block) const { return _registry->contains(block); }
     bool isSchedulerAvailable(std::string_view scheduler) const { return _schedulerRegistry->contains(scheduler); }
+
+    const auto& definitionForBlockName() const { return _yamlRegistry._definitionForBlockName; }
 };
 #endif
 

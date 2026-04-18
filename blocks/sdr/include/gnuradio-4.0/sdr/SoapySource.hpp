@@ -35,7 +35,7 @@ Operating modes:
 
 Tested with RTL-SDR and LimeSDR drivers.)">;
 
-    using TSizeChecker = Limits<0U, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
+    using TSizeChecker = Limits<1UZ, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
     using TBasePort    = PortOut<T>;
     using TPortType    = std::conditional_t<nPorts == 1U, TBasePort, std::conditional_t<nPorts == std::dynamic_extent, std::vector<TBasePort>, std::array<TBasePort, nPorts>>>;
 

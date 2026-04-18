@@ -164,7 +164,7 @@ inline void setupEmscriptenDialogCallback() {
 FILEIO_EXTERN_C {
 
     FILEIO_EXPORT
-    void fileio_dialog_on_bytes(std::uintptr_t handleToken, const std::uint8_t* data, int len) {
+    inline void fileio_dialog_on_bytes(std::uintptr_t handleToken, const std::uint8_t* data, int len) {
         auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
         if (handle == nullptr) {
             return;
@@ -183,7 +183,7 @@ FILEIO_EXTERN_C {
     }
 
     FILEIO_EXPORT
-    void fileio_dialog_on_cancel(std::uintptr_t handleToken) {
+    inline void fileio_dialog_on_cancel(std::uintptr_t handleToken) {
         auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
         if (handle != nullptr && handle->fail) {
             handle->fail("User cancelled");
@@ -191,7 +191,7 @@ FILEIO_EXTERN_C {
     }
 
     FILEIO_EXPORT
-    void fileio_dialog_on_error(std::uintptr_t handleToken) {
+    inline void fileio_dialog_on_error(std::uintptr_t handleToken) {
         auto* handle = reinterpret_cast<DialogOpenHandle*>(handleToken);
         if (handle != nullptr && handle->fail) {
             handle->fail("JS error while reading file");

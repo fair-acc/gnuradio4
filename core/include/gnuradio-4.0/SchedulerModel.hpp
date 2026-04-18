@@ -68,6 +68,11 @@ public:
             return;
         }
 
+        if (std::string_view(sched.poolName.value) == gr::thread_pool::kDefaultCpuPoolId) {
+            std::ignore = sched.settings().set({{"poolName", std::string(gr::thread_pool::kDefaultIoPoolId)}});
+            std::ignore = sched.settings().applyStagedParameters();
+        }
+
         _schedulerThread = std::thread([&sched] {
             // this will invoke scheduler's start(), which blocks
             if (!sched.changeStateTo(gr::lifecycle::State::RUNNING)) {

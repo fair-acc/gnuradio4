@@ -3,6 +3,7 @@ add_library(
   src/Value.cpp
   src/ValueHelper.cpp
   src/Block.cpp
+  src/BlockModel.cpp
   src/Settings.cpp
   src/Graph.cpp
   src/PluginLoader.cpp
@@ -59,6 +60,7 @@ target_link_libraries(
   gnuradio-core
   PUBLIC gnuradio-options
          gnuradio-meta
+         gnuradio-algorithm
          magic_enum
          vir)
 

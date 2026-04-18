@@ -597,6 +597,51 @@ const boost::ut::suite<"SchedulerTests"> SchedulerSettingsTests = [] {
 
         expect(sched.runAndWait().has_value());
     };
+
+    "poolName setting swaps to a registered pool"_test = [] {
+        using namespace gr::thread_pool;
+        static constexpr std::string_view kAltPoolName = "qa_alt_pool";
+
+        auto altPool = std::make_shared<ThreadPoolWrapper>(std::make_unique<BasicThreadPool>(std::string(kAltPoolName), TaskType::CPU_BOUND, 1U, 1U), "CPU");
+        Manager::instance().replacePool(std::string(kAltPoolName), std::move(altPool));
+
+        gr::scheduler::Simple<> sched;
+        gr::MsgPortIn           fromScheduler;
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+
+        std::ignore = sched.settings().set({{"poolName", std::string(kAltPoolName)}});
+        std::ignore = sched.settings().activateContext();
+        std::ignore = sched.settings().applyStagedParameters();
+
+        expect(eq(std::string_view(sched.poolName.value), kAltPoolName)) << "poolName reflectable should reflect the new value";
+
+        for (const auto& msg : gr::testing::consumeAllReplyMessages(fromScheduler)) {
+            expect(msg.data.has_value()) << std::format("unexpected error message on swap to known pool: endpoint='{}' error='{}'", msg.endpoint, msg.data.has_value() ? "" : msg.data.error().message);
+        }
+    };
+
+    "poolName setting with unknown pool emits error"_test = [] {
+        gr::scheduler::Simple<> sched;
+        gr::MsgPortIn           fromScheduler;
+        expect(sched.msgOut.connect(fromScheduler).has_value());
+
+        std::ignore = gr::testing::consumeAllReplyMessages(fromScheduler); // discard any setup-time messages
+
+        static constexpr std::string_view kBogusPoolName = "qa_definitely_not_a_pool_xyz";
+        std::ignore                                      = sched.settings().set({{"poolName", std::string(kBogusPoolName)}});
+        std::ignore                                      = sched.settings().activateContext();
+        std::ignore                                      = sched.settings().applyStagedParameters();
+
+        const auto messages     = gr::testing::consumeAllReplyMessages(fromScheduler);
+        bool       sawPoolError = false;
+        for (const auto& msg : messages) {
+            if (msg.endpoint == "settingsChanged(poolName)" && !msg.data.has_value()) {
+                expect(msg.data.error().message.find(kBogusPoolName) != std::string::npos) << "error message should mention the rejected pool name";
+                sawPoolError = true;
+            }
+        }
+        expect(sawPoolError) << "expected error notification for unknown pool";
+    };
 };
 
 const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {

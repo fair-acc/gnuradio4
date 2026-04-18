@@ -22,6 +22,7 @@ Uses a dedicated IO thread to decouple hardware latency from the scheduler.
 Shares the underlying SoapySDR device handle with SoapySource when both use
 the same driver string, enabling full-duplex TX/RX operation.)">;
 
+    using TSizeChecker  = Limits<1UZ, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
     using TBasePort     = PortIn<T>;
     using TPortType     = std::conditional_t<nPorts == 1U, TBasePort, std::conditional_t<nPorts == std::dynamic_extent, std::vector<TBasePort>, std::array<TBasePort, nPorts>>>;
     using StagingBuffer = gr::CircularBuffer<T>;
@@ -51,7 +52,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
     Annotated<std::string, "tune_args", Doc<"per-channel tuning kwargs (comma-separated key=value)">>                      tune_args;
     Annotated<std::string, "frontend_mapping", Doc<"logical-to-physical channel mapping">>                                 frontend_mapping;
     Annotated<std::string, "device_settings", Doc<"device-level settings (comma-separated key=value)">>                    device_settings;
-    Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per write">, Visible>                                      max_chunk_size        = 512U << 4U;
+    Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per write">, Visible, TSizeChecker>                        max_chunk_size        = 512U << 4U;
     Annotated<std::uint32_t, "max_time_out_us", Unit<"us">, Doc<"SoapySDR polling timeout">>                               max_time_out_us       = 1'000;
     Annotated<gr::Size_t, "max_underflow_count", Doc<"max consecutive underflows before stop (0 = disable)">>              max_underflow_count   = 10U;
     Annotated<bool, "verbose_underflow", Doc<"log each underflow event">>                                                  verbose_underflow     = false;

@@ -1,2 +1,4 @@
 # this is a known soapy leak.
 leak:libSoapySDR
+# OpenSSL TLS init — freed only at process exit, not a real leak.
+leak:OPENSSL_init_crypto

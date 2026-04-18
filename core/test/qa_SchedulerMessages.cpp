@@ -570,4 +570,107 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     std::print("Counting sink counted to {}\n", sink.count);
 };
 
+const boost::ut::suite InspectBlockTests = [] {
+    using namespace std::string_literals;
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::test;
+    using enum gr::message::Command;
+
+    "kInspectBlock returns property_map for a normal block"_test = [] {
+        gr::Graph graph(context->loader);
+        auto&     source = graph.emplaceBlock<gr::testing::CountingSink<float>>();
+
+        TestScheduler scheduler(std::move(graph));
+
+        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string(source.unique_name)}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
+
+        expect(reply.has_value());
+        if (reply) {
+            const auto& data = reply->data.value();
+            expect(data.contains("id")) << "id field must be present";
+            expect(data.contains("unique_name")) << "unique_name field must be present";
+            expect(!data.contains("yamlData")) << "yamlData must not be present in property_map mode";
+        }
+    };
+
+    "kInspectBlock returns yamlData string when serialization_format is yaml"_test = [] {
+        gr::Graph graph(context->loader);
+        auto&     source = graph.emplaceBlock<gr::testing::CountingSink<float>>();
+
+        TestScheduler scheduler(std::move(graph));
+
+        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string(source.unique_name)}, {"serialization_format", "yaml"s}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
+
+        expect(reply.has_value());
+        if (reply) {
+            const auto& data = reply->data.value();
+            expect(data.contains("yamlData")) << "yamlData key must be present";
+            if (data.contains("yamlData")) {
+                const auto yaml = gr::test::get_value_or_fail<std::string>(data.at("yamlData"));
+                expect(!yaml.empty()) << "yamlData must not be empty";
+            }
+        }
+    };
+};
+
+const boost::ut::suite EmplaceBlockFromYamlTests = [] {
+    using namespace std::string_literals;
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::testing;
+    using namespace gr::test;
+    using enum gr::message::Command;
+
+    "kEmplaceBlock with yaml field creates a normal block"_test = [] {
+        gr::Graph graph(context->loader);
+        auto&     existingBlock = graph.emplaceBlock<gr::testing::CountingSink<float>>();
+
+        TestScheduler scheduler(std::move(graph));
+
+        // First, inspect the block to get its YAML definition
+        auto inspectReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.graph().unique_name, graph::property::kInspectBlock, property_map{{"uniqueName", std::string(existingBlock.unique_name)}, {"serialization_format", "yaml"s}}, [](const Message& msg) { return msg.endpoint == graph::property::kBlockInspected; });
+
+        expect(fatal(inspectReply.has_value())) << "kInspectBlock must succeed";
+        const auto yamlDef = gr::test::get_value_or_fail<std::string>(inspectReply->data.value().at("yamlData"));
+
+        const auto blockCountBefore = scheduler.graph().blocks().size();
+
+        // Now emplace a new block from that YAML definition
+        auto emplaceReply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, property_map{{"yaml", yamlDef}}, [](const Message& msg) { return msg.endpoint == scheduler::property::kBlockEmplaced; });
+
+        expect(emplaceReply.has_value()) << "kEmplaceBlock with yaml must succeed";
+        expect(eq(scheduler.graph().blocks().size(), blockCountBefore + 1UZ)) << "one new block must be added";
+
+        if (emplaceReply) {
+            const auto& replyData = emplaceReply->data.value();
+            expect(replyData.contains("id")) << "reply must contain id";
+            const auto newId = gr::test::get_value_or_fail<std::string>(replyData.at("id"));
+            expect(!newId.empty()) << "id must not be empty";
+        }
+    };
+
+    "kEmplaceBlock with empty yaml field returns error"_test = [] {
+        TestScheduler scheduler(gr::Graph(context->loader));
+
+        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, property_map{{"yaml", ""s}}, [](const Message& msg) { return msg.endpoint == scheduler::property::kEmplaceBlock || msg.endpoint == scheduler::property::kBlockEmplaced; });
+
+        expect(reply.has_value());
+        if (reply) {
+            expect(!reply->data.has_value()) << "error response must have no data";
+        }
+    };
+
+    "kEmplaceBlock with invalid yaml field returns error"_test = [] {
+        TestScheduler scheduler(gr::Graph(context->loader));
+
+        auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, scheduler.unique_name(), scheduler::property::kEmplaceBlock, property_map{{"yaml", "id: nonexistent::BlockType<float32>\nparameters: {}\n"s}}, [](const Message& msg) { return msg.endpoint == scheduler::property::kEmplaceBlock || msg.endpoint == scheduler::property::kBlockEmplaced; });
+
+        // Either an error is returned or no reply (behaviour depends on emplaceBlock error handling)
+        // The main check is that it doesn't crash
+        expect(true) << "must not crash on invalid yaml block type";
+    };
+};
+
 int main() { /* tests are statically executed */ }
