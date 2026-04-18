@@ -656,7 +656,12 @@ protected:
                 currentProgress = progress->value();
             }
 
-            bool hasMessagesToProcess = msgToCount == 0UZ;
+            // Process messages either when the ratio gate opens, or immediately when any entry-point port has
+            // pending traffic. This keeps the ratio's amortisation of empty-queue checks while giving arriving
+            // messages single-iteration latency (important for multi-hop sub-scheduler message paths).
+            const bool hasMessagesToProcess = msgToCount == 0UZ                //
+                                              || this->msgIn.available() > 0UZ //
+                                              || _fromChildMessagePort.available() > 0UZ;
             if (hasMessagesToProcess) {
                 if (runnerID == 0UZ || nRunningJobs->value() == 0UZ) {
                     this->processScheduledMessages(); // execute the scheduler- and Graph-specific message handler only once globally
@@ -1255,15 +1260,16 @@ protected:
     std::optional<Message> propertyCallbackSchedulerInspect([[maybe_unused]] std::string_view propertyName, Message message) {
         assert(propertyName == scheduler::property::kSchedulerInspect);
 
-        if (const bool yamlSerialize = [&] {
-                if (!message.data) {
+        if (const bool yamlSerialize =
+                [&] {
+                    if (!message.data) {
+                        return false;
+                    }
+                    if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
+                        return it->second == "yaml";
+                    }
                     return false;
-                }
-                if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-                    return it->second == "yaml";
-                }
-                return false;
-            }();
+                }();
             !yamlSerialize) {
             message.data = [&] {
                 property_map result;
