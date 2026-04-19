@@ -332,6 +332,71 @@ template<typename T>
 
 } // namespace settings
 
+namespace detail {
+// Free templates (not CtxSettings<TBlock>::) so the bodies instantiate once per Type
+// instead of once per (TBlock, Type).
+template<typename Type>
+inline std::optional<std::string> setParameterImpl(std::string_view key, const pmt::Value& value, property_map& newParameters) {
+    if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
+        const auto keyStr = std::pmr::string(key);
+        if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
+            newParameters.insert_or_assign(keyStr, detail::enumToString(convertedValue.value()));
+        } else if constexpr (meta::array_or_vector_type<Type>) {
+            newParameters.insert_or_assign(keyStr, pmt::Value(detail::collectionToTensor(*convertedValue)));
+        } else {
+            newParameters.insert_or_assign(keyStr, detail::castToGrSizeIfNeeded(convertedValue.value()));
+        }
+        return std::nullopt;
+    } else {
+        return convertedValue.error();
+    }
+}
+
+template<typename Type>
+inline bool autoUpdateImpl(std::string_view key, const pmt::Value& value, const std::set<std::string>& autoUpdateParams, property_map& stagedParameters) {
+    const auto keyStr = std::string(key);
+    if (!autoUpdateParams.contains(keyStr)) {
+        return false;
+    }
+    const auto keyPmr = std::pmr::string(key);
+    if constexpr (std::is_enum_v<Type>) {
+        if (value.holds<std::string>()) {
+            stagedParameters.insert_or_assign(keyPmr, value);
+            return true;
+        }
+#ifdef __EMSCRIPTEN__
+    } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
+        if (value.holds<gr::Size_t>()) {
+            stagedParameters.insert_or_assign(keyPmr, value);
+            return true;
+        }
+#endif
+    } else if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
+        if (value.holds<std::pmr::string>()) {
+            stagedParameters.insert_or_assign(keyPmr, value);
+            return true;
+        }
+    } else if constexpr (meta::array_or_vector_type<Type>) {
+        using TValue      = typename Type::value_type;
+        using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, std::pmr::string, TValue>;
+        if (value.holds<Tensor<TTensorElem>>()) {
+            auto converted = pmt::convertTo<Tensor<TTensorElem>>(value);
+            if (converted.has_value()) {
+                stagedParameters.insert_or_assign(keyPmr, std::move(*converted));
+                return true;
+            }
+            return false;
+        }
+    } else {
+        if (value.holds<Type>()) {
+            stagedParameters.insert_or_assign(keyPmr, value);
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace detail
+
 struct SettingsBase {
     struct CtxSettingsPair {
         SettingsCtx  context;
@@ -605,69 +670,6 @@ public:
     using ActiveParameterReader = void (*)(const TBlock* block, property_map& activeParameters);
 
 private:
-    // Helper template for parameter setting (set method) - instantiated once per member type
-    template<typename Type>
-    static std::optional<std::string> setParameterImpl(std::string_view key, const pmt::Value& value, property_map& newParameters) {
-        if (auto convertedValue = settings::convertParameter<Type>(key, value); convertedValue) [[likely]] {
-            const auto keyStr = std::pmr::string(key);
-            if constexpr (detail::isEnumOrAnnotatedEnum<Type>) {
-                newParameters.insert_or_assign(keyStr, detail::enumToString(convertedValue.value()));
-            } else if constexpr (meta::array_or_vector_type<Type>) {
-                newParameters.insert_or_assign(keyStr, pmt::Value(detail::collectionToTensor(*convertedValue)));
-            } else {
-                newParameters.insert_or_assign(keyStr, detail::castToGrSizeIfNeeded(convertedValue.value()));
-            }
-            return std::nullopt; // success
-        } else {
-            return convertedValue.error(); // error message
-        }
-    }
-
-    // Helper template for autoUpdate - checks type compatibility and updates staged parameters
-    template<typename Type>
-    static bool autoUpdateImpl(std::string_view key, const pmt::Value& value, const std::set<std::string>& autoUpdateParams, property_map& stagedParameters) {
-        const auto keyStr = std::string(key);
-        if (!autoUpdateParams.contains(keyStr)) {
-            return false;
-        }
-        const auto keyPmr = std::pmr::string(key);
-        if constexpr (std::is_enum_v<Type>) {
-            if (value.holds<std::string>()) {
-                stagedParameters.insert_or_assign(keyPmr, value);
-                return true;
-            }
-#ifdef __EMSCRIPTEN__
-        } else if constexpr (std::is_same_v<Type, std::size_t> && !std::is_same_v<std::size_t, gr::Size_t>) {
-            if (value.holds<gr::Size_t>()) {
-                stagedParameters.insert_or_assign(keyPmr, value);
-                return true;
-            }
-#endif
-        } else if constexpr (std::is_same_v<Type, std::string> || std::is_same_v<Type, std::pmr::string>) {
-            if (value.holds<std::pmr::string>()) {
-                stagedParameters.insert_or_assign(keyPmr, value);
-                return true;
-            }
-        } else if constexpr (meta::array_or_vector_type<Type>) {
-            using TValue      = typename Type::value_type;
-            using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, std::pmr::string, TValue>;
-            if (value.holds<Tensor<TTensorElem>>()) {
-                auto converted = pmt::convertTo<Tensor<TTensorElem>>(value);
-                if (converted.has_value()) {
-                    stagedParameters.insert_or_assign(keyPmr, std::move(*converted));
-                    return true;
-                }
-                return false;
-            }
-        } else {
-            if (value.holds<Type>()) {
-                stagedParameters.insert_or_assign(keyPmr, value);
-                return true;
-            }
-        }
-        return false;
-    }
-
     // Helper template for applyStagedParameters - applies value to block member
     template<std::size_t kIdx, typename RawType, typename Type>
     static bool applyStagedImpl(TBlock* block, std::string_view key, const pmt::Value& stagedValue, property_map& applied, property_map& staged, bool hasCallback) {
@@ -778,7 +780,7 @@ public:
                     using Type       = unwrap_if_wrapped_t<RawType>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
-                        result[fieldName.view()] = &setParameterImpl<Type>;
+                        result[fieldName.view()] = &detail::setParameterImpl<Type>;
                     }
                 });
             }
@@ -797,7 +799,7 @@ public:
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
                         constexpr auto fieldName = refl::data_member_name<TBlock, kIdx>;
-                        result[fieldName.view()] = &autoUpdateImpl<Type>;
+                        result[fieldName.view()] = &detail::autoUpdateImpl<Type>;
                     }
                 });
             }
