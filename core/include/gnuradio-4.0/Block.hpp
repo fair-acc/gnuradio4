@@ -469,21 +469,22 @@ struct isBlockDependent {
 };
 
 namespace block::property {
-inline static const char* kHeartbeat      = "Heartbeat";      ///< heartbeat property - the canary in the coal mine (supports block-specific subscribe/unsubscribe)
-inline static const char* kEcho           = "Echo";           ///< basic property that receives any matching message and sends a mirror with it's serviceName/unique_name
-inline static const char* kLifeCycleState = "LifecycleState"; ///< basic property that sets the block's @see lifecycle::StateMachine
-inline static const char* kSetting        = "Settings";       ///< asynchronous message-based setting handling,
-                                                              // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
-inline static const char* kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
+// [[maybe_unused]]: names referenced only from Block.cpp (initStandardPropertyCallbacks) and user code — silences -Werror=unused-variable on TUs that include only the header.
+[[maybe_unused]] inline static const char* kHeartbeat      = "Heartbeat";      ///< heartbeat property - the canary in the coal mine (supports block-specific subscribe/unsubscribe)
+[[maybe_unused]] inline static const char* kEcho           = "Echo";           ///< basic property that receives any matching message and sends a mirror with it's serviceName/unique_name
+[[maybe_unused]] inline static const char* kLifeCycleState = "LifecycleState"; ///< basic property that sets the block's @see lifecycle::StateMachine
+[[maybe_unused]] inline static const char* kSetting        = "Settings";       ///< asynchronous message-based setting handling,
+                                                                               // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
+[[maybe_unused]] inline static const char* kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
 
-inline static const char* kMetaInformation = "MetaInformation"; ///< asynchronous message-based retrieval of the static meta-information (i.e. Annotated<> interfaces, constraints, etc...)
-inline static const char* kUiConstraints   = "UiConstraints";   ///< asynchronous message-based retrieval of user-defined UI constraints
+[[maybe_unused]] inline static const char* kMetaInformation = "MetaInformation"; ///< asynchronous message-based retrieval of the static meta-information (i.e. Annotated<> interfaces, constraints, etc...)
+[[maybe_unused]] inline static const char* kUiConstraints   = "UiConstraints";   ///< asynchronous message-based retrieval of user-defined UI constraints
 
-inline static const char* kStoreDefaults    = "StoreDefaults";    ///< store present settings as default, for counterpart @see kResetDefaults
-inline static const char* kResetDefaults    = "ResetDefaults";    ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
-inline static const char* kActiveContext    = "ActiveContext";    ///< retrieve and set active context
-inline static const char* kSettingsCtx      = "SettingsCtx";      ///< retrieve/creates/remove a new stored context
-inline static const char* kSettingsContexts = "SettingsContexts"; ///< retrieve/creates/remove a new stored context
+[[maybe_unused]] inline static const char* kStoreDefaults    = "StoreDefaults";    ///< store present settings as default, for counterpart @see kResetDefaults
+[[maybe_unused]] inline static const char* kResetDefaults    = "ResetDefaults";    ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
+[[maybe_unused]] inline static const char* kActiveContext    = "ActiveContext";    ///< retrieve and set active context
+[[maybe_unused]] inline static const char* kSettingsCtx      = "SettingsCtx";      ///< retrieve/creates/remove a new stored context
+[[maybe_unused]] inline static const char* kSettingsContexts = "SettingsContexts"; ///< retrieve/creates/remove a new stored context
 
 } // namespace block::property
 
@@ -520,6 +521,9 @@ struct BlockBase {
 
     std::map<std::string, PropertyCallback>      propertyCallbacks;
     std::map<std::string, std::set<std::string>> propertySubscriptions;
+
+    // out-of-line so the 12-entry map literal is compiled once, not per Block<T>::Block body.
+    void initStandardPropertyCallbacks() noexcept;
 
     // accessor helpers (delegate to function pointers, using _blockSelf for correct Block* address)
     SettingsBase&              cbSettings() { return _cbSettings(_blockSelf); }
@@ -835,21 +839,7 @@ public:
         _cbMetaInformation = &Block::cbMetaInformationImpl;
         _cbUiConstraints   = &Block::cbUiConstraintsImpl;
 
-        // initialize inherited BlockBase::propertyCallbacks
-        propertyCallbacks = {
-            {block::property::kHeartbeat, &BlockBase::propertyCallbackHeartbeat},
-            {block::property::kEcho, &BlockBase::propertyCallbackEcho},
-            {block::property::kLifeCycleState, &BlockBase::propertyCallbackLifecycleState},
-            {block::property::kSetting, &BlockBase::propertyCallbackSettings},
-            {block::property::kStagedSetting, &BlockBase::propertyCallbackStagedSettings},
-            {block::property::kStoreDefaults, &BlockBase::propertyCallbackStoreDefaults},
-            {block::property::kResetDefaults, &BlockBase::propertyCallbackResetDefaults},
-            {block::property::kActiveContext, &BlockBase::propertyCallbackActiveContext},
-            {block::property::kSettingsCtx, &BlockBase::propertyCallbackSettingsCtx},
-            {block::property::kSettingsContexts, &BlockBase::propertyCallbackSettingsContexts},
-            {block::property::kMetaInformation, &BlockBase::propertyCallbackMetaInformation},
-            {block::property::kUiConstraints, &BlockBase::propertyCallbackUiConstraints},
-        };
+        initStandardPropertyCallbacks();
 
         // check Block<T> contracts
         checkBlockContracts<decltype(*static_cast<Derived*>(this))>();
