@@ -81,19 +81,46 @@ if(NOT MSVC)
     set(_USE_ICF FALSE)
   endif()
 
+  # user-facing override: USE_MOLD_LINKER=OFF forces fall-through to lld/default even if mold is installed.
+  option(USE_MOLD_LINKER "Use mold as the linker when available (falls back to lld, then default)" ON)
+
   if(NOT
      CMAKE_SYSTEM_NAME
      STREQUAL
      "Emscripten"
      AND NOT APPLE)
-    find_program(MOLD_BIN ld.mold)
-    if(MOLD_BIN)
+    set(_mold_usable FALSE)
+    if(USE_MOLD_LINKER)
+      find_program(MOLD_BIN ld.mold)
+      if(MOLD_BIN)
+        # mold < 3.0 does not parse the AS_NEEDED() directive used by some modern libatomic stubs (observed with GCC
+        # 16's libatomic_asneeded.so; affects any compiler toolchain whose runtime ships an AS_NEEDED linker-script
+        # stub). Auto-fall-through to lld / default in that case.
+        execute_process(
+          COMMAND "${MOLD_BIN}" --version
+          OUTPUT_VARIABLE _mold_version_out
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(_mold_version_out MATCHES "mold ([0-9]+)\\.([0-9]+)")
+          if(CMAKE_MATCH_1 VERSION_LESS 3)
+            message(
+              STATUS "Skipping mold ${CMAKE_MATCH_1}.${CMAKE_MATCH_2} (AS_NEEDED() support requires mold >= 3.0).")
+          else()
+            set(_mold_usable TRUE)
+          endif()
+        else()
+          # unknown format — assume usable, user can override via -DUSE_MOLD_LINKER=OFF
+          set(_mold_usable TRUE)
+        endif()
+      endif()
+    endif()
+
+    if(_mold_usable)
       set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=mold")
       if(_USE_ICF)
         string(APPEND _LD_GC_SECTIONS " -Wl,--icf=safe")
       endif()
       message(STATUS "Using mold @ ${MOLD_BIN} as the linker.")
-    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    else()
       find_program(LLD_BIN ld.lld)
       if(LLD_BIN)
         set(_LD_GC_SECTIONS "${_LD_GC_SECTIONS} -fuse-ld=lld")
@@ -101,6 +128,8 @@ if(NOT MSVC)
           string(APPEND _LD_GC_SECTIONS " -Wl,--icf=safe")
         endif()
         message(STATUS "Using lld @ ${LLD_BIN} as the linker.")
+      else()
+        message(STATUS "Using default system linker (mold and lld unavailable).")
       endif()
     endif()
   endif()
