@@ -389,7 +389,8 @@ public:
     requires std::is_constructible_v<TBlock, property_map>
     TBlock& emplaceBlock(gr::property_map initialSettings = gr::property_map()) {
         static_assert(std::is_same_v<TBlock, std::remove_reference_t<TBlock>>);
-        const std::shared_ptr<BlockModel>& newBlock    = _blocks.emplace_back(std::make_shared<BlockWrapper<TBlock>>(std::move(initialSettings)));
+        BlockModel*                        raw         = new BlockWrapper<TBlock>(std::move(initialSettings));
+        const std::shared_ptr<BlockModel>& newBlock    = _blocks.emplace_back(std::shared_ptr<BlockModel>{raw});
         TBlock*                            rawBlockRef = static_cast<TBlock*>(newBlock->raw());
         rawBlockRef->init(_progress);
         return *rawBlockRef;

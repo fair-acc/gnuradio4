@@ -2,6 +2,23 @@
 
 namespace gr {
 
+void BlockBase::initStandardPropertyCallbacks() noexcept {
+    propertyCallbacks = {
+        {block::property::kHeartbeat, &BlockBase::propertyCallbackHeartbeat},
+        {block::property::kEcho, &BlockBase::propertyCallbackEcho},
+        {block::property::kLifeCycleState, &BlockBase::propertyCallbackLifecycleState},
+        {block::property::kSetting, &BlockBase::propertyCallbackSettings},
+        {block::property::kStagedSetting, &BlockBase::propertyCallbackStagedSettings},
+        {block::property::kStoreDefaults, &BlockBase::propertyCallbackStoreDefaults},
+        {block::property::kResetDefaults, &BlockBase::propertyCallbackResetDefaults},
+        {block::property::kActiveContext, &BlockBase::propertyCallbackActiveContext},
+        {block::property::kSettingsCtx, &BlockBase::propertyCallbackSettingsCtx},
+        {block::property::kSettingsContexts, &BlockBase::propertyCallbackSettingsContexts},
+        {block::property::kMetaInformation, &BlockBase::propertyCallbackMetaInformation},
+        {block::property::kUiConstraints, &BlockBase::propertyCallbackUiConstraints},
+    };
+}
+
 std::optional<Message> BlockBase::propertyCallbackHeartbeat(std::string_view propertyName, Message message) {
     using enum gr::message::Command;
     assert(propertyName == block::property::kHeartbeat);

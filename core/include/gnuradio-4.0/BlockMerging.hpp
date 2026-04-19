@@ -33,7 +33,8 @@ concept MergedBlock = requires(const T& t) {
 
 template<BlockLike T>
 std::shared_ptr<BlockModel> makeNonOwningWrapper(T& block) {
-    return std::make_shared<BlockWrapper<T, std::false_type>>(block);
+    BlockModel* raw = new BlockWrapper<T, std::false_type>(block);
+    return std::shared_ptr<BlockModel>{raw};
 }
 
 template<typename T>
@@ -345,9 +346,9 @@ struct SplitMergeDisplayBlock : gr::Block<SplitMergeDisplayBlock<T>> {
 
 template<typename T>
 std::shared_ptr<BlockModel> makeSplitMergeDisplayNode(const std::string& label) {
-    auto node             = std::make_shared<BlockWrapper<SplitMergeDisplayBlock<T>>>();
-    node->blockRef().name = label;
-    return node;
+    auto* wrapper            = new BlockWrapper<SplitMergeDisplayBlock<T>>();
+    wrapper->blockRef().name = label;
+    return std::shared_ptr<BlockModel>{static_cast<BlockModel*>(wrapper)};
 }
 
 template<BlockLike... Paths>
