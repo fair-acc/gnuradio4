@@ -722,7 +722,6 @@ public:
                 }
             }
         });
-        // assert(maxSize != 0UZ);
         assert(maxSize != undefined_size);
         return maxSize;
     }
