@@ -353,7 +353,7 @@ struct std::formatter<gr::trigger::MatchResult> {
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const gr::trigger::MatchResult& ret, FormatContext& ctx) const -> decltype(ctx.out()) {
-        return std::format_to(ctx.out(), "{}", magic_enum::enum_name(ret));
+        return std::format_to(ctx.out(), "{}", gr::meta::enumName(ret).value_or(""));
     }
 };
 

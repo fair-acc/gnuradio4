@@ -255,10 +255,8 @@ auto boost::ut::eq(Enum lhs, Enum rhs) {
 template<typename Enum>
 requires std::is_enum_v<Enum>
 std::ostream& operator<<(std::ostream& os, Enum e) {
-    if constexpr (std::is_enum_v<Enum>) {
-        if (auto name = magic_enum::enum_name(e); !name.empty()) {
-            return os << name;
-        }
+    if (auto name = gr::meta::enumName(e); name.has_value()) {
+        return os << *name;
     }
     return os << static_cast<std::underlying_type_t<Enum>>(e);
 }

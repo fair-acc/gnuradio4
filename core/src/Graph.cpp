@@ -114,15 +114,16 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
 std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std::string_view propertyName, Message message) {
     assert(propertyName == graph::property::kGraphInspect);
 
-    if (const bool yamlSerialize = [&] {
-            if (!message.data) {
+    if (const bool yamlSerialize =
+            [&] {
+                if (!message.data) {
+                    return false;
+                }
+                if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
+                    return it->second == "yaml";
+                }
                 return false;
-            }
-            if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-                return it->second == "yaml";
-            }
-            return false;
-        }();
+            }();
         !yamlSerialize) {
         message.data = [&] {
             property_map _result;
@@ -130,7 +131,7 @@ std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std:
 
             result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(name);
             result[std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(unique_name);
-            result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
+            result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(gr::meta::enumName(blockCategory).value_or(""));
 
             property_map serializedChildren;
             for (const auto& child : blocks()) {

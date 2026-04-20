@@ -295,15 +295,15 @@ template<class T, bool strictCheck = false, typename From>
     else if constexpr (std::is_same_v<S, std::string>) {
         // 6a) string->enum
         if constexpr (std::is_enum_v<T>) {
-            if (auto maybeEnum = magic_enum::enum_cast<T>(srcValue)) {
+            if (auto maybeEnum = gr::meta::parseEnum<T>(srcValue)) {
                 return *maybeEnum;
             }
             auto possibleEnumValues = []<typename U>(const U&) -> std::string {
-                constexpr auto vals  = magic_enum::enum_values<U>();
-                auto           names = vals | std::views::transform(magic_enum::enum_name<U>);
+                constexpr auto vals  = gr::meta::enumValues<U>();
+                auto           names = vals | std::views::transform([](U v) { return gr::meta::enumName(v).value_or(""); });
                 return std::format("{}", gr::join(names, ", "));
             };
-            return std::unexpected(std::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, magic_enum::enum_type_name<T>(), possibleEnumValues(T{})));
+            return std::unexpected(std::format("'{}' is not a valid enum '{}' value: [{}]", srcValue, gr::meta::type_name<T>(), possibleEnumValues(T{})));
         }
         // 6b) string->integral (excluding bool)
         else if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
@@ -347,9 +347,9 @@ template<class T, bool strictCheck = false, typename From>
     // 7) source is enum
     else if constexpr (std::is_enum_v<S>) {
         if constexpr (std::is_same_v<T, std::string>) {
-            return std::string(magic_enum::enum_name(srcValue));
+            return std::string(gr::meta::enumName(srcValue).value_or(""));
         }
-        return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", magic_enum::enum_type_name<S>(), magic_enum::enum_name(srcValue), typeid(T).name()));
+        return std::unexpected(std::format("no safe conversion for {} src = {} -> <{}>", gr::meta::type_name<S>(), gr::meta::enumName(srcValue).value_or(""), typeid(T).name()));
     }
 
     // fallback

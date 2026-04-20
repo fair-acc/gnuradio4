@@ -72,6 +72,11 @@ T cast(U value) { /// gcc/clang warning suppressing cast
 
 namespace meta {
 
+// Shallow alternative to std::invoke_result_t that avoids the libstdc++
+// __invoke_result cascade. No member-function-pointer support — use std::invoke_result_t there.
+template<typename F, typename... Args>
+using invoke_result_t = decltype(std::declval<F>()(std::declval<Args>()...));
+
 struct null_type {};
 
 template<typename... Ts>

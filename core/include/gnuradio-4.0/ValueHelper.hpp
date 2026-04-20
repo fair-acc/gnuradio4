@@ -95,7 +95,7 @@ template<typename From, typename To, ConversionPolicy P>
 inline constexpr bool conversion_allowed_v = is_same_type_v<From, To> || (P >= ConversionPolicy::Widening && is_widening_v<From, To>) || (P >= ConversionPolicy::Narrowing && is_narrowing_v<From, To>) || (P == ConversionPolicy::Unchecked && is_static_castable_v<From, To>);
 
 template<typename F, typename T>
-concept FallbackFactory = std::invocable<F> && std::convertible_to<std::invoke_result_t<F>, T>;
+concept FallbackFactory = std::invocable<F> && std::convertible_to<gr::meta::invoke_result_t<F>, T>;
 
 template<typename F, typename T>
 concept FallbackValue = std::convertible_to<F, T> && !FallbackFactory<F, T>;

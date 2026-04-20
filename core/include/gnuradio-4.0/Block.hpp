@@ -460,6 +460,24 @@ inline std::size_t computePerformedWork(Status status, std::size_t processedIn, 
 
 } // namespace work
 
+} // namespace gr
+
+// Compile-time performance override; phased out with C++26 reflection.
+namespace gr::meta::detail {
+template<>
+struct EnumTraits<gr::work::Status> {
+    static constexpr std::array<std::pair<gr::work::Status, std::string_view>, 5> entries = {{
+        {gr::work::Status::ERROR, "ERROR"},
+        {gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS, "INSUFFICIENT_OUTPUT_ITEMS"},
+        {gr::work::Status::INSUFFICIENT_INPUT_ITEMS, "INSUFFICIENT_INPUT_ITEMS"},
+        {gr::work::Status::DONE, "DONE"},
+        {gr::work::Status::OK, "OK"},
+    }};
+};
+} // namespace gr::meta::detail
+
+namespace gr {
+
 template<typename TBlock, typename TDecayedBlock = std::remove_cvref_t<TBlock>>
 inline void checkBlockContracts();
 
@@ -753,7 +771,7 @@ public:
         property_map ret;
         if constexpr (!std::is_same_v<NotDrawable, DrawableControl>) {
             property_map info;
-            info.insert_or_assign("Category", std::string(magic_enum::enum_name(DrawableControl::kCategory)));
+            info.insert_or_assign("Category", std::string(gr::meta::enumName(DrawableControl::kCategory).value_or("")));
             info.insert_or_assign("Toolkit", std::string(DrawableControl::kToolkit));
 
             ret.insert_or_assign("Drawable", info);
@@ -2484,7 +2502,7 @@ struct std::formatter<gr::work::Result, char> {
 
     template<typename FormatContext>
     auto format(const gr::work::Result& result, FormatContext& ctx) const {
-        return std::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", result.requested_work, result.performed_work, magic_enum::enum_name(result.status));
+        return std::format_to(ctx.out(), "requested_work: {}, performed_work: {}, status: {}", result.requested_work, result.performed_work, gr::meta::enumName(result.status).value_or(""));
     }
 };
 

@@ -4,10 +4,14 @@
 #include <gnuradio-4.0/meta/typelist.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
 
+#include <algorithm>
 #include <array>
 #include <memory_resource>
-// #include <string> // for type_name specialization
+#include <optional>
+#include <string_view>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 #ifdef _MSC_VER
 #include <vector> // for type_name specialization
 #endif
@@ -491,8 +495,58 @@ using make_typelist_from_index_sequence = typename detail::make_typelist_from_in
 
 } // namespace gr::refl
 
+// gr::meta:: enum reflection — C++26 std::meta when available, magic_enum fallback.
+// The std::meta branch (__cpp_impl_reflection >= 202506L, GCC 16+ with -std=c++26 -freflection)
+// pulls no external dependency. On every other compiler the branch falls back to magic_enum;
+// hot enums may provide gr::meta::detail::EnumTraits<E> to bypass its per-enum fan-out.
+#if defined(__cpp_impl_reflection) && __cpp_impl_reflection >= 202506L
+
+#include <meta>
+
+namespace gr::meta {
+
+template<typename E>
+requires std::is_enum_v<E>
+[[nodiscard]] constexpr std::optional<std::string_view> enumName(E value) noexcept {
+    constexpr std::meta::info enums = std::meta::reflect_constant_array(std::meta::enumerators_of(^^E));
+    template for (constexpr std::meta::info I : [:enums:]) {
+        if (value == [:I:]) {
+            return std::string_view{std::meta::identifier_of(I)};
+        }
+    }
+    return std::nullopt;
+}
+
+template<typename E>
+requires std::is_enum_v<E>
+[[nodiscard]] constexpr std::optional<E> parseEnum(std::string_view s) noexcept {
+    constexpr std::meta::info enums = std::meta::reflect_constant_array(std::meta::enumerators_of(^^E));
+    template for (constexpr std::meta::info I : [:enums:]) {
+        if (s == std::meta::identifier_of(I)) {
+            return [:I:];
+        }
+    }
+    return std::nullopt;
+}
+
+template<typename E>
+requires std::is_enum_v<E>
+[[nodiscard]] consteval auto enumValues() noexcept {
+    constexpr auto              enums = std::meta::enumerators_of(^^E);
+    std::array<E, enums.size()> result{};
+    std::size_t                 i = 0;
+    template for (constexpr std::meta::info I : std::meta::reflect_constant_array(enums)) { result[i++] = [:I:]; }
+    return result;
+}
+
+[[nodiscard]] constexpr std::string_view reflectionBackendProvider() noexcept { return "std::meta"; }
+
+} // namespace gr::meta
+
+#else // fallback: magic_enum with optional gr::meta::detail::EnumTraits<E> override for hot enums
+
 #ifdef __GNUC__
-#pragma GCC diagnostic push // ignore warning of external libraries that from this lib-context we do not have any control over
+#pragma GCC diagnostic push // ignore warnings from external lib we can't control
 #ifndef __clang__
 #pragma GCC diagnostic ignored "-Wuseless-cast"
 #endif
@@ -503,5 +557,74 @@ using make_typelist_from_index_sequence = typename detail::make_typelist_from_in
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
+
+namespace gr::meta {
+
+namespace detail {
+// Opt-in compile-time override: specialise for hot enums to bypass magic_enum's
+// per-enum template instantiation cascade. Phased out with C++26 reflection.
+template<typename E>
+struct EnumTraits;
+} // namespace detail
+
+template<typename E>
+requires std::is_enum_v<E>
+[[nodiscard]] constexpr std::optional<std::string_view> enumName(E value) noexcept {
+    if constexpr (requires { detail::EnumTraits<E>::entries; }) {
+        for (const auto& [v, s] : detail::EnumTraits<E>::entries) {
+            if (v == value) {
+                return s;
+            }
+        }
+        return std::nullopt;
+    } else {
+        if (auto name = magic_enum::enum_name(value); !name.empty()) {
+            return std::string_view{name};
+        }
+        return std::nullopt;
+    }
+}
+
+template<typename E>
+requires std::is_enum_v<E>
+[[nodiscard]] constexpr std::optional<E> parseEnum(std::string_view s) noexcept {
+    if constexpr (requires { detail::EnumTraits<E>::entries; }) {
+        for (const auto& [v, name] : detail::EnumTraits<E>::entries) {
+            if (s == name) {
+                return v;
+            }
+        }
+        return std::nullopt;
+    } else {
+        if (auto v = magic_enum::enum_cast<E>(s); v.has_value()) {
+            return *v;
+        }
+        return std::nullopt;
+    }
+}
+
+template<typename E>
+requires std::is_enum_v<E>
+[[nodiscard]] consteval auto enumValues() noexcept {
+    if constexpr (requires { detail::EnumTraits<E>::entries; }) {
+        constexpr auto&               entries = detail::EnumTraits<E>::entries;
+        std::array<E, entries.size()> result{};
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            result[i] = entries[i].first;
+        }
+        return result;
+    } else {
+        constexpr auto               values = magic_enum::enum_values<E>();
+        std::array<E, values.size()> result{};
+        std::ranges::copy(values, result.begin());
+        return result;
+    }
+}
+
+[[nodiscard]] constexpr std::string_view reflectionBackendProvider() noexcept { return "magic_enum"; }
+
+} // namespace gr::meta
+
+#endif // __cpp_impl_reflection
 
 #endif // GNURADIO_REFLECTION_HPP

@@ -202,6 +202,29 @@ enum class UICategory {
     Notification /// Transient non-modal feedback (toast/banner).
 };
 
+} // namespace gr
+
+// Compile-time performance override; phased out with C++26 reflection.
+namespace gr::meta::detail {
+template<>
+struct EnumTraits<gr::UICategory> {
+    static constexpr std::array<std::pair<gr::UICategory, std::string_view>, 10> entries = {{
+        {gr::UICategory::None, "None"},
+        {gr::UICategory::MenuBar, "MenuBar"},
+        {gr::UICategory::Toolbar, "Toolbar"},
+        {gr::UICategory::StatusBar, "StatusBar"},
+        {gr::UICategory::Content, "Content"},
+        {gr::UICategory::Panel, "Panel"},
+        {gr::UICategory::Overlay, "Overlay"},
+        {gr::UICategory::ContextMenu, "ContextMenu"},
+        {gr::UICategory::Dialog, "Dialog"},
+        {gr::UICategory::Notification, "Notification"},
+    }};
+};
+} // namespace gr::meta::detail
+
+namespace gr {
+
 /**
  * @brief Annotates block, indicating that it is drawable and provides a  mandatory `void draw()` method.
  *

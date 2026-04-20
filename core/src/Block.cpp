@@ -71,7 +71,7 @@ std::optional<Message> BlockBase::propertyCallbackLifecycleState(std::string_vie
             throw gr::exception(std::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
         }
 
-        auto state = magic_enum::enum_cast<lifecycle::State>(stateStr);
+        auto state = gr::meta::parseEnum<lifecycle::State>(stateStr);
         if (!state.has_value()) {
             throw gr::exception(std::format("propertyCallbackLifecycleState - invalid lifecycle::State conversion from {}, msg: {}", stateStr, message));
         }
@@ -84,7 +84,7 @@ std::optional<Message> BlockBase::propertyCallbackLifecycleState(std::string_vie
     }
 
     if (message.cmd == Get) {
-        message.data = pmt::Value::Map{{"state", std::string(magic_enum::enum_name(cbState()))}};
+        message.data = pmt::Value::Map{{"state", std::string(gr::meta::enumName(cbState()).value_or(""))}};
         return message;
     }
 

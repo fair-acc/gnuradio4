@@ -11,7 +11,7 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
     property_map result;
     result.emplace(serialization_fields::BLOCK_ID, pluginLoader.registry().typeName(block));
     result.emplace(serialization_fields::BLOCK_UNIQUE_NAME, std::string(block->uniqueName()));
-    result.emplace(serialization_fields::BLOCK_CATEGORY, std::string(magic_enum::enum_name(block->blockCategory())));
+    result.emplace(serialization_fields::BLOCK_CATEGORY, std::string(gr::meta::enumName(block->blockCategory()).value_or("")));
 
     if (!block->metaInformation().empty()) {
         result.emplace(serialization_fields::BLOCK_META_INFORMATION, block->metaInformation());

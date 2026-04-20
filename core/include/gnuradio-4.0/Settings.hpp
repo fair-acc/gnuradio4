@@ -218,7 +218,7 @@ std::expected<T, std::string> tryExtractEnumValue(const pmt::Value& pmt, std::st
         return std::unexpected(std::format("Field '{}' expects enum string, got different type", key));
     }
 
-    if (auto opt = magic_enum::enum_cast<T>(str); opt.has_value()) {
+    if (auto opt = gr::meta::parseEnum<T>(str); opt.has_value()) {
         return *opt;
     }
 
@@ -229,9 +229,9 @@ template<typename T, typename U = std::remove_cvref_t<T>>
 requires isEnumOrAnnotatedEnum<U>
 std::string enumToString(T&& enum_value) {
     if constexpr (is_annotated<U>()) {
-        return std::string(magic_enum::enum_name(enum_value.value));
+        return std::string(gr::meta::enumName(enum_value.value).value_or(""));
     } else {
-        return std::string(magic_enum::enum_name(enum_value));
+        return std::string(gr::meta::enumName(enum_value).value_or(""));
     }
 }
 
@@ -921,14 +921,17 @@ public:
                     auto  memberName                                               = std::string(refl::data_member_name<TBlock, kIdx>.view());
                     auto& meta_info                                                = _block->meta_information;
                     meta_info[convert_string_domain(memberName) + "::enum_values"] = [] {
+                        constexpr auto           values = gr::meta::enumValues<Type>();
                         std::vector<std::string> result;
-                        result.reserve(magic_enum::enum_count<Type>());
-                        for (auto [_, name] : magic_enum::enum_entries<Type>()) {
-                            result.emplace_back(name);
+                        result.reserve(values.size());
+                        for (auto v : values) {
+                            if (auto name = gr::meta::enumName(v); name.has_value()) {
+                                result.emplace_back(*name);
+                            }
                         }
                         return result;
                     }();
-                    meta_info[convert_string_domain(memberName) + "::enum_type"] = std::string(magic_enum::enum_type_name<Type>());
+                    meta_info[convert_string_domain(memberName) + "::enum_type"] = std::string(gr::meta::type_name<Type>());
                 }
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
