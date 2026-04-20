@@ -72,6 +72,12 @@ T cast(U value) { /// gcc/clang warning suppressing cast
 
 namespace meta {
 
+#if defined(NDEBUG)
+inline constexpr bool kDebugBuild = false;
+#else
+inline constexpr bool kDebugBuild = true;
+#endif
+
 // Shallow alternative to std::invoke_result_t that avoids the libstdc++
 // __invoke_result cascade. No member-function-pointer support — use std::invoke_result_t there.
 template<typename F, typename... Args>

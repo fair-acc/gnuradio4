@@ -937,7 +937,9 @@ public:
                 }
             }
         });
-        checkBlockParameterConsistency();
+        if constexpr (gr::meta::kDebugBuild) {
+            checkBlockParameterConsistency();
+        }
         // store default settings -> can be recovered with 'resetDefaults()'
         settings().storeDefaults();
         emitErrorMessageIfAny("init(..) -> INITIALISED", this->changeStateTo(lifecycle::State::INITIALISED));
@@ -1233,7 +1235,9 @@ public:
             std::ignore      = publishForwardTags;
             std::ignore      = capturedForwardParams;
             auto applyResult = settings().applyStagedParameters();
-            checkBlockParameterConsistency();
+            if constexpr (gr::meta::kDebugBuild) {
+                checkBlockParameterConsistency();
+            }
 
             if constexpr (!noTagPropagation) {
                 if (publishForwardTags && !applyResult.forwardParameters.empty()) {
