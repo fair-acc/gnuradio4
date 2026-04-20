@@ -25,7 +25,7 @@ public:
     requires std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>
         : _value(std::make_unique<T>(*other)) {}
 
-    indirect(indirect<T>&& other) : _value(std::move(other._value)) {}
+    indirect(indirect<T>&& other) noexcept : _value(std::move(other._value)) {}
 
     indirect<T>& operator=(const indirect<T>& other)
     requires std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>
@@ -35,7 +35,7 @@ public:
         return *this;
     }
 
-    indirect<T>& operator=(indirect<T>&& other) {
+    indirect<T>& operator=(indirect<T>&& other) noexcept {
         _value = std::exchange(other._value, nullptr);
         return *this;
     }

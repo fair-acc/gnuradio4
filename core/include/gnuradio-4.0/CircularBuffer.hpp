@@ -789,10 +789,10 @@ public:
 
     // CircularBuffer is just a shared pointer over BufferImpl,
     // it is Ok to have copy and move operations.
-    CircularBuffer(const CircularBuffer&)            = default;
-    CircularBuffer(CircularBuffer&&)                 = default;
-    CircularBuffer& operator=(const CircularBuffer&) = default;
-    CircularBuffer& operator=(CircularBuffer&&)      = default;
+    CircularBuffer(const CircularBuffer&)                = default;
+    CircularBuffer(CircularBuffer&&) noexcept            = default;
+    CircularBuffer& operator=(const CircularBuffer&)     = default;
+    CircularBuffer& operator=(CircularBuffer&&) noexcept = default;
 
     [[nodiscard]] std::size_t           size() const noexcept { return _sharedBufferPtr->_size; }
     [[nodiscard]] BufferWriterLike auto new_writer() { return Writer<T>(_sharedBufferPtr); }
