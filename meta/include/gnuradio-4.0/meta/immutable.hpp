@@ -32,6 +32,8 @@ public:
     immutable<T>& operator=(const immutable<T>& other) = delete;
     immutable<T>& operator=(immutable<T>&& other)      = delete;
 
+    ~immutable() = default;
+
     const T& value() const { return _value; }
 
     operator const T&() const { return _value; }

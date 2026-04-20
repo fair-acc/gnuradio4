@@ -465,7 +465,10 @@ private:
               _offset(std::exchange(other._offset, 0)),                                           //
               _internalSpan(std::exchange(other._internalSpan, std::span<T>{})) {};
 
-        Writer& operator=(Writer tmp) noexcept {
+        Writer(const Writer&)            = delete;
+        Writer& operator=(const Writer&) = delete;
+
+        Writer& operator=(Writer&& tmp) noexcept {
             std::swap(_buffer, tmp._buffer);
             std::swap(_nRequestedSamplesToPublish, tmp._nRequestedSamplesToPublish);
             std::swap(_index, tmp._index);
@@ -719,7 +722,10 @@ private:
               _nRequestedSamplesToConsume(other._nRequestedSamplesToConsume),               //
               _nSamplesConsumed(other._nSamplesConsumed) {}
 
-        Reader& operator=(Reader tmp) noexcept {
+        Reader(const Reader&)            = delete;
+        Reader& operator=(const Reader&) = delete;
+
+        Reader& operator=(Reader&& tmp) noexcept {
             std::swap(_readIndex, tmp._readIndex);
             std::swap(_readIndexCached, tmp._readIndexCached);
             std::swap(_buffer, tmp._buffer);

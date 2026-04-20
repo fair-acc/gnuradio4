@@ -68,6 +68,7 @@ public:
         std::swap(_blockTypeHandlers, tmp._blockTypeHandlers);
         return *this;
     }
+    ~GeneralRegistry() = default;
 
 #ifdef GR_ENABLE_BLOCK_REGISTRY
     template<BlockLike TBlock>

@@ -159,6 +159,7 @@ public:
     MergeByIndex(const MergeByIndex& other)       = delete;
     MergeByIndex& operator=(MergeByIndex& other)  = delete;
     MergeByIndex& operator=(MergeByIndex&& other) = delete;
+    ~MergeByIndex()                               = default;
 
     MergeByIndex(MergeByIndex&& other) noexcept(std::is_nothrow_move_constructible_v<Left> && std::is_nothrow_move_constructible_v<Right>) : _leftBlock(std::move(other._leftBlock)), _rightBlock(std::move(other._rightBlock)) {}
 

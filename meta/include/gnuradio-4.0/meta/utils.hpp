@@ -886,6 +886,10 @@ template<typename Fn>
 struct on_scope_exit {
     Fn function;
     on_scope_exit(Fn fn) : function(std::move(fn)) {}
+    on_scope_exit(const on_scope_exit&)            = delete;
+    on_scope_exit(on_scope_exit&&)                 = delete;
+    on_scope_exit& operator=(const on_scope_exit&) = delete;
+    on_scope_exit& operator=(on_scope_exit&&)      = delete;
     ~on_scope_exit() { function(); }
 };
 
