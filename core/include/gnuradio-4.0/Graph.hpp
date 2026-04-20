@@ -412,7 +412,7 @@ public:
     }
 
     [[maybe_unused]] bool removeEdge(const Edge& edge) {
-        return std::erase_if(_edges, [&](const Edge& e) { return e == edge; });
+        return std::erase_if(_edges, [&edge](const Edge& e) { return e == edge; });
     }
 
     std::optional<Message> propertyCallbackInspectBlock([[maybe_unused]] std::string_view propertyName, Message message);
@@ -562,7 +562,7 @@ public:
             std::expected<Result, Error> result       = std::unexpected(Error("Not found"));
 
             gr::meta::tuple_for_each(
-                [&]<typename PortOrCollection>(const PortOrCollection& portOrCollection) {
+                [&currentIndex, &result, &info]<typename PortOrCollection>(const PortOrCollection& portOrCollection) {
                     if constexpr (traits::port::is_port_v<PortOrCollection>) {
                         if (portOrCollection.metaInfo.name == info.portName) {
                             if (info.portIndex != meta::invalid_index) {
@@ -714,7 +714,7 @@ public:
         }
 
         std::size_t maxSize = 0UZ;
-        graph::forEachEdge<block::Category::All>(*this, [&](const Edge& e) {
+        graph::forEachEdge<block::Category::All>(*this, [&refEdge, &maxSize](const Edge& e) {
             if (refEdge.hasSameSourcePort(e)) {
                 std::size_t minBufferSize = e.minBufferSize();
                 if (minBufferSize != undefined_size) {
@@ -806,7 +806,7 @@ template<block::Category traverseCategory, typename Fn>
 void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category filter = block::Category::All) {
     using enum block::Category;
 
-    detail::traverseSubgraphs<traverseCategory>(root, [&](const GraphLike auto& graph) {
+    detail::traverseSubgraphs<traverseCategory>(root, [&function, filter](const GraphLike auto& graph) {
         for (auto& block : graph.blocks()) {
             const block::Category cat = block->blockCategory();
             if (filter == All || cat == filter) {
@@ -819,7 +819,7 @@ void forEachBlock(GraphLike auto const& root, Fn&& function, block::Category fil
 template<block::Category traverseCategory>
 [[nodiscard]] std::size_t countBlocks(GraphLike auto const& root, block::Category filter = block::Category::All) {
     std::size_t n = 0;
-    forEachBlock<traverseCategory>(root, [&](auto const&) { n++; }, filter);
+    forEachBlock<traverseCategory>(root, [&n](auto const&) { n++; }, filter);
     return n;
 }
 
@@ -827,7 +827,7 @@ template<block::Category traverseCategory, typename Fn>
 void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filter) {
     using enum Edge::EdgeState;
 
-    detail::traverseSubgraphs<traverseCategory>(root, [&](const GraphLike auto& graph) {
+    detail::traverseSubgraphs<traverseCategory>(root, [&function, filter](const GraphLike auto& graph) {
         for (auto& edge : graph.edges()) {
             if (filter == Unknown || edge._state == filter) {
                 function(edge);
@@ -839,7 +839,7 @@ void forEachEdge(GraphLike auto const& root, Fn&& function, Edge::EdgeState filt
 template<block::Category traverseCategory>
 [[nodiscard]] std::size_t countEdges(GraphLike auto const& root, Edge::EdgeState filter = Edge::EdgeState::Unknown) {
     std::size_t n = 0;
-    forEachEdge<traverseCategory>(root, [&](auto const&) { n++; }, filter);
+    forEachEdge<traverseCategory>(root, [&n](auto const&) { n++; }, filter);
     return n;
 }
 
@@ -848,11 +848,11 @@ gr::Graph flatten(GraphLike auto const& root, std::source_location location = st
     using enum block::Category;
 
     gr::Graph flattenedGraph;
-    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
-    std::ranges::for_each(root.edges(), [&](const Edge& edge) { std::ignore = flattenedGraph.addEdge(edge, location); }); // add edges from root graph
+    gr::graph::forEachBlock<traverseCategory>(root, [&flattenedGraph](const std::shared_ptr<BlockModel>& block) { flattenedGraph.addBlock(block, false); });
+    std::ranges::for_each(root.edges(), [&flattenedGraph, &location](const Edge& edge) { std::ignore = flattenedGraph.addEdge(edge, location); }); // add edges from root graph
 
     // add edges related to blocks in flattened Graph
-    gr::graph::forEachBlock<traverseCategory>(root, [&](const std::shared_ptr<BlockModel>& block) { std::ranges::for_each(block->edges(), [&](const Edge& edge) { std::ignore = flattenedGraph.addEdge(edge, location); }); });
+    gr::graph::forEachBlock<traverseCategory>(root, [&flattenedGraph, &location](const std::shared_ptr<BlockModel>& block) { std::ranges::for_each(block->edges(), [&flattenedGraph, &location](const Edge& edge) { std::ignore = flattenedGraph.addEdge(edge, location); }); });
 
     return flattenedGraph;
 }
@@ -1005,7 +1005,7 @@ std::vector<FeedbackLoop> detectFeedbackLoops(const GraphLike auto& graph) {
 
     const AdjacencyList adjList = computeAdjacencyList(graph);
 
-    forEachBlock<block::Category::All>(graph, [&](const auto& block) { visited[block] = VisitState::Unvisited; });
+    forEachBlock<block::Category::All>(graph, [&visited](const auto& block) { visited[block] = VisitState::Unvisited; });
 
     auto dfs = [&](this auto&& self, auto& current) -> void {
         visited[current] = VisitState::Gray;
@@ -1040,7 +1040,7 @@ std::vector<FeedbackLoop> detectFeedbackLoops(const GraphLike auto& graph) {
         visited[current] = VisitState::Black;
     };
 
-    forEachBlock<block::Category::All>(graph, [&](auto& block) {
+    forEachBlock<block::Category::All>(graph, [&visited, &dfs](auto& block) {
         if (visited[block] == VisitState::Unvisited) {
             dfs(block);
         }
