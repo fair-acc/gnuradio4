@@ -1078,7 +1078,7 @@ struct Tensor<T, Ex...> : TensorBase<T, true, Ex...> { // fully or partially dyn
 
         // move data
         base_t::_data.reserve(other._data.size());
-        for (auto&& elem : other._data) {
+        for (auto& elem : other._data) {
             base_t::_data.push_back(static_cast<T>(std::move(elem)));
         }
     }

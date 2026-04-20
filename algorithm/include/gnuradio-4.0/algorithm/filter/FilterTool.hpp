@@ -377,7 +377,7 @@ template<typename... Coeffs>
 enum class ResponseType { Magnitude, MagnitudeDB, Phase, PhaseDegrees };
 
 template<Frequency frequencyType, ResponseType responseType, std::floating_point T, typename... TFilterCoefficients>
-[[nodiscard]] inline T calculateResponse(T normalisedDigitalFrequency, TFilterCoefficients... filterCoefficients) {
+[[nodiscard]] inline T calculateResponse(T normalisedDigitalFrequency, TFilterCoefficients&&... filterCoefficients) {
     using C = std::complex<T>;
     static_assert(frequencyType == Frequency::Normalised, "Frequency::Hertz not applicable for digital filters");
     std::vector<FilterCoefficients<T>> filterCoefficients_{std::forward<TFilterCoefficients>(filterCoefficients)...};
@@ -626,7 +626,7 @@ std::vector<std::complex<T>> sortComplexWithConjugates(const std::vector<std::co
 } // namespace details
 
 template<typename T, std::ranges::input_range Range>
-[[nodiscard]] std::vector<T> expandRootsToPolynomial(Range&& roots, std::size_t desiredOrder) {
+[[nodiscard]] std::vector<T> expandRootsToPolynomial(Range&& roots, std::size_t desiredOrder) { // NOSONAR (S5425) — forwarding-ref kept for non-const-iterable views
     if (roots.empty()) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnull-dereference" // gcc13 false positive
