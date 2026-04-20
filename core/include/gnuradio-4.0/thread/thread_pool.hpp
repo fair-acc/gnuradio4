@@ -439,7 +439,7 @@ public:
         updateThreadConstraints();
     }
 
-    template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = std::invoke_result_t<Callable, Args...>>
+    template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = gr::meta::invoke_result_t<Callable, Args...>>
     requires(std::is_same_v<R, void>)
     void execute(Callable&& func, Args&&... args, const std::source_location& location = std::source_location::current()) {
         static thread_local gr::SpinWait spinWait;
@@ -466,7 +466,7 @@ public:
         spinWait.reset();
     }
 
-    template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = std::invoke_result_t<Callable, Args...>>
+    template<const detail::basic_fixed_string taskName = "", uint32_t priority = 0, int32_t cpuID = -1, std::invocable Callable, typename... Args, typename R = gr::meta::invoke_result_t<Callable, Args...>>
     requires(!std::is_same_v<R, void>)
     [[nodiscard]] std::future<R> execute(Callable&& func, Args&&... funcArgs) {
         if constexpr (cpuID >= 0) {

@@ -79,7 +79,7 @@ enum class Command : unsigned char {
 
 template<Command command>
 std::string commandName() noexcept {
-    return std::string(magic_enum::enum_name<command>());
+    return std::string(gr::meta::enumName(command).value_or(""));
 }
 
 inline static std::string defaultBlockProtocol  = "MDPW03";
@@ -186,11 +186,11 @@ struct std::formatter<gr::message::Command> {
     // Formats the source_location, using 'f' for file and 'l' for line
     template<typename FormatContext>
     auto format(const gr::message::Command& command, FormatContext& ctx) const -> decltype(ctx.out()) {
-        return std::format_to(ctx.out(), "{}", magic_enum::enum_name(command));
+        return std::format_to(ctx.out(), "{}", gr::meta::enumName(command).value_or(""));
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const gr::message::Command& command) { return os << magic_enum::enum_name(command); }
+inline std::ostream& operator<<(std::ostream& os, const gr::message::Command& command) { return os << gr::meta::enumName(command).value_or(""); }
 
 template<>
 struct std::formatter<gr::Message> {

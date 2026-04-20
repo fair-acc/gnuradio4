@@ -272,4 +272,44 @@ std::string_view string_test2() { return gr::refl::class_name<ns::Type<float>>; 
 
 const char* member_name_string0() { return gr::refl::data_member_name<ns::Type<char>, 0>.data(); }
 
+// verifies parity between std::meta (C++26, GCC 16+) and magic_enum fallback branches
+namespace enum_reflection_test {
+
+enum class Color : int { Red, Green, Blue, Yellow };
+
+// basic name resolution
+static_assert(gr::meta::enumName(Color::Red).has_value());
+static_assert(gr::meta::enumName(Color::Red).value() == "Red");
+static_assert(gr::meta::enumName(Color::Green).value() == "Green");
+static_assert(gr::meta::enumName(Color::Blue).value() == "Blue");
+static_assert(gr::meta::enumName(Color::Yellow).value() == "Yellow");
+
+// unknown value → nullopt
+static_assert(!gr::meta::enumName(static_cast<Color>(99)).has_value());
+
+// round-trip parseEnum(enumName(v)) == v for every enumerator
+static_assert(gr::meta::parseEnum<Color>("Red") == Color::Red);
+static_assert(gr::meta::parseEnum<Color>("Green") == Color::Green);
+static_assert(gr::meta::parseEnum<Color>("Blue") == Color::Blue);
+static_assert(gr::meta::parseEnum<Color>("Yellow") == Color::Yellow);
+static_assert(gr::meta::parseEnum<Color>("Magenta") == std::nullopt);
+static_assert(gr::meta::parseEnum<Color>("") == std::nullopt);
+
+// enumValues<E>() — consteval array of all enumerators
+static_assert(gr::meta::enumValues<Color>().size() == 4);
+static_assert(gr::meta::enumValues<Color>()[0] == Color::Red);
+static_assert(gr::meta::enumValues<Color>()[3] == Color::Yellow);
+
+// non-contiguous values — mirrors gr::work::Status shape
+enum class Status : int { Error = -100, InsufficientInput = -2, Done = -1, Ok = 0 };
+static_assert(gr::meta::enumName(Status::Error).value() == "Error");
+static_assert(gr::meta::enumName(Status::Ok).value() == "Ok");
+static_assert(gr::meta::parseEnum<Status>("Done") == Status::Done);
+static_assert(gr::meta::enumValues<Status>().size() == 4);
+
+// reflectionBackendProvider returns a non-empty identifier
+static_assert(!gr::meta::reflectionBackendProvider().empty());
+
+} // namespace enum_reflection_test
+
 int main() { /* tests are statically executed */ }

@@ -625,10 +625,10 @@ property_map serializeEdge(const auto& edge) {
     result.emplace(serialization_fields::EDGE_NAME, std::string(edge.name()));
 
     result.emplace(serialization_fields::EDGE_BUFFER_SIZE, static_cast<gr::Size_t>(edge.bufferSize()));
-    result.emplace(serialization_fields::EDGE_EDGE_STATE, std::string(magic_enum::enum_name(edge.state())));
+    result.emplace(serialization_fields::EDGE_EDGE_STATE, std::string(gr::meta::enumName(edge.state()).value_or("")));
     result.emplace(serialization_fields::EDGE_N_READERS, static_cast<gr::Size_t>(edge.nReaders()));
     result.emplace(serialization_fields::EDGE_N_WRITERS, static_cast<gr::Size_t>(edge.nWriters()));
-    result.emplace(serialization_fields::EDGE_TYPE, std::string(magic_enum::enum_name(edge.edgeType())));
+    result.emplace(serialization_fields::EDGE_TYPE, std::string(gr::meta::enumName(edge.edgeType()).value_or("")));
 
     return result;
 }
@@ -1009,7 +1009,7 @@ struct std::formatter<gr::Edge> {
 
         return std::format_to(ctx.out(), "{}/{} ⟶ (name: '{}', size: {:2}, weight: {:2}, state: {}) ⟶ {}/{}", //
             getName(e._sourceBlock), e._sourcePortDefinition,                                                 // src
-            e._name, e._minBufferSize, e._weight, magic_enum::enum_name(e._state),                            // edge
+            e._name, e._minBufferSize, e._weight, gr::meta::enumName(e._state).value_or(""),                  // edge
             getName(e._destinationBlock), e._destinationPortDefinition);                                      // dst
     }
 };

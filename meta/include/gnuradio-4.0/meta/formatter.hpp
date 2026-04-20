@@ -7,19 +7,12 @@
 #include <expected>
 #include <format>
 #include <source_location>
+#include <utility>
 #include <vector>
 
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wuseless-cast"
-#endif
-#include <magic_enum.hpp>
-
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__EMSCRIPTEN__)
-#pragma GCC diagnostic pop
-#endif
 
 namespace gr {
 namespace time {
@@ -395,11 +388,10 @@ struct std::formatter<E, char> {
 
     template<typename FormatContext>
     auto format(E e, FormatContext& ctx) const {
-        if (auto name = magic_enum::enum_name(e); !name.empty()) {
-            return _strFormatter.format(name, ctx); // delegate string formatting
-        } else {
-            return std::format_to(ctx.out(), "{}", std::to_underlying(e)); // fallback to underlying type
+        if (auto name = gr::meta::enumName(e); name.has_value()) {
+            return _strFormatter.format(*name, ctx);
         }
+        return std::format_to(ctx.out(), "{}", std::to_underlying(e));
     }
 };
 #endif

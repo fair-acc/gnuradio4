@@ -74,6 +74,27 @@ namespace gr::lifecycle {
 enum class State : char { IDLE, INITIALISED, RUNNING, REQUESTED_PAUSE, PAUSED, REQUESTED_STOP, STOPPED, ERROR };
 using enum State;
 
+} // namespace gr::lifecycle
+
+// Compile-time performance override; phased out with C++26 reflection.
+namespace gr::meta::detail {
+template<>
+struct EnumTraits<gr::lifecycle::State> {
+    static constexpr std::array<std::pair<gr::lifecycle::State, std::string_view>, 8> entries = {{
+        {gr::lifecycle::State::IDLE, "IDLE"},
+        {gr::lifecycle::State::INITIALISED, "INITIALISED"},
+        {gr::lifecycle::State::RUNNING, "RUNNING"},
+        {gr::lifecycle::State::REQUESTED_PAUSE, "REQUESTED_PAUSE"},
+        {gr::lifecycle::State::PAUSED, "PAUSED"},
+        {gr::lifecycle::State::REQUESTED_STOP, "REQUESTED_STOP"},
+        {gr::lifecycle::State::STOPPED, "STOPPED"},
+        {gr::lifecycle::State::ERROR, "ERROR"},
+    }};
+};
+} // namespace gr::meta::detail
+
+namespace gr::lifecycle {
+
 inline constexpr bool isActive(lifecycle::State state) noexcept { return state == RUNNING || state == REQUESTED_PAUSE || state == PAUSED; }
 
 inline constexpr bool isShuttingDown(lifecycle::State state) noexcept { return state == REQUESTED_STOP || state == STOPPED; }
@@ -199,7 +220,7 @@ public:
         if (!isValidTransition(oldState, newState)) {
             return std::unexpected(Error{std::format("Block '{}' invalid state transition in {} from {} -> to {}", //
                                              getBlockName(), gr::meta::type_name<TDerived>(),                      //
-                                             magic_enum::enum_name(state()), magic_enum::enum_name(newState)),
+                                             gr::meta::enumName(state()).value_or(""), gr::meta::enumName(newState).value_or("")),
                 location});
         }
 

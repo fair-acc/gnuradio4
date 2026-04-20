@@ -203,7 +203,7 @@ void printGraphTopology(const gr::Graph& graph, GraphTopology topology, bool det
     for (auto& loop : gr::graph::detectFeedbackLoops(flatGraph)) {
         gr::graph::colour(loop.edges.back(), gr::utf8::color::palette::Default::Cyan); // colour feedback edges
     }
-    std::println("Graph Topology: {}{}:\n{}", magic_enum::enum_name(topology), neededFlattening ? "-flattened" : "", gr::graph::draw(flatGraph));
+    std::println("Graph Topology: {}{}:\n{}", gr::meta::enumName(topology).value_or(""), neededFlattening ? "-flattened" : "", gr::graph::draw(flatGraph));
     std::println("blocks in order of definition: {}", //
         [&] -> std::string {
             std::string s;
@@ -322,7 +322,7 @@ gr::Graph createInstrumentalisedGraph(GraphTopology topology = GraphTopology::LI
     using namespace benchmark;
 
     "scheduler topology loop"_test = [](GraphTopology topology) {
-        const std::string topologyName(magic_enum::enum_name(topology));
+        const std::string topologyName(gr::meta::enumName(topology).value_or(""));
 
         gr::scheduler::Simple simple;
         if (auto ret = simple.exchange(createInstrumentalisedGraph<T>(topology)); !ret) {

@@ -348,7 +348,7 @@ public:
         }
     }
 
-    void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(magic_enum::enum_name(newState))}}); }
+    void stateChanged(lifecycle::State newState) { this->notifyListeners(block::property::kLifeCycleState, {{"state", std::string(gr::meta::enumName(newState).value_or(""))}}); }
 
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _graph->blocks(); }
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _graph->blocks(); }
@@ -852,7 +852,7 @@ protected:
         case INITIALISED: //
             this->emitErrorMessageIfAny("adoptBlock -> INITIALIZED", newBlock->changeStateTo(RUNNING));
             break;
-        default: this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", magic_enum::enum_name(newBlock->state())));
+        default: this->emitErrorMessage("propertyCallbackEmplaceBlock", std::format("Unexpected block state during emplacement: {}", gr::meta::enumName(newBlock->state()).value_or("")));
         }
     }
 
@@ -1275,7 +1275,7 @@ protected:
                 property_map result;
                 result[std::pmr::string(serialization_fields::BLOCK_NAME)]        = std::string(this->name);
                 result[std::pmr::string(serialization_fields::BLOCK_UNIQUE_NAME)] = std::string(this->unique_name);
-                result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(magic_enum::enum_name(blockCategory));
+                result[std::pmr::string(serialization_fields::BLOCK_CATEGORY)]    = std::string(gr::meta::enumName(blockCategory).value_or(""));
 
                 // Requesting graph serialization
                 property_map serializedChildren;
