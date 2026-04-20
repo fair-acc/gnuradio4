@@ -111,6 +111,7 @@ struct Edge {
     }
     Edge(Edge&&) noexcept            = default;
     Edge& operator=(Edge&&) noexcept = default;
+    ~Edge()                          = default;
 
     explicit Edge(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePortDefinition,               //
         std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPortDefinition,               //
