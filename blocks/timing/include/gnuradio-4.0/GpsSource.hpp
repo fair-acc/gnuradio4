@@ -44,6 +44,11 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
 
     struct IoThreadGuard { // must be last member — destroyed first, ensuring IO thread exits before _serialPort/_parser
         bool& done;
+        explicit IoThreadGuard(bool& done_) noexcept : done(done_) {}
+        IoThreadGuard(const IoThreadGuard&)            = delete;
+        IoThreadGuard(IoThreadGuard&&)                 = delete;
+        IoThreadGuard& operator=(const IoThreadGuard&) = delete;
+        IoThreadGuard& operator=(IoThreadGuard&&)      = delete;
         ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
     };
     IoThreadGuard _ioGuard{_ioThreadDone};

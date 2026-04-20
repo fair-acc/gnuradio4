@@ -361,6 +361,7 @@ public:
     Graph(Graph&)                   = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&)        = delete; // there can be only one owner of Graph
     Graph& operator=(Graph&& other) = delete;
+    ~Graph()                        = default;
 
     [[nodiscard]] std::span<const std::shared_ptr<BlockModel>> blocks() const noexcept { return _blocks; }
     [[nodiscard]] std::span<std::shared_ptr<BlockModel>>       blocks() noexcept { return _blocks; }

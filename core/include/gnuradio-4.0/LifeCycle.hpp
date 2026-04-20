@@ -191,6 +191,9 @@ public:
     }
 
     StateMachine(StateMachine&& other) noexcept { *this = std::move(other); }
+    ~StateMachine()                              = default;
+    StateMachine(const StateMachine&)            = delete;
+    StateMachine& operator=(const StateMachine&) = delete;
 
     StateMachine& operator=(StateMachine&& other) noexcept {
         // _other's state is put in STOPPED, so that a moved-from ~Block() becomes a no-op

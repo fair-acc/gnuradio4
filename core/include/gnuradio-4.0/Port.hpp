@@ -1197,6 +1197,7 @@ public:
 
     DynamicPort(const DynamicPort& arg)            = delete;
     DynamicPort& operator=(const DynamicPort& arg) = delete;
+    ~DynamicPort()                                 = default;
 
     DynamicPort(DynamicPort&& other) noexcept : priority(other.priority), min_samples(other.min_samples), max_samples(other.max_samples), metaInfo(other.metaInfo), _accessor(std::move(other._accessor)) {}
     auto& operator=(DynamicPort&& other) noexcept {
