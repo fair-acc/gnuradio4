@@ -638,7 +638,7 @@ std::expected<std::vector<DstT>, ConversionError> valueToVector(const Value& v) 
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (auto* t = const_cast<Value&>(v).get_if<Tensor<Value>>()) return tensorOfValueToVector<DstT, CP, RP>(*t);
+        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToVector<DstT, CP, RP>(*t);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -678,7 +678,7 @@ std::expected<std::array<DstT, N>, ConversionError> valueToArray(const Value& v)
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (auto* t = const_cast<Value&>(v).get_if<Tensor<Value>>()) return tensorOfValueToArray<DstT, N, CP, RP>(*t);
+        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToArray<DstT, N, CP, RP>(*t);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -718,7 +718,7 @@ std::expected<DstTensor, ConversionError> valueToTensor(const Value& v, std::pmr
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (auto* t = const_cast<Value&>(v).get_if<Tensor<Value>>()) return tensorOfValueToTensor<DstTensor, CP, RP>(*t, mr);
+        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToTensor<DstTensor, CP, RP>(*t, mr);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -866,7 +866,7 @@ std::expected<void, ConversionError> assignTo(TensorT& dst, const Value& value) 
     using T = typename gr::tensor_traits<TensorT>::value_type;
     if constexpr (!gr::tensor_traits<TensorT>::all_static) {
         if (value.value_type() == detail::valueTypeFor<T>() && value.is_tensor()) {
-            if (auto* srcTensor = const_cast<Value&>(value).get_if<Tensor<T>>()) {
+            if (const auto* srcTensor = value.get_if<Tensor<T>>()) {
                 if constexpr (RP == RankPolicy::Strict && gr::tensor_traits<TensorT>::static_rank) {
                     if (srcTensor->rank() != dst.rank()) {
                         return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch});
