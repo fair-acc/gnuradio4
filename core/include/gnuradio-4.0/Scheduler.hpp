@@ -54,21 +54,21 @@ using namespace gr::message;
 
 namespace property {
 
-inline static const char* kEmplaceBlock = "EmplaceBlock";
-inline static const char* kRemoveBlock  = "RemoveBlock";
-inline static const char* kReplaceBlock = "ReplaceBlock";
-inline static const char* kEmplaceEdge  = "EmplaceEdge";
-inline static const char* kRemoveEdge   = "RemoveEdge";
+inline static const char* const kEmplaceBlock = "EmplaceBlock";
+inline static const char* const kRemoveBlock  = "RemoveBlock";
+inline static const char* const kReplaceBlock = "ReplaceBlock";
+inline static const char* const kEmplaceEdge  = "EmplaceEdge";
+inline static const char* const kRemoveEdge   = "RemoveEdge";
 
-inline static const char* kBlockEmplaced = "BlockEmplaced";
-inline static const char* kBlockRemoved  = "BlockRemoved";
-inline static const char* kBlockReplaced = "BlockReplaced";
-inline static const char* kEdgeEmplaced  = "EdgeEmplaced";
-inline static const char* kEdgeRemoved   = "EdgeRemoved";
+inline static const char* const kBlockEmplaced = "BlockEmplaced";
+inline static const char* const kBlockRemoved  = "BlockRemoved";
+inline static const char* const kBlockReplaced = "BlockReplaced";
+inline static const char* const kEdgeEmplaced  = "EdgeEmplaced";
+inline static const char* const kEdgeRemoved   = "EdgeRemoved";
 
-inline static const char* kGraphGRC           = "GraphGRC";
-inline static const char* kSchedulerInspect   = "SchedulerInspect";
-inline static const char* kSchedulerInspected = "SchedulerInspected";
+inline static const char* const kGraphGRC           = "GraphGRC";
+inline static const char* const kSchedulerInspect   = "SchedulerInspect";
+inline static const char* const kSchedulerInspected = "SchedulerInspected";
 } // namespace property
 
 enum class ExecutionPolicy {

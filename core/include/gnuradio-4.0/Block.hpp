@@ -488,21 +488,21 @@ struct isBlockDependent {
 
 namespace block::property {
 // [[maybe_unused]]: names referenced only from Block.cpp (initStandardPropertyCallbacks) and user code — silences -Werror=unused-variable on TUs that include only the header.
-[[maybe_unused]] inline static const char* kHeartbeat      = "Heartbeat";      ///< heartbeat property - the canary in the coal mine (supports block-specific subscribe/unsubscribe)
-[[maybe_unused]] inline static const char* kEcho           = "Echo";           ///< basic property that receives any matching message and sends a mirror with it's serviceName/unique_name
-[[maybe_unused]] inline static const char* kLifeCycleState = "LifecycleState"; ///< basic property that sets the block's @see lifecycle::StateMachine
-[[maybe_unused]] inline static const char* kSetting        = "Settings";       ///< asynchronous message-based setting handling,
-                                                                               // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
-[[maybe_unused]] inline static const char* kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
+[[maybe_unused]] inline static const char* const kHeartbeat      = "Heartbeat";      ///< heartbeat property - the canary in the coal mine (supports block-specific subscribe/unsubscribe)
+[[maybe_unused]] inline static const char* const kEcho           = "Echo";           ///< basic property that receives any matching message and sends a mirror with it's serviceName/unique_name
+[[maybe_unused]] inline static const char* const kLifeCycleState = "LifecycleState"; ///< basic property that sets the block's @see lifecycle::StateMachine
+[[maybe_unused]] inline static const char* const kSetting        = "Settings";       ///< asynchronous message-based setting handling,
+                                                                                     // N.B. 'Set' Settings are first staged before being applied within the work(...) function (real-time/non-real-time decoupling)
+[[maybe_unused]] inline static const char* const kStagedSetting = "StagedSettings";  ///< asynchronous message-based staging of settings
 
-[[maybe_unused]] inline static const char* kMetaInformation = "MetaInformation"; ///< asynchronous message-based retrieval of the static meta-information (i.e. Annotated<> interfaces, constraints, etc...)
-[[maybe_unused]] inline static const char* kUiConstraints   = "UiConstraints";   ///< asynchronous message-based retrieval of user-defined UI constraints
+[[maybe_unused]] inline static const char* const kMetaInformation = "MetaInformation"; ///< asynchronous message-based retrieval of the static meta-information (i.e. Annotated<> interfaces, constraints, etc...)
+[[maybe_unused]] inline static const char* const kUiConstraints   = "UiConstraints";   ///< asynchronous message-based retrieval of user-defined UI constraints
 
-[[maybe_unused]] inline static const char* kStoreDefaults    = "StoreDefaults";    ///< store present settings as default, for counterpart @see kResetDefaults
-[[maybe_unused]] inline static const char* kResetDefaults    = "ResetDefaults";    ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
-[[maybe_unused]] inline static const char* kActiveContext    = "ActiveContext";    ///< retrieve and set active context
-[[maybe_unused]] inline static const char* kSettingsCtx      = "SettingsCtx";      ///< retrieve/creates/remove a new stored context
-[[maybe_unused]] inline static const char* kSettingsContexts = "SettingsContexts"; ///< retrieve/creates/remove a new stored context
+[[maybe_unused]] inline static const char* const kStoreDefaults    = "StoreDefaults";    ///< store present settings as default, for counterpart @see kResetDefaults
+[[maybe_unused]] inline static const char* const kResetDefaults    = "ResetDefaults";    ///< retrieve and reset to default setting, for counterpart @see kStoreDefaults
+[[maybe_unused]] inline static const char* const kActiveContext    = "ActiveContext";    ///< retrieve and set active context
+[[maybe_unused]] inline static const char* const kSettingsCtx      = "SettingsCtx";      ///< retrieve/creates/remove a new stored context
+[[maybe_unused]] inline static const char* const kSettingsContexts = "SettingsContexts"; ///< retrieve/creates/remove a new stored context
 
 } // namespace block::property
 

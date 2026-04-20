@@ -152,7 +152,7 @@ constexpr std::size_t hash_combine(std::size_t seed, const T& v) noexcept {
     return seed;
 }
 
-inline auto computeValueHash = meta::overloaded([](const std::string_view& sv) { return std::hash<std::string_view>()(sv); }, //
+inline const auto computeValueHash = meta::overloaded([](const std::string_view& sv) { return std::hash<std::string_view>()(sv); }, //
     []<typename T>(const gr::Tensor<T>& tensor) {
         std::size_t seed = 9UZ;
         for (const auto& v : tensor) {

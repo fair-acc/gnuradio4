@@ -43,16 +43,16 @@ using namespace std::string_literals;
 class PluginLoader;
 
 namespace graph::property {
-inline const char* kInspectBlock   = "InspectBlock";
-inline const char* kBlockInspected = "BlockInspected";
-inline const char* kGraphInspect   = "GraphInspect";
-inline const char* kGraphInspected = "GraphInspected";
+inline const char* const kInspectBlock   = "InspectBlock";
+inline const char* const kBlockInspected = "BlockInspected";
+inline const char* const kGraphInspect   = "GraphInspect";
+inline const char* const kGraphInspected = "GraphInspected";
 
-inline const char* kRegistryBlockTypes     = "RegistryBlockTypes";
-inline const char* kRegistrySchedulerTypes = "RegistrySchedulerTypes";
+inline const char* const kRegistryBlockTypes     = "RegistryBlockTypes";
+inline const char* const kRegistrySchedulerTypes = "RegistrySchedulerTypes";
 
-inline const char* kSubgraphExportPort   = "SubgraphExportPort";
-inline const char* kSubgraphExportedPort = "SubgraphExportedPort";
+inline const char* const kSubgraphExportPort   = "SubgraphExportPort";
+inline const char* const kSubgraphExportedPort = "SubgraphExportedPort";
 } // namespace graph::property
 
 namespace detail {
