@@ -36,7 +36,6 @@ constexpr bool isSupportedVectorOrTensorType() {
     if constexpr (gr::meta::vector_type<T> || gr::meta::array_type<T> || is_tensor<T>) {
         using ValueType = typename T::value_type;
         // TODO(follow-up PR): remove pmt::Value as collection element — it bypasses C++ type safety and breaks settings introspection
-        // return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType>;
         return std::is_arithmetic_v<ValueType> || std::is_same_v<ValueType, std::string> || std::is_same_v<ValueType, std::pmr::string> || std::is_same_v<ValueType, std::complex<double>> || std::is_same_v<ValueType, std::complex<float>> || std::is_enum_v<ValueType> || std::is_same_v<ValueType, pmt::Value>;
     } else {
         return false;
@@ -56,7 +55,6 @@ constexpr bool isReadableMember() {
         }
     };
     // TODO(follow-up PR): remove pmt::Value as settings type — it erases type information, prevents validation, and complicates GRC YAML serialisation
-    // return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || isReadableImmutable();
     return std::is_arithmetic_v<T> || std::is_same_v<T, std::string> || std::is_same_v<T, std::pmr::string> || isSupportedVectorOrTensorType<T>() || std::is_same_v<T, property_map> //
            || std::is_same_v<T, std::complex<double>> || std::is_same_v<T, std::complex<float>> || std::is_enum_v<T> || std::is_same_v<T, pmt::Value> || isReadableImmutable();
 }

@@ -715,9 +715,6 @@ consteval std::size_t indexForName() {
     return helper(std::make_index_sequence<PortList::size>());
 }
 
-// template<template<typename...> typename Type, typename... Items>
-// using find_type = decltype(std::tuple_cat(std::declval<std::conditional_t<is_instantiation_of<Items, Type>, std::tuple<Items>, std::tuple<>>>()...));
-
 template<template<typename> typename Pred, typename... Items>
 struct find_type;
 

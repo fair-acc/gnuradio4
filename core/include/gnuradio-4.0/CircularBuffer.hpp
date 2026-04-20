@@ -548,7 +548,6 @@ private:
 #endif
         }
     }; // class Writer
-    // static_assert(BufferWriterLike<Writer<T>>);
 
     template<typename U = T>
     class Reader;
@@ -622,7 +621,6 @@ private:
         const T&                                 operator[](std::size_t i) noexcept { return _internalSpan[i]; }
         explicit(false) operator const std::span<const T>&() const noexcept { return _internalSpan; }
         explicit(false) operator std::span<const T>&() noexcept { return _internalSpan; }
-        // operator std::span<const T>&&() = delete;
 
         template<bool strict_check = true>
         [[nodiscard]] bool consume(std::size_t nSamples) noexcept {
@@ -769,7 +767,6 @@ private:
 
         [[nodiscard]] constexpr std::size_t available() const noexcept { return _buffer->_claimStrategy._publishCursor.value() - _readIndexCached; }
     }; // class Reader
-    // static_assert(BufferReaderLike<Reader<T>>);
 
     [[nodiscard]] constexpr static Allocator DefaultAllocator() {
         if constexpr (has_posix_mmap_interface && std::is_trivially_copyable_v<T>) {

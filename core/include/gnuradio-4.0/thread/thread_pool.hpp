@@ -503,8 +503,6 @@ private:
 
     void updateThreadConstraints() {
         std::scoped_lock lock(_threadListMutex);
-        // std::erase_if(_threads, [](auto &thread) { return !thread.joinable(); });
-
         std::for_each(_threads.begin(), _threads.end(), [this, threadID = std::size_t{0}](auto& thread) mutable { this->updateThreadConstraints(threadID++, thread); });
     }
 

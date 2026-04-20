@@ -237,7 +237,6 @@ public:
 
     operator const std::span<const T>&() const noexcept { return internalSpan; }
     operator std::span<const T>&() noexcept { return internalSpan; }
-    // operator std::span<const T>&&() = delete;
 
     [[nodiscard]] bool consume(std::size_t /* nSamples */) noexcept { return true; }
 };

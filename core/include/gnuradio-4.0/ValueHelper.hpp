@@ -928,8 +928,6 @@ std::expected<void, ConversionError> assignTo(TensorT& dst, Value&& value) {
     return assignTo<CP, RP>(dst, static_cast<const Value&>(value));
 }
 
-// public API: assignTo unordered_map<string, Value>
-
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict>
 std::expected<void, ConversionError> assignTo(std::unordered_map<std::string, Value>& dst, const Value& value) {
     auto result = convertTo<std::unordered_map<std::string, Value>, CP, RP>(value);
@@ -945,8 +943,6 @@ std::expected<void, ConversionError> assignTo(std::unordered_map<std::string, Va
     return assignTo<CP, RP>(dst, static_cast<const Value&>(value));
 }
 
-// public API: assignTo std::map<string, Value>
-
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict>
 std::expected<void, ConversionError> assignTo(std::map<std::string, Value>& dst, const Value& value) {
     auto result = convertTo<std::map<std::string, Value>, CP, RP>(value);
@@ -961,8 +957,6 @@ template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolic
 std::expected<void, ConversionError> assignTo(std::map<std::string, Value>& dst, Value&& value) {
     return assignTo<CP, RP>(dst, static_cast<const Value&>(value));
 }
-
-// public API: assignTo typed unordered_map<string, V>
 
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, typename V>
 requires(!std::same_as<V, Value>)
@@ -980,8 +974,6 @@ requires(!std::same_as<V, Value>)
 std::expected<void, ConversionError> assignTo(std::unordered_map<std::string, V>& dst, Value&& value) {
     return assignTo<CP, RP>(dst, static_cast<const Value&>(value));
 }
-
-// public API: assignTo typed std::map<string, V>
 
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, typename V>
 requires(!std::same_as<V, Value>)

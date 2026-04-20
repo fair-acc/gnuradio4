@@ -173,10 +173,7 @@ struct MergeView : std::ranges::view_interface<MergeView<R, TComp>> {
             }
         }
 
-        reference operator*() const {
-            // assert(_chosen < _its.size());
-            return *_its[_chosen];
-        }
+        reference operator*() const { return *_its[_chosen]; }
 
         Iterator& operator++() {
             ++_its[_chosen];
