@@ -909,7 +909,7 @@ public:
         // Set names of port member variables
         // TODO: Refactor the library not to assign names to ports. The
         // block and the graph are the only things that need the port name
-        auto setPortName = [&](std::size_t, auto* t) {
+        auto setPortName = [this](std::size_t, auto* t) {
             using Description = std::remove_pointer_t<decltype(t)>;
             auto& port        = Description::getPortObject(self());
             if constexpr (Description::kIsDynamicCollection || Description::kIsStaticCollection) {
@@ -1139,7 +1139,7 @@ public:
             // MergeTagPropagation: all auto-forward keys → one output tag at position 0
             property_map merged;
             for_each_reader_span(
-                [&](auto& in) {
+                [&tagWindow, &filterAndSubstitute, &merged](auto& in) {
                     if (!in.isSync || !in.isConnected) {
                         return;
                     }
@@ -1159,7 +1159,7 @@ public:
 
         if constexpr (kNInputPorts <= 1) {
             for_each_reader_span(
-                [&](auto& in) {
+                [&tagWindow, &publishFiltered](auto& in) {
                     if (!in.isSync || !in.isConnected) {
                         return;
                     }
@@ -1175,7 +1175,7 @@ public:
             std::size_t                           nSeen = 0;
 
             for_each_reader_span(
-                [&](auto& in) {
+                [&tagWindow, &publishFiltered, &seen, &nSeen, kDedupCapacity](auto& in) {
                     if (!in.isSync || !in.isConnected) {
                         return;
                     }
@@ -1346,7 +1346,7 @@ public:
 
     void rebindFieldsTo(std::pmr::memory_resource* mr) {
         _allocResource = mr;
-        refl::for_each_data_member_index<Derived>([&](auto kIdx) {
+        refl::for_each_data_member_index<Derived>([this, mr](auto kIdx) {
             auto& field     = refl::data_member<kIdx>(self());
             using F         = std::remove_cvref_t<decltype(field)>;
             using Unwrapped = unwrap_if_wrapped_t<F>;
@@ -1612,12 +1612,12 @@ public:
     work::Status invokeProcessOneSimd(auto& inputSpans, auto& outputSpans, auto width, std::size_t nSamplesToProcess) {
         std::size_t i = 0UZ;
         for (; i + width <= nSamplesToProcess; i += width) {
-            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [&](const auto&... input_simds) { return invoke_processOne_simd(width, input_simds...); });
+            const auto& results = simdize_tuple_load_and_apply(width, inputSpans, i, [this, width](const auto&... input_simds) { return this->invoke_processOne_simd(width, input_simds...); });
             meta::tuple_for_each([i](auto& output_range, const auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
         }
-        simd_epilogue(width, [&](auto w) {
+        simd_epilogue(width, [this, &i, &nSamplesToProcess, &inputSpans, &outputSpans](auto w) {
             if (i + w <= nSamplesToProcess) {
-                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [&](auto&&... input_simds) { return invoke_processOne_simd(w, input_simds...); });
+                const auto results = simdize_tuple_load_and_apply(w, inputSpans, i, [this, w](auto&&... input_simds) { return this->invoke_processOne_simd(w, input_simds...); });
                 meta::tuple_for_each([i](auto& output_range, auto& result) { result.copy_to(output_range.data() + i, stdx::element_aligned); }, outputSpans, results);
                 i += w;
             }
@@ -2230,13 +2230,13 @@ template<BlockLike TBlock>
     // re-enable once all compilers support string and constexpr static
     /*constexpr*/ std::string ret = std::format("# {}\n{}\n**supported data types:**", //
         gr::meta::type_name<DerivedBlock>(), TBlock::description);
-    gr::meta::typelist<SupportedTypes>::for_each([&](std::size_t index, auto&& t) {
+    gr::meta::typelist<SupportedTypes>::for_each([&ret](std::size_t index, auto&& t) {
         std::string type_name = gr::meta::type_name<decltype(t)>();
         ret += std::format("{}:{} ", index, type_name);
     });
     ret += std::format("\n**Parameters:**\n");
     if constexpr (refl::reflectable<DerivedBlock>) {
-        refl::for_each_data_member_index<DerivedBlock>([&](auto kIdx) {
+        refl::for_each_data_member_index<DerivedBlock>([&ret](auto kIdx) {
             using RawType = std::remove_cvref_t<refl::data_member_type<DerivedBlock, kIdx>>;
             using Type    = unwrap_if_wrapped_t<RawType>;
             if constexpr ((std::integral<Type> || std::floating_point<Type> || std::is_same_v<Type, std::string>)) {
@@ -2352,7 +2352,7 @@ int registerBlock(auto& registerInstance) {
  */
 template<template<typename...> typename TBlock, typename... Tuples>
 inline constexpr int registerBlockTT(auto& registerInstance) {
-    meta::outer_product<meta::to_typelist<Tuples>...>::for_each([&]<typename Types>(std::size_t, Types*) { registerBlock<TBlock, typename Types::template apply<BlockParameters>>(registerInstance); });
+    meta::outer_product<meta::to_typelist<Tuples>...>::for_each([&registerInstance]<typename Types>(std::size_t, Types*) { registerBlock<TBlock, typename Types::template apply<BlockParameters>>(registerInstance); });
     return {};
 }
 
@@ -2369,7 +2369,7 @@ inline constexpr int registerBlockTT(auto& registerInstance) {
 // (yet). And in principle, there's always another overload missing.
 template<template<typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
 inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
-    auto addBlockType = [&]<typename Type> {
+    auto addBlockType = [&registerInstance]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0>;
         registerInstance.template addBlockType<ThisBlock>();
@@ -2380,7 +2380,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
 
 template<template<typename, typename, auto> typename TBlock, auto Value0, typename... TBlockParameters, typename TRegisterInstance>
 inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
-    auto addBlockType = [&]<typename Type> {
+    auto addBlockType = [&registerInstance]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0>;
@@ -2392,7 +2392,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
 
 template<template<typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
 inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
-    auto addBlockType = [&]<typename Type> {
+    auto addBlockType = [&registerInstance]<typename Type> {
         static_assert(!meta::is_instantiation_of<Type, BlockParameters>);
         using ThisBlock = TBlock<Type, Value0, Value1>;
         registerInstance.template addBlockType<ThisBlock>();
@@ -2403,7 +2403,7 @@ inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
 
 template<template<typename, typename, auto, auto> typename TBlock, auto Value0, auto Value1, typename... TBlockParameters, typename TRegisterInstance>
 inline constexpr int registerBlock(TRegisterInstance& registerInstance) {
-    auto addBlockType = [&]<typename Type> {
+    auto addBlockType = [&registerInstance]<typename Type> {
         static_assert(meta::is_instantiation_of<Type, BlockParameters>);
         static_assert(Type::size == 2);
         using ThisBlock = TBlock<typename Type::template at<0>, typename Type::template at<1>, Value0, Value1>;

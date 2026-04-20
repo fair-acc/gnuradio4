@@ -106,9 +106,9 @@ void reflectBlock(const TBlock& obj) {
                "# output streams: {}\n",
         gr::refl::type_name<TBlock>.view(), gr::refl::data_member_count<TBlock>, inputs::size(), outputs::size());
     std::print("-- input streams:\n");
-    inputs::for_each([&]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
+    inputs::for_each([&obj]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
     std::print("-- output streams:\n");
-    outputs::for_each([&]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
+    outputs::for_each([&obj]<typename P>(auto idx, P*) { reflectPort<P>(idx, P::getPortObject(obj)); });
 }
 
 int main() {

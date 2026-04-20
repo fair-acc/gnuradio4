@@ -217,7 +217,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
             if (!auto_update.contains(convert_string_domain(key))) {
                 continue;
             }
-            refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) {
+            refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &maybeError, &location, this](auto kIdx) {
                 using MemberType = refl::data_member_type<PortMetaInfo, kIdx>;
                 using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
 
@@ -253,7 +253,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
 
     [[nodiscard]] property_map get() const noexcept {
         property_map metaInfo;
-        refl::for_each_data_member_index<PortMetaInfo>([&](auto kIdx) { //
+        refl::for_each_data_member_index<PortMetaInfo>([&metaInfo, this](auto kIdx) { //
             metaInfo.insert_or_assign(std::pmr::string(refl::data_member_name<PortMetaInfo, kIdx>.view()), refl::data_member<kIdx>(*this).value);
         });
 

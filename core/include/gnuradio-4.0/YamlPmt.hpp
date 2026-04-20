@@ -716,7 +716,7 @@ inline std::expected<pmt::Value, ParseError> parsePlainScalar(ParseContext& ctx,
     }
 
     // fallback for parsing without a YAML tag
-    return parseNextString(ctx, extraDelimiters, [&](std::size_t quoteOffset, std::string_view sv) -> std::expected<pmt::Value, ValueParseError> {
+    return parseNextString(ctx, extraDelimiters, [](std::size_t quoteOffset, std::string_view sv) -> std::expected<pmt::Value, ValueParseError> {
         if (quoteOffset > 0) { // quoted, treat as string
             return resolveYamlEscapes_quoted(sv).transform(value_construct);
         }
@@ -744,7 +744,7 @@ inline std::expected<pmt::Value, ParseError> parsePlainScalar(ParseContext& ctx,
         }
 
         // Anything else: string
-        return parseAs<std::string>(sv).transform_error([&](ValueParseError error) { return ValueParseError{quoteOffset + error.offset, error.message}; }).transform(value_construct);
+        return parseAs<std::string>(sv).transform_error([quoteOffset](ValueParseError error) { return ValueParseError{quoteOffset + error.offset, error.message}; }).transform(value_construct);
     });
 }
 

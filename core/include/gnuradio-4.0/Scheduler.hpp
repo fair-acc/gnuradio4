@@ -495,7 +495,7 @@ public:
 protected:
     void disconnectAllEdges() {
         _graph->disconnectAllEdges();
-        graph::forEachBlock<TransparentBlockGroup>(*_graph, [&](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(*_graph, [](auto& block) {
             if (block->blockCategory() == TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 graph->blockRef().disconnectAllEdges();
@@ -519,7 +519,7 @@ protected:
 
         bool result = _graph->connectPendingEdges();
         primeFeedbackPorts(gr::graph::flatten(*_graph)); // need to flatten graph due to potential loops from within the subgraph to blocks in the parents.
-        graph::forEachBlock<TransparentBlockGroup>(*_graph, [&](auto& block) {
+        graph::forEachBlock<TransparentBlockGroup>(*_graph, [&result, &primeFeedbackPorts](auto& block) {
             if (block->blockCategory() == TransparentBlockGroup) {
                 auto* graph = static_cast<GraphWrapper<gr::Graph>*>(block.get());
                 result      = result && graph->blockRef().connectPendingEdges();

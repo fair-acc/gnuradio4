@@ -193,7 +193,7 @@ inline auto computeValueHash = meta::overloaded([](const std::string_view& sv) {
 
 inline std::size_t computeHash(const pmt::Value& value) {
     std::size_t result = 0UZ;
-    pmt::ValueVisitor([&](const auto& v) { result = computeValueHash(v); }).visit(value);
+    pmt::ValueVisitor([&result](const auto& v) { result = computeValueHash(v); }).visit(value);
     return result;
 }
 
@@ -645,7 +645,7 @@ public:
         static const std::set<std::string> members = [] {
             std::set<std::string> result;
             if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
@@ -774,7 +774,7 @@ public:
         static const std::unordered_map<std::string_view, ParameterSetter> setters = [] {
             std::unordered_map<std::string_view, ParameterSetter> result;
             if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
@@ -794,7 +794,7 @@ public:
         static const std::unordered_map<std::string_view, AutoUpdateHandler> handlers = [] {
             std::unordered_map<std::string_view, AutoUpdateHandler> result;
             if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isWritableMember<Type, MemberType>()) {
@@ -813,7 +813,7 @@ public:
         static const std::unordered_map<std::string_view, StagedApplier> appliers = [] {
             std::unordered_map<std::string_view, StagedApplier> result;
             if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
@@ -833,7 +833,7 @@ public:
         static const std::vector<ParameterReader> readers = [] {
             std::vector<ParameterReader> result;
             if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using Type       = unwrap_if_wrapped_t<std::remove_cvref_t<MemberType>>;
                     if constexpr (settings::isReadableMember<Type>()) {
@@ -851,7 +851,7 @@ public:
         static const std::vector<ActiveParameterReader> readers = [] {
             std::vector<ActiveParameterReader> result;
             if constexpr (refl::reflectable<TBlock>) {
-                refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+                refl::for_each_data_member_index<TBlock>([&result](auto kIdx) {
                     using MemberType = refl::data_member_type<TBlock, kIdx>;
                     using RawType    = std::remove_cvref_t<MemberType>;
                     using Type       = unwrap_if_wrapped_t<RawType>;
@@ -912,7 +912,7 @@ public:
             }
 
             // handle meta-information for UI and other non-processing-related purposes
-            refl::for_each_data_member_index<TBlock>([&](auto kIdx) {
+            refl::for_each_data_member_index<TBlock>([this](auto kIdx) {
                 using MemberType = refl::data_member_type<TBlock, kIdx>;
                 using RawType    = std::remove_cvref_t<MemberType>;
                 using Type       = unwrap_if_wrapped_t<RawType>;
