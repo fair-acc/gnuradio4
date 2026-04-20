@@ -352,7 +352,7 @@ public:
 
     Graph(gr::PluginLoader& pluginLoader, property_map settings = property_map{}) : Graph(std::move(settings)) { _pluginLoader = std::addressof(pluginLoader); }
 
-    Graph(Graph&& other)
+    Graph(Graph&& other) noexcept
         : gr::Block<gr::Graph>(std::move(other)),                             //
           _edges(std::move(other._edges)), _blocks(std::move(other._blocks)), //
           _progress(std::move(other._progress)),                              //

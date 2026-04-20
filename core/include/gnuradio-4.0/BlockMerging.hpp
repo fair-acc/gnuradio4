@@ -160,7 +160,7 @@ public:
     MergeByIndex& operator=(MergeByIndex& other)  = delete;
     MergeByIndex& operator=(MergeByIndex&& other) = delete;
 
-    MergeByIndex(MergeByIndex&& other) : _leftBlock(std::move(other._leftBlock)), _rightBlock(std::move(other._rightBlock)) {}
+    MergeByIndex(MergeByIndex&& other) noexcept(std::is_nothrow_move_constructible_v<Left> && std::is_nothrow_move_constructible_v<Right>) : _leftBlock(std::move(other._leftBlock)), _rightBlock(std::move(other._rightBlock)) {}
 
     // copy-paste from above, keep in sync
     using base = Block<MergeByIndex<Left, OutId, Right, InId>>;
@@ -415,7 +415,7 @@ struct SplitMergeCombine<Paths...> : Block<SplitMergeCombine<Paths...>> {
     SplitMergeCombine& operator=(const SplitMergeCombine&) = delete;
     SplitMergeCombine& operator=(SplitMergeCombine&&)      = delete;
 
-    SplitMergeCombine(SplitMergeCombine&& other) : _paths(std::move(other._paths)) {}
+    SplitMergeCombine(SplitMergeCombine&& other) noexcept(std::is_nothrow_move_constructible_v<std::tuple<Paths...>>) : _paths(std::move(other._paths)) {}
 
     explicit constexpr SplitMergeCombine(gr::property_map init = {}) {
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
@@ -513,7 +513,7 @@ struct SplitMergeCombine<OutputSigns<Vs...>, Paths...> : Block<SplitMergeCombine
     SplitMergeCombine& operator=(const SplitMergeCombine&) = delete;
     SplitMergeCombine& operator=(SplitMergeCombine&&)      = delete;
 
-    SplitMergeCombine(SplitMergeCombine&& other) : _paths(std::move(other._paths)) {}
+    SplitMergeCombine(SplitMergeCombine&& other) noexcept(std::is_nothrow_move_constructible_v<std::tuple<Paths...>>) : _paths(std::move(other._paths)) {}
 
     explicit constexpr SplitMergeCombine(gr::property_map init = {}) {
         [&]<std::size_t... Is>(std::index_sequence<Is...>) {
