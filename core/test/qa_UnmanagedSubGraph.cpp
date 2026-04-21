@@ -96,7 +96,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, demo.graphUniqueName, graph::property::kSubgraphExportPort,                                                   //
@@ -170,7 +170,7 @@ const boost::ut::suite ExportPortsTests_ = [] {
         // return to initial state
         const auto initRet = scheduler.changeStateTo(lifecycle::State::INITIALISED);
         expect(initRet.has_value()) << [&initRet] { return std::format("could switch to INITIALISED - error: {}", initRet.error()); };
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
         expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
 };
@@ -207,11 +207,11 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
-        expect(awaitCondition(1s, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+        expect(awaitCondition(scheduler, [&] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
-        expect(awaitCondition(1s, [&] { return sink.count > 0UZ; }));
+        expect(awaitCondition(scheduler, [&] { return sink.count > 0UZ; }));
 
         expect(source.state() == lifecycle::State::RUNNING);
         expect(sink.state() == lifecycle::State::RUNNING);
@@ -229,7 +229,7 @@ const boost::ut::suite SchedulerDiveIntoSubgraphTests_ = [] {
 
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
         expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
 };
@@ -264,7 +264,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_HierBlock::scheduler", scheduler);
 
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
         expect(eq(graph.blocks().size(), 3UZ)) << "should contain source->(copy->copy)->sink";
@@ -284,7 +284,7 @@ const boost::ut::suite SubgraphBlockSettingsTests_ = [] {
 
         // return to initial state
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
         expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
     };
 };
@@ -314,7 +314,7 @@ const boost::ut::suite GraphInspectYamlTests_ = [] {
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_GraphInspectYaml::scheduler", scheduler);
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, graph.unique_name,     //
             graph::property::kGraphInspect, property_map{{"serialization_format", "yaml"s}}, //
@@ -335,7 +335,7 @@ const boost::ut::suite GraphInspectYamlTests_ = [] {
         scheduler.requestStop();
         schedulerThreadHandle.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
     };
 };
 
@@ -362,7 +362,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_SchedulerInspect::scheduler", scheduler);
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name, //
             scheduler::property::kSchedulerInspect, property_map{},                          //
@@ -386,7 +386,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
         scheduler.requestStop();
         schedulerThreadHandle.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
     };
 
     "kSchedulerInspect returns yaml when serialization_format is yaml"_test = [] {
@@ -407,7 +407,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
         expect(scheduler.msgOut.connect(fromScheduler).has_value());
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_SchedulerInspectYaml::scheduler", scheduler);
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler running";
 
         testing::sendAndWaitForReply<Set>(toScheduler, fromScheduler, scheduler.unique_name,         //
             scheduler::property::kSchedulerInspect, property_map{{"serialization_format", "yaml"s}}, //
@@ -429,7 +429,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
         scheduler.requestStop();
         schedulerThreadHandle.get();
         expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value());
-        expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; }));
     };
 };
 
