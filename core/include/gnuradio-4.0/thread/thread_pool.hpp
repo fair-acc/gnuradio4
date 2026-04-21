@@ -523,11 +523,14 @@ private:
         if (globalAffinityMask.empty()) {
             return {};
         }
+        // pools with minThreads == 0 (e.g. the Emscripten CPU pool, lazily spawned) would divide
+        // by zero below; fall back to a single-stripe layout until the pool actually grows.
+        const std::size_t stripe = std::max<std::size_t>(minThreads(), 1UZ);
         std::vector<bool> affinityMask;
         std::size_t       coreCount = 0;
         for (bool value : globalAffinityMask) {
             if (value) {
-                affinityMask.push_back(coreCount++ % minThreads() == threadID);
+                affinityMask.push_back(coreCount++ % stripe == threadID);
             } else {
                 affinityMask.push_back(false);
             }
