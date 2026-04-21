@@ -21,6 +21,9 @@ using namespace gr;
 
 using namespace std::chrono_literals;
 
+inline constexpr std::size_t               kDefaultMaxStallRounds = 5000UZ; // ~5 s of consecutive stalled 1 ms polls
+inline constexpr std::chrono::milliseconds kDefaultWallClockCap   = 120s;
+
 /// Sleeps the current thread until condition() is true or timeout
 template<typename Condition>
 bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
@@ -30,6 +33,33 @@ bool awaitCondition(std::chrono::milliseconds timeout, Condition condition) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return false;
+}
+
+// Progress-aware: stalling of Graph::progress() (not wall-clock) is the give-up signal
+// — immune to CPU starvation; `safetyCap` catches genuine deadlocks.
+template<typename Scheduler, typename Condition>
+bool awaitCondition(Scheduler& scheduler, Condition condition, //
+    std::size_t maxStallRounds = kDefaultMaxStallRounds, std::chrono::milliseconds safetyCap = kDefaultWallClockCap) {
+    const auto& progress    = scheduler.graph().progress();
+    const auto  deadline    = std::chrono::steady_clock::now() + safetyCap;
+    std::size_t lastSeen    = progress.value();
+    std::size_t stallRounds = 0UZ;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (condition()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const auto current = progress.value();
+        if (current == lastSeen) {
+            if (++stallRounds >= maxStallRounds) {
+                return false;
+            }
+        } else {
+            lastSeen    = current;
+            stallRounds = 0UZ;
+        }
     }
     return false;
 }
@@ -58,8 +88,8 @@ inline std::vector<Message> consumeAllReplyMessages(gr::MsgPortIn& port, std::so
 };
 
 template<typename Condition>
-inline std::optional<Message> waitForReply(gr::MsgPortIn& fromGraph, Condition condition, std::chrono::milliseconds maxWaitTime = 1s) {
-    auto startedAt = std::chrono::system_clock::now();
+inline std::optional<Message> waitForReply(gr::MsgPortIn& fromGraph, Condition condition, std::chrono::milliseconds maxWaitTime = kDefaultWallClockCap) {
+    auto startedAt = std::chrono::steady_clock::now();
     while (true) {
         auto messages = fromGraph.streamReader().get();
         auto it       = std::find_if(messages.begin(), messages.end(), condition);
@@ -67,8 +97,8 @@ inline std::optional<Message> waitForReply(gr::MsgPortIn& fromGraph, Condition c
             return *it;
         }
 
-        std::this_thread::sleep_for(100ms);
-        if (std::chrono::system_clock::now() - startedAt > maxWaitTime) {
+        std::this_thread::sleep_for(1ms);
+        if (std::chrono::steady_clock::now() - startedAt > maxWaitTime) {
             std::println("msg dump for failed test (message count {}):", messages.size());
             for (auto& msg : messages) {
                 std::println("msg: .endpoint={} .hasData={}", msg.endpoint, msg.data.has_value());

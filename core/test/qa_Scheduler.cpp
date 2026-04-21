@@ -1104,7 +1104,7 @@ const boost::ut::suite<"SchedulerTests"> SchedulerTests = [] {
 
         auto schedulerThreadHandle = gr::test::thread_pool::executeScheduler("qa_Sched", scheduler);
 
-        expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 

@@ -63,7 +63,7 @@ public:
 
         using namespace boost::ut;
         // Wait for the scheduler to start running
-        expect(gr::testing::awaitCondition(1s, [this] { return scheduler_.state() == gr::lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+        expect(gr::testing::awaitCondition(scheduler_, [this] { return scheduler_.state() == gr::lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
         expect(scheduler_.state() == gr::lifecycle::State::RUNNING) << "scheduler thread up and running";
     }
 
@@ -130,7 +130,7 @@ const boost::ut::suite TopologyGraphTests = [] {
 
         TestScheduler scheduler(std::move(flow));
 
-        expect(awaitCondition(2s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+        expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
 
         expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler is running";
 
@@ -145,13 +145,13 @@ const boost::ut::suite TopologyGraphTests = [] {
             property_map{{"type", std::string("builtin_counter<float32>")}, {"properties", property_map{{"disconnect_on_done", false}}}},                                //
             ReplyChecker{.expectedEndpoint = scheduler::property::kBlockEmplaced});
 
-        expect(awaitCondition(2s, [&scheduler, initialBlockCount] { return scheduler.graph().blocks().size() > initialBlockCount; })) << "waiting for block to be added to graph";
+        expect(awaitCondition(scheduler, [&scheduler, initialBlockCount] { return scheduler.graph().blocks().size() > initialBlockCount; })) << "waiting for block to be added to graph";
 
         auto finalBlockCount = scheduler.graph().blocks().size();
         std::println("Final block count: {}", finalBlockCount);
         expect(eq(finalBlockCount, initialBlockCount + 1)) << "block was added";
 
-        expect(awaitCondition(2s, [&scheduler] {
+        expect(awaitCondition(scheduler, [&scheduler] {
             for (const auto& block : scheduler.graph().blocks()) {
                 if (block->name() == "builtin_counter<float32>" && block->state() == lifecycle::State::RUNNING) {
                     return true;
@@ -381,11 +381,19 @@ const boost::ut::suite TopologyGraphTests = [] {
     };
 
     "UI constraints setting test"_test = [] {
+        // Build a fully connected source→copy1→copy2→sink chain. Orphan blocks
+        // self-stop via `disconnect_on_done` before staged settings commit, so the
+        // earlier version of this test raced depending on stdlib timing.
         gr::Graph testGraph(context->loader);
-        auto&     copy1 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
-        auto&     copy2 = testGraph.emplaceBlock("gr::testing::Copy<float32>", {});
+        auto&     source = testGraph.emplaceBlock<gr::testing::SlowSource<float>>();
+        auto&     copy1  = testGraph.emplaceBlock<gr::testing::Copy<float>>();
+        auto&     copy2  = testGraph.emplaceBlock<gr::testing::Copy<float>>();
+        auto&     sink   = testGraph.emplaceBlock<gr::testing::CountingSink<float>>();
+        expect(testGraph.connect<"out", "in">(source, copy1).has_value());
+        expect(testGraph.connect<"out", "in">(copy1, copy2).has_value());
+        expect(testGraph.connect<"out", "in">(copy2, sink).has_value());
 
-        TestScheduler scheduler(std::move(testGraph));
+        TestScheduler scheduler(std::move(testGraph), /*addTestSourceAndSink=*/false);
         auto          makeUiConstraints = [](float x, float y) { return gr::property_map{{"x", x}, {"y", y}}; };
 
         // Setting ui_constraints property for all blocks, universal
@@ -394,24 +402,20 @@ const boost::ut::suite TopologyGraphTests = [] {
         );
 
         // Setting ui_constraints property for one block
-        sendMessage<Set>(scheduler.toScheduler, copy1->uniqueName(), block::property::kSetting, //
-            {{"ui_constraints", makeUiConstraints(42, 6)}}                                      // data
+        sendMessage<Set>(scheduler.toScheduler, copy1.unique_name, block::property::kSetting, //
+            {{"ui_constraints", makeUiConstraints(42, 6)}}                                    // data
         );
 
         auto uiConstraintsFor = [](const auto& block) {
             property_map result{};
-            pmt::ValueVisitor(meta::overloaded{
-                                  //
-                                  [&result]<typename... Args>(const gr::property_map& map) { result = gr::property_map(map); },
-                                  //
-                                  [&result]<typename Other>(const Other& /*v*/) { result = gr::property_map{}; }
-                                  //
-                              })
-                .visit(block->settings().get("ui_constraints").value());
+            pmt::ValueVisitor(meta::overloaded{                                                                                 //
+                                  [&result]<typename... Args>(const gr::property_map& map) { result = gr::property_map(map); }, //
+                                  [&result]<typename Other>(const Other& /*v*/) { result = gr::property_map{}; }})
+                .visit(block.settings().get("ui_constraints").value());
             return result;
         };
 
-        expect(awaitCondition(2s, [&] {
+        expect(awaitCondition(scheduler, [&] {
             auto c1 = uiConstraintsFor(copy1);
             auto c2 = uiConstraintsFor(copy2);
             if (c1.empty() || c2.empty()) {
@@ -426,7 +430,6 @@ const boost::ut::suite TopologyGraphTests = [] {
         expect(eq(43.f, gr::test::get_value_or_fail<float>(uiConstraintsFor(copy2)["x"])));
 
         // Check if block introspection includes ui_constraints
-
         {
             auto reply = testing::sendAndWaitForReply<Set>(scheduler.toScheduler, scheduler.fromScheduler, {}, // serviceName
                 graph::property::kGraphInspect,                                                                // endpoint
@@ -456,13 +459,10 @@ const boost::ut::suite TopologyGraphTests = [] {
         }
 
         scheduler.scheduler().requestStop();
-        expect(awaitCondition(2s, [&] { return scheduler.state() != lifecycle::State::RUNNING; })) << "scheduler stopped";
+        expect(awaitCondition(scheduler, [&] { return scheduler.state() != lifecycle::State::RUNNING; })) << "scheduler stopped";
 
-        auto copy1direct = static_cast<gr::testing::Copy<float>*>(copy1->raw());
-        auto copy2direct = static_cast<gr::testing::Copy<float>*>(copy2->raw());
-
-        expect(eq(42.f, gr::test::get_value_or_fail<float>(copy1direct->ui_constraints["x"])));
-        expect(eq(43.f, gr::test::get_value_or_fail<float>(copy2direct->ui_constraints["x"])));
+        expect(eq(42.f, gr::test::get_value_or_fail<float>(copy1.ui_constraints["x"])));
+        expect(eq(43.f, gr::test::get_value_or_fail<float>(copy2.ui_constraints["x"])));
     };
 };
 
@@ -482,11 +482,11 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
 
     TestScheduler scheduler(std::move(graph), /*addTestSourceAndSink=*/false);
 
-    expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+    expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
     expect(eq(scheduler.graph().edges().size(), 1UZ)) << "added one edge";
 
-    expect(awaitCondition(1s, [&sink] { return sink.count >= 10U; })) << "sink received enough data";
+    expect(awaitCondition(scheduler, [&sink] { return sink.count >= 10U; })) << "sink received enough data";
     std::println("executed basic graph");
 
     // Adding a few blocks
@@ -547,11 +547,11 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
 
     // return to initial state
     expect(scheduler.changeStateTo(lifecycle::State::INITIALISED).has_value()) << "could switch to INITIALISED?";
-    expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
+    expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::INITIALISED; })) << "scheduler INITIALISED w/ timeout";
     expect(scheduler.state() == lifecycle::State::INITIALISED) << std::format("scheduler INITIALISED - actual: {}\n", magic_enum::enum_name(scheduler.state()));
 
     scheduler.run();
-    expect(awaitCondition(1s, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
+    expect(awaitCondition(scheduler, [&scheduler] { return scheduler.state() == lifecycle::State::RUNNING; })) << "scheduler thread up and running w/ timeout";
     expect(scheduler.state() == lifecycle::State::RUNNING) << "scheduler thread up and running";
 
     for (const auto& edge : scheduler.graph().edges()) {
@@ -560,7 +560,7 @@ const boost::ut::suite MoreTopologyGraphTests = [] {
     expect(eq(scheduler.graph().edges().size(), 4UZ)) << "added three new edges, one previously registered with connect";
 
     // FIXME: edge->connection is not performed
-    //    expect(awaitCondition(1s, [&sink] {
+    //    expect(awaitCondition(scheduler,[&sink] {
     //        std::this_thread::sleep_for(100ms);
     //        std::println("sink has received {} samples - parents: {}", sink.count, sink.in.buffer().streamBuffer.n_writers());
     //        return sink.count >= 10U;

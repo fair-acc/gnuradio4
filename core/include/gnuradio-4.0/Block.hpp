@@ -1833,6 +1833,9 @@ public:
             }
         }
         if (this->state() == lifecycle::State::STOPPED) {
+            // flush any staged settings before shutdown so messages that arrived just before
+            // the block transitioned to STOPPED (e.g. kSetting/ui_constraints) still commit
+            applyChangedSettings();
             disconnectFromUpStreamParents();
             return work::Result{requestedWork, 0UZ, DONE};
         }
