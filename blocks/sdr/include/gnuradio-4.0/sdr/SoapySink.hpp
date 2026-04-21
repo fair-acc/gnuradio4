@@ -22,7 +22,7 @@ Uses a dedicated IO thread to decouple hardware latency from the scheduler.
 Shares the underlying SoapySDR device handle with SoapySource when both use
 the same driver string, enabling full-duplex TX/RX operation.)">;
 
-    using TSizeChecker  = Limits<1UZ, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
+    using TSizeChecker  = Limits<std::uint32_t{1}, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
     using TBasePort     = PortIn<T>;
     using TPortType     = std::conditional_t<nPorts == 1U, TBasePort, std::conditional_t<nPorts == std::dynamic_extent, std::vector<TBasePort>, std::array<TBasePort, nPorts>>>;
     using StagingBuffer = gr::CircularBuffer<T>;
