@@ -289,6 +289,85 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             expect(v.is_string());
             expect(eq(v.value_or(std::string_view{""}), std::string_view{"test"}));
         };
+
+        "single-arg copy inherits source resource"_test = [] {
+            counting_resource source_mr;
+            Value             source{std::string_view{"copy-inherits-source-resource-payload"}, &source_mr};
+            const std::size_t source_allocs_before = source_mr.alloc_count;
+
+            Value target{source}; // single-arg copy — must land on source_mr
+
+            expect(source_mr.alloc_count > source_allocs_before) << "single-arg copy did not allocate from source resource";
+            expect(target.is_string());
+            expect(eq(target.value_or(std::string_view{""}), std::string_view{"copy-inherits-source-resource-payload"}));
+        };
+
+        "two-arg copy with explicit target resource uses target"_test = [] {
+            counting_resource source_mr;
+            counting_resource target_mr;
+            Value             source{std::string_view{"two-arg-explicit-target-payload"}, &source_mr};
+            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t target_allocs_before = target_mr.alloc_count;
+
+            Value target{source, &target_mr};
+
+            expect(eq(source_mr.alloc_count, source_allocs_before)) << "source resource was used instead of explicit target";
+            expect(target_mr.alloc_count > target_allocs_before) << "explicit target resource was not used";
+            expect(target.is_string());
+        };
+
+        "two-arg copy with nullptr falls back to source resource"_test = [] {
+            counting_resource source_mr;
+            Value             source{std::string_view{"two-arg-nullptr-falls-back-payload"}, &source_mr};
+            const std::size_t source_allocs_before = source_mr.alloc_count;
+
+            Value target{source, nullptr}; // nullptr → source_mr
+
+            expect(source_mr.alloc_count > source_allocs_before) << "nullptr fallback to source resource did not happen";
+            expect(target.is_string());
+        };
+
+        "two-arg copy with explicit default goes to default"_test = [] {
+            counting_resource source_mr;
+            Value             source{std::string_view{"two-arg-explicit-default-payload"}, &source_mr};
+            const std::size_t source_allocs_before = source_mr.alloc_count;
+
+            Value target{source, std::pmr::get_default_resource()};
+
+            expect(eq(source_mr.alloc_count, source_allocs_before)) << "explicit default resource was overridden by source";
+            expect(target.is_string());
+        };
+
+        "move-assign same resource steals without allocating"_test = [] {
+            counting_resource mr;
+            Value             source{std::string_view{"move-assign-same-resource-payload"}, &mr};
+            Value             target{std::string_view{"target-old"}, &mr};
+            const std::size_t allocs_before = mr.alloc_count;
+
+            target = std::move(source);
+
+            expect(eq(mr.alloc_count, allocs_before)) << "same-resource move-assign must not allocate";
+            expect(target.is_string());
+            expect(eq(target.value_or(std::string_view{""}), std::string_view{"move-assign-same-resource-payload"}));
+            expect(source.is_monostate()) << "source must be moved-from (monostate)";
+        };
+
+        "move-assign cross-resource deep-copies into target"_test = [] {
+            counting_resource source_mr;
+            counting_resource target_mr;
+            Value             source{std::string_view{"move-assign-cross-resource-payload"}, &source_mr};
+            Value             target{std::string_view{"target-old"}, &target_mr};
+            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t target_allocs_before = target_mr.alloc_count;
+
+            target = std::move(source);
+
+            expect(eq(source_mr.alloc_count, source_allocs_before)) << "source resource must not see new allocations";
+            expect(target_mr.alloc_count > target_allocs_before) << "target resource must receive the deep-copy";
+            expect(target.is_string());
+            expect(eq(target.value_or(std::string_view{""}), std::string_view{"move-assign-cross-resource-payload"}));
+            expect(source.is_monostate()) << "source must be moved-from after cross-resource move";
+        };
     };
 
     "Tensor<T> construction"_test = [] {

@@ -304,11 +304,11 @@ public:
     Value(std::monostate, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
     // copy/move/destructor
-    Value(const Value& other) : Value(other, std::pmr::get_default_resource()) {}
+    Value(const Value& other) : Value(other, other._resource) {}
     Value(const Value& other, std::pmr::memory_resource* resource) : _value_type(other._value_type), _container_type(other._container_type), _storage{}, _resource(ensure_resource(resource ? resource : other._resource)) { copy_from(other); }
     Value(Value&& other) noexcept;
     Value& operator=(const Value& other);
-    Value& operator=(Value&& other) noexcept;
+    Value& operator=(Value&& other); // cross-resource path may allocate
     ~Value();
 
     // type-specific assignment

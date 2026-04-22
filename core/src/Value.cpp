@@ -355,15 +355,27 @@ Value& Value::operator=(const Value& other) {
     return *this;
 }
 
-Value& Value::operator=(Value&& other) noexcept {
-    if (this != &other) {
+Value& Value::operator=(Value&& other) {
+    if (this == &other) {
+        return *this;
+    }
+    if (_resource == other._resource) {
         destroy();
         _value_type     = other._value_type;
         _container_type = other._container_type;
         _storage        = other._storage;
-        _resource       = other._resource;
         other.set_types(ValueType::Monostate, ContainerType::Scalar);
         other._storage.u64 = 0UZ;
+        other._resource    = nullptr;
+    } else {
+        // Cross-resource: preserve target's resource per std::pmr::vector semantics
+        // (propagate_on_container_move_assignment = false_type).
+        Value tmp(other, _resource);
+        swap(*this, tmp);
+        other.destroy();
+        other.set_types(ValueType::Monostate, ContainerType::Scalar);
+        other._storage.u64 = 0UZ;
+        other._resource    = nullptr;
     }
     return *this;
 }
