@@ -83,8 +83,9 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
         reply.data = std::unexpected(Error{"Invalid block specification"s});
         return reply;
     }
-    const auto& data       = *message.data;
-    const auto  uniqueName = data.at("uniqueName").value_or(std::string_view{});
+    const auto& data = *message.data;
+    // copy bytes into owning std::string — value_or<string_view>() aliases temp Value's storage.
+    const auto uniqueName = std::string(data.at("uniqueName").value_or(std::string_view{}));
     if (uniqueName.empty()) {
         reply.data = std::unexpected(Error{"Invalid block specification"s});
         return reply;
@@ -98,7 +99,7 @@ std::optional<Message> Graph::propertyCallbackInspectBlock([[maybe_unused]] std:
 
     const bool yamlSerialize = [&] {
         if (const auto fmt = data.find("serialization_format"); fmt != data.cend()) {
-            return fmt->second == "yaml";
+            return (*fmt).second == "yaml";
         }
         return false;
     }();
@@ -120,7 +121,7 @@ std::optional<Message> Graph::propertyCallbackGraphInspect([[maybe_unused]] std:
                     return false;
                 }
                 if (const auto it = message.data->find("serialization_format"); it != message.data->cend()) {
-                    return it->second == "yaml";
+                    return (*it).second == "yaml";
                 }
                 return false;
             }();

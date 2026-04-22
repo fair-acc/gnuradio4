@@ -789,7 +789,7 @@ const boost::ut::suite<"Value generic map ctor round-trip"> _generic_map_roundtr
         expect(result.has_value());
         expect(eq(result->size(), 2UZ));
         expect(result->at("key").is_string());
-        expect(eq(*result->at("key").get_if<std::pmr::string>(), std::pmr::string{"value"}));
+        expect(eq(result->at("key").value_or(std::string_view{""}), std::string_view{"value"}));
     };
 
     "std::unordered_map<string, int> round-trip"_test = [] {
@@ -834,11 +834,13 @@ const boost::ut::suite<"Value generic map ctor round-trip"> _generic_map_roundtr
         expect(result->at("inner_map").is_map());
         expect(eq(*result->at("scalar").get_if<std::int32_t>(), 100));
 
-        auto* innerMap = result->at("inner_map").get_if<Value::Map>();
-        expect(innerMap != nullptr);
+        const Value innerEntry = result->at("inner_map");
+        auto        innerMap   = innerEntry.get_if<Value::Map>();
+        expect(innerMap.has_value());
         if (innerMap) {
             expect(eq(innerMap->size(), 1UZ));
-            expect(eq(*innerMap->at(std::pmr::string{"nested_key"}).get_if<std::int32_t>(), 42));
+            const Value nestedEntry = innerMap->at(std::pmr::string{"nested_key"});
+            expect(eq(*nestedEntry.get_if<std::int32_t>(), 42));
         }
     };
 

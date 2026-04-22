@@ -36,12 +36,12 @@ property_map CtxSettingsBase::get(std::span<const std::string> parameterKeys) co
 
 std::optional<pmt::Value> CtxSettingsBase::get(const std::string& parameterKey) const noexcept {
     auto res = get(std::array<std::string, 1>({parameterKey}));
-    auto it  = res.find(convert_string_domain(parameterKey));
-    if (it != res.end()) {
-        return it->second;
-    } else {
+    if (!res.contains(std::string_view{parameterKey})) {
         return std::nullopt;
     }
+    // ValueMap iter yields view-mode Values aliasing res._blob; res dies at function exit.
+    // at() routes through decodeEntry → owning Value at default_resource, surviving res's death.
+    return res.at(std::string_view{parameterKey});
 }
 
 // --- getStored() overloads ---
@@ -375,21 +375,15 @@ void CtxSettingsBase::removeExpiredStoredParameters() {
 // --- Private helpers: tag parsing ---
 
 std::optional<std::string> CtxSettingsBase::contextInTag(const Tag& tag) const {
-    if (tag.map.contains(gr::tag::CONTEXT.shortKey())) {
-        const pmt::Value& ctxInfo = tag.map.at(gr::tag::CONTEXT.shortKey());
-        auto              result  = ctxInfo.value_or(std::string_view{});
-        if (result.data() != nullptr) {
-            return {std::string(result)};
-        }
+    if (const auto it = tag.map.find(gr::tag::CONTEXT.shortKey()); it != tag.map.end() && (*it).second.is_string()) {
+        return std::string((*it).second.value_or(std::string_view{}));
     }
     return std::nullopt;
 }
 
 std::optional<std::uint64_t> CtxSettingsBase::triggeredTimeInTag(const Tag& tag) const {
-    if (tag.map.contains(gr::tag::TRIGGER_TIME.shortKey())) {
-        const pmt::Value& pmtTimeUtcNs = tag.map.at(gr::tag::TRIGGER_TIME.shortKey());
-        auto              result       = pmt::convert_safely<std::uint64_t>(pmtTimeUtcNs);
-        if (result) {
+    if (const auto it = tag.map.find(gr::tag::TRIGGER_TIME.shortKey()); it != tag.map.end()) {
+        if (auto result = pmt::convert_safely<std::uint64_t>((*it).second); result) {
             return *result;
         }
     }

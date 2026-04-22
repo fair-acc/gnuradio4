@@ -598,7 +598,8 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         bool foundGpsTrigger = false;
         for (const auto& sinkTag : sink._tags) {
             if (auto it = sinkTag.map.find(gr::tag::TRIGGER_NAME.shortKey()); it != sinkTag.map.end()) {
-                if (auto* name = it->second.get_if<std::pmr::string>()) {
+                const gr::pmt::Value nameEntry = (*it).second;
+                if (auto name = nameEntry.get_if<std::string_view>()) {
                     if (*name == "GPS:TEST") {
                         foundGpsTrigger = true;
                         break;

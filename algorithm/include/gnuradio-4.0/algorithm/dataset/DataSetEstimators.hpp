@@ -509,8 +509,8 @@ std::optional<StepStartDetectionResult<T>> detectStepStart(D& ds, TValue thresho
     T max_val = estimators::getMaximum(ds, indexMin, indexMax, signalIndex).value().value;
     T min_val = estimators::getMinimum(ds, indexMin, indexMax, signalIndex).value().value;
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
-        ds.meta_information[signalIndex]["gr:minimum"] = gr::value(min_val);
-        ds.meta_information[signalIndex]["gr:maximum"] = gr::value(max_val);
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr:minimum"}, gr::value(min_val));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr:maximum"}, gr::value(max_val));
     }
 
     bool isRising  = initial < max_val;
@@ -705,13 +705,13 @@ StepPulseResponseMetrics<T> analyzeStepPulseResponse(D&& ds, std::size_t indexMi
     metrics.isPulse   = gr::value(metrics.V2 - lastValue) > TValue(3) * roughMinThreshold;
 
     if constexpr (!isConstDataSet && mode == MetaInfo::Apply) {
-        ds.meta_information[signalIndex]["gr::detected"]       = metrics.isPulse ? "pulse" : "step";
-        ds.meta_information[signalIndex]["gr::triggerTime"]    = gr::value(metrics.triggerTime);
-        ds.meta_information[signalIndex]["gr::rise_time"]      = gr::value(metrics.riseTime);
-        ds.meta_information[signalIndex]["gr::V1"]             = gr::value(metrics.V1);
-        ds.meta_information[signalIndex]["gr::V2"]             = gr::value(metrics.V2);
-        ds.meta_information[signalIndex]["gr::peak_amplitude"] = gr::value(metrics.peakAmplitude);
-        ds.meta_information[signalIndex]["gr::overshoot"]      = gr::value(metrics.overshoot);
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::detected"}, std::string{metrics.isPulse ? "pulse" : "step"});
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::triggerTime"}, gr::value(metrics.triggerTime));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::rise_time"}, gr::value(metrics.riseTime));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::V1"}, gr::value(metrics.V1));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::V2"}, gr::value(metrics.V2));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::peak_amplitude"}, gr::value(metrics.peakAmplitude));
+        ds.meta_information[signalIndex].insert_or_assign(std::string_view{"gr::overshoot"}, gr::value(metrics.overshoot));
     }
 
     return metrics;

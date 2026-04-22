@@ -190,12 +190,12 @@ auto get_value_or_fail(const gr::pmt::Value& value, std::source_location sourceL
         }
 
     } else if constexpr (meta::array_or_vector_type<T>) {
-        using TValue       = typename T::value_type;
-        using TTensorElem  = std::conditional_t<std::is_same_v<TValue, std::string>, pmt::Value, TValue>;
-        const auto* tensor = value.get_if<Tensor<TTensorElem>>();
+        using TValue      = typename T::value_type;
+        using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string>, pmt::Value, TValue>;
+        auto tensor       = value.template get_if<TensorView<TTensorElem>>();
 
         auto sizeOk = [&] {
-            if (tensor == nullptr) {
+            if (!tensor) {
                 return false;
             }
             if constexpr (meta::array_type<T>) {
@@ -220,6 +220,17 @@ auto get_value_or_fail(const gr::pmt::Value& value, std::source_location sourceL
             }
         }
 
+    } else if constexpr (std::is_same_v<T, gr::pmt::ValueMap>) {
+        // Q1 inversion: get_if<ValueMap>() returns std::optional<ValueMap> view-mode; materialise
+        // into owning copy before returning so it survives the source value going out of scope.
+        if (auto opt = value.get_if<gr::pmt::ValueMap>()) {
+            return opt->owned();
+        }
+    } else if constexpr (gr::TensorLike<T>) {
+        // Q1.B: get_if<Tensor<U>> returns std::optional<Tensor<U>> (decoded copy from byte-blob).
+        if (auto opt = value.template get_if<T>()) {
+            return std::move(*opt);
+        }
     } else {
         if (auto ptr = value.get_if<T>(); ptr != nullptr) {
             return *ptr;

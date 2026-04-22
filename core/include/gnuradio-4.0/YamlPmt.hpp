@@ -1051,7 +1051,9 @@ inline std::expected<pmt::Value::Map, ParseError> parseMap(ParseContext& ctx, in
             return std::unexpected(ctx.makeError("Expected map in flow-style map"));
         }
 
-        return *ptr;
+        // get_if<ValueMap>() yields a view-mode ValueMap aliasing `result`'s bytes; materialise
+        // into an owning copy before returning so it survives `result` going out of scope.
+        return ptr->owned();
     }
 
     pmt::Value::Map map;

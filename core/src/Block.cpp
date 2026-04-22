@@ -66,7 +66,8 @@ std::optional<Message> BlockBase::propertyCallbackLifecycleState(std::string_vie
             throw gr::exception(std::format("propertyCallbackLifecycleState - state not found, msg: {}", message));
         }
 
-        const auto stateStr = it->second.value_or(std::string_view{});
+        const pmt::Value stateEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+        const auto       stateStr   = stateEntry.value_or(std::string_view{});
         if (!stateStr.data()) {
             throw gr::exception(std::format("propertyCallbackLifecycleState - state is not a string, msg: {}", message));
         }
@@ -216,7 +217,8 @@ std::optional<Message> BlockBase::propertyCallbackActiveContext(std::string_view
 
         std::string contextStr;
         if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-            if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
+            const pmt::Value ctxEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+            if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
                 contextStr = str;
             } else {
                 throw gr::exception(std::format("propertyCallbackActiveContext - context is not a string, msg: {}", message));
@@ -227,7 +229,8 @@ std::optional<Message> BlockBase::propertyCallbackActiveContext(std::string_view
 
         std::uint64_t time = 0;
         if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-            if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
+            const pmt::Value timeEntry = (*it).second;
+            if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
                 time = *timePtr;
             }
         }
@@ -266,7 +269,8 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
 
     std::string contextStr;
     if (auto it = dataMap.find(gr::tag::CONTEXT.shortKey()); it != dataMap.end()) {
-        if (const auto str = it->second.value_or(std::string_view{}); str.data()) {
+        const pmt::Value ctxEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+        if (const auto str = ctxEntry.value_or(std::string_view{}); str.data()) {
             contextStr = str;
         } else {
             throw gr::exception(std::format("propertyCallbackSettingsCtx - context is not a string, msg: {}", message));
@@ -277,7 +281,8 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
 
     std::uint64_t time = 0;
     if (auto it = dataMap.find(gr::tag::CONTEXT_TIME.shortKey()); it != dataMap.end()) {
-        if (const std::uint64_t* timePtr = it->second.get_if<std::uint64_t>(); timePtr) {
+        const pmt::Value timeEntry = (*it).second; // bind to lvalue; ValueMap iter yields by value
+        if (const std::uint64_t* timePtr = timeEntry.get_if<std::uint64_t>(); timePtr) {
             time = *timePtr;
         }
     }
@@ -292,9 +297,9 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
         Tensor<pmt::Value> paramKeys;
         auto               itParam = dataMap.find("parameters");
         if (itParam != dataMap.end()) {
-            auto keys = itParam->second.get_if<Tensor<pmt::Value>>();
-            if (keys) {
-                paramKeys = *keys;
+            const pmt::Value keysEntry = (*itParam).second; // bind to lvalue; TensorView aliases entry's storage
+            if (auto keys = keysEntry.get_if<TensorView<pmt::Value>>()) {
+                paramKeys = keys->owned();
             } else {
                 std::println("Warning: keys are not Tensor<Value>");
             }
@@ -311,7 +316,8 @@ std::optional<Message> BlockBase::propertyCallbackSettingsCtx(std::string_view p
 
     if (message.cmd == Set) {
         if (auto it = dataMap.find("parameters"); it != dataMap.end()) {
-            auto params = it->second.get_if<pmt::Value::Map>();
+            const pmt::Value paramsEntry = (*it).second; // bind to lvalue; Map* aliases entry's _storage
+            auto             params      = paramsEntry.get_if<pmt::Value::Map>();
             if (params) {
                 parameters = *params;
             }

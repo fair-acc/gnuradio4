@@ -53,7 +53,18 @@ bool ValueVisitor::visit(const Value& value) {
     MAKE_VISITOR_CHECK(std::complex<double>, complex_double)
 
     MAKE_VISITOR_CHECK(std::string_view, string_view)
-    MAKE_VISITOR_CHECK(Value::Map, property_map)
+
+    // Map dispatched separately — value_or(Value::Map{}) was removed (the unified value_or
+    // template no longer matches ValueMap). Use the optional get_if<ValueMap>() and materialise
+    // into an owning copy before passing to the handler.
+    if (value.holds<Value::Map>()) {
+        if (auto m = value.get_if<Value::Map>()) {
+            property_map_handler(handler, m->owned());
+        } else {
+            property_map_handler(handler, Value::Map{});
+        }
+        return true;
+    }
 
     MAKE_VISITOR_CHECK(Tensor<bool>, tensor_bool)
     MAKE_VISITOR_CHECK(Tensor<std::int8_t>, tensor_int8_t)

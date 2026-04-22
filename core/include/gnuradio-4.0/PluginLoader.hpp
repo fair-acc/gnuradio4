@@ -61,7 +61,7 @@ inline std::string joinUri(const std::string& base, const std::string& file) {
 
 inline std::expected<std::string, ParseError> readUriToString(std::string_view uri) {
     gr::algorithm::fileio::ReaderConfig config;
-    auto readerExp = gr::algorithm::fileio::readAsync(uri, config);
+    auto                                readerExp = gr::algorithm::fileio::readAsync(uri, config);
     if (!readerExp) {
         return std::unexpected(ParseError{.message = "Failed to read URI"});
     }
@@ -141,13 +141,20 @@ struct YamlDefinitionsLoader {
             std::println("warning: plugin cache directory {} is not available; caching disabled", cacheDir.string());
         }
 
-        auto getMapField = []<typename R>(const auto& map, const auto& key, const R& defaultValue) {
+        auto getMapField = []<typename R>(const auto& map, const auto& key, const R& defaultValue) -> R {
             auto it = map.find(key);
             if (it == map.cend()) {
                 return defaultValue;
-
+            }
+            const auto& entry = (*it).second;
+            if constexpr (std::same_as<R, gr::pmt::ValueMap>) {
+                // ValueMap accessor returns std::optional<ValueMap> view-mode; materialise into owning copy.
+                if (auto opt = entry.template get_if<gr::pmt::ValueMap>()) {
+                    return opt->owned();
+                }
+                return defaultValue;
             } else {
-                return it->second.value_or(defaultValue);
+                return entry.value_or(defaultValue);
             }
         };
 
@@ -163,7 +170,7 @@ struct YamlDefinitionsLoader {
             }
             const auto assetsList = getMapField(*indexMap, "assets", gr::Tensor<gr::pmt::Value>{});
             for (const gr::pmt::Value& assetEntry : assetsList) {
-                const auto* assetMap = assetEntry.get_if<pmt::Value::Map>();
+                const auto assetMap = assetEntry.get_if<pmt::Value::Map>();
                 if (!assetMap) {
                     continue;
                 }
@@ -202,9 +209,9 @@ struct YamlDefinitionsLoader {
                 }
 
                 const auto meta  = getMapField(*blockMap, "definition_metadata", gr::property_map{});
-                auto       field = [&](const auto& key) {
-                    const auto it = meta.find(std::string(key));
-                    return it != meta.end() ? it->second.value_or(std::string{}) : std::string{};
+                auto       field = [&](const auto& key) -> std::string {
+                    const auto it = meta.find(std::string_view{key});
+                    return it != meta.end() ? std::string{(*it).second.value_or(std::string_view{})} : std::string{};
                 };
                 gr_plugin_metadata metadata{
                     .plugin_name    = field("plugin_name"),    //

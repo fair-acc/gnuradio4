@@ -23,18 +23,18 @@ inline std::expected<T, gr::Error> getProperty(const gr::property_map& map, std:
     }
 
     if constexpr (std::is_same_v<T, std::string>) {
-        auto value = it->second.value_or(std::string_view{});
+        auto value = (*it).second.value_or(std::string_view{});
         if (value.data() != nullptr) {
             return std::string(value);
         }
     } else {
-        auto value = checked_access_ptr{it->second.get_if<T>()};
+        auto value = checked_access_ptr{(*it).second.get_if<T>()};
         if (value != nullptr) {
             return *value;
         }
     }
 
-    return std::unexpected(gr::Error(std::format("Field {} in YAML object {} has an incorrect type {}:{} instead of {}", propertyName, map, it->second.value_type(), it->second.container_type(), gr::meta::type_name<T>())));
+    return std::unexpected(gr::Error(std::format("Field {} in YAML object {} has an incorrect type {}:{} instead of {}", propertyName, map, (*it).second.value_type(), (*it).second.container_type(), gr::meta::type_name<T>())));
 }
 
 template<typename T>
@@ -47,9 +47,10 @@ requires(sizeof...(propertySubNames) > 0)
         return std::unexpected(gr::Error(std::format("Missing field {} in YAML object", propertyName)));
     }
 
-    auto value = checked_access_ptr{it->second.get_if<gr::property_map>()};
-    if (value == nullptr) {
-        return std::unexpected(gr::Error(std::format("Field {} in YAML object has an incorrect type {}:{} instead of gr::property_map", propertyName, it->second.value_type(), it->second.container_type())));
+    const pmt::Value entryValue = (*it).second; // bind to lvalue: ValueMap iter yields by value, the Map view below would alias a temporary
+    auto             value      = entryValue.get_if<gr::property_map>();
+    if (!value) {
+        return std::unexpected(gr::Error(std::format("Field {} in YAML object has an incorrect type {}:{} instead of gr::property_map", propertyName, entryValue.value_type(), entryValue.container_type())));
     }
 
     return getProperty<T>(*value, propertySubNames...);
@@ -69,14 +70,15 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
     Tensor<pmt::Value> blks;
     if (auto it = yaml.find("blocks"); it != yaml.end()) {
-        if (const auto blkRef = checked_access_ptr<Tensor<pmt::Value>, false>{it->second.get_if<Tensor<pmt::Value>>()}; blkRef != nullptr) {
-            blks = *blkRef;
+        const pmt::Value blkValue = (*it).second; // ValueMap iter yields by value; bind to lvalue so view aliases live storage
+        if (auto blkView = blkValue.get_if<TensorView<pmt::Value>>()) {
+            blks = blkView->owned();
         }
     }
 
     for (const auto& blk : blks) {
-        const auto _grcBlock = checked_access_ptr{blk.get_if<property_map>()};
-        if (_grcBlock == nullptr) {
+        const auto _grcBlock = blk.get_if<property_map>();
+        if (!_grcBlock) {
             continue;
         }
         const auto& grcBlock = *_grcBlock;
@@ -86,8 +88,11 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
         if (blockType == "SUBGRAPH") {
             auto loadGraph = [&grcBlock, &loader, &location](auto graphWrapper) {
-                const auto _graphData = checked_access_ptr{grcBlock.at("graph").get_if<property_map>()};
-                if (_graphData == nullptr) {
+                // bind by-value at() result to lvalue: get_if<property_map>() returns Map* aliasing
+                // the temp Value's heap storage which dies at the end of the init expression.
+                const pmt::Value graphEntry = grcBlock.at("graph");
+                const auto       _graphData = graphEntry.get_if<property_map>();
+                if (!_graphData) {
                     return;
                 }
                 const auto& graphData = *_graphData;
@@ -96,9 +101,9 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
                 const auto& exportedPorts = graphData.at("exported_ports").value_or(Tensor<pmt::Value>());
                 for (const auto& exportedPort_ : exportedPorts) {
-                    auto exportedPort = checked_access_ptr{exportedPort_.get_if<Tensor<pmt::Value>>()};
-                    if (exportedPort == nullptr || exportedPort->size() != 4) {
-                        throw gr::exception(std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort != nullptr ? exportedPort->size() : -1UZ));
+                    auto exportedPort = exportedPort_.get_if<TensorView<pmt::Value>>();
+                    if (!exportedPort || exportedPort->size() != 4) {
+                        throw gr::exception(std::format("Unable to parse exported port ({} instead of 4 elements)", exportedPort ? exportedPort->size() : -1UZ));
                     }
 
                     const auto requiredBlockName   = (*exportedPort)[0].value_or(std::string_view{});
@@ -134,15 +139,17 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
             const bool isManaged   = schedulerIt != grcBlock.end();
 
             if (isManaged) {
-                auto schedulerPmt = checked_access_ptr{schedulerIt->second.get_if<property_map>()};
-                if (schedulerPmt == nullptr) {
+                const pmt::Value schedulerValue = (*schedulerIt).second; // bind to lvalue so the Map* below aliases live storage
+                auto             schedulerPmt   = schedulerValue.get_if<property_map>();
+                if (!schedulerPmt) {
                     throw gr::exception(std::format("scheduler is not a property_map"));
                 }
                 auto schedulerId = getOrThrow(getProperty<std::string>(*schedulerPmt, "id"sv));
 
                 property_map schedulerParams;
                 if (auto paramsIt = schedulerPmt->find("parameters"); paramsIt != schedulerPmt->end()) {
-                    if (const auto params = checked_access_ptr{paramsIt->second.get_if<property_map>()}; params != nullptr) {
+                    const pmt::Value paramsValue = (*paramsIt).second; // bind to lvalue
+                    if (auto params = paramsValue.get_if<property_map>()) {
                         schedulerParams = *params;
                     }
                 }
@@ -176,28 +183,34 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
             currentBlock->setName(blockName);
 
             const auto parametersPmt = grcBlock.at("parameters");
-            if (const auto parameters = checked_access_ptr{parametersPmt.get_if<property_map>()}; parameters != nullptr) {
+            if (auto parameters = parametersPmt.get_if<property_map>()) {
                 currentBlock->settings().loadParametersFromPropertyMap(*parameters);
             } else {
-                currentBlock->settings().loadParametersFromPropertyMap({});
+                currentBlock->settings().loadParametersFromPropertyMap(property_map{});
             }
 
             if (auto it = grcBlock.find("ctx_parameters"); it != grcBlock.end()) {
-                const auto parametersCtx = checked_access_ptr{it->second.get_if<Tensor<pmt::Value>>()};
-                if (parametersCtx == nullptr) {
+                const pmt::Value ctxParamsValue = (*it).second; // bind to lvalue so the TensorView aliases live storage
+                auto             parametersCtx  = ctxParamsValue.get_if<TensorView<pmt::Value>>();
+                if (!parametersCtx) {
                     throw gr::exception(std::format("ctx_parameters is not a vector<pmt::Value>"));
                 }
 
                 for (const auto& ctxPmt : *parametersCtx) {
-                    const auto ctxPar = checked_access_ptr{ctxPmt.get_if<property_map>()};
-                    if (ctxPar == nullptr) {
+                    const auto ctxPar = ctxPmt.get_if<property_map>();
+                    if (!ctxPar) {
                         throw gr::exception(std::format("ctxPar is not a property_map"));
                     }
 
-                    const auto ctxName       = ctxPar->at(gr::tag::CONTEXT.shortKey()).value_or(std::string_view{});
-                    const auto ctxTime       = checked_access_ptr{ctxPar->at(gr::tag::CONTEXT_TIME.shortKey()).get_if<std::uint64_t>()};
-                    const auto ctxParameters = checked_access_ptr{ctxPar->at("parameters").get_if<property_map>()};
-                    if (ctxName.data() == nullptr || ctxTime == nullptr || ctxParameters == nullptr) {
+                    // bind by-value at() results to lvalues — string_view / get_if<>() pointers
+                    // alias the temp Value's storage which dies at the end of each init expression.
+                    const pmt::Value ctxNameVal       = ctxPar->at(gr::tag::CONTEXT.shortKey());
+                    const pmt::Value ctxTimeVal       = ctxPar->at(gr::tag::CONTEXT_TIME.shortKey());
+                    const pmt::Value ctxParametersVal = ctxPar->at("parameters");
+                    const auto       ctxName          = std::string(ctxNameVal.value_or(std::string_view{}));
+                    const auto       ctxTime          = ctxTimeVal.get_if<std::uint64_t>();
+                    const auto       ctxParameters    = ctxParametersVal.get_if<property_map>();
+                    if (ctxName.empty() || !ctxTime || !ctxParameters) {
                         throw gr::exception(std::format("Missing context values for loadParametersFromPropertyMap"));
                     }
 
@@ -215,15 +228,16 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
 
     Tensor<pmt::Value> connections;
     if (auto it = yaml.find("connections"); it != yaml.end()) {
-        if (const auto connRef = checked_access_ptr<Tensor<pmt::Value>, false>{it->second.get_if<Tensor<pmt::Value>>()}; connRef != nullptr) {
-            connections = *connRef;
+        const pmt::Value connValue = (*it).second; // bind to lvalue so the TensorView aliases live storage
+        if (auto connView = connValue.get_if<TensorView<pmt::Value>>()) {
+            connections = connView->owned();
         }
     }
 
     for (const auto& conn : connections) {
-        const auto _connection = checked_access_ptr{conn.get_if<Tensor<pmt::Value>>()};
-        if (_connection == nullptr || _connection->size() < 4) {
-            throw gr::exception(std::format("Unable to parse connection ({} instead of >=4 elements)", _connection == nullptr ? -1UZ : _connection->size()));
+        auto _connection = conn.get_if<TensorView<pmt::Value>>();
+        if (!_connection || _connection->size() < 4) {
+            throw gr::exception(std::format("Unable to parse connection ({} instead of >=4 elements)", _connection ? _connection->size() : -1UZ));
         }
         const auto& connection = *_connection;
 
@@ -242,12 +256,12 @@ inline void loadGraphFromMap(PluginLoader& loader, gr::Graph& resultGraph, gr::p
                 PortDefinition  port_definition;
             };
 
-            if (const auto portFields = checked_access_ptr<const Tensor<pmt::Value>, false>{portField.template get_if<Tensor<pmt::Value>>()}; portFields != nullptr) {
+            if (auto portFields = portField.template get_if<TensorView<pmt::Value>>()) {
                 if (portFields->size() != 2) {
                     throw gr::exception(std::format("Port definition has invalid length ({} instead of 2)", portFields->size()));
                 }
-                const auto index    = checked_access_ptr{portFields->at(0).template get_if<std::int64_t>()};
-                const auto subIndex = checked_access_ptr{portFields->at(1).template get_if<std::int64_t>()};
+                const auto index    = checked_access_ptr{(*portFields)[0].template get_if<std::int64_t>()};
+                const auto subIndex = checked_access_ptr{(*portFields)[1].template get_if<std::int64_t>()};
                 if (index == nullptr || subIndex == nullptr) {
                     throw gr::exception(std::format("Port definition missing values"));
                 }
@@ -300,7 +314,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
         Tensor<pmt::Value> serializedBlocks;
         serializedBlocks.reserve(nBlocks);
         gr::graph::forEachBlock<gr::block::Category::NormalBlock>(rootGraph, [&serializedBlocks, &loader](const std::shared_ptr<BlockModel>& block) { serializedBlocks.emplace_back(serializeBlock(loader, block, BlockSerializationFlags::All & (~BlockSerializationFlags::Ports))); });
-        result["blocks"] = std::move(serializedBlocks);
+        result.insert_or_assign(std::string_view{"blocks"}, std::move(serializedBlocks));
     }
 
     {
@@ -340,7 +354,7 @@ inline gr::property_map saveGraphToMap(PluginLoader& loader, const gr::Graph& ro
 
             serializedConnections.emplace_back(std::move(seq));
         });
-        result["connections"] = std::move(serializedConnections);
+        result.insert_or_assign(std::string_view{"connections"}, std::move(serializedConnections));
     }
 
     return result;

@@ -157,6 +157,8 @@ template<typename Tensor, typename T>
 concept DynamicTensorOf = TensorOf<Tensor, T> && tensor_traits<std::remove_cvref_t<Tensor>>::all_dynamic;
 template<typename Tensor, typename T>
 concept TensorViewOf = TensorOf<Tensor, T> && tensor_traits<std::remove_cvref_t<Tensor>>::is_view;
+template<typename Tensor>
+concept TensorViewLike = TensorLike<Tensor> && tensor_traits<std::remove_cvref_t<Tensor>>::is_view;
 
 template<typename T, bool managed, std::size_t... Ex>
 struct TensorBase {
@@ -1760,6 +1762,20 @@ struct TensorView : TensorBase<T, false, Ex...> {
         base_t::_data._resource = nullptr;
 
         return *this;
+    }
+
+    /// Materialise this view into an owning Tensor allocated against the given PMR resource
+    /// (defaults to the global default resource). Element-wise copy via begin/end iteration.
+    [[nodiscard]] Tensor<std::remove_const_t<T>, Ex...> owned(std::pmr::memory_resource* resource = std::pmr::get_default_resource()) const {
+        using OwnedT = Tensor<std::remove_const_t<T>, Ex...>;
+        OwnedT result(resource);
+        if constexpr (sizeof...(Ex) == 0UZ) {
+            std::array<std::size_t, detail::kMaxRank> extents{};
+            std::copy_n(base_t::extents().begin(), base_t::rank(), extents.begin());
+            result.resize(std::span<const std::size_t>{extents.data(), base_t::rank()});
+        }
+        std::copy(base_t::begin(), base_t::end(), result.begin());
+        return result;
     }
 };
 

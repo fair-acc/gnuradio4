@@ -1,22 +1,19 @@
 #include <boost/ut.hpp>
 
+#include <gnuradio-4.0/MemoryAllocators.hpp>
 #include <gnuradio-4.0/Value.hpp>
 #include <gnuradio-4.0/ValueHelper.hpp>
+#include <gnuradio-4.0/formatter/ValueFormatter.hpp> // operator<< for Value / Value::ValueType / Value::ContainerType
 
 #include <atomic>
 #include <complex>
 #include <cstdint>
-#include <magic_enum.hpp>
 #include <memory_resource>
-#include <ostream>
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace gr::pmt {
-inline std::ostream& operator<<(std::ostream& os, Value::ValueType t) { return os << magic_enum::enum_name(t); }
-inline std::ostream& operator<<(std::ostream& os, Value::ContainerType t) { return os << magic_enum::enum_name(t); }
-} // namespace gr::pmt
+namespace gr::pmt {} // namespace gr::pmt
 
 struct DiagCounters {
     std::atomic<std::size_t> default_ctor{0UZ};
@@ -73,24 +70,7 @@ struct std::formatter<DiagString, char> : std::formatter<std::string_view, char>
     constexpr auto format(DiagString const& s, auto& ctx) const { return std::formatter<std::string_view, char>::format(static_cast<std::string_view>(s.data), ctx); }
 };
 
-struct counting_resource : std::pmr::memory_resource {
-    std::pmr::memory_resource* upstream{std::pmr::new_delete_resource()};
-    std::size_t                alloc_count{0}, dealloc_count{0}, bytes{0};
-
-    void* do_allocate(std::size_t n, std::size_t align) override {
-        ++alloc_count;
-        bytes += n;
-        return upstream->allocate(n, align);
-    }
-
-    void do_deallocate(void* p, std::size_t n, std::size_t align) override {
-        ++dealloc_count;
-        bytes -= n;
-        upstream->deallocate(p, n, align);
-    }
-
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
-};
+using counting_resource = gr::allocator::pmr::CountingResource;
 
 const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite = [] {
     using namespace boost::ut;
@@ -241,7 +221,7 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource target_mr;
 
             Value source{std::string_view{"hello"}, &source_mr};
-            expect(source_mr.alloc_count >= 1u) << "source allocated";
+            expect(source_mr.allocCount >= 1u) << "source allocated";
 
             // Copy construct with different allocator
             Value target{source}; // Note: copy uses source's _resource in current impl
@@ -268,11 +248,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource mr;
 
             Value source{std::string_view{"hello"}, &mr};
-            auto  allocs_after_source = mr.alloc_count;
+            auto  allocs_after_source = mr.allocCount;
 
             Value target{std::move(source)};
 
-            expect(eq(mr.alloc_count, allocs_after_source)) << "no new allocations on move";
+            expect(eq(mr.allocCount, allocs_after_source)) << "no new allocations on move";
             expect(target.is_string());
             expect(source.is_monostate()) << "source reset after move";
         };
@@ -293,11 +273,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
         "single-arg copy inherits source resource"_test = [] {
             counting_resource source_mr;
             Value             source{std::string_view{"copy-inherits-source-resource-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
 
             Value target{source}; // single-arg copy — must land on source_mr
 
-            expect(source_mr.alloc_count > source_allocs_before) << "single-arg copy did not allocate from source resource";
+            expect(source_mr.allocCount > source_allocs_before) << "single-arg copy did not allocate from source resource";
             expect(target.is_string());
             expect(eq(target.value_or(std::string_view{""}), std::string_view{"copy-inherits-source-resource-payload"}));
         };
@@ -306,35 +286,35 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource source_mr;
             counting_resource target_mr;
             Value             source{std::string_view{"two-arg-explicit-target-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
-            const std::size_t target_allocs_before = target_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
+            const std::size_t target_allocs_before = target_mr.allocCount;
 
             Value target{source, &target_mr};
 
-            expect(eq(source_mr.alloc_count, source_allocs_before)) << "source resource was used instead of explicit target";
-            expect(target_mr.alloc_count > target_allocs_before) << "explicit target resource was not used";
+            expect(eq(source_mr.allocCount, source_allocs_before)) << "source resource was used instead of explicit target";
+            expect(target_mr.allocCount > target_allocs_before) << "explicit target resource was not used";
             expect(target.is_string());
         };
 
         "two-arg copy with nullptr falls back to source resource"_test = [] {
             counting_resource source_mr;
             Value             source{std::string_view{"two-arg-nullptr-falls-back-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
 
             Value target{source, nullptr}; // nullptr → source_mr
 
-            expect(source_mr.alloc_count > source_allocs_before) << "nullptr fallback to source resource did not happen";
+            expect(source_mr.allocCount > source_allocs_before) << "nullptr fallback to source resource did not happen";
             expect(target.is_string());
         };
 
         "two-arg copy with explicit default goes to default"_test = [] {
             counting_resource source_mr;
             Value             source{std::string_view{"two-arg-explicit-default-payload"}, &source_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
 
             Value target{source, std::pmr::get_default_resource()};
 
-            expect(eq(source_mr.alloc_count, source_allocs_before)) << "explicit default resource was overridden by source";
+            expect(eq(source_mr.allocCount, source_allocs_before)) << "explicit default resource was overridden by source";
             expect(target.is_string());
         };
 
@@ -342,11 +322,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource mr;
             Value             source{std::string_view{"move-assign-same-resource-payload"}, &mr};
             Value             target{std::string_view{"target-old"}, &mr};
-            const std::size_t allocs_before = mr.alloc_count;
+            const std::size_t allocs_before = mr.allocCount;
 
             target = std::move(source);
 
-            expect(eq(mr.alloc_count, allocs_before)) << "same-resource move-assign must not allocate";
+            expect(eq(mr.allocCount, allocs_before)) << "same-resource move-assign must not allocate";
             expect(target.is_string());
             expect(eq(target.value_or(std::string_view{""}), std::string_view{"move-assign-same-resource-payload"}));
             expect(source.is_monostate()) << "source must be moved-from (monostate)";
@@ -357,13 +337,13 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             counting_resource target_mr;
             Value             source{std::string_view{"move-assign-cross-resource-payload"}, &source_mr};
             Value             target{std::string_view{"target-old"}, &target_mr};
-            const std::size_t source_allocs_before = source_mr.alloc_count;
-            const std::size_t target_allocs_before = target_mr.alloc_count;
+            const std::size_t source_allocs_before = source_mr.allocCount;
+            const std::size_t target_allocs_before = target_mr.allocCount;
 
             target = std::move(source);
 
-            expect(eq(source_mr.alloc_count, source_allocs_before)) << "source resource must not see new allocations";
-            expect(target_mr.alloc_count > target_allocs_before) << "target resource must receive the deep-copy";
+            expect(eq(source_mr.allocCount, source_allocs_before)) << "source resource must not see new allocations";
+            expect(target_mr.allocCount > target_allocs_before) << "target resource must receive the deep-copy";
             expect(target.is_string());
             expect(eq(target.value_or(std::string_view{""}), std::string_view{"move-assign-cross-resource-payload"}));
             expect(source.is_monostate()) << "source must be moved-from after cross-resource move";
@@ -372,6 +352,7 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
 
     "Tensor<T> construction"_test = [] {
         using gr::Tensor;
+        using gr::TensorView;
 
         "Tensor copy preserves data"_test = [] {
             Tensor<float> t({2, 3});
@@ -384,11 +365,11 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
             expect(v1.is_tensor());
             expect(v2.is_tensor());
 
-            auto* t1 = v1.get_if<Tensor<float>>();
-            auto* t2 = v2.get_if<Tensor<float>>();
+            auto t1 = v1.get_if<TensorView<float>>();
+            auto t2 = v2.get_if<TensorView<float>>();
 
-            expect(t1 != nullptr);
-            expect(t2 != nullptr);
+            expect(t1.has_value());
+            expect(t2.has_value());
             expect(eq((*t1)[0, 0], 1.0f));
             expect(eq((*t2)[0, 0], 1.0f));
             expect(eq((*t1)[1, 2], 6.0f));
@@ -404,8 +385,8 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
 
             expect(v1.is_monostate()) << "source reset after move";
             expect(v2.is_tensor());
-            auto* t2 = v2.get_if<Tensor<float>>();
-            expect(t2 != nullptr);
+            auto t2 = v2.get_if<TensorView<float>>();
+            expect(t2.has_value());
             expect(eq((*t2)[0, 0], 42.0f));
         };
 
@@ -423,13 +404,14 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
     using namespace boost::ut;
     using gr::pmt::Value;
     using gr::Tensor;
+    using gr::TensorView;
 
     "std::vector<float> → Value"_test = [] {
         Value v{std::vector{1.f, 2.f, 3.f}};
         expect(v.is_tensor());
         expect(eq(v.value_type(), Value::ValueType::Float32));
-        auto* t = v.get_if<Tensor<float>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<float>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0], 1.f));
         expect(eq((*t)[2], 3.f));
@@ -438,16 +420,16 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
     "std::vector<double> → Value"_test = [] {
         Value v{std::vector{1., 2., 3.}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<double>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<double>>();
+        expect(t.has_value());
         expect(eq((*t)[1], 2.));
     };
 
     "std::vector<int32_t> → Value"_test = [] {
         Value v{std::vector<std::int32_t>{10, 20, 30}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<std::int32_t>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<std::int32_t>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0], 10));
     };
@@ -456,8 +438,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v{std::vector<std::string>{"hello", "world", "!"}};
         expect(v.is_tensor());
         expect(eq(v.value_type(), Value::ValueType::Value));
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0].value_or(std::string{}), std::string("hello")));
         expect(eq((*t)[1].value_or(std::string{}), std::string("world")));
@@ -467,16 +449,16 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
     "std::vector<std::string> empty → Value"_test = [] {
         Value v{std::vector<std::string>{}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq(t->size(), 0UZ));
     };
 
     "std::array<float, 3> → Value"_test = [] {
         Value v{std::array{1.f, 2.f, 3.f}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<float>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<float>>();
+        expect(t.has_value());
         expect(eq(t->size(), 3UZ));
         expect(eq((*t)[0], 1.f));
     };
@@ -484,8 +466,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
     "std::array<std::string, 2> → Value"_test = [] {
         Value v{std::array<std::string, 2>{"X", "Y"}};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq(t->size(), 2UZ));
         expect(eq((*t)[0].value_or(std::string{}), std::string("X")));
         expect(eq((*t)[1].value_or(std::string{}), std::string("Y")));
@@ -495,8 +477,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::vector{4.f, 5.f};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<float>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<float>>();
+        expect(t.has_value());
         expect(eq(t->size(), 2UZ));
         expect(eq((*t)[0], 4.f));
     };
@@ -505,8 +487,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::vector<std::string>{"a", "b"};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq((*t)[0].value_or(std::string{}), std::string("a")));
     };
 
@@ -514,8 +496,8 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::array{1., 2.};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<double>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<double>>();
+        expect(t.has_value());
         expect(eq((*t)[1], 2.));
     };
 
@@ -523,27 +505,27 @@ const boost::ut::suite<"Value - container converting constructors"> _container_c
         Value v;
         v = std::array<std::string, 1>{"only"};
         expect(v.is_tensor());
-        auto* t = v.get_if<Tensor<Value>>();
-        expect(t != nullptr);
+        auto t = v.get_if<TensorView<Value>>();
+        expect(t.has_value());
         expect(eq((*t)[0].value_or(std::string{}), std::string("only")));
     };
 
     "std::vector/array in Value::Map"_test = [] {
         Value::Map pm;
-        pm.emplace("floats", std::vector{1.f, 2.f, 3.f});
-        pm.emplace("strings", std::vector<std::string>{"a", "b"});
-        pm.emplace("ints", std::array<std::int32_t, 2>{10, 20});
+        pm.emplace("floats", Value{std::vector{1.f, 2.f, 3.f}});
+        pm.emplace("strings", Value{std::vector<std::string>{"a", "b"}});
+        pm.emplace("ints", Value{std::array<std::int32_t, 2>{10, 20}});
 
-        auto* ft = pm.at("floats").get_if<Tensor<float>>();
-        expect(ft != nullptr);
+        auto ft = pm.at("floats").get_if<TensorView<float>>();
+        expect(ft.has_value());
         expect(eq(ft->size(), 3UZ));
 
-        auto* st = pm.at("strings").get_if<Tensor<Value>>();
-        expect(st != nullptr);
+        auto st = pm.at("strings").get_if<TensorView<Value>>();
+        expect(st.has_value());
         expect(eq(st->size(), 2UZ));
 
-        auto* it = pm.at("ints").get_if<Tensor<std::int32_t>>();
-        expect(it != nullptr);
+        auto it = pm.at("ints").get_if<TensorView<std::int32_t>>();
+        expect(it.has_value());
         expect(eq(it->size(), 2UZ));
     };
 };
@@ -844,15 +826,15 @@ const boost::ut::suite<"Value - Comparison & Ordering"> _comparison_suite = [] {
             Value v{std::move(outer_map)};
 
             expect(v.is_map());
-            auto* map_ptr = v.get_if<Value::Map>();
-            expect(map_ptr != nullptr);
+            auto map_ptr = v.get_if<Value::Map>();
+            expect(map_ptr.has_value());
             expect(map_ptr->contains("inner"));
             expect(map_ptr->contains("top_level"));
 
-            auto& inner = map_ptr->at("inner");
+            auto inner = map_ptr->at("inner");
             expect(inner.is_map());
-            auto* inner_map_ptr = inner.get_if<Value::Map>();
-            expect(inner_map_ptr != nullptr);
+            auto inner_map_ptr = inner.get_if<Value::Map>();
+            expect(inner_map_ptr.has_value());
             expect(inner_map_ptr->at("nested_int").holds<std::int64_t>());
         };
 
@@ -910,12 +892,12 @@ const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
 
         {
             Value vs{std::string_view{"hello world"}, &mr};
-            expect(mr.bytes > 0u) << "string should allocate via PMR";
-            expect(mr.alloc_count >= 1u);
+            expect(mr.liveBytes > 0u) << "string should allocate via PMR";
+            expect(mr.allocCount >= 1u);
         }
 
-        expect(eq(mr.bytes, 0u)) << "all memory freed after destruction";
-        expect(eq(mr.alloc_count, mr.dealloc_count));
+        expect(eq(mr.liveBytes, 0u)) << "all memory freed after destruction";
+        expect(eq(mr.allocCount, mr.deallocCount));
     };
 
     "complex uses PMR resource"_test = [] {
@@ -923,10 +905,10 @@ const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
 
         {
             Value vc{std::complex<double>{1.0, 2.0}, &mr};
-            expect(mr.bytes > 0u) << "complex should allocate via PMR";
+            expect(mr.liveBytes > 0u) << "complex should allocate via PMR";
         }
 
-        expect(eq(mr.bytes, 0u));
+        expect(eq(mr.liveBytes, 0u));
     };
 
     "scalars do not allocate"_test = [] {
@@ -935,7 +917,7 @@ const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
         {
             Value vi{std::int64_t{42}, &mr};
             Value vf{3.14, &mr};
-            expect(eq(mr.bytes, 0u)) << "scalars use inline storage";
+            expect(eq(mr.liveBytes, 0u)) << "scalars use inline storage";
         }
     };
 
@@ -944,10 +926,10 @@ const boost::ut::suite<"Value - PMR Memory Management"> _pmr_suite = [] {
 
         {
             Value vs{std::string_view{"hello world"}, &mr};
-            expect(mr.bytes > 0u);
+            expect(mr.liveBytes > 0u);
         }
 
-        expect(eq(mr.bytes, 0u)) << "all memory freed after destruction";
+        expect(eq(mr.liveBytes, 0u)) << "all memory freed after destruction";
     };
 };
 
@@ -973,14 +955,14 @@ const boost::ut::suite<"Value - Safe Access"> _safe_access_suite = [] {
     "ref_if returns nullptr on mismatch"_test = [] {
         Value vi{std::int32_t{42}};
         expect(vi.get_if<double>() == nullptr);
-        expect(vi.get_if<std::pmr::string>() == nullptr);
+        expect(!vi.get_if<std::string_view>().has_value());
         expect(vi.get_if<std::int64_t>() == nullptr);
     };
 
     "ref_if on monostate returns nullptr"_test = [] {
         Value mono;
         expect(mono.get_if<std::int32_t>() == nullptr);
-        expect(mono.get_if<std::pmr::string>() == nullptr);
+        expect(!mono.get_if<std::string_view>().has_value());
     };
 
     "const ref_if works"_test = [] {
@@ -1107,36 +1089,27 @@ const boost::ut::suite<"Value - value_or Copy"> _value_or_suite = [] {
     };
 
     "rvalue reference (move) semantic"_test = [] {
-        "value_or<T&&> moves and resets to monostate on match"_test = [] {
-            Value v{std::pmr::string{"hello"}};
-            expect(!v.is_monostate());
-
-            std::pmr::string result = v.value_or<std::pmr::string&&>(std::pmr::string{"fallback"});
-            expect(eq(std::string_view{result}, std::string_view{"hello"}));
-            expect(v.is_monostate()) << "Value must be monostate after ownership transfer";
-        };
-
-        "value_or<T&&> returns fallback on mismatch without reset"_test = [] {
-            Value v{std::int64_t{42}};
-
-            std::pmr::string result = v.value_or<std::pmr::string&&>(std::pmr::string{"fallback"});
-            expect(eq(std::string_view{result}, std::string_view{"fallback"}));
-            expect(v.holds<std::int64_t>()) << "Value unchanged on mismatch";
-            expect(!v.is_monostate());
-        };
-
-        "value_or<T&&> on monostate returns fallback"_test = [] {
-            Value            mono;
-            std::pmr::string result = mono.value_or<std::pmr::string&&>(std::pmr::string{"default"});
-            expect(eq(std::string_view{result}, std::string_view{"default"}));
-            expect(mono.is_monostate());
-        };
+        // Phase 1e: std::pmr::string is no longer a storage type — the String container holds raw
+        // bytes via a byte-blob allocation, not a std::pmr::string object. The T&& ownership-transfer
+        // semantic is only meaningful for types whose storage is a heap object (Map / Tensor / complex).
+        // For scalars and strings, callers should use:
+        //   - `value_or<std::string>(default)` for an owning copy of a string
+        //   - `get_if<std::string_view>()` for an alloc-free view
+        //   - `value_or<T>(default)` for a copy of a scalar
+        //   - explicit `v.clear()` if the source Value should be reset.
 
         "value_or<T&&> with scalar type resets to monostate"_test = [] {
             Value        v{std::int64_t{42}};
             std::int64_t result = v.value_or<std::int64_t&&>(std::int64_t{0});
             expect(eq(result, std::int64_t{42}));
             expect(v.is_monostate()) << "even scalars reset to monostate on T&&";
+        };
+
+        "value_or<T&&> returns fallback on mismatch without reset"_test = [] {
+            Value        v{std::int64_t{42}};
+            std::int64_t result = v.value_or<std::int64_t&&>(std::int64_t{99});
+            expect(eq(result, std::int64_t{42}));
+            expect(v.is_monostate()) << "match path resets to monostate";
         };
     };
 };
@@ -1200,16 +1173,16 @@ const boost::ut::suite<"Value - or_else lazy evaluation"> _or_else_suite = [] {
     };
 
     "or_else<T&&> ownership transfer on match"_test = [] {
-        Value v{std::pmr::string{"original"}};
+        Value v{std::int64_t{1234}};
         bool  factory_called = false;
 
-        std::pmr::string result = v.or_else<std::pmr::string&&>([&]() -> std::pmr::string {
+        std::int64_t result = v.or_else<std::int64_t&&>([&]() -> std::int64_t {
             factory_called = true;
-            return std::pmr::string{"from_factory"};
+            return std::int64_t{9999};
         });
 
         expect(!factory_called) << "factory NOT called on match";
-        expect(eq(std::string_view{result}, std::string_view{"original"}));
+        expect(eq(result, std::int64_t{1234}));
         expect(v.is_monostate()) << "Value reset to monostate after T&& transfer";
     };
 
@@ -1217,13 +1190,13 @@ const boost::ut::suite<"Value - or_else lazy evaluation"> _or_else_suite = [] {
         Value v{std::int64_t{42}};
         bool  factory_called = false;
 
-        std::pmr::string result = v.or_else<std::pmr::string&&>([&]() -> std::pmr::string {
+        double result = v.or_else<double&&>([&]() -> double {
             factory_called = true;
-            return std::pmr::string{"from_factory"};
+            return 3.14;
         });
 
         expect(factory_called);
-        expect(eq(std::string_view{result}, std::string_view{"from_factory"}));
+        expect(eq(result, 3.14));
         expect(v.holds<std::int64_t>()) << "Value unchanged on mismatch";
     };
 
@@ -1282,11 +1255,11 @@ const boost::ut::suite<"Value - transform"> _transform_suite = [] {
     };
 
     "transform<T&&> moves and resets to monostate"_test = [] {
-        Value v{std::pmr::string{"hello_world"}};
+        Value v{std::int64_t{1234}};
 
-        std::size_t result = v.transform<std::pmr::string&&>([](std::pmr::string&& s) -> std::size_t { return s.size(); });
+        std::size_t result = v.transform<std::int64_t&&>([](std::int64_t&& n) -> std::size_t { return std::to_string(n).size(); });
 
-        expect(eq(result, 11UZ));
+        expect(eq(result, 4UZ));
         expect(v.is_monostate()) << "Value reset after transform<T&&>";
     };
 
@@ -1299,9 +1272,9 @@ const boost::ut::suite<"Value - transform"> _transform_suite = [] {
     };
 
     "transform with type conversion"_test = [] {
-        Value v{std::pmr::string{"12345"}};
+        Value v{std::int64_t{12345}};
 
-        std::size_t len = v.transform<std::pmr::string>([](const std::pmr::string& s) { return s.size(); });
+        std::size_t len = v.transform<std::int64_t>([](const std::int64_t& n) { return std::to_string(n).size(); });
 
         expect(eq(len, 5UZ));
     };
@@ -1328,9 +1301,9 @@ const boost::ut::suite<"Value - transform_or"> _transform_or_suite = [] {
     };
 
     "transform_or<T&&> resets to monostate on match"_test = [] {
-        Value v{std::pmr::string{"test"}};
+        Value v{std::int64_t{1234}};
 
-        auto result = v.transform_or<std::pmr::string&&>([](std::pmr::string&& s) { return s.size(); }, 0UZ);
+        auto result = v.transform_or<std::int64_t&&>([](std::int64_t&& n) { return std::to_string(n).size(); }, 0UZ);
 
         expect(eq(result, 4UZ));
         expect(v.is_monostate());
@@ -1359,15 +1332,12 @@ const boost::ut::suite<"Value - and_then Chaining"> _and_then_suite = [] {
     };
 
     "and_then<T&&> moves and resets"_test = [] {
-        Value v{std::pmr::string{"chain_me"}};
+        Value v{std::int64_t{42}};
 
-        Value result = v.and_then<std::pmr::string&&>([](std::pmr::string&& s) -> Value {
-            s += "_modified";
-            return Value{std::string_view{s}};
-        });
+        Value result = v.and_then<std::int64_t&&>([](std::int64_t&& n) -> Value { return Value{n * 10}; });
 
-        expect(result.holds<std::pmr::string>());
-        expect(eq(result.value_or(std::string_view{""}), std::string_view{"chain_me_modified"}));
+        expect(result.holds<std::int64_t>());
+        expect(eq(result.value_or<std::int64_t>(0), std::int64_t{420}));
         expect(v.is_monostate()) << "original Value reset after T&& chain";
     };
 
@@ -1430,6 +1400,7 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
     using gr::Tensor;
+    using gr::TensorView;
 
     "Map creation and access"_test = [] {
         counting_resource mr;
@@ -1445,8 +1416,8 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
             expect(eq(v_map.container_type(), Value::ContainerType::Map));
             expect(eq(v_map.value_type(), Value::ValueType::Value));
 
-            auto* map_ptr = v_map.get_if<Map>();
-            expect(map_ptr != nullptr);
+            auto map_ptr = v_map.get_if<Map>();
+            expect(map_ptr.has_value());
             expect(eq(map_ptr->size(), 2u));
             expect(map_ptr->contains("a"));
             expect(map_ptr->contains("b"));
@@ -1454,7 +1425,7 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
             expect(eq(map_ptr->at("b").value_or<std::int64_t>(std::int64_t{0}), std::int64_t{2}));
         }
 
-        expect(eq(mr.bytes, 0u)) << "all memory freed after destruction";
+        expect(eq(mr.liveBytes, 0u)) << "all memory freed after destruction";
     };
 
     "Tensor construction with scalar element type"_test = [] {
@@ -1466,8 +1437,9 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
         expect(eq(vt.container_type(), Value::ContainerType::Tensor));
         expect(eq(vt.value_type(), Value::ValueType::Int32));
 
-        Tensor<int>* tref = vt.get_if<Tensor<std::int32_t>>();
-        static_assert(std::is_same_v<decltype(*tref), Tensor<std::int32_t>&>);
+        auto tref = vt.get_if<TensorView<std::int32_t>>();
+        static_assert(std::is_same_v<decltype(*tref), TensorView<std::int32_t>&>);
+        expect(tref.has_value());
     };
 
     "Tensor of Value (heterogeneous)"_test = [] {
@@ -1480,9 +1452,41 @@ const boost::ut::suite<"Value - Containers"> _container_suite = [] {
         expect(vt.is_tensor());
         expect(eq(vt.value_type(), Value::ValueType::Value));
 
-        Tensor<Value>* tref = vt.get_if<Tensor<Value>>();
+        auto tref = vt.get_if<TensorView<Value>>();
+        expect(tref.has_value());
         expect(eq((*tref)[0UZ].value_or<std::int64_t>(std::int64_t{0}), std::int64_t{42}));
         expect(eq((*tref)[1UZ].value_or(std::string{}), std::string("Hello World!")));
+    };
+
+    "get_if<TensorView<T>> returns view on hit, nullopt on mismatch"_test = [] {
+        Tensor<float> t({3UZ});
+        t[0] = 1.0f;
+        t[1] = 2.0f;
+        t[2] = 3.0f;
+        Value v{t};
+
+        auto view = v.get_if<gr::TensorView<float>>();
+        expect(view.has_value()) << "view present for matching element type";
+        if (view) {
+            expect(eq(view->size(), 3UZ));
+            expect(eq((*view)[0UZ], 1.0f));
+            expect(eq((*view)[2UZ], 3.0f));
+        }
+
+        // type mismatch — different element type
+        expect(!v.get_if<gr::TensorView<std::int32_t>>().has_value());
+
+        // type mismatch — not a tensor
+        Value scalar{std::int64_t{42}};
+        expect(!scalar.get_if<gr::TensorView<float>>().has_value());
+
+        // const-element view from const Value
+        const Value& cv    = v;
+        auto         cView = cv.get_if<gr::TensorView<const float>>();
+        expect(cView.has_value());
+        if (cView) {
+            expect(eq((*cView)[1UZ], 2.0f));
+        }
     };
 };
 
@@ -1594,16 +1598,15 @@ const boost::ut::suite<"Value - Edge Cases"> _edge_case_suite = [] {
     };
 
     "consecutive ownership transfers"_test = [] {
-        Value v1{std::pmr::string{"data"}};
+        Value v1{std::int64_t{1234}};
 
-        // Transfer v1's content
-        std::pmr::string s1 = v1.value_or<std::pmr::string&&>(std::pmr::string{});
+        std::int64_t n1 = v1.value_or<std::int64_t&&>(std::int64_t{0});
         expect(v1.is_monostate());
-        expect(eq(std::string_view{s1}, std::string_view{"data"}));
+        expect(eq(n1, std::int64_t{1234}));
 
-        // v1 is now monostate, trying to transfer again returns fallback
-        std::pmr::string s2 = v1.value_or<std::pmr::string&&>(std::pmr::string{"fallback"});
-        expect(eq(std::string_view{s2}, std::string_view{"fallback"}));
+        // v1 is now monostate; second transfer returns fallback
+        std::int64_t n2 = v1.value_or<std::int64_t&&>(std::int64_t{99});
+        expect(eq(n2, std::int64_t{99}));
     };
 
     "empty string handling"_test = [] {
@@ -1732,7 +1735,7 @@ const boost::ut::suite<"Value - std::format and operator<< support"> _format_sup
     "safe accessors on monostate do not explode"_test = [] {
         gr::pmt::Value mono;
         expect(mono.get_if<std::int64_t>() == nullptr);
-        expect(mono.get_if<std::pmr::string>() == nullptr);
+        expect(!mono.get_if<std::string_view>().has_value());
         expect(ge(gr::pmt::detail::type_name(mono).size(), 1UZ)) << "type name is not empty";
         expect(le(memory_usage(mono), 24UZ)) << "memory usage is reasonable";
     };
@@ -1751,7 +1754,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            auto* internal = v.get_if<Value::Map>();
+            auto internal = v.get_if<Value::Map>();
             expect(internal->size() == 2_ul);
             expect(internal->at("a") == Value{1});
             expect(internal->at("b") == Value{2});
@@ -1815,7 +1818,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            auto* internal = v.get_if<Value::Map>();
+            auto internal = v.get_if<Value::Map>();
             expect(internal->size() == 3_ul);
             expect(internal->at("one") == Value{1});
             expect(internal->at("two") == Value{2});
@@ -1992,7 +1995,7 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value v{m};
 
             expect(v.is_map());
-            auto* internal = v.get_if<Value::Map>();
+            auto internal = v.get_if<Value::Map>();
             expect(internal->size() == 1000_ul);
             expect(internal->at("key_0") == Value{0});
             expect(internal->at("key_500") == Value{500});
@@ -2018,10 +2021,10 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
             Value                        v{outer};
 
             expect(v.is_map());
-            auto* outerMap = v.get_if<Value::Map>();
+            auto outerMap = v.get_if<Value::Map>();
             expect(outerMap->at("scalar") == Value{3.14});
 
-            auto& nestedValue = outerMap->at("nested");
+            auto nestedValue = outerMap->at("nested");
             expect(nestedValue.is_map());
             expect(nestedValue.get_if<Value::Map>()->at("inner_int") == Value{42});
         };
@@ -2033,9 +2036,14 @@ const boost::ut::suite<"Value generic map"> _genericMapTests = [] {
 
             Value v{level1};
 
-            auto* l1 = v.get_if<Value::Map>();
-            auto* l2 = l1->at("level2").get_if<Value::Map>();
-            auto* l3 = l2->at("level3").get_if<Value::Map>();
+            // get_if<Value::Map> returns std::optional<ValueMap> view-mode aliasing the bytes
+            // of *this — bind each parent Value to a stable lvalue so the optional inside it
+            // stays usable across the chained at() calls.
+            auto        l1 = v.get_if<Value::Map>();
+            const Value v2 = l1->at("level2");
+            auto        l2 = v2.get_if<Value::Map>();
+            const Value v3 = l2->at("level3");
+            auto        l3 = v3.get_if<Value::Map>();
             expect(l3->at("deep") == Value{999});
         };
     };
@@ -2383,6 +2391,101 @@ const boost::ut::suite<"std::hash<Value>"> _hashTests = [] {
         }
         // Expect no collisions for 100 consecutive integers
         expect(hashes.size() == 100_ul);
+    };
+};
+
+// View-mode lifetime contract: view-mode aliases external bytes whose lifetime is bounded by
+// the source container. Copying a view-mode Value materialises into owning at the target's
+// resource (per the 4f3e801b PMR contract). Moving preserves view-mode (cheap pointer transfer);
+// callers escaping iter scope must explicitly bind to lvalue or copy out.
+const boost::ut::suite<"Value - view-mode lifetime"> _view_mode_lifetime_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+
+    "makeView aliases external bytes; is_view() reports true"_test = [] {
+        const std::string_view src{"hello-view"};
+        const auto*            base = reinterpret_cast<const std::byte*>(src.data());
+        const Value            v    = Value::makeView(Value::ValueType::String, Value::ContainerType::String, base, static_cast<std::uint32_t>(src.size()), std::pmr::get_default_resource());
+        expect(v.is_view());
+        expect(v.is_string());
+        expect(eq(v.value_or(std::string_view{}), src));
+    };
+
+    "copy ctor materialises view-mode source into owning storage"_test = [] {
+        std::string backing{"materialise-me"};
+        const auto* base = reinterpret_cast<const std::byte*>(backing.data());
+        Value       view = Value::makeView(Value::ValueType::String, Value::ContainerType::String, base, static_cast<std::uint32_t>(backing.size()), std::pmr::get_default_resource());
+        const Value copy{view}; // 1-arg copy ctor — should materialise
+
+        expect(view.is_view()) << "source remains view-mode";
+        expect(!copy.is_view()) << "copy must be owning";
+        expect(eq(copy.value_or(std::string_view{}), std::string_view{"materialise-me"}));
+
+        // mutate the backing — copy must be unaffected (it owns its own bytes)
+        backing.replace(0, backing.size(), backing.size(), 'X');
+        expect(eq(copy.value_or(std::string_view{}), std::string_view{"materialise-me"}));
+    };
+
+    "two-arg copy ctor materialises into the explicitly-supplied resource"_test = [] {
+        std::string                          backing{"explicit-resource-copy"};
+        const auto*                          base = reinterpret_cast<const std::byte*>(backing.data());
+        const Value                          view = Value::makeView(Value::ValueType::String, Value::ContainerType::String, base, static_cast<std::uint32_t>(backing.size()), std::pmr::get_default_resource());
+        std::pmr::synchronized_pool_resource pool;
+        const Value                          copy{view, &pool}; // 2-arg copy ctor — materialise into `pool`
+
+        expect(!copy.is_view());
+        expect(copy._resource == &pool);
+        expect(eq(copy.value_or(std::string_view{}), std::string_view{"explicit-resource-copy"}));
+    };
+
+    "move ctor preserves view-mode (no auto-materialise; cheap pointer transfer)"_test = [] {
+        const std::string_view backing{"keep-view-on-move"};
+        const auto*            base = reinterpret_cast<const std::byte*>(backing.data());
+        Value                  view = Value::makeView(Value::ValueType::String, Value::ContainerType::String, base, static_cast<std::uint32_t>(backing.size()), std::pmr::get_default_resource());
+        Value                  moved{std::move(view)};
+
+        expect(moved.is_view()) << "move-ctor must NOT auto-materialise (would invalidate the within-iter perf path)";
+        expect(eq(moved.value_or(std::string_view{}), backing));
+    };
+};
+
+// Documents the by-value lifetime hazards surfaced during the alias swap: callers escaping
+// the iteration scope MUST bind to an lvalue first (or copy out to std::string), since
+// `m.at(k).get_if<T>()` and `.value_or(string_view{})` alias the temp Value's storage which
+// dies at the end of the full expression.
+const boost::ut::suite<"Value - by-value lifetime safety"> _by_value_lifetime_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+    using gr::pmt::ValueMap;
+
+    "lvalue-bound at() — get_if<int>() pointer survives the if-body"_test = [] {
+        ValueMap map;
+        map.insert_or_assign("count", std::int32_t{42});
+
+        const Value entry = map.at("count");
+        if (auto* p = entry.get_if<std::int32_t>(); p != nullptr) {
+            expect(eq(*p, std::int32_t{42}));
+        } else {
+            expect(false) << "get_if<int32_t> must succeed for the inserted value";
+        }
+    };
+
+    "lvalue-bound at() — value_or(string_view{}) survives subsequent statements"_test = [] {
+        ValueMap map;
+        map.insert_or_assign("note", std::string_view{"persistent"});
+
+        const Value entry = map.at("note");
+        const auto  sv    = entry.value_or(std::string_view{});
+        expect(eq(sv, std::string_view{"persistent"}));
+    };
+
+    "copy-out via value_or(std::string{}) is safe even on temp Value"_test = [] {
+        ValueMap map;
+        map.insert_or_assign("note", std::string_view{"copied-out"});
+
+        // value_or<std::string>(default) returns std::string by value — owning, safe.
+        const std::string copy = map.at("note").value_or(std::string{});
+        expect(eq(copy, std::string{"copied-out"}));
     };
 };
 

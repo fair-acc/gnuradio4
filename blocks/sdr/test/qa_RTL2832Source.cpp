@@ -426,10 +426,10 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         auto triggerName = firstTag.get(std::string(tag::TRIGGER_NAME.shortKey()));
         expect(triggerName.has_value()) << "first tag has trigger_name";
         if (triggerName) {
-            auto* name = triggerName->get().get_if<std::pmr::string>();
-            expect(name != nullptr);
+            auto name = triggerName->get().get_if<std::string_view>();
+            expect(name.has_value());
             if (name) {
-                expect(eq(*name, std::pmr::string("TEST_TRIGGER"))) << "custom trigger name";
+                expect(eq(*name, std::string_view{"TEST_TRIGGER"})) << "custom trigger name";
             }
         }
 
@@ -630,8 +630,8 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         for (const auto& capturedTag : sink._tags) {
             auto triggerName = capturedTag.get(std::string(tag::TRIGGER_NAME.shortKey()));
             if (triggerName) {
-                auto* name = triggerName->get().get_if<std::pmr::string>();
-                if (name && name->find("PPS") != std::pmr::string::npos) {
+                auto name = triggerName->get().get_if<std::string_view>();
+                if (name && name->find("PPS") != std::string_view::npos) {
                     foundPpsTriggerName = true;
                 }
             }
@@ -641,8 +641,8 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
                 auto* metaMap = metaInfo->get().get_if<property_map>();
                 if (metaMap) {
                     if (auto it = metaMap->find(std::pmr::string("clock_source")); it != metaMap->end()) {
-                        auto* clockSource = it->second.get_if<std::pmr::string>();
-                        if (clockSource && clockSource->find("PPS") != std::pmr::string::npos) {
+                        auto clockSource = it->second.get_if<std::string_view>();
+                        if (clockSource && clockSource->find("PPS") != std::string_view::npos) {
                             foundClockSource = true;
                         }
                     }
@@ -716,8 +716,8 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
         for (const auto& capturedTag : sink._tags) {
             auto triggerName = capturedTag.get(std::string(tag::TRIGGER_NAME.shortKey()));
             if (triggerName) {
-                auto* name = triggerName->get().get_if<std::pmr::string>();
-                if (name && name->find("GPS") != std::pmr::string::npos) {
+                auto name = triggerName->get().get_if<std::string_view>();
+                if (name && name->find("GPS") != std::string_view::npos) {
                     foundGpsTriggerName = true;
                 }
             }
@@ -727,8 +727,8 @@ const boost::ut::suite<"RTL2832Source"> rtl2832Tests = [] {
                 auto* metaMap = metaInfo->get().get_if<property_map>();
                 if (metaMap) {
                     if (auto it = metaMap->find(std::pmr::string("clock_source")); it != metaMap->end()) {
-                        auto* clockSource = it->second.get_if<std::pmr::string>();
-                        if (clockSource && clockSource->find("GPS") != std::pmr::string::npos) {
+                        auto clockSource = it->second.get_if<std::string_view>();
+                        if (clockSource && clockSource->find("GPS") != std::string_view::npos) {
                             foundGpsClockSource = true;
                         }
                     }

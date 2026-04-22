@@ -75,7 +75,7 @@ struct Matcher {
             return trigger::MatchResult::Ignore;
         }
 
-        const auto tup        = std::make_tuple(ty->get().value_or(0), tm->get().value_or(0), td->get().value_or(0));
+        const auto tup        = std::make_tuple(ty->value_or(0), tm->value_or(0), td->value_or(0));
         const auto& [y, m, d] = tup;
         const auto ly         = last_seen ? std::optional<int>(std::get<0>(*last_seen)) : std::nullopt;
         const auto lm         = last_seen ? std::optional<int>(std::get<1>(*last_seen)) : std::nullopt;
@@ -166,9 +166,9 @@ std::pair<std::vector<Tag>, std::vector<Tag>> extractMetadataTags(const std::vec
         nonMetadata.index = tag.index;
         for (const auto& [key, value] : tag.map) {
             if (std::find(tagsToExtract.begin(), tagsToExtract.end(), key) != tagsToExtract.end()) {
-                metadata.map[key] = value;
+                metadata.map.insert_or_assign(key, value);
             } else {
-                nonMetadata.map[key] = value;
+                nonMetadata.map.insert_or_assign(key, value);
             }
         }
         if (!metadata.map.empty()) {
@@ -484,7 +484,7 @@ const boost::ut::suite DataSinkTests = [] {
         auto polling = std::async([] {
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
                 const auto v = tag.get(TRIGGER_NAME.shortKey());
-                return v && test::get_value_or_fail<std::string>(v->get()) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+                return v && test::get_value_or_fail<std::string>(*v) == "TRIGGER" ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
 
             std::shared_ptr<DataSetPoller<int32_t>> poller;
@@ -555,7 +555,7 @@ const boost::ut::suite DataSinkTests = [] {
 
             auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
                 const auto type = tag.get(TRIGGER_NAME.shortKey());
-                return (type && test::get_value_or_fail<std::string>(type->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+                return (type && test::get_value_or_fail<std::string>(*type) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
             };
             std::shared_ptr<DataSetPoller<int32_t>> poller;
             expect(spinUntil(4s, [&] {
@@ -620,7 +620,7 @@ const boost::ut::suite DataSinkTests = [] {
 
         auto isTrigger = [](std::string_view /* filterSpec */, const Tag& tag, const property_map& /* filter state */) {
             const auto v = tag.get(TRIGGER_NAME.shortKey());
-            return (v && test::get_value_or_fail<std::string>(v->get()) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
+            return (v && test::get_value_or_fail<std::string>(*v) == "TRIGGER") ? trigger::MatchResult::Matching : trigger::MatchResult::Ignore;
         };
 
         auto registerThread = std::thread([&] {

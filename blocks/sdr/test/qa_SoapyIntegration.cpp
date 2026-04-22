@@ -150,7 +150,7 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
         for (const auto& tag : sink._tags) {
             auto nameIt = tag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME.shortKey()));
             if (nameIt != tag.map.end()) {
-                if (auto* name = nameIt->second.get_if<std::pmr::string>()) {
+                if (auto name = nameIt->second.get_if<std::string_view>()) {
                     if (*name == "GPS_PPS") {
                         foundClockTag = true;
                         break;

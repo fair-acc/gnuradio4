@@ -140,7 +140,7 @@ void sendMessage(auto& port, std::string_view serviceName, std::string_view endp
 }
 
 template<auto cmd>
-void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> userMessage, std::string_view clientRequestID = "") {
+void sendMessage(auto& port, std::string_view serviceName, std::string_view endpoint, std::initializer_list<std::pair<std::string_view, pmt::Value>> userMessage, std::string_view clientRequestID = "") {
     detail::sendMessage<cmd, property_map>(port, serviceName, endpoint, property_map(userMessage), clientRequestID);
 }
 

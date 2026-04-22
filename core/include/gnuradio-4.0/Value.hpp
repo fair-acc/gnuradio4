@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstdint>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -19,6 +20,94 @@
 namespace gr::pmt {
 
 class Value;
+class ValueMap; // forward declaration — full definition in ValueMap.hpp; Map operations live in Value.cpp
+
+} // namespace gr::pmt
+
+namespace gr {
+// Q1.B: partial specialisation of TensorView for T=gr::pmt::Value.
+//
+// Tensor<Value>'s on-blob encoding is variable-size (per-element [PackedTensorElement] header +
+// variable-length payload), so a TensorView<Value> can NOT alias a contiguous Value array out of
+// the byte-blob — the elements are not contiguous Value objects on disk. To keep the API symmetric
+// with TensorView<T> for fixed-size T (used by std::vector<Value> settings fields and the same
+// generic templated dispatch), this specialisation owns a Tensor<Value> internally that is decoded
+// once on construction. Iteration / size / extents / element access forward to the decoded snapshot.
+//
+// "View" is a slight misnomer for this specialisation (it owns a copy), but the user-facing API
+// (begin/end/size/operator[]/data/owned) is the same shape as the non-specialised case, so generic
+// caller code reads the same.
+template<std::size_t... Ex>
+struct TensorView<gr::pmt::Value, Ex...> {
+    using value_type     = gr::pmt::Value;
+    using element_type   = gr::pmt::Value;
+    using container_t    = Tensor<gr::pmt::Value, Ex...>;
+    using iterator       = typename container_t::iterator;
+    using const_iterator = typename container_t::const_iterator;
+
+    container_t _data{}; // owning decoded snapshot
+
+    TensorView()                                 = default;
+    TensorView(const TensorView&)                = default;
+    TensorView(TensorView&&) noexcept            = default;
+    TensorView& operator=(const TensorView&)     = default;
+    TensorView& operator=(TensorView&&) noexcept = default;
+
+    // Construct from an owning Tensor<Value>. Used by Value::get_if<TensorView<Value>>() after
+    // decoding the byte-blob into a stable Tensor<Value>.
+    explicit TensorView(container_t snapshot) : _data(std::move(snapshot)) {}
+
+    template<std::size_t... TEx>
+    requires(sizeof...(TEx) > 0 || sizeof...(Ex) == 0)
+    explicit TensorView(const Tensor<gr::pmt::Value, TEx...>& source) : _data(source) {}
+
+    template<std::size_t... TEx>
+    requires(sizeof...(TEx) > 0 || sizeof...(Ex) == 0)
+    explicit TensorView(Tensor<gr::pmt::Value, TEx...>& source) : _data(source) {}
+
+    // Forward-range API
+    [[nodiscard]] auto        begin() noexcept { return _data.begin(); }
+    [[nodiscard]] auto        end() noexcept { return _data.end(); }
+    [[nodiscard]] auto        begin() const noexcept { return _data.begin(); }
+    [[nodiscard]] auto        end() const noexcept { return _data.end(); }
+    [[nodiscard]] std::size_t size() const noexcept { return _data.size(); }
+    [[nodiscard]] std::size_t rank() const noexcept { return _data.rank(); }
+    [[nodiscard]] auto        extents() const noexcept { return _data.extents(); }
+    [[nodiscard]] auto        strides() const noexcept { return _data.strides(); }
+    [[nodiscard]] auto*       data() noexcept { return _data.data(); }
+    [[nodiscard]] const auto* data() const noexcept { return _data.data(); }
+
+    [[nodiscard]] gr::pmt::Value&       operator[](std::size_t i) noexcept { return _data[i]; }
+    [[nodiscard]] const gr::pmt::Value& operator[](std::size_t i) const noexcept { return _data[i]; }
+
+    [[nodiscard]] container_t owned(std::pmr::memory_resource* res = std::pmr::get_default_resource()) const { return container_t{_data, res}; }
+};
+} // namespace gr
+
+namespace gr::pmt {
+
+// ─── Tensor byte-blob format (Q1 inversion: Value owns its own tensor bytes) ────────────────
+// Format (mirrors what ValueMap stored in tensor sub-blobs pre-Q1; now Value's intrinsic shape):
+//
+//   offset  size  field
+//   ------  ----  ----------------------------------------------------------------------------
+//      0      1   elementValueType  (Value::ValueType byte: Float32 / Int64 / String / Value …)
+//      1      1   rank              (0 .. kMaxTensorRank)
+//      2      1   encodingFlags     bit 0 = variableSizeElements (set iff elementVT ∈ {String, Value})
+//      3      1   reserved = 0
+//      4      4   elementCount      (product of extents; 0 if any extent is 0; 1 for rank-0)
+//      8     4*r  extents[0..r-1]   (one u32 per extent)
+//
+// Then EITHER (variableSizeElements == 0 → fixed-size scalar / complex elements):
+//      8+4r  elementCount × sizeof(elementCpp)  contiguous element data (alignment matches Tensor's)
+//
+// OR    (variableSizeElements == 1 → string / Value elements): per-element [PackedTensorElement]
+//      headers + packed payload bytes — defined in detail::encodeTensorElement / decodeTensorElement
+//      in ValueMap.hpp (kept there because nested-ValueMap encoding belongs alongside ValueMap).
+inline constexpr std::uint8_t  kMaxTensorRank              = 8U;       // mirrors gr::detail::kMaxRank in Tensor.hpp
+inline constexpr std::uint32_t kMaxTensorElements          = 1U << 24; // sanity cap (~16M elements per tensor)
+inline constexpr std::size_t   kTensorBlobHeaderSize       = 8UZ;      // elementValueType[1] + rank[1] + encodingFlags[1] + reserved[1] + elementCount[4]
+inline constexpr std::uint8_t  kTensorEncodingVariableSize = 0x01;
 
 namespace detail {
 [[noreturn, gnu::cold]] inline void value_type_mismatch() noexcept {
@@ -29,8 +118,10 @@ namespace detail {
 
 /// Helper to determine return type based on requested type category.
 /// For T&& requests, returns T (by value after move); otherwise returns T as-is.
+/// Tensor / ValueMap exceptions: byte-blob storage has no stable T*, so reference-to-storage
+/// returns are unsupported — value_or always returns by value.
 template<typename T>
-using return_t = std::conditional_t<std::is_rvalue_reference_v<T>, std::remove_reference_t<T>, T>;
+using return_t = std::conditional_t<std::is_rvalue_reference_v<T>, std::remove_reference_t<T>, std::conditional_t<gr::TensorLike<std::remove_cvref_t<T>>, std::remove_cvref_t<T>, T>>;
 
 /// Check if T is a const lvalue reference.
 template<typename T>
@@ -67,7 +158,7 @@ template<typename T>
 concept ValueConvertible = std::same_as<std::remove_cvref_t<T>, Value> || ValueScalarType<T> || std::convertible_to<T, std::string_view>;
 
 template<typename T>
-concept ValueComparable = ValueScalarType<T> || std::same_as<std::remove_cvref_t<T>, std::pmr::string>;
+concept ValueComparable = ValueScalarType<T>;
 
 template<typename M>
 concept ValueMapLike = requires(const std::remove_cvref_t<M>& m) {
@@ -78,7 +169,7 @@ concept ValueMapLike = requires(const std::remove_cvref_t<M>& m) {
 } && std::convertible_to<typename std::remove_cvref_t<M>::key_type, std::string_view> && ValueConvertible<typename std::remove_cvref_t<M>::mapped_type>;
 
 template<typename M>
-concept ExternalValueMap = ValueMapLike<M> && !std::same_as<std::remove_cvref_t<M>, std::pmr::unordered_map<std::pmr::string, Value>>;
+concept ExternalValueMap = ValueMapLike<M> && !std::same_as<std::remove_cvref_t<M>, ValueMap>;
 
 constexpr std::string value_to_string(const Value&); // forward declaration
 } // namespace detail
@@ -95,7 +186,7 @@ constexpr std::string value_to_string(const Value&); // forward declaration
  * @par Supported Types
  *   - Scalars: bool, int8–64, uint8–64, float, double (inline storage)
  *   - Complex: std::complex<float/double> (PMR heap)
- *   - Strings: std::pmr::string (PMR heap)
+ *   - Strings: raw byte-blob (PMR heap, [size:4][chars][\0])
  *   - Containers: Tensor<T>, Map (PMR heap)
  *
  * @par Ownership Semantics for value_or<T>()
@@ -117,8 +208,12 @@ constexpr std::string value_to_string(const Value&); // forward declaration
  *  v = std::int64_t{42};
  *  int64_t          x = v.value_or<std::int64_t>(0);       // copy, v unchanged
  *  int64_t&         r = v.value_or<std::int64_t&>(fb);     // modify in-place
- *  std::pmr::string s = v.value_or<std::pmr::string&&>(...);// ownership transfer
  * @endcode
+ *
+ * @note `get_if<std::pmr::string>` is dropped — strings are stored as a raw byte-blob,
+ *       not a `std::pmr::string` object. Use `get_if<std::string_view>()` for alloc-free
+ *       view access (works for owning + view modes) or `value_or<std::string>(default)`
+ *       for an owning copy.
  *
  * @warning Unchecked accessors have undefined behavior on type mismatch (assert in debug).
  *          Use holds<T>(), get_if<T>(), or value_or() for safe access.
@@ -156,10 +251,24 @@ public:
         bool operator()(const auto& left, const auto& right) const { return std::string_view(left) == std::string_view(right); }
     };
 
-    using Map = std::pmr::unordered_map<std::pmr::string, Value, MapHash, MapEqual>; // TODO: replace with std::flat_map or other more simpler key-value map once available (libc++ >=20, stdlibc++ >=15)
+    // Phase 1e Step C: Map alias is the contiguous packed-blob ValueMap (was a
+    // std::pmr::unordered_map<std::pmr::string, Value, MapHash, MapEqual>). Storage stays as
+    // a heap pointer (`_storage.ptr → ValueMap*`) for now; the byte-blob storage redesign
+    // happens in a follow-up step. Map operations live in Value.cpp where ValueMap is fully
+    // defined.
+    using Map = ValueMap;
 
-    uint8_t _value_type : 4 {0U};
-    uint8_t _container_type : 4 {0U};
+    // View-mode flag (bit 0 of _flags). When set, _storage.ptr aliases external bytes
+    // (typically a ValueMap blob's payload pool) and _payloadLength carries the byte count
+    // — the destructor does NOT free _storage.ptr. View-mode is only meaningful for variable-
+    // size containers (String, Tensor, Map). Inline scalars never use view-mode.
+    static constexpr std::uint8_t kFlagViewMode = 0x01;
+
+    uint8_t       _value_type : 4 {0U}; // bits 0-3 of byte 0
+    uint8_t       _container_type : 4 {0U};
+    uint8_t       _flags{0U};         // byte 1: kFlagViewMode | (reserved bits 1..7)
+    uint16_t      _reserved{0U};      // bytes 2-3
+    std::uint32_t _payloadLength{0U}; // bytes 4-7: byte length of view-mode payload (0 for owning)
     union Storage {
         bool          b;
         std::int8_t   i8;
@@ -182,16 +291,19 @@ public:
 private:
     [[nodiscard]] static std::pmr::memory_resource* ensure_resource(std::pmr::memory_resource* r) noexcept { return r != nullptr ? r : std::pmr::get_default_resource(); }
 
-    void set_types(ValueType vt, ContainerType ct) noexcept;
+    // Inlined here so hot-path callers (e.g. ValueMap iterator's Value construction) collapse
+    // through the bit-field writes instead of paying a function-call layer per Value ctor.
+    void set_types(ValueType vt, ContainerType ct) noexcept {
+        _value_type     = static_cast<unsigned char>(static_cast<std::uint8_t>(vt) & 0x0F);
+        _container_type = static_cast<unsigned char>(static_cast<std::uint8_t>(ct) & 0x0F);
+    }
     void copy_from(const Value& other);
     void destroy() noexcept;
 
     void initStringTensor(std::ranges::sized_range auto& strings) {
         Tensor<Value> tensor({std::ranges::size(strings)});
         std::ranges::transform(strings, tensor.begin(), [this](auto& str) { return Value(std::move(str), _resource); });
-        set_types(get_value_type<Value>(), ContainerType::Tensor);
-        void* mem    = _resource->allocate(sizeof(Tensor<Value>), alignof(Tensor<Value>));
-        _storage.ptr = new (mem) Tensor<Value>(std::move(tensor));
+        init_from_tensor(std::move(tensor));
     }
 
     Value& assignStringTensor(std::ranges::sized_range auto& strings) {
@@ -251,29 +363,12 @@ private:
     [[nodiscard]] bool                  compare_scalar_eq(const Value& other) const noexcept;
     [[nodiscard]] std::partial_ordering compare_scalar_order(const Value& other) const noexcept;
 
+    // Body moved to ValueMap.hpp (Phase 1e Step C: forward-decl Map = ValueMap means sizeof(Map)
+    // and `new Map(...)` need ValueMap's full definition — only available after ValueMap.hpp
+    // is included). Callers constructing Value from a non-ValueMap source map MUST include
+    // <gnuradio-4.0/ValueMap.hpp>.
     template<detail::ExternalValueMap T>
-    void init_from_map(T&& map) {
-        using DecayedMap           = std::remove_cvref_t<T>;
-        using MappedType           = typename DecayedMap::mapped_type;
-        constexpr bool isValueType = std::same_as<MappedType, Value>;
-        constexpr bool canMove     = std::is_rvalue_reference_v<T&&>;
-
-        set_types(ValueType::Value, ContainerType::Map);
-        void* mem    = _resource->allocate(sizeof(Map), alignof(Map));
-        auto* newMap = new (mem) Map(_resource);
-        newMap->reserve(map.size());
-
-        for (auto& [key, val] : map) {
-            if constexpr (isValueType && canMove) {
-                newMap->emplace(std::pmr::string(key, _resource), std::move(val));
-            } else if constexpr (isValueType) {
-                newMap->emplace(std::pmr::string(key, _resource), val);
-            } else {
-                newMap->emplace(std::pmr::string(key, _resource), Value{val, _resource});
-            }
-        }
-        _storage.ptr = newMap;
-    }
+    void init_from_map(T&& map);
 
 public:
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -311,6 +406,51 @@ public:
     Value& operator=(Value&& other); // cross-resource path may allocate
     ~Value();
 
+    /**
+     * @brief Construct a view-mode Value that aliases external bytes (does not own them).
+     *
+     * View-mode is a within-iteration optimisation: `ValueMap::const_iterator::operator*()` yields
+     * view-mode Values for variable-size entries (currently String only; Tensor / Map land in
+     * Phase 1e Q1) so the per-deref Value carries a pointer + length into the source ValueMap's
+     * blob instead of allocating its own bytes.
+     *
+     * @par Lifetime contract
+     *
+     * View-mode bytes live as long as the SOURCE container is alive AND not mutated. Any
+     * `emplace`/`insert_or_assign`/`erase`/`clear`/`reserve`/`shrink_to_fit`/`merge` on the source
+     * ValueMap invalidates outstanding view-mode Values (same rule as `std::vector` iterator
+     * invalidation). Caller discipline only — no `freeze()`-and-iterate enforcement.
+     *
+     * @par Escaping iter scope
+     *
+     * The two ways view-mode Values leave their iter scope have OPPOSING lifetime needs:
+     *
+     * 1. Storing or returning a Value (`auto v = (*it).second; return v;`) — by default,
+     *    move-ctor preserves view-mode (cheap pointer transfer), so the destination dangles
+     *    when the source ValueMap dies. Caller MUST either bind to lvalue and copy explicitly
+     *    (`pmt::Value owned{view}; return owned;` — copy-ctor materialises) OR route through
+     *    `at()` instead of iterator deref (`at()` uses `decodeEntry` → owning Value).
+     *    See `Settings::CtxSettingsBase::get(string)` for the canonical pattern.
+     *
+     * 2. Extracting a string_view / pointer from a temp Value (`auto sv = (*it).second.value_or(sv{});`)
+     *    — `value_or<string_view>()` and `get_if<T>()` return references/pointers into the
+     *    Value's storage, which die at end of full expression. Caller MUST bind the Value to
+     *    a const lvalue first (`const pmt::Value e = (*it).second; auto sv = e.value_or(sv{});`)
+     *    OR copy out to `std::string` (`auto s = (*it).second.value_or(std::string{});`).
+     *
+     * Copy-ctor (one-arg) materialises against source's resource; two-arg version materialises
+     * against an explicit target resource. Move-ctor preserves view-mode — losing this would
+     * defeat the iter perf optimisation by forcing materialisation on every implicit move.
+     */
+    [[nodiscard]] static Value makeView(ValueType vt, ContainerType ct, const std::byte* base, std::uint32_t length, std::pmr::memory_resource* resource) noexcept {
+        Value v(resource);
+        v.set_types(vt, ct);
+        v._flags         = kFlagViewMode;
+        v._payloadLength = length;
+        v._storage.ptr   = const_cast<std::byte*>(base); // view storage; never written through
+        return v;
+    }
+
     // type-specific assignment
     Value& operator=(bool v);
     Value& operator=(int8_t v);
@@ -331,21 +471,20 @@ public:
     Value& operator=(const std::pmr::string& v);
     Value& operator=(const char* v);
 
+    // Q1.B: Tensor byte-blob storage. Body in ValueMap.hpp where encodeTensorBlob is defined.
+    // Users constructing Value from a Tensor MUST include <gnuradio-4.0/ValueMap.hpp>.
+    template<TensorLike Tens>
+    void init_from_tensor(Tens&& tensor);
+
     template<TensorLike TensorCollection>
     Value(TensorCollection tensor, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : _resource(ensure_resource(resource)) {
-        using T = TensorCollection::value_type;
-        set_types(get_value_type<T>(), ContainerType::Tensor);
-        void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));
-        _storage.ptr = new (mem) Tensor<T>(std::move(tensor));
+        init_from_tensor(std::move(tensor));
     }
 
     template<TensorLike TensorCollection>
     Value& operator=(TensorCollection tensor) {
-        using T = TensorCollection::value_type;
         destroy();
-        set_types(get_value_type<T>(), ContainerType::Tensor);
-        void* mem    = _resource->allocate(sizeof(Tensor<T>), alignof(Tensor<T>));
-        _storage.ptr = new (mem) Tensor<T>(std::move(tensor));
+        init_from_tensor(std::move(tensor));
         return *this;
     }
 
@@ -418,6 +557,7 @@ public:
     [[nodiscard]] constexpr bool is_string() const noexcept { return container_type() == ContainerType::String; }
     [[nodiscard]] constexpr bool is_tensor() const noexcept { return container_type() == ContainerType::Tensor; }
     [[nodiscard]] constexpr bool is_map() const noexcept { return container_type() == ContainerType::Map; }
+    [[nodiscard]] constexpr bool is_view() const noexcept { return (_flags & kFlagViewMode) != 0U; }
 
     [[nodiscard]] constexpr bool     has_value() const noexcept { return !is_monostate(); }
     [[nodiscard]] constexpr explicit operator bool() const noexcept { return has_value(); }
@@ -430,20 +570,105 @@ public:
     requires(!meta::is_instantiation_of<T, std::vector>)
     [[nodiscard]] bool holds() const noexcept;
 
-    /// Safe pointer access - returns nullptr on type mismatch
-    /// @note For std::string/std::string_view, use value_or() instead (requires conversion)
+    /// Safe pointer access — returns `T*` to the owning storage on hit, nullptr on type mismatch
+    /// (including when this is a view-mode Value — view-mode aliases external bytes, no `T*` to
+    /// hand out; use the view-type overload instead, e.g. `get_if<std::string_view>()`).
+    /// @note For std::string / std::pmr::string, use `value_or<std::string>(default)` (auto-converts,
+    ///       allocates) or `get_if<std::string_view>()` for alloc-free view (Phase 1e: strings are
+    ///       stored as raw byte-blobs, not as `std::pmr::string` objects).
     template<typename T>
-    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>>)
+    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> && !std::is_same_v<T, std::pmr::string> && !std::is_same_v<T, Tensor<std::string>> && !std::is_same_v<T, ValueMap> && !gr::TensorViewLike<T> && !gr::TensorLike<T>)
     [[nodiscard]] T* get_if() noexcept;
 
     template<typename T>
-    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, Tensor<std::string>> && !std::is_same_v<T, std::monostate>)
+    requires(!std::is_array_v<T> && !meta::is_instantiation_of<T, std::vector> && !std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> && !std::is_same_v<T, std::pmr::string> && !std::is_same_v<T, Tensor<std::string>> && !std::is_same_v<T, std::monostate> && !std::is_same_v<T, ValueMap> && !gr::TensorViewLike<T> && !gr::TensorLike<T>)
     [[nodiscard]] const T* get_if() const noexcept {
 #ifdef __EMSCRIPTEN__
         static_assert(!std::is_same_v<std::size_t, T>);
 #endif
         return const_cast<Value*>(this)->get_if<T>();
     }
+
+    /// Q1.B: get_if<Tensor<T>>() — Tensor storage is byte-blob; no stable Tensor<T>* exists.
+    /// Returns std::optional<Tensor<T>> (decoded copy on hit, allocates per call), nullopt on
+    /// type mismatch / empty. For zero-copy access prefer get_if<TensorView<T>>(). Body in
+    /// ValueMap.hpp where decodeTensorBlob is defined.
+    template<typename T>
+    requires gr::TensorLike<T>
+    [[nodiscard]] std::optional<T> get_if() const noexcept;
+
+    /// View-type overload — returns std::optional<std::string_view> on hit, std::nullopt on type
+    /// mismatch. Works uniformly across owning + view modes (alloc-free). The string_view aliases
+    /// the owning byte-blob's bytes (Phase 1e) or the view-mode external bytes — lifetime-bound to
+    /// the source Value.
+    template<typename T>
+    requires std::same_as<T, std::string_view>
+    [[nodiscard]] std::optional<std::string_view> get_if() const noexcept {
+        if (!is_string()) {
+            return std::nullopt;
+        }
+        return std::string_view{static_cast<const char*>(_storage.ptr), _payloadLength};
+    }
+
+    /// View-type overload — returns std::optional<TensorView<U,...>> on hit, std::nullopt on type
+    /// mismatch. Non-owning view aliasing the owning Tensor's element storage; lifetime-bound to
+    /// the source Value (Phase 1e step B preparation: read-only callers should prefer this over
+    /// `get_if<Tensor<U,...>>()` so the eventual storage redesign — heap Tensor → byte-blob — does
+    /// not break them). Same span-style const-laxness as std::span: a mutable TensorView can be
+    /// obtained from a const Value; pick `TensorView<const U,...>` for an enforced read-only view.
+    /// Q1.B: get_if<TensorView<T>>() — works uniformly across owning + view-mode byte-blob storage.
+    ///
+    /// For fixed-size T (bool, intN/uintN, float, double, complex<float>, complex<double>): aliases
+    /// the data section of the tensor blob (header + extents + data). Zero allocation. Lifetime
+    /// bound to *this. bool is supported because the byte-blob stores 1 byte per bool (contiguous);
+    /// the TensorView<bool> ctor (T* data, extents) accepts this directly.
+    ///
+    /// For T=Value (variable-size element encoding): partial specialisation in this header decodes
+    /// the blob into a Tensor<Value> and wraps it in a TensorView<Value> snapshot.
+    template<typename T>
+    requires(gr::TensorViewLike<T> && !std::same_as<std::remove_const_t<typename T::value_type>, gr::pmt::Value>)
+    [[nodiscard]] std::optional<T> get_if() const noexcept {
+        using ElemT = std::remove_const_t<typename T::value_type>;
+        if (!is_tensor() || value_type() != get_value_type<ElemT>()) {
+            return std::nullopt;
+        }
+        const auto* base = static_cast<const std::byte*>(_storage.ptr);
+        if (base == nullptr || _payloadLength < kTensorBlobHeaderSize) {
+            return std::nullopt;
+        }
+        const auto rank          = static_cast<std::uint8_t>(base[1]);
+        const auto encodingFlags = static_cast<std::uint8_t>(base[2]);
+        if (rank > kMaxTensorRank || (encodingFlags & kTensorEncodingVariableSize) != 0U) {
+            return std::nullopt; // variable-size element types can't alias contiguous bytes
+        }
+        std::array<std::size_t, kMaxTensorRank> extentsBuf{};
+        for (std::size_t i = 0UZ; i < rank; ++i) {
+            std::uint32_t ext;
+            std::memcpy(&ext, base + kTensorBlobHeaderSize + 4UZ * i, sizeof(ext));
+            extentsBuf[i] = static_cast<std::size_t>(ext);
+        }
+        const std::span<const std::size_t> extents{extentsBuf.data(), rank};
+        const auto*                        elementData = base + kTensorBlobHeaderSize + 4UZ * rank;
+        // Build via non-const ElemT TensorView and implicit-convert to T (handles TensorView<const T>).
+        gr::TensorView<ElemT> nonConstView{const_cast<ElemT*>(reinterpret_cast<const ElemT*>(elementData)), extents};
+        return T{nonConstView};
+    }
+
+    /// Specialisation for TensorView<Value>: decode the byte-blob into a Tensor<Value> snapshot
+    /// and return it inside the TensorView<Value> partial specialisation (which carries a
+    /// container_t Tensor<Value> internally). Body in ValueMap.hpp where decodeTensorBlob lives.
+    template<typename T>
+    requires(gr::TensorViewLike<T> && std::same_as<std::remove_const_t<typename T::value_type>, gr::pmt::Value>)
+    [[nodiscard]] std::optional<T> get_if() const noexcept;
+
+    /// View-mode-aware ValueMap accessor (post Q1). Returns std::optional<ValueMap> on hit
+    /// where the inner ValueMap is in view-mode (alloc-free; aliases the source Value's bytes
+    /// when in view-mode, or aliases the owning ValueMap's blob when in owning mode).
+    /// Lifetime-bound to the source Value. For an owning copy, call `result->owned(resource)`.
+    /// Defined out-of-line in Value.cpp because ValueMap is forward-declared here.
+    template<typename T>
+    requires std::same_as<T, ValueMap>
+    [[nodiscard]] std::optional<ValueMap> get_if() const noexcept;
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
     // UNIFIED VALUE ACCESS — value_or<T|T&|const T&|T&&>(fallback)
@@ -457,8 +682,8 @@ public:
     //   value_or<T&&>(fallback)       → Transfer: moves out and resets Value to monostate
     //
     // STRING CONVERSION:
-    //   value_or<std::string>(fallback)      → auto-convert from pmr::string (allocates)
-    //   value_or<std::string_view>(fallback) → zero-copy view of pmr::string
+    //   value_or<std::string>(fallback)      → auto-convert from byte-blob (allocates)
+    //   value_or<std::string_view>(fallback) → zero-copy view of byte-blob
     //   These always return by value; reference variants are not supported for conversions.
     //
     // TYPE STRICTNESS: For non-string types, the fallback type must match exactly.
@@ -466,20 +691,19 @@ public:
 
     // ─── String conversion overloads (always by-value) ───────────────────────────────────────────
 
-    /// value_or for std::string - auto-converts from pmr::string (allocates)
+    /// value_or for std::string - auto-converts from byte-blob (allocates)
     [[nodiscard]] std::string value_or(std::string default_val) const& {
         if (is_string()) {
-            return std::string(*static_cast<const std::pmr::string*>(_storage.ptr));
+            return std::string(static_cast<const char*>(_storage.ptr), _payloadLength);
         }
         return default_val;
     }
 
-    /// value_or for std::string_view - zero-copy view of pmr::string
+    /// value_or for std::string_view - zero-copy view of byte-blob
     /// @warning Returned view is invalidated if Value is modified or destroyed
     [[nodiscard]] std::string_view value_or(std::string_view default_val) const& noexcept {
         if (is_string()) {
-            const auto* str = static_cast<const std::pmr::string*>(_storage.ptr);
-            return std::string_view{str->data(), str->size()};
+            return std::string_view{static_cast<const char*>(_storage.ptr), _payloadLength};
         }
         return default_val;
     }
@@ -489,10 +713,17 @@ public:
     /// monadic value_or — supports T, T&, const T&, T&&
     /// @return    copy/reference/moved value on match, fallback on mismatch
     template<typename T> // mutable
-    requires(!detail::is_string_convertible_v<std::remove_cvref_t<T>>)
+    requires(!detail::is_string_convertible_v<std::remove_cvref_t<T>> && !std::same_as<std::remove_cvref_t<T>, ValueMap>)
     [[nodiscard]] auto value_or(T&& default_val) & -> detail::return_t<T> {
         using Raw = std::remove_cvref_t<T>;
-        if constexpr (std::is_rvalue_reference_v<T>) {
+        if constexpr (gr::TensorLike<Raw>) {
+            // Tensor storage is byte-blob: get_if returns std::optional<Raw> (decoded snapshot).
+            // No stable Raw* exists, so reference returns are unsupported — always returns by value.
+            if (auto opt = get_if<Raw>()) {
+                return std::move(*opt);
+            }
+            return static_cast<Raw>(std::forward<T>(default_val));
+        } else if constexpr (std::is_rvalue_reference_v<T>) {
             // T&& → ownership transfer: move out, reset to monostate
             if (auto* p = get_if<Raw>()) {
                 Raw tmp = std::move(*p);
@@ -516,10 +747,15 @@ public:
     }
 
     template<typename T> // const value_or — only T and const T& (not T& or T&&)
-    requires(!std::is_same_v<T, std::monostate> && !detail::is_string_convertible_v<std::remove_cvref_t<T>>) && (!std::is_reference_v<T> || detail::is_const_ref_v<T>)
+    requires(!std::is_same_v<T, std::monostate> && !detail::is_string_convertible_v<std::remove_cvref_t<T>> && !std::same_as<std::remove_cvref_t<T>, ValueMap>) && (!std::is_reference_v<T> || detail::is_const_ref_v<T>)
     [[nodiscard]] auto value_or(T&& default_val) const& -> detail::return_t<T> {
         using Raw = std::remove_cvref_t<T>;
-        if constexpr (std::is_lvalue_reference_v<T>) {
+        if constexpr (gr::TensorLike<Raw>) {
+            if (auto opt = get_if<Raw>()) {
+                return std::move(*opt);
+            }
+            return static_cast<Raw>(std::forward<T>(default_val));
+        } else if constexpr (std::is_lvalue_reference_v<T>) {
             // const T& requested
             if (auto* p = get_if<Raw>()) {
                 return *p;
@@ -545,21 +781,20 @@ public:
 
     // ─── String conversion or_else variants ──────────────────────────────────────────────────────
 
-    /// or_else for std::string - auto-converts from pmr::string
+    /// or_else for std::string - auto-converts from byte-blob
     template<typename F>
     [[nodiscard]] std::string or_else_string(F&& factory) const& {
         if (is_string()) {
-            return std::string(*static_cast<const std::pmr::string*>(_storage.ptr));
+            return std::string(static_cast<const char*>(_storage.ptr), _payloadLength);
         }
         return std::forward<F>(factory)();
     }
 
-    /// or_else for std::string_view - zero-copy view
+    /// or_else for std::string_view - zero-copy view of byte-blob
     template<typename F>
     [[nodiscard]] std::string_view or_else_string_view(F&& factory) const& noexcept {
         if (is_string()) {
-            const auto* str = static_cast<const std::pmr::string*>(_storage.ptr);
-            return std::string_view{str->data(), str->size()};
+            return std::string_view{static_cast<const char*>(_storage.ptr), _payloadLength};
         }
         return std::forward<F>(factory)();
     }
@@ -776,6 +1011,10 @@ bool operator==(const T&, const Value&);
 // EXPLICIT TEMPLATE INSTANTIATION DECLARATIONS
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 // clang-format off
+// Direct-accessor scalar types (used for get_if<T>, holds<T>, value_or<T>, Value == T comparisons).
+// std::pmr::string is intentionally excluded — Phase 1e dropped get_if<std::pmr::string>; the
+// String storage is a raw byte-blob, not a std::pmr::string object. Use get_if<std::string_view>()
+// for view access or value_or<std::string>(default) for an owning copy.
 #define GR_PMT_VALUE_SCALAR_TYPES \
     X(bool)                       \
     X(std::int8_t)                \
@@ -789,24 +1028,41 @@ bool operator==(const T&, const Value&);
     X(float)                      \
     X(double)                     \
     X(std::complex<float>)        \
-    X(std::complex<double>)       \
-    X(std::pmr::string)
+    X(std::complex<double>)
 
+// Tensor element types (wider than SCALAR — Tensor<std::pmr::string> + Tensor<Value> both work).
 #define GR_PMT_VALUE_TENSOR_ELEMENT_TYPES \
     GR_PMT_VALUE_SCALAR_TYPES             \
+    X(std::pmr::string)                   \
     X(gr::pmt::Value)
 
 namespace gr::pmt {
 
+// Direct scalar accessors (excluding std::pmr::string and gr::pmt::Value — handled below).
 #define X(T)                                                                    \
-    extern template Value&   Value::operator=(Tensor<T>&& tensor);              \
-    extern template Value&   Value::operator=(const Tensor<T>& tensor);         \
     extern template bool     Value::holds<T>() const noexcept;                  \
     extern template T*       Value::get_if<T>() noexcept;                       \
     extern template const T* Value::get_if<T>() const noexcept;
+GR_PMT_VALUE_SCALAR_TYPES
+#undef X
 
+extern template bool   Value::holds<gr::pmt::Value>() const noexcept;
+extern template Value* Value::get_if<gr::pmt::Value>() noexcept;
+extern template const Value* Value::get_if<gr::pmt::Value>() const noexcept;
+
+// Tensor accessors + Tensor ctors/operator= (works for ALL element types including pmr::string and Value).
+// Q1.B: get_if<Tensor<T>> returns std::optional<Tensor<T>> (decoded from byte-blob); body in
+// ValueMap.hpp (needs decodeTensorBlob) and is implicitly instantiated.
+#define X(T)                                                                  \
+    extern template Value& Value::operator=(Tensor<T>&& tensor);              \
+    extern template Value& Value::operator=(const Tensor<T>& tensor);         \
+    extern template bool   Value::holds<Tensor<T>>() const noexcept;
 GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
 #undef X
+
+// holds<std::pmr::string>() is still meaningful (a type predicate equivalent to is_string()),
+// even though get_if<std::pmr::string> is dropped post Phase 1e.
+extern template bool Value::holds<std::pmr::string>() const noexcept;
 
 #define X(T)                                                     \
     extern template bool operator== <T>(const Value&, const T&); \
@@ -815,7 +1071,7 @@ GR_PMT_VALUE_TENSOR_ELEMENT_TYPES
 GR_PMT_VALUE_SCALAR_TYPES
 #undef X
 
-// string type specializations (convertible from pmr::string)
+// string type specializations (still meaningful as predicates)
 extern template bool Value::holds<std::string>() const noexcept;
 extern template bool Value::holds<std::string_view>() const noexcept;
 

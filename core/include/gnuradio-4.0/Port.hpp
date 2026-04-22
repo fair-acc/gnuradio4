@@ -214,7 +214,7 @@ Follows the ISO 80000-1:2022 Quantities and Units conventions:
     [[nodiscard]] std::expected<void, Error> update(const property_map& metaInfo, const std::source_location location = std::source_location::current()) noexcept {
         std::expected<void, Error> maybeError = {};
         for (const auto& [key, value] : metaInfo) {
-            if (!auto_update.contains(convert_string_domain(key))) {
+            if (!auto_update.contains(std::string_view{key})) {
                 continue;
             }
             refl::for_each_data_member_index<PortMetaInfo>([&key, &value, &maybeError, &location, this](auto kIdx) {
@@ -1276,7 +1276,7 @@ inline constexpr TagPredicate auto defaultEOSTagMatcher = [](const Tag& tag, std
     }
     auto& map        = tag.map;
     auto  eosTagIter = map.find(static_cast<std::pmr::string>(gr::tag::END_OF_STREAM));
-    return eosTagIter != map.end() && eosTagIter->second == true;
+    return eosTagIter != map.end() && (*eosTagIter).second == true;
 };
 } // namespace detail
 

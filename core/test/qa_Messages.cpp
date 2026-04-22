@@ -666,7 +666,7 @@ const boost::ut::suite MessagesTests = [] {
                 auto is_contained = [](const property_map& haystack, const property_map& needle) -> bool {
                     for (const auto& [key, val] : needle) {
                         auto it = haystack.find(key);
-                        if (it == haystack.end() || it->second != val) {
+                        if (it == haystack.end() || (*it).second != val) {
                             return false; // key not found or value mismatch
                         }
                     }

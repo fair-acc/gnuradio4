@@ -839,7 +839,7 @@ public:
 
 public:
     Block() : Block(gr::property_map()) {}
-    Block(std::initializer_list<std::pair<const std::pmr::string, pmt::Value>> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
+    Block(std::initializer_list<property_map::value_type> initParameter) noexcept(false) : Block(property_map(initParameter)) {}
     Block(property_map initParameters) noexcept(false)                                                     // N.B. throws in case of on contract violations
         : lifecycle::StateMachine<Derived>(),                                                              //
           inputStreamCache(static_cast<Derived&>(*this)), outputStreamCache(static_cast<Derived&>(*this)), //
@@ -1111,7 +1111,7 @@ public:
         auto                        filterAndSubstitute = [&](const property_map& src) {
             property_map dst;
             for (const auto& [key, value] : src) {
-                auto shortKey = convert_string_domain(key);
+                std::string shortKey{std::string_view{key}};
                 if (!autoForwardKeys.contains(shortKey)) {
                     continue;
                 }
@@ -1119,7 +1119,7 @@ public:
                     cachedSettings.emplace(settings().get());
                 }
                 if (auto it = cachedSettings->find(key); blockSettings.contains(shortKey) && it != cachedSettings->end()) {
-                    dst.insert_or_assign(key, it->second);
+                    dst.insert_or_assign(key, (*it).second);
                 } else {
                     dst.insert_or_assign(key, value);
                 }
@@ -1145,7 +1145,7 @@ public:
                     }
                     for (const auto& [relIndex, tagMapRef] : in.tags(tagWindow)) {
                         auto filtered = filterAndSubstitute(tagMapRef.get());
-                        merged.merge(std::move(filtered));
+                        merged.merge(filtered);
                     }
                 },
                 inputSpans);
@@ -1242,7 +1242,7 @@ public:
             if constexpr (!noTagPropagation) {
                 if (publishForwardTags && !applyResult.forwardParameters.empty()) {
                     if (capturedForwardParams) {
-                        capturedForwardParams->merge(std::move(applyResult.forwardParameters));
+                        capturedForwardParams->merge(applyResult.forwardParameters);
                     } else {
                         publishTag(applyResult.forwardParameters, 0);
                     }
@@ -1334,7 +1334,7 @@ public:
     }
 
     inline constexpr void publishEoS(auto& outputSpanTuple) noexcept {
-        const property_map& tagData{{gr::tag::END_OF_STREAM, true}};
+        const property_map tagData = property_map{{static_cast<std::pmr::string>(gr::tag::END_OF_STREAM), true}};
         for_each_writer_span([&tagData](auto& outSpan) { outSpan.publishTag(tagData, static_cast<std::size_t>(outSpan.nRequestedSamplesToPublish())); }, outputSpanTuple);
     }
 
@@ -2009,7 +2009,9 @@ public:
                         }
                         for (const auto& [relIndex, tagMapRef] : in.tags()) {
                             if (relIndex == 0) {
-                                for (const auto& [k, v] : tagMapRef.get()) {
+                                const auto& src = tagMapRef.get();
+                                merged.reserve(static_cast<std::uint32_t>(merged.size() + src.size())); // avoid rehash storms on dense tag maps
+                                for (const auto& [k, v] : src) {
                                     merged.insert_or_assign(k, v);
                                 }
                             }

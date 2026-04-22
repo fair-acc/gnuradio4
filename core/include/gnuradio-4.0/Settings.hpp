@@ -296,9 +296,9 @@ template<typename T>
             }
 
         } else if constexpr (meta::array_or_vector_type<T>) {
-            using TValue            = typename T::value_type;
-            using TTensorElem       = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, pmt::Value, TValue>;
-            const auto* tensorValue = value.get_if<Tensor<TTensorElem>>();
+            using TValue      = typename T::value_type;
+            using TTensorElem = std::conditional_t<std::is_same_v<TValue, std::string> || std::is_same_v<TValue, std::pmr::string>, pmt::Value, TValue>;
+            auto tensorValue  = value.template get_if<TensorView<TTensorElem>>();
             if (!tensorValue) {
                 return std::unexpected(std::format("Value {} is not a tensor of {}", value, meta::type_name<TTensorElem>()));
             }
@@ -380,7 +380,7 @@ inline bool autoUpdateImpl(std::string_view key, const pmt::Value& value, const 
         if (value.holds<Tensor<TTensorElem>>()) {
             auto converted = pmt::convertTo<Tensor<TTensorElem>>(value);
             if (converted.has_value()) {
-                stagedParameters.insert_or_assign(keyPmr, std::move(*converted));
+                stagedParameters.insert_or_assign(keyPmr, pmt::Value{std::move(*converted)});
                 return true;
             }
             return false;
@@ -687,8 +687,8 @@ private:
         } else if constexpr (meta::array_or_vector_type<Type>) {
             using TValue       = typename Type::value_type;
             using TTensorValue = std::conditional_t<std::is_same_v<std::string, TValue> || std::is_same_v<std::pmr::string, TValue>, pmt::Value, TValue>;
-            auto tensor        = checked_access_ptr{stagedValue.get_if<Tensor<TTensorValue>>()};
-            if (tensor != nullptr) {
+            const bool tensorOk = stagedValue.template get_if<TensorView<TTensorValue>>().has_value();
+            if (tensorOk) {
                 maybe_value = settings::convertParameter<Type>(key, stagedValue);
             } else {
                 maybe_value = std::unexpected("Unexpected type in stagedValue");
@@ -702,6 +702,21 @@ private:
                 maybe_value = std::unexpected("Unexpected type in stagedValue");
             }
 #endif
+        } else if constexpr (std::is_same_v<Type, pmt::ValueMap>) {
+            // ValueMap accessor returns std::optional<ValueMap> view-mode (not raw pointer).
+            // Materialise into an owning copy via owned() before storing.
+            if (auto opt = stagedValue.template get_if<pmt::ValueMap>()) {
+                maybe_value = opt->owned();
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
+        } else if constexpr (gr::TensorLike<Type>) {
+            // Tensor get_if returns optional<Tensor<T>> (decoded from byte-blob).
+            if (auto opt = stagedValue.template get_if<Type>()) {
+                maybe_value = std::move(*opt);
+            } else {
+                maybe_value = std::unexpected("Unexpected type in stagedValue");
+            }
         } else {
             auto ptr = checked_access_ptr{stagedValue.get_if<Type>()};
             if (ptr != nullptr) {
@@ -906,7 +921,7 @@ public:
 
             if constexpr (hasMetaInfo && requires(TBlock t) { t.description; }) {
                 static_assert(std::is_same_v<std::remove_cvref_t<unwrap_if_wrapped_t<decltype(TBlock::description)>>, std::string_view>);
-                _block->meta_information.value["description"] = std::string(_block->description);
+                _block->meta_information.value.insert_or_assign(std::string_view{"description"}, std::string(_block->description));
             }
 
             // handle meta-information for UI and other non-processing-related purposes
@@ -916,9 +931,9 @@ public:
                 using Type       = unwrap_if_wrapped_t<RawType>;
 
                 if constexpr (hasMetaInfo && std::is_enum_v<Type>) {
-                    auto  memberName                                               = std::string(refl::data_member_name<TBlock, kIdx>.view());
-                    auto& meta_info                                                = _block->meta_information;
-                    meta_info[convert_string_domain(memberName) + "::enum_values"] = [] {
+                    auto  memberName = std::string(refl::data_member_name<TBlock, kIdx>.view());
+                    auto& meta_info  = _block->meta_information.value;
+                    meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_values", pmt::Value{[] {
                         constexpr auto           values = gr::meta::enumValues<Type>();
                         std::vector<std::string> result;
                         result.reserve(values.size());
@@ -928,17 +943,17 @@ public:
                             }
                         }
                         return result;
-                    }();
-                    meta_info[convert_string_domain(memberName) + "::enum_type"] = std::string(gr::meta::type_name<Type>());
+                    }()});
+                    meta_info.insert_or_assign(convert_string_domain(memberName) + "::enum_type", std::string(gr::meta::type_name<Type>()));
                 }
 
                 if constexpr (hasMetaInfo && AnnotatedType<RawType>) {
-                    auto  memberName                                                        = std::string(refl::data_member_name<TBlock, kIdx>.view());
-                    auto& meta_information                                                  = _block->meta_information;
-                    meta_information[convert_string_domain(memberName) + "::description"]   = std::string(RawType::description());
-                    meta_information[convert_string_domain(memberName) + "::documentation"] = std::string(RawType::documentation());
-                    meta_information[convert_string_domain(memberName) + "::unit"]          = std::string(RawType::unit());
-                    meta_information[convert_string_domain(memberName) + "::visible"]       = RawType::visible();
+                    auto  memberName       = std::string(refl::data_member_name<TBlock, kIdx>.view());
+                    auto& meta_information = _block->meta_information.value;
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::description", std::string(RawType::description()));
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::documentation", std::string(RawType::documentation()));
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::unit", std::string(RawType::unit()));
+                    meta_information.insert_or_assign(convert_string_domain(memberName) + "::visible", RawType::visible());
                 }
             });
         }
@@ -1028,6 +1043,16 @@ public:
 
     NO_INLINE void autoUpdate(const Tag& tag) override {
         if constexpr (refl::reflectable<TBlock>) {
+            if (tag.map.empty()) {
+                // Fast path: empty tag means no context, no auto-update keys, no work — but we
+                // still must clear the `_changed` flag iff no staged parameters are pending
+                // (matches the slow-path semantics at line 1068).
+                std::lock_guard lg(_mutex);
+                if (_stagedParameters.empty()) {
+                    setChanged(false);
+                }
+                return;
+            }
             std::lock_guard lg(_mutex);
             const auto      tagCtx      = createSettingsCtxFromTag(tag);
             const auto      previousCtx = _activeCtx; // capture before activateContext may change it
@@ -1156,11 +1181,11 @@ public:
 
         for (const auto& [key, value] : parameters) {
             if (setters.contains(key)) {
-                newProperties[key] = value;
+                newProperties.insert_or_assign(key, value);
             } else {
                 auto str = ctx.context.value_or(std::string_view{});
                 if (str.empty()) { // store meta_information only for default
-                    _block->meta_information[key] = value;
+                    _block->meta_information.value.insert_or_assign(key, value);
                 }
             }
         }

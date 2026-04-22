@@ -94,15 +94,20 @@ const boost::ut::suite GraphMessageTests = [] {
             if (reply.data.has_value()) {
                 const auto& dataMap    = reply.data.value();
                 auto        foundTypes = dataMap.find("types");
-                if (foundTypes != dataMap.end() || !foundTypes->second.holds<Tensor<pmt::Value>>()) {
-                    PluginLoader& loader             = context->loader;
-                    auto          expectedBlockTypes = loader.availableBlocks();
-                    std::ranges::sort(expectedBlockTypes);
-                    auto blockTypes = gr::test::get_value_or_fail<std::vector<std::string>>(foundTypes->second);
-                    std::ranges::sort(blockTypes);
-                    expect(eq(expectedBlockTypes, blockTypes));
+                if (foundTypes != dataMap.end()) {
+                    const pmt::Value typesEntry = (*foundTypes).second; // bind to lvalue; ValueMap iter yields by value
+                    if (typesEntry.holds<Tensor<pmt::Value>>()) {
+                        PluginLoader& loader             = context->loader;
+                        auto          expectedBlockTypes = loader.availableBlocks();
+                        std::ranges::sort(expectedBlockTypes);
+                        auto blockTypes = gr::test::get_value_or_fail<std::vector<std::string>>(typesEntry);
+                        std::ranges::sort(blockTypes);
+                        expect(eq(expectedBlockTypes, blockTypes));
+                    } else {
+                        expect(false) << "`types` data type is not a Tensor<Value>";
+                    }
                 } else {
-                    expect(false) << "`types` key not found or data type is not a `property_map`";
+                    expect(false) << "`types` key not found";
                 }
             } else {
                 expect(false) << std::format("data has no value - error: {}", reply.data.error());

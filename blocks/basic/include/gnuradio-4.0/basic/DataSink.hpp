@@ -618,7 +618,8 @@ public:
             if (!tagData) {
                 tagData.emplace(tagMapRef.get());
             } else {
-                tagData->merge(property_map(tagMapRef.get()));
+                property_map tmp(tagMapRef.get());
+                tagData->merge(tmp);
             }
         }
 

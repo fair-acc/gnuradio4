@@ -76,9 +76,9 @@ Internally this uses FileIo.
 
     [[nodiscard]] static pmt::Value::Map makeResultValue(std::span<const std::uint8_t> rawData, int status = 200, std::string_view mimeType = "text/plain") {
         pmt::Value::Map result;
-        result["mime-type"] = std::string(mimeType);
-        result["status"]    = status;
-        result["raw-data"]  = gr::Tensor<std::uint8_t>(rawData.begin(), rawData.end());
+        result.insert_or_assign(std::string_view{"mime-type"}, std::string(mimeType));
+        result.insert_or_assign(std::string_view{"status"}, status);
+        result.insert_or_assign(std::string_view{"raw-data"}, gr::Tensor<std::uint8_t>(rawData.begin(), rawData.end()));
         return result;
     }
 

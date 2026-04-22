@@ -270,6 +270,27 @@ void migrateField(T& field, std::pmr::memory_resource* mr) {
     std::construct_at(&field, std::move(rebound));
 }
 
+/// PMR resource that counts allocate / deallocate calls and tracks live byte usage,
+/// then forwards to an upstream resource. Test-only analogue of allocator-side `Logging`.
+struct CountingResource : std::pmr::memory_resource {
+    std::pmr::memory_resource* upstream{std::pmr::new_delete_resource()};
+    std::size_t                allocCount{0UZ};
+    std::size_t                deallocCount{0UZ};
+    std::size_t                liveBytes{0UZ};
+
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++allocCount;
+        liveBytes += bytes;
+        return upstream->allocate(bytes, alignment);
+    }
+    void do_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) override {
+        ++deallocCount;
+        liveBytes -= bytes;
+        upstream->deallocate(ptr, bytes, alignment);
+    }
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override { return this == &other; }
+};
+
 } // namespace pmr
 } // namespace gr::allocator
 

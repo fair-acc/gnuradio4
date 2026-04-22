@@ -844,7 +844,7 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
     "makeTagMap returns property_map using tag buffer resource"_test = [] {
         PortOut<float> out;
         auto           tagMap = out.makeTagMap();
-        expect(eq(tagMap.get_allocator().resource(), out.tagResource()));
+        expect(eq(tagMap.resource(), out.tagResource()));
     };
 
     "tag::put uses map allocator for keys and values"_test = [] {
@@ -859,7 +859,7 @@ const boost::ut::suite<"Port PMR resource access"> portResourceTests = [] {
 
         auto nameIt = tagMap.find(std::pmr::string("trigger_name"));
         expect(nameIt != tagMap.end());
-        expect(eq(nameIt->second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
+        expect(eq((*nameIt).second.value_or(std::string_view{}), std::string_view("GPS_PPS")));
     };
 
     "tag::put with DefaultTag uses short key"_test = [] {

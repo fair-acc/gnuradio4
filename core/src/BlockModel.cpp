@@ -23,7 +23,7 @@ property_map serializeBlockImpl(gr::PluginLoader& pluginLoader, const std::share
             pmt::Value::Map parameters;
             auto            writeMap = [&](const auto& localMap) {
                 for (const auto& [settingsKey, settingsValue] : localMap) {
-                    parameters[settingsKey] = settingsValue;
+                    parameters.insert_or_assign(std::string_view{settingsKey}, settingsValue);
                 }
             };
             writeMap(settingsMap);
@@ -110,9 +110,9 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
     property_map map;
 
     if (const gr::Graph* subgraph = block->graph()) {
-        map.emplace("id", "SUBGRAPH");
-        map["unique_name"] = std::string(block->uniqueName());
-        map["name"]        = std::string(block->name());
+        map.emplace("id", std::string{"SUBGRAPH"});
+        map.insert_or_assign(std::string_view{"unique_name"}, std::string(block->uniqueName()));
+        map.insert_or_assign(std::string_view{"name"}, std::string(block->name()));
 
         {
             property_map subgraphMap;
@@ -131,14 +131,14 @@ property_map serializeBlock(PluginLoader& pluginLoader, const std::shared_ptr<Bl
                 exportedPortsData.push_back(Tensor<pmt::Value>(data_from, {gr::pmt::Value(blockName), gr::pmt::Value("OUTPUT"s), gr::pmt::Value(portName)}));
             }
 
-            subgraphMap["exported_ports"] = std::move(exportedPortsData);
-            map["graph"]                  = std::move(subgraphMap);
+            subgraphMap.insert_or_assign(std::string_view{"exported_ports"}, std::move(exportedPortsData));
+            map.insert_or_assign(std::string_view{"graph"}, std::move(subgraphMap));
         }
 
         if (const auto* schedulerModel = dynamic_cast<const SchedulerModel*>(block.get()); schedulerModel != nullptr) {
             property_map schedulerMap;
-            schedulerMap["id"] = pluginLoader.schedulerRegistry().typeName(block);
-            map["scheduler"]   = std::move(schedulerMap);
+            schedulerMap.insert_or_assign(std::string_view{"id"}, std::string{pluginLoader.schedulerRegistry().typeName(block)});
+            map.insert_or_assign(std::string_view{"scheduler"}, std::move(schedulerMap));
         }
 
     } else {

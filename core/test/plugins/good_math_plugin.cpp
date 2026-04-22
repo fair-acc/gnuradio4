@@ -14,8 +14,8 @@ template<typename T>
 auto factor(const gr::property_map& params) {
     T factor = 1;
     if (auto it = params.find("factor"); it != params.end()) {
-        auto& variant = it->second;
-        auto  ptr     = gr::checked_access_ptr{variant.get_if<T>()};
+        const gr::pmt::Value variant = (*it).second; // bind to lvalue; ValueMap iter yields by value
+        auto                 ptr     = gr::checked_access_ptr{variant.template get_if<T>()};
         if (ptr != nullptr) {
             factor = *ptr;
         }

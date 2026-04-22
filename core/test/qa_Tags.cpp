@@ -123,12 +123,12 @@ struct AutoForwardParametersBlock : public gr::Block<AutoForwardParametersBlock<
     std::string      trigger_name      = "";
     std::uint64_t    trigger_time      = 0;
     float            trigger_offset    = 0.f;
-    gr::property_map trigger_meta_info = {};
+    gr::property_map trigger_meta_info = gr::property_map{};
     std::string      context           = "";
-    std::uint64_t    time              = 0;
+    std::uint64_t    ctx_time          = 0;
 
     GR_MAKE_REFLECTABLE(AutoForwardParametersBlock, in, out, not_auto_forward_parameter, sample_rate, signal_name, signal_quantity, signal_unit, //
-        signal_min, signal_max, n_dropped_samples, trigger_name, trigger_time, trigger_offset, trigger_meta_info, context, time);
+        signal_min, signal_max, n_dropped_samples, trigger_name, trigger_time, trigger_offset, trigger_meta_info, context, ctx_time);
 
     [[nodiscard]] constexpr auto processOne(T) noexcept { return T(0); }
 };
@@ -372,7 +372,7 @@ const boost::ut::suite<"TagPropagation"> _TagPropagation = [] {
         expect(eq(autoForwardBlock.trigger_offset, 42.f));
         expect(eq(autoForwardBlock.trigger_meta_info.size(), 1UZ));
         expect(eq(autoForwardBlock.context, "CONTEXT_42"s));
-        expect(eq(autoForwardBlock.time, std::uint64_t(42)));
+        expect(eq(autoForwardBlock.ctx_time, std::uint64_t(42)));
 
         expect(equal_tag_lists(monitorOne._tags, tags)); // all tags from src
         expect(equal_tag_lists(monitorBulk1._tags, tagsOnlyAutoForward));
@@ -786,7 +786,7 @@ const boost::ut::suite<"CustomForwardTests"> _CustomForwardTests = [] {
         bool hasSampleRate = false;
         for (const auto& tag : sink._tags) {
             if (auto it = tag.map.find(tag::SAMPLE_RATE.shortKey()); it != tag.map.end()) {
-                expect(*it->second.get_if<float>() == 48000.f);
+                expect(*(*it).second.get_if<float>() == 48000.f);
                 hasSampleRate = true;
             }
         }

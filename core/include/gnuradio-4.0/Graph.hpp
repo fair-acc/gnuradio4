@@ -177,12 +177,18 @@ protected:
     std::unordered_multimap<std::string, PortNameMapper> _exportedOutputPortsForBlock;
 
     static std::optional<Message> subgraphExportHandler(void* context, Message message) {
-        auto*       wrapper             = static_cast<GraphWrapper*>(context);
-        const auto& data                = message.data.value();
-        const auto  uniqueBlockName     = data.at("uniqueBlockName").value_or(std::string_view{});
-        const auto  portDirectionString = data.at("portDirection").value_or(std::string_view{});
-        const auto  portName            = data.at("portName").value_or(std::string_view{});
-        const auto  exportFlag          = checked_access_ptr{data.at("exportFlag").get_if<bool>()};
+        auto*       wrapper = static_cast<GraphWrapper*>(context);
+        const auto& data    = message.data.value();
+        // ValueMap::at() returns Value by value; bind to lvalues so string_view / get_if<bool>() pointers
+        // remain valid past the end of each init expression.
+        const pmt::Value uniqueBlockNameVal     = data.at("uniqueBlockName");
+        const pmt::Value portDirectionStringVal = data.at("portDirection");
+        const pmt::Value portNameVal            = data.at("portName");
+        const pmt::Value exportFlagVal          = data.at("exportFlag");
+        const auto       uniqueBlockName        = uniqueBlockNameVal.value_or(std::string_view{});
+        const auto       portDirectionString    = portDirectionStringVal.value_or(std::string_view{});
+        const auto       portName               = portNameVal.value_or(std::string_view{});
+        const auto       exportFlag             = checked_access_ptr{exportFlagVal.get_if<bool>()};
         if (uniqueBlockName.data() == nullptr || portDirectionString.data() == nullptr || portName.data() == nullptr || exportFlag == nullptr) {
             message.data = std::unexpected(Error{std::format("Invalid definition for the kSubgraphExportPort message {}", message)});
             return message;
@@ -191,7 +197,8 @@ protected:
         const auto portDirection = portDirectionString == "input" ? PortDirection::INPUT : PortDirection::OUTPUT;
 
         if (*exportFlag) {
-            const auto exportedName = data.at("exportedName").value_or(std::string_view{});
+            const pmt::Value exportedNameVal = data.at("exportedName");
+            const auto       exportedName    = exportedNameVal.value_or(std::string_view{});
             if (exportedName.data() == nullptr) {
                 message.data = std::unexpected(Error{std::format("Invalid definition for exportName in the kSubgraphExportPort message {}", message)});
                 return message;
@@ -327,9 +334,9 @@ private:
     }
 
     void updateMetaInformation() {
-        auto& info                  = this->metaInformation();
-        info["exportedInputPorts"]  = exportedPortsFor(_exportedInputPortsForBlock);
-        info["exportedOutputPorts"] = exportedPortsFor(_exportedOutputPortsForBlock);
+        auto& info = this->metaInformation();
+        info.insert_or_assign(std::string_view{"exportedInputPorts"}, exportedPortsFor(_exportedInputPortsForBlock));
+        info.insert_or_assign(std::string_view{"exportedOutputPorts"}, exportedPortsFor(_exportedOutputPortsForBlock));
     }
 };
 
@@ -649,8 +656,8 @@ public:
             auto tryResolveFromBlock = [&edge](const BlockModel& block) -> bool {
                 const auto& staged    = block.settings().stagedParameters();
                 auto        domainStr = std::string();
-                if (auto it = staged.find(std::pmr::string("compute_domain")); it != staged.end()) {
-                    auto sv = it->second.value_or(std::string_view{});
+                if (auto it = staged.find(std::string_view{"compute_domain"}); it != staged.end()) {
+                    auto sv = (*it).second.value_or(std::string_view{});
                     if (sv.data()) {
                         domainStr = std::string(sv);
                     }

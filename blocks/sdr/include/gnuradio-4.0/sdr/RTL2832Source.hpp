@@ -298,9 +298,9 @@ Operating modes:
             }
 
             if (auto it = clkTag.map.find(kTriggerNameKey); it != clkTag.map.end()) {
-                if (auto* namePtr = it->second.template get_if<std::pmr::string>()) {
-                    if (!namePtr->empty()) {
-                        _clockTriggerName = std::string(*namePtr);
+                if (auto nameView = it->second.template get_if<std::string_view>()) {
+                    if (!nameView->empty()) {
+                        _clockTriggerName = std::string(*nameView);
                     }
                 }
             }

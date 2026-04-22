@@ -248,7 +248,8 @@ public:
 
         auto it = msg.data->find(detail::kMessageDataKey);
         if (it != msg.data->end()) {
-            if (auto bytes = it->second.get_if<Tensor<std::uint8_t>>(); bytes != nullptr) {
+            const gr::pmt::Value bytesEntry = (*it).second; // bind to lvalue; TensorView aliases entry's owning Tensor storage
+            if (auto bytes = bytesEntry.get_if<TensorView<std::uint8_t>>()) {
                 if (bytes->size() <= maxSize) {
                     res.data = std::span<const std::uint8_t>(bytes->data(), bytes->size());
                     std::invoke(std::forward<TCallback>(callback), std::move(res));

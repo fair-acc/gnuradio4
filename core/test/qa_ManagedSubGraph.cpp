@@ -404,7 +404,7 @@ const boost::ut::suite GraphInspectYamlTests_ = [] {
                 const auto  yamlData = data.find("yamlData");
                 expect(yamlData != data.cend()) << "yamlData key must be present";
                 if (yamlData != data.cend()) {
-                    const auto yamlStr = gr::test::get_value_or_fail<std::string>(yamlData->second);
+                    const auto yamlStr = gr::test::get_value_or_fail<std::string>((*yamlData).second);
                     expect(!yamlStr.empty()) << "yamlData must not be empty";
                     expect(yamlStr.find("ui_constraints") != std::string::npos);
                 }
@@ -503,7 +503,7 @@ const boost::ut::suite SchedulerInspectTests_ = [] {
                 const auto  yamlData = data.find("yamlData");
                 expect(yamlData != data.cend()) << "yamlData key must be present";
                 if (yamlData != data.cend()) {
-                    const auto yamlStr = gr::test::get_value_or_fail<std::string>(yamlData->second);
+                    const auto yamlStr = gr::test::get_value_or_fail<std::string>((*yamlData).second);
                     expect(!yamlStr.empty()) << "yamlData must not be empty";
                     expect(yamlStr.find("ui_constraints") != std::string::npos);
                 }

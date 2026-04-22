@@ -938,8 +938,8 @@ const boost::ut::suite<"Annotations"> _drawableAnnotations = [] {
         };
         auto testBlock = gr::BlockWrapper<LocalTestBlock>();
         expect(testBlock.uiConstraints().empty());
-        testBlock.uiConstraints()["x-position"] = 3.f;
-        testBlock.uiConstraints()["y-position"] = 4.f;
+        testBlock.uiConstraints().insert_or_assign(std::string_view{"x-position"}, 3.f);
+        testBlock.uiConstraints().insert_or_assign(std::string_view{"y-position"}, 4.f);
         expect(!testBlock.uiConstraints().empty());
         expect(eq(testBlock.uiConstraints().size(), 2UZ));
         expect(testBlock.uiConstraints().contains("x-position"));

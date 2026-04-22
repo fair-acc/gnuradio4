@@ -3,6 +3,7 @@
 
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/Value.hpp>
+#include <gnuradio-4.0/ValueMap.hpp> // Phase 1e Step C: Value::Map = ValueMap (forward-decl in Value.hpp); full def needed for member access
 #include <gnuradio-4.0/meta/utils.hpp>
 
 #include <array>
@@ -618,7 +619,7 @@ std::expected<std::vector<DstT>, ConversionError> valueToVector(const Value& v) 
     switch (v.value_type()) {
 #define DISPATCH_CASE(SrcType)                                              \
     case valueTypeFor<SrcType>():                                           \
-        if (auto* t = (const_cast<Value&>(v)).get_if<Tensor<SrcType>>())    \
+        if (auto t = v.get_if<Tensor<SrcType>>())                           \
             return tensorToVector<DstT, SrcType, CP, RP>(*t);               \
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
@@ -638,7 +639,7 @@ std::expected<std::vector<DstT>, ConversionError> valueToVector(const Value& v) 
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToVector<DstT, CP, RP>(*t);
+        if (auto t = v.get_if<Tensor<Value>>()) return tensorOfValueToVector<DstT, CP, RP>(*t);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -658,7 +659,7 @@ std::expected<std::array<DstT, N>, ConversionError> valueToArray(const Value& v)
     switch (v.value_type()) {
 #define DISPATCH_CASE(SrcType)                                              \
     case valueTypeFor<SrcType>():                                           \
-        if (auto* t = const_cast<Value&>(v).get_if<Tensor<SrcType>>())      \
+        if (auto t = v.get_if<Tensor<SrcType>>())                           \
             return tensorToArray<DstT, N, SrcType, CP, RP>(*t);             \
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
@@ -678,7 +679,7 @@ std::expected<std::array<DstT, N>, ConversionError> valueToArray(const Value& v)
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToArray<DstT, N, CP, RP>(*t);
+        if (auto t = v.get_if<Tensor<Value>>()) return tensorOfValueToArray<DstT, N, CP, RP>(*t);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -698,7 +699,7 @@ std::expected<DstTensor, ConversionError> valueToTensor(const Value& v, std::pmr
     switch (v.value_type()) {
 #define DISPATCH_CASE(SrcType)                                              \
     case valueTypeFor<SrcType>():                                           \
-        if (auto* t = const_cast<Value&>(v).get_if<Tensor<SrcType>>())      \
+        if (auto t = v.get_if<Tensor<SrcType>>())                           \
             return tensorToTensor<DstTensor, SrcType, CP, RP>(*t, mr);      \
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
@@ -718,7 +719,7 @@ std::expected<DstTensor, ConversionError> valueToTensor(const Value& v, std::pmr
 #undef DISPATCH_CASE
 
     case Value::ValueType::Value:
-        if (const auto* t = v.get_if<Tensor<Value>>()) return tensorOfValueToTensor<DstTensor, CP, RP>(*t, mr);
+        if (auto t = v.get_if<Tensor<Value>>()) return tensorOfValueToTensor<DstTensor, CP, RP>(*t, mr);
         return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
 
     default: return std::unexpected(ConversionError{.kind = ConversionError::Kind::TypeMismatch});
@@ -730,7 +731,7 @@ std::expected<DstTensor, ConversionError> valueToTensor(const Value& v, std::pmr
 
 template<gr::meta::map_type DstMap, ConversionPolicy CP = ConversionPolicy::Safe>
 std::expected<DstMap, ConversionError> valueToMap(const Value& v) {
-    if (auto* m = v.get_if<Value::Map>()) {
+    if (auto m = v.get_if<Value::Map>()) {
         if constexpr (std::same_as<typename DstMap::mapped_type, Value>) {
             return mapToStdMap<DstMap>(*m);
         } else {
@@ -777,11 +778,11 @@ std::expected<Target, ConversionError> convertTo(Value&& value, std::pmr::memory
         actualMr = value._resource;
     }
 
-    // move optimization for same-type dynamic Tensor
+    // same-type dynamic Tensor fast path (decode byte-blob into target tensor in one step)
     if constexpr (TensorLike<Target> && !detail::is_fixed_size_v<Target>) {
         using DstT = typename Target::value_type;
         if (value.value_type() == detail::valueTypeFor<DstT>()) {
-            if (auto* srcTensor = value.get_if<Tensor<DstT>>()) {
+            if (auto srcTensor = value.get_if<Tensor<DstT>>()) {
                 if constexpr (gr::tensor_traits<Target>::static_rank && RP == RankPolicy::Strict) {
                     if (srcTensor->rank() != gr::tensor_traits<Target>::rank) {
                         return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch});
@@ -866,7 +867,7 @@ std::expected<void, ConversionError> assignTo(TensorT& dst, const Value& value) 
     using T = typename gr::tensor_traits<TensorT>::value_type;
     if constexpr (!gr::tensor_traits<TensorT>::all_static) {
         if (value.value_type() == detail::valueTypeFor<T>() && value.is_tensor()) {
-            if (const auto* srcTensor = value.get_if<Tensor<T>>()) {
+            if (auto srcTensor = value.get_if<Tensor<T>>()) {
                 if constexpr (RP == RankPolicy::Strict && gr::tensor_traits<TensorT>::static_rank) {
                     if (srcTensor->rank() != dst.rank()) {
                         return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch});
@@ -910,11 +911,10 @@ std::expected<void, ConversionError> assignTo(TensorT& dst, const Value& value) 
 
 template<ConversionPolicy CP = ConversionPolicy::Safe, RankPolicy RP = RankPolicy::Strict, TensorLike TensorT>
 std::expected<void, ConversionError> assignTo(TensorT& dst, Value&& value) {
-    // move optimization for same-type
     using T = typename gr::tensor_traits<TensorT>::value_type;
     if constexpr (!gr::tensor_traits<TensorT>::all_static) {
         if (value.value_type() == detail::valueTypeFor<T>()) {
-            if (auto* srcTensor = value.get_if<Tensor<T>>()) {
+            if (auto srcTensor = value.get_if<Tensor<T>>()) {
                 if constexpr (gr::tensor_traits<TensorT>::static_rank && RP == RankPolicy::Strict) {
                     if (srcTensor->rank() != dst.rank()) {
                         return std::unexpected(ConversionError{.kind = ConversionError::Kind::RankMismatch});
@@ -998,12 +998,18 @@ inline constexpr std::size_t memory_usage(const Value& value) noexcept {
     std::size_t size = sizeof(Value);
     switch (value.container_type()) {
     case Value::ContainerType::Complex: size += (value.value_type() == Value::ValueType::ComplexFloat32) ? sizeof(std::complex<float>) : sizeof(std::complex<double>); break;
-    case Value::ContainerType::String: size += sizeof(std::pmr::string) + static_cast<const std::pmr::string*>(value._storage.ptr)->capacity(); break;
+    case Value::ContainerType::String:
+        // Phase 1e: raw byte-blob ([chars][\0]). Owning consumes _payloadLength + 1 bytes via the
+        // PMR resource. View-mode aliases external bytes — no owned allocation to count.
+        if (!value.is_view()) {
+            size += static_cast<std::size_t>(value._payloadLength) + 1U;
+        }
+        break;
     case Value::ContainerType::Map:
-        if (const auto* map = value.get_if<Value::Map>()) {
-            size += sizeof(Value::Map) + map->bucket_count() * sizeof(void*);
+        if (auto map = value.get_if<Value::Map>()) {
+            size += sizeof(Value::Map) + map->blob().size(); // packed-blob includes header + entries + payload pool
             for (const auto& [k, v] : *map) {
-                size += k.capacity() + memory_usage(v);
+                size += k.size() + memory_usage(v); // string_view key shares blob memory; just count the bytes
             }
         }
         break;

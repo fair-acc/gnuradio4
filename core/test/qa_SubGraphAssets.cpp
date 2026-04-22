@@ -57,7 +57,13 @@ bool hasOneSubgraphBlock(const gr::property_map& definition) {
         if (blocks.size() != 1uz) {
             return false;
         }
-        const auto block = blocks[0].value_or(gr::property_map{});
+        // get_if<ValueMap>() returns std::optional<ValueMap> view-mode; materialise into owning
+        // copy so it survives the temp Value lifetime.
+        const auto blockOpt = blocks[0].get_if<gr::property_map>();
+        if (!blockOpt) {
+            return false;
+        }
+        const auto block = blockOpt->owned();
         return block.at("id") == "SUBGRAPH";
     } catch (...) {
         return false;
@@ -70,18 +76,18 @@ bool hasOneSubgraphBlock(const gr::property_map& definition) {
 std::vector<std::string> collectExportedNames(const gr::property_map& portsMap) {
     std::vector<std::string> names;
     for (const auto& [_blockName, portInfoVal] : portsMap) {
-        const auto* portMap = portInfoVal.get_if<gr::property_map>();
+        const auto portMap = portInfoVal.get_if<gr::property_map>();
         if (!portMap) {
             continue;
         }
         for (const auto& [_internalName, exportInfoVal] : *portMap) {
-            const auto* exportMap = exportInfoVal.get_if<gr::property_map>();
+            const auto exportMap = exportInfoVal.get_if<gr::property_map>();
             if (!exportMap) {
                 continue;
             }
             auto it = exportMap->find("exportedName");
             if (it != exportMap->end()) {
-                names.emplace_back(it->second.value_or(std::string_view{}));
+                names.emplace_back((*it).second.value_or(std::string_view{}));
             }
         }
     }

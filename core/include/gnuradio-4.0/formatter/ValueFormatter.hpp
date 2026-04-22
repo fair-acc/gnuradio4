@@ -3,6 +3,7 @@
 
 #include "gnuradio-4.0/ValueHelper.hpp"
 #include <gnuradio-4.0/Value.hpp>
+#include <gnuradio-4.0/meta/reflection.hpp>
 
 #include <format>
 #include <ostream>
@@ -81,7 +82,7 @@ inline constexpr std::string value_to_string(const Value& v) {
     if (v.is_monostate()) {
         out += "monostate";
     } else if (v.is_map()) {
-        if (auto* map = v.get_if<Value::Map>()) {
+        if (auto map = v.get_if<Value::Map>()) {
             out += map_value_to_string(*map);
         }
     } else if (v.is_tensor()) {
@@ -158,8 +159,10 @@ namespace gr::pmt {
 // optional public helper if you want it
 inline std::string to_string(const Value& v) { return detail::value_to_string(v); }
 
-// ostream support – thin wrapper
+// ostream support – thin wrappers used by tests, logging, and boost::ut diagnostics.
 inline std::ostream& operator<<(std::ostream& os, const Value& v) { return os << detail::value_to_string(v); }
+inline std::ostream& operator<<(std::ostream& os, Value::ValueType t) { return os << gr::meta::enumName(t).value_or("?"); }
+inline std::ostream& operator<<(std::ostream& os, Value::ContainerType t) { return os << gr::meta::enumName(t).value_or("?"); }
 
 } // namespace gr::pmt
 

@@ -339,12 +339,19 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         const std::string keyTriggerTime = gr::tag::TRIGGER_TIME.shortKey();
 
         const auto itName = tag.map.find(keyTriggerName);
-        if (itName == tag.map.end() || //
-            (!filter->empty() && itName->second.value_or(std::string_view{}) != filter)) {
+        if (itName == tag.map.end()) {
+            return false;
+        }
+        const gr::pmt::Value nameEntry = (*itName).second; // bind to lvalue; iter yields by value
+        if (!filter->empty() && nameEntry.value_or(std::string_view{}) != filter) {
             return false;
         }
         const auto itTime = tag.map.find(keyTriggerTime);
-        if (itTime == tag.map.end() || !itTime->second.holds<std::uint64_t>()) {
+        if (itTime == tag.map.end()) {
+            return false;
+        }
+        const gr::pmt::Value timeEntry = (*itTime).second;
+        if (!timeEntry.holds<std::uint64_t>()) {
             return false;
         }
         return true;
@@ -358,7 +365,8 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
             return 0ULL;
         }
 
-        auto ptr = it->second.get_if<std::uint64_t>();
+        const gr::pmt::Value timeEntry = (*it).second; // bind to lvalue
+        auto                 ptr       = timeEntry.get_if<std::uint64_t>();
         if (ptr == nullptr) {
             return 0ULL;
         }

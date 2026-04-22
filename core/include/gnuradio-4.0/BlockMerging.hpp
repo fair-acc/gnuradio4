@@ -102,7 +102,8 @@ void forwardSettings(B& block, const gr::property_map& params) {
 template<typename B>
 void forwardNestedSettings(B& block, const gr::property_map& init, std::string_view key) {
     if (auto it = init.find(key); it != init.end()) {
-        if (const auto* nested = it->second.template get_if<pmt::Value::Map>()) {
+        const pmt::Value entry = (*it).second; // bind to lvalue; iter yields by value
+        if (auto nested = entry.template get_if<pmt::Value::Map>()) {
             forwardSettings(block, *nested);
         }
     }

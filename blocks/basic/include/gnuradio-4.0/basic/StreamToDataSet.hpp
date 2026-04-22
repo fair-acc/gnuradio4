@@ -127,7 +127,8 @@ If multiple 'start' or 'stop' Tags arrive in a single merged tag, only one DataS
                     throw gr::exception("n_pre must be <= output port CircularBuffer size");
                 }
             }
-            auto prePtr = it->second.get_if<gr::Size_t>();
+            const pmt::Value entry  = (*it).second; // bind to lvalue: ValueMap iter yields by value
+            auto             prePtr = entry.get_if<gr::Size_t>();
             if (prePtr != nullptr) {
                 _history.resize(MIN_BUFFER_SIZE + *prePtr);
             }
@@ -320,7 +321,8 @@ private:
         Tag inputTag;
         for (const auto& [relIndex, tagMapRef] : inSpan.tags()) {
             if (relIndex == 0) {
-                inputTag.map.merge(property_map(tagMapRef.get()));
+                property_map tmp(tagMapRef.get());
+                inputTag.map.merge(tmp);
             }
         }
         const trigger::MatchResult matchResult = _matcher(filter.value, inputTag, filterState);
@@ -358,10 +360,10 @@ private:
         dataSet.signal_units.emplace_back(signal_unit);
         dataSet.signal_ranges.resize(1UZ);  // one data set
         dataSet.meta_information.resize(1); // one data set
-        dataSet.meta_information[0]["ctx"]    = filter.value;
-        dataSet.meta_information[0]["n_pre"]  = n_pre;
-        dataSet.meta_information[0]["n_post"] = n_post;
-        dataSet.meta_information[0]["n_max"]  = n_max;
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"ctx"}, filter.value);
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"n_pre"}, n_pre.value);
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"n_post"}, n_post.value);
+        dataSet.meta_information[0].insert_or_assign(std::string_view{"n_max"}, n_max.value);
 
         dataSet.timing_events.resize(1UZ); // one data set
     }

@@ -280,16 +280,19 @@ private:
             ++nTagsConsumed;
 
             if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_TIME.shortKey())); it != clkTag.map.end()) {
-                if (auto* timePtr = it->second.template get_if<std::uint64_t>()) {
+                const pmt::Value timeEntry = (*it).second; // bind to lvalue: ValueMap iter yields by value
+                if (auto* timePtr = timeEntry.template get_if<std::uint64_t>()) {
                     auto triggerUtcNs = static_cast<std::int64_t>(*timePtr);
 
                     std::int64_t localNs      = 0;
                     bool         hasLocalTime = false;
 
                     if (auto metaIt = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_META_INFO.shortKey())); metaIt != clkTag.map.end()) {
-                        if (auto* metaMap = metaIt->second.template get_if<property_map>()) {
+                        const pmt::Value metaEntry = (*metaIt).second;
+                        if (auto metaMap = metaEntry.template get_if<property_map>()) {
                             if (auto ltIt = metaMap->find(std::pmr::string("local_time")); ltIt != metaMap->end()) {
-                                if (auto* ltPtr = ltIt->second.template get_if<std::uint64_t>()) {
+                                const pmt::Value ltEntry = (*ltIt).second;
+                                if (auto* ltPtr = ltEntry.template get_if<std::uint64_t>()) {
                                     localNs      = static_cast<std::int64_t>(*ltPtr);
                                     hasLocalTime = true;
                                 }
@@ -303,9 +306,10 @@ private:
             }
 
             if (auto it = clkTag.map.find(std::pmr::string(gr::tag::TRIGGER_NAME.shortKey())); it != clkTag.map.end()) {
-                if (auto* namePtr = it->second.template get_if<std::pmr::string>()) {
-                    if (!namePtr->empty()) {
-                        _clockTriggerName = std::string(*namePtr);
+                const pmt::Value nameEntry = (*it).second;
+                if (auto nameView = nameEntry.template get_if<std::string_view>()) {
+                    if (!nameView->empty()) {
+                        _clockTriggerName = std::string(*nameView);
                     }
                 }
             }

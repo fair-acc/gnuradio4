@@ -104,8 +104,8 @@ struct LayoutPreference {
 
 inline LayoutPref getLayoutPref(const std::shared_ptr<gr::BlockModel>& block) {
     auto& ui = block.get()->uiConstraints();
-    if (auto it = ui.find("layout_pref"); it != ui.end()) {
-        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
+    if (ui.contains("layout_pref")) {
+        if (auto str = ui.at("layout_pref").value_or(std::string{}); !str.empty()) {
             if (str == "horizontal") {
                 return LayoutPref::HORIZONTAL;
             }
@@ -121,11 +121,12 @@ inline LayoutPref getLayoutPref(const std::shared_ptr<gr::BlockModel>& block) {
 }
 
 inline void setLayoutPref(std::shared_ptr<gr::BlockModel>& block, LayoutPref pref) {
+    auto& ui = block->uiConstraints();
     switch (pref) {
-    case LayoutPref::HORIZONTAL: block->uiConstraints()["layout_pref"] = "horizontal"; break;
-    case LayoutPref::VERTICAL: block->uiConstraints()["layout_pref"] = "vertical"; break;
-    case LayoutPref::AUTO: block->uiConstraints()["layout_pref"] = "auto"; break;
-    default: block->uiConstraints()["layout_pref"] = "undefined";
+    case LayoutPref::HORIZONTAL: ui.insert_or_assign(std::string_view{"layout_pref"}, std::string{"horizontal"}); break;
+    case LayoutPref::VERTICAL: ui.insert_or_assign(std::string_view{"layout_pref"}, std::string{"vertical"}); break;
+    case LayoutPref::AUTO: ui.insert_or_assign(std::string_view{"layout_pref"}, std::string{"auto"}); break;
+    default: ui.insert_or_assign(std::string_view{"layout_pref"}, std::string{"undefined"}); break;
     }
 }
 
@@ -135,15 +136,11 @@ Point<T> getPosition(const std::shared_ptr<gr::BlockModel>& block) {
     T     x  = Point<T>::invalid_position;
     T     y  = Point<T>::invalid_position;
 
-    if (auto it = ui.find("pos_x"); it != ui.end()) {
-        if (auto* val = it->second.get_if<double>()) {
-            x = static_cast<T>(*val);
-        }
+    if (ui.contains("pos_x")) {
+        x = static_cast<T>(ui.at("pos_x").value_or(static_cast<double>(Point<T>::invalid_position)));
     }
-    if (auto it = ui.find("pos_y"); it != ui.end()) {
-        if (auto* val = it->second.get_if<double>()) {
-            y = static_cast<T>(*val);
-        }
+    if (ui.contains("pos_y")) {
+        y = static_cast<T>(ui.at("pos_y").value_or(static_cast<double>(Point<T>::invalid_position)));
     }
     return {x, y};
 }
@@ -163,7 +160,7 @@ class PortInfo {
 public:
     static void mergeInto(gr::property_map& dst, const gr::property_map& src) {
         for (auto const& [k, v] : src) {
-            dst[k] = v;
+            dst.insert_or_assign(k, v);
         }
     }
 
@@ -176,50 +173,35 @@ public:
         const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
-        // ensure vector exists and has correct size
-        auto& vec = [&]() -> Tensor<pmt::Value>& {
-            auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
-            if (!it->second.holds<Tensor<pmt::Value>>()) {
-                it->second = Tensor<pmt::Value>(gr::extents_from, {portCount});
-            }
-            auto& v = *it->second.get_if<Tensor<pmt::Value>>();
-            if (v.size() != portCount) {
-                v.resize({portCount}, gr::pmt::Value{});
-            }
-            return v;
-        }();
+        Tensor<pmt::Value> vec = _readOrSeedPortVec(ui, mapKey, portCount);
 
         if (_idx >= vec.size()) {
             return;
         }
 
-        // Ensure property_map exists at this index
-        auto& m = [&]() -> gr::property_map& {
-            if (!vec[_idx].holds<gr::property_map>()) {
-                vec[_idx] = gr::property_map{};
-            }
-            return *vec[_idx].get_if<gr::property_map>();
-        }();
+        // Ensure property_map exists at this index — work with a local copy and write back.
+        gr::property_map m;
+        if (auto mp = vec[_idx].get_if<gr::property_map>(); mp.has_value()) {
+            m = *mp;
+        }
 
         // --- Side (legacy int; keep key name "side") ---
-        if (auto it = m.find("side"); it != m.end()) {
-            if (auto* v = it->second.get_if<int>()) {
+        if (m.contains("side")) {
+            const pmt::Value sideVal = m.at("side");
+            if (auto* v = sideVal.get_if<int>(); v != nullptr) {
                 _preferredSide = static_cast<Side>(*v);
             }
         } else {
             _preferredSide = _isInput ? Side::Left : Side::Right;
-            m["side"]      = static_cast<int>(*_preferredSide);
+            m.insert_or_assign(std::string_view{"side"}, static_cast<int>(*_preferredSide));
         }
 
         // --- Position ---
-        // Preferred: "pos" as array via Point<double> converter.
-        // Legacy: "pos_x"/"pos_y" doubles.
         bool posSet = false;
-        if (auto it = m.find("pos"); it != m.end()) {
-            // Build a one-key map view to reuse fromPropertyMap(Point<double>)
+        if (m.contains("pos")) {
             gr::property_map tmp;
-            tmp["point"] = it->second;
-            auto p       = gr::utf8::fromPropertyMap(Point<double>{}, tmp);
+            tmp.insert_or_assign(std::string_view{"point"}, m.at("pos"));
+            auto p = gr::utf8::fromPropertyMap(Point<double>{}, tmp);
             if (p.x != 0.0 || p.y != 0.0) {
                 _position = p;
                 posSet    = true;
@@ -227,14 +209,16 @@ public:
         }
         if (!posSet) {
             bool hasX = false, hasY = false;
-            if (auto it = m.find("pos_x"); it != m.end()) {
-                if (auto* v = it->second.get_if<double>()) {
+            if (m.contains("pos_x")) {
+                const pmt::Value posX = m.at("pos_x");
+                if (auto* v = posX.get_if<double>(); v != nullptr) {
                     _position.x = *v;
                     hasX        = true;
                 }
             }
-            if (auto it = m.find("pos_y"); it != m.end()) {
-                if (auto* v = it->second.get_if<double>()) {
+            if (m.contains("pos_y")) {
+                const pmt::Value posY = m.at("pos_y");
+                if (auto* v = posY.get_if<double>(); v != nullptr) {
                     _position.y = *v;
                     hasY        = true;
                 }
@@ -248,24 +232,21 @@ public:
                     _position.y = blockPos.y;
                 }
             }
-            // Write back new unified key "pos"
             mergeInto(m, gr::utf8::toPropertyMap(Point<double>{_position.x, _position.y}));
         }
 
         // --- Exit direction ---
-        // Preferred: "direction" via enum string; Legacy: "exit_dir" int.
-        if (auto it = m.find("direction"); it != m.end()) {
+        if (m.contains("direction")) {
             gr::property_map tmp;
-            tmp["direction"] = it->second;
-            _exitDir         = gr::utf8::fromPropertyMap(Direction{}, tmp);
-        } else if (auto it2 = m.find("exit_dir"); it2 != m.end()) {
-            if (auto* v = it2->second.get_if<int>()) {
+            tmp.insert_or_assign(std::string_view{"direction"}, m.at("direction"));
+            _exitDir = gr::utf8::fromPropertyMap(Direction{}, tmp);
+        } else if (m.contains("exit_dir")) {
+            const pmt::Value exitDirVal = m.at("exit_dir");
+            if (auto* v = exitDirVal.get_if<int>(); v != nullptr) {
                 _exitDir = static_cast<Direction>(*v);
             }
-            // Write back new key
             mergeInto(m, gr::utf8::toPropertyMap(_exitDir));
         } else {
-            // Default from side
             switch (*_preferredSide) {
             case Side::Left: _exitDir = Direction::West; break;
             case Side::Right: _exitDir = Direction::East; break;
@@ -276,12 +257,10 @@ public:
         }
 
         // --- Style / Colour ---
-        // Preferred: full Style keys (fg/bg/bold/…); Legacy: "colour" hex string.
         _style = gr::utf8::fromPropertyMap(Style{}, m);
         if (!_style.isSet()) {
-            if (auto it = m.find("colour"); it != m.end()) {
-                if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
-                    // interpret as fg hex
+            if (m.contains("colour")) {
+                if (auto str = m.at("colour").value_or(std::string{}); !str.empty()) {
                     if (auto c = gr::utf8::color::parseHexRGB(str)) {
                         _style.fg    = Colour{c->r, c->g, c->b};
                         _style.fgSet = 1U;
@@ -289,11 +268,14 @@ public:
                 }
             }
         }
-        // Emit unified Style keys (and keep legacy 'colour' if it existed)
         mergeInto(m, gr::utf8::toPropertyMap(_style));
-        if (auto it = m.find("colour"); it == m.end() && _style.fgSet) {
-            m["colour"] = gr::utf8::color::toHexRGB(_style.fg); // legacy convenience
+        if (!m.contains("colour") && _style.fgSet) {
+            m.insert_or_assign(std::string_view{"colour"}, gr::utf8::color::toHexRGB(_style.fg));
         }
+
+        // Write back into the tensor element and the ui constraints map.
+        vec[_idx] = pmt::Value{std::move(m)};
+        ui.insert_or_assign(std::string_view{mapKey}, std::move(vec));
     }
 
     PortInfo() = delete;
@@ -374,6 +356,29 @@ public:
     }
 
 private:
+    // Read the existing port-info Tensor from `ui[mapKey]` (or create one of size portCount),
+    // returning an owning copy. ValueMap::at returns Value by value, so the get_if<Tensor>
+    // pointer must be dereferenced inside the lvalue's scope.
+    static Tensor<pmt::Value> _readOrSeedPortVec(gr::property_map& ui, const char* mapKey, std::size_t portCount) {
+        bool seed = true;
+        if (ui.contains(mapKey)) {
+            const pmt::Value entryValue = ui.at(mapKey);
+            seed                        = !entryValue.holds<Tensor<pmt::Value>>();
+        }
+        if (seed) {
+            ui.insert_or_assign(std::string_view{mapKey}, Tensor<pmt::Value>(gr::extents_from, {portCount}));
+        }
+        Tensor<pmt::Value> vec;
+        const pmt::Value   entryValue = ui.at(mapKey);
+        if (auto p = entryValue.get_if<Tensor<pmt::Value>>()) {
+            vec = std::move(*p);
+        }
+        if (vec.size() != portCount) {
+            vec.resize({portCount}, pmt::Value{});
+        }
+        return vec;
+    }
+
     void updateUIConstraints(const gr::property_map& patch) {
         if (!_block) {
             return;
@@ -383,28 +388,19 @@ private:
         const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
-        auto& vec = [&]() -> Tensor<pmt::Value>& {
-            auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
-            if (!it->second.holds<Tensor<pmt::Value>>()) {
-                it->second = Tensor<pmt::Value>(extents_from, {portCount});
-            }
-            auto& v = *it->second.get_if<Tensor<pmt::Value>>();
-            if (v.size() != portCount) {
-                v.resize({portCount}, pmt::Value());
-            }
-            return v;
-        }();
+        Tensor<pmt::Value> vec = _readOrSeedPortVec(ui, mapKey, portCount);
 
         if (_idx >= vec.size()) {
             return;
         }
 
-        if (!vec[_idx].holds<gr::property_map>()) {
-            vec[_idx] = gr::property_map{};
+        gr::property_map m;
+        if (auto mp = vec[_idx].get_if<gr::property_map>(); mp.has_value()) {
+            m = *mp;
         }
-
-        auto& m = *vec[_idx].get_if<gr::property_map>();
         mergeInto(m, patch);
+        vec[_idx] = pmt::Value{std::move(m)};
+        ui.insert_or_assign(std::string_view{mapKey}, std::move(vec));
     }
 
     void updateUIConstraints(const std::string& key, pmt::Value value) {
@@ -416,30 +412,19 @@ private:
         const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
-        // Ensure vector exists and has correct size
-        auto& vec = [&]() -> Tensor<pmt::Value>& {
-            auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
-            if (!it->second.holds<Tensor<pmt::Value>>()) {
-                it->second = Tensor<pmt::Value>(extents_from, {portCount});
-            }
-            auto& v = *it->second.get_if<Tensor<pmt::Value>>();
-            if (v.size() != portCount) {
-                v.resize({portCount}, pmt::Value());
-            }
-            return v;
-        }();
+        Tensor<pmt::Value> vec = _readOrSeedPortVec(ui, mapKey, portCount);
 
-        // Ensure property_map exists at this index
         if (_idx >= vec.size()) {
-            return; // Safety check
+            return;
         }
 
-        if (!vec[_idx].holds<gr::property_map>()) {
-            vec[_idx] = gr::property_map{};
+        gr::property_map m;
+        if (auto mp = vec[_idx].get_if<gr::property_map>(); mp.has_value()) {
+            m = *mp;
         }
-
-        auto& m                       = *vec[_idx].get_if<gr::property_map>();
-        m[convert_string_domain(key)] = std::move(value);
+        m.insert_or_assign(convert_string_domain(key), std::move(value));
+        vec[_idx] = pmt::Value{std::move(m)};
+        ui.insert_or_assign(std::string_view{mapKey}, std::move(vec));
     }
 };
 
@@ -645,8 +630,8 @@ void updateBlock(std::shared_ptr<gr::BlockModel>& block, Point<T> newPosition) {
 // edge helpers
 [[nodiscard]] inline EdgeType getEdgeType(const gr::Edge& edge) {
     auto& ui = const_cast<gr::Edge&>(edge).uiConstraints();
-    if (auto it = ui.find("edge_type"); it != ui.end()) {
-        if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
+    if (ui.contains("edge_type")) {
+        if (auto str = ui.at("edge_type").value_or(std::string{}); !str.empty()) {
             if (str == "feedback") {
                 return EdgeType::Feedback;
             }
